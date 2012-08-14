@@ -38,3 +38,6 @@
 
 // RUN: %clang -fms-extensions -fenable-experimental-ms-inline-asm %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS3 %s
 // CHECK-OPTIONS3: -fenable-experimental-ms-inline-asm
+
+// RUN: %clang -fcilkplus %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS4 %s
+// CHECK-OPTIONS4: -fcilkplus

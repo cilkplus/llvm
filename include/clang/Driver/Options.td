@@ -468,6 +468,8 @@ def fmodule_cache_path : Separate<"-fmodule-cache-path">, Group<i_Group>,
   HelpText<"Specify the module cache path">;
 def fmodules : Flag <"-fmodules">, Group<f_Group>, Flags<[NoForward,CC1Option]>,
   HelpText<"Enable the 'modules' language feature">;
+def fcilkplus : Flag <"-fcilkplus">, Group<f_Group>, Flags<[CC1Option]>,
+  HelpText<"Enable Cilk Plus extensions">;
   
 def fmudflapth : Flag<"-fmudflapth">, Group<f_Group>;
 def fmudflap : Flag<"-fmudflap">, Group<f_Group>;

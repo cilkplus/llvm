@@ -105,6 +105,7 @@ namespace {
     KEYC11 = 0x400,
     KEYARC = 0x800,
     KEYNOMS = 0x01000,
+    KEYCILKPLUS = 0x02000,
     KEYALL = (0xffff & ~KEYNOMS) // Because KEYNOMS is used to exclude.
   };
 }
@@ -137,6 +138,7 @@ static void AddKeyword(StringRef Keyword,
   // in non-arc mode.
   else if (LangOpts.ObjC2 && (Flags & KEYARC)) AddResult = 2;
   else if (LangOpts.CPlusPlus && (Flags & KEYCXX0X)) AddResult = 3;
+  else if (LangOpts.CilkPlus && (Flags & KEYCILKPLUS)) AddResult = 1;
 
   // Don't add this keyword under MicrosoftMode.
   if (LangOpts.MicrosoftMode && (Flags & KEYNOMS))
