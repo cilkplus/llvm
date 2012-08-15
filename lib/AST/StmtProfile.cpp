@@ -720,6 +720,14 @@ void StmtProfiler::VisitAsTypeExpr(const AsTypeExpr *S) {
   VisitExpr(S);
 }
 
+void StmtProfiler::VisitCilkSyncStmt(const CilkSyncStmt *S) {
+  VisitStmt(S);
+}
+
+void StmtProfiler::VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
+  VisitExpr(E);
+}
+
 void StmtProfiler::VisitCXXNamedCastExpr(const CXXNamedCastExpr *S) {
   VisitExplicitCastExpr(S);
 }

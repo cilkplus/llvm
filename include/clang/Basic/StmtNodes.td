@@ -171,3 +171,7 @@ def MSDependentExistsStmt : Stmt;
 
 // OpenCL Extensions.
 def AsTypeExpr : DStmt<Expr>;
+
+// Cilk Plus Extensions.
+def CilkSyncStmt : Stmt;
+def CilkSpawnExpr : DStmt<Expr>;

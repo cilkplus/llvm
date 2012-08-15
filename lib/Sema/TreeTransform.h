@@ -9295,6 +9295,34 @@ TreeTransform<Derived>::RebuildCXXPseudoDestructorExpr(Expr *Base,
                                             /*TemplateArgs*/ 0);
 }
 
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
+  return StmtError();
+}
+
+/*
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::RebuildCilkSyncStmt(CilkSyncStmt *S) {
+  return StmtError();
+}
+*/
+
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
+  return ExprError();
+}
+
+/*
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::RebuildCilkSpawnExpr(CilkSpawnExpr *E) {
+  return ExprError();
+}
+*/
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_SEMA_TREETRANSFORM_H

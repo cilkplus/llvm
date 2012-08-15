@@ -890,6 +890,9 @@ CanThrowResult Sema::canThrow(const Expr *E) {
     return mergeCanThrow(CT, canSubExprsThrow(*this, E));
   }
 
+  case Expr::CilkSpawnExprClass:
+    return canThrow(cast<CilkSpawnExpr>(E)->getCall());
+
   case Expr::CXXConstructExprClass:
   case Expr::CXXTemporaryObjectExprClass: {
     CanThrowResult CT = canCalleeThrow(*this, E,

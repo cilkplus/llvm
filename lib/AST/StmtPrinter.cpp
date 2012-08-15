@@ -1795,6 +1795,17 @@ void StmtPrinter::VisitAsTypeExpr(AsTypeExpr *Node) {
   OS << ")";
 }
 
+void StmtPrinter::VisitCilkSyncStmt(CilkSyncStmt *) {
+  OS << "_Cilk_sync;\n";
+}
+
+void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
+  OS << "_Cilk_spawn(";
+  PrintExpr(Node->getCall());
+  OS << ", " << Node->getType().getAsString();
+  OS << ")";
+}
+
 //===----------------------------------------------------------------------===//
 // Stmt method implementations
 //===----------------------------------------------------------------------===//

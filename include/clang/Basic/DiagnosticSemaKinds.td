@@ -5848,6 +5848,16 @@ def err_static_kernel : Error<
 def err_static_function_scope : Error<
   "variables in function scope cannot be declared static">;
 
+// Cilk Plus warnings and errors
+def err_not_a_call : Error<
+  "the argument to _Cilk_spawn must be a function call">;
+def err_spawn_global : Error<
+  "_Cilk_spawn not allowed in this scope">;
+def err_spawn_spawn : Error<
+  "consecutive _Cilk_spawn tokens not allowed">;
+def err_spawn_not_whole_expr : Error<
+  "_Cilk_spawn is not at statement level">;
+
 } // end of sema category
 
 let CategoryName = "Related Result Type Issue" in {

@@ -11785,3 +11785,37 @@ Sema::ActOnObjCBoolLiteral(SourceLocation OpLoc, tok::TokenKind Kind) {
   return Owned(new (Context) ObjCBoolLiteralExpr(Kind == tok::kw___objc_yes,
                                         Context.ObjCBuiltinBoolTy, OpLoc));
 }
+
+ExprResult
+Sema::ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
+  assert(FunctionScopes.size() > 0 && "FunctionScopes missing TU scope");
+  if (FunctionScopes.size() < 1 ||
+      getCurFunction()->CompoundScopes.size() < 1) {
+    Diag(SpawnLoc, diag::err_spawn_global);
+    return ExprError();
+  }
+
+  getCurCompoundScope().setHasCilkSpawn();
+  return BuildCilkSpawnExpr(SpawnLoc, E);
+}
+
+ExprResult
+Sema::BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
+  assert(E && "null expression");
+
+  bool isCall = isa<CallExpr>(E);
+  if (CXXOperatorCallExpr *O = dyn_cast<CXXOperatorCallExpr>(E))
+    isCall = O->getOperator() == OO_Call;
+
+  if (isa<CilkSpawnExpr>(E)) {
+    Diag(E->getExprLoc(), diag::err_spawn_spawn);
+    return ExprError();
+  }
+
+  if (!isCall) {
+    Diag(E->getExprLoc(), PDiag(diag::err_not_a_call) << getExprRange(E));
+    return ExprError();
+  }
+
+  return Owned(new (Context) CilkSpawnExpr(SpawnLoc, cast<CallExpr>(E)));
+}

@@ -1211,6 +1211,14 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
     cutOffParsing();
     return ExprError();
   }
+
+  case tok::kw__Cilk_spawn: {
+    SourceLocation SpawnLoc = ConsumeToken();
+    Res = ParseCastExpression(false);
+    if (Res.isInvalid()) return ExprError();
+    return Actions.ActOnCilkSpawnExpr(SpawnLoc, Res.release());
+  }
+
   case tok::l_square:
     if (getLangOpts().CPlusPlus0x) {
       if (getLangOpts().ObjC1) {

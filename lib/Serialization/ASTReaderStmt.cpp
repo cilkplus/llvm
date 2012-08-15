@@ -1537,6 +1537,20 @@ void ASTStmtReader::VisitAsTypeExpr(AsTypeExpr *E) {
 }
 
 //===----------------------------------------------------------------------===//
+// Cilk Plus Expressions and Statements.
+//===----------------------------------------------------------------------===//
+void ASTStmtReader::VisitCilkSyncStmt(CilkSyncStmt *S) {
+  VisitStmt(S);
+  S->SyncLoc = ReadSourceLocation(Record, Idx);
+}
+
+void ASTStmtReader::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+  VisitExpr(E);
+  E->SpawnLoc = ReadSourceLocation(Record, Idx);
+  E->Call = Reader.ReadSubExpr();
+}
+
+//===----------------------------------------------------------------------===//
 // ASTReader Implementation
 //===----------------------------------------------------------------------===//
 

@@ -75,6 +75,7 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHFinallyStmtClass:
   case Stmt::MSDependentExistsStmtClass:
     llvm_unreachable("invalid statement class to emit generically");
+  case Stmt::CilkSyncStmtClass:
   case Stmt::NullStmtClass:
   case Stmt::CompoundStmtClass:
   case Stmt::DeclStmtClass:
@@ -171,6 +172,8 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
 bool CodeGenFunction::EmitSimpleStmt(const Stmt *S) {
   switch (S->getStmtClass()) {
   default: return false;
+  case Stmt::CilkSyncStmtClass:
+    // FIXME: implement this by calling the Cilk Plus runtime
   case Stmt::NullStmtClass: break;
   case Stmt::CompoundStmtClass: EmitCompoundStmt(cast<CompoundStmt>(*S)); break;
   case Stmt::DeclStmtClass:     EmitDeclStmt(cast<DeclStmt>(*S));         break;

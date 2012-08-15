@@ -4570,6 +4570,31 @@ public:
     return child_range(SubExprs, SubExprs+NumSubExprs);
   }
 };
+
+class CilkSpawnExpr : public Expr {
+  Stmt *Call;
+  SourceLocation SpawnLoc;
+
+  friend class ASTStmtReader;
+
+public:
+  CilkSpawnExpr(SourceLocation SL, CallExpr *C);
+
+  CallExpr *getCall() const { return reinterpret_cast<CallExpr*>(Call); }
+
+  SourceLocation getSpawnLoc() const { return SpawnLoc; }
+
+  SourceRange getSourceRange() const LLVM_READONLY {
+    return SourceRange(SpawnLoc, Call->getLocEnd());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CilkSpawnExprClass;
+  }
+  static bool classof(const CilkSpawnExpr *) { return true; }
+
+  child_range children() { return child_range(&Call, &Call + 1); }
+};
 }  // end namespace clang
 
 #endif

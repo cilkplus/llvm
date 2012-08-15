@@ -22,6 +22,7 @@
 #include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/TypeLoc.h"
@@ -184,6 +185,9 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
   if (DiagnoseUnusedComparison(*this, E))
     return;
 
+  if (const CilkSpawnExpr *EE = dyn_cast<CilkSpawnExpr>(E))
+    return DiagnoseUnusedExprResult(EE->getCall());
+
   E = WarnExpr;
   if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
     if (E->getType()->isVoidType())
@@ -262,6 +266,127 @@ sema::CompoundScopeInfo &Sema::getCurCompoundScope() const {
   return getCurFunction()->CompoundScopes.back();
 }
 
+namespace {
+// Diagnose any _Cilk_spawn expressions (see comment below). InSpawn indicates
+// that S is contained within a spawn, e.g. _Cilk_spawn foo(_Cilk_spawn bar())
+class DiagnoseCilkSpawnHelper
+  : public RecursiveASTVisitor<DiagnoseCilkSpawnHelper> {
+  Sema &SemaRef;
+public:
+  DiagnoseCilkSpawnHelper(Sema &S) : SemaRef(S) { }
+
+  bool TraverseCompoundStmt(Stmt *) { return true; }
+  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    SemaRef.Diag(E->getSpawnLoc(), SemaRef.PDiag(diag::err_spawn_not_whole_expr)
+                                   << E->getSourceRange());
+    return true;
+  }
+};
+} // anonymous namespace
+
+
+// Check that _Cilk_spawn is used only:
+//  - as the entire body of an expression statement,
+//  - as the entire right hand side of an assignment expression that is the
+//    entire body of an expression statement, or
+//  - as the entire initializer-clause in a simple declaration.
+//
+// Since this is run per-compound scope stmt, we don't traverse into sub-
+// compound scopes, but we do need to traverse into loops, ifs, etc. in case of:
+// if (cond) _Cilk_spawn foo();
+//           ^~~~~~~~~~~~~~~~~ not a compound scope
+void Sema::DiagnoseCilkSpawn(Stmt *S) {
+  DiagnoseCilkSpawnHelper D(*this);
+
+  switch (S->getStmtClass()) {
+  case Stmt::CompoundStmtClass:
+    return; // already checked
+  case Stmt::CXXCatchStmtClass:
+    DiagnoseCilkSpawn(cast<CXXCatchStmt>(S)->getHandlerBlock());
+    break;
+  case Stmt::CXXForRangeStmtClass: {
+    CXXForRangeStmt *FR = cast<CXXForRangeStmt>(S);
+    D.TraverseStmt(FR->getRangeInit());
+    DiagnoseCilkSpawn(FR->getBody());
+    break;
+  }
+  case Stmt::CXXTryStmtClass:
+    DiagnoseCilkSpawn(cast<CXXTryStmt>(S)->getTryBlock());
+    break;
+  case Stmt::DeclStmtClass: {
+    DeclStmt *DS = cast<DeclStmt>(S);
+    if (DS->isSingleDecl() && isa<VarDecl>(DS->getSingleDecl())) {
+      VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
+      if (VD->hasInit()) {
+        Expr *RHS = VD->getInit();
+        if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(RHS))
+          RHS = ICE->getSubExprAsWritten();
+        if (CilkSpawnExpr *E = dyn_cast<CilkSpawnExpr>(RHS))
+          D.TraverseStmt(E->getCall());
+        else
+          D.TraverseStmt(RHS);
+      }
+    } else D.TraverseStmt(DS);
+    break;
+  }
+  case Stmt::DoStmtClass: {
+    DoStmt *DS = cast<DoStmt>(S);
+    D.TraverseStmt(DS->getCond());
+    DiagnoseCilkSpawn(DS->getBody());
+    break;
+  }
+  case Stmt::CilkSpawnExprClass:
+    D.TraverseStmt(cast<CilkSpawnExpr>(S)->getCall());
+    break;
+  case Stmt::BinaryOperatorClass: {
+    BinaryOperator *B = cast<BinaryOperator>(S);
+    if (B->getOpcode() == BO_Assign) {
+      D.TraverseStmt(B->getLHS());
+      Expr *RHS = B->getRHS();
+      if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(RHS))
+        RHS = ICE->getSubExprAsWritten();
+      if (CilkSpawnExpr *E = dyn_cast<CilkSpawnExpr>(RHS))
+        D.TraverseStmt(E->getCall());
+      else
+        D.TraverseStmt(RHS);
+    } else D.TraverseStmt(B);
+    break;
+  }
+  case Stmt::ForStmtClass: {
+    ForStmt *F = cast<ForStmt>(S);
+    if (F->getInit())
+      D.TraverseStmt(F->getInit());
+    if (F->getCond())
+      D.TraverseStmt(F->getCond());
+    if (F->getInc())
+      D.TraverseStmt(F->getInc());
+    DiagnoseCilkSpawn(F->getBody());
+    break;
+  }
+  case Stmt::IfStmtClass: {
+    IfStmt *I = cast<IfStmt>(S);
+    D.TraverseStmt(I->getCond());
+    DiagnoseCilkSpawn(I->getThen());
+    if (I->getElse())
+      DiagnoseCilkSpawn(I->getElse());
+    break;
+  }
+  case Stmt::CaseStmtClass:
+  case Stmt::DefaultStmtClass:
+    DiagnoseCilkSpawn(cast<SwitchCase>(S)->getSubStmt());
+    break;
+  case Stmt::WhileStmtClass: {
+    WhileStmt *W = cast<WhileStmt>(S);
+    D.TraverseStmt(W->getCond());
+    DiagnoseCilkSpawn(W->getBody());
+    break;
+  }
+  default:
+    D.TraverseStmt(S);
+    break;
+  }
+}
+
 StmtResult
 Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
                         MultiStmtArg elts, bool isStmtExpr) {
@@ -285,6 +410,16 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       Diag(D->getLocation(), diag::ext_mixed_decls_code);
     }
   }
+
+  // If there are _Cilk_spawn expressions in this compound statement, check
+  // whether they are used correctly.
+  if (getCurCompoundScope().HasCilkSpawn) {
+    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
+    for (unsigned i = 0; i != NumElts; ++i) {
+      DiagnoseCilkSpawn(Elts[i]);
+    }
+  }
+
   // Warn about unused expressions in statements.
   for (unsigned i = 0; i != NumElts; ++i) {
     // Ignore statements that are last in a statement expression.
@@ -2060,6 +2195,12 @@ Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
 
   return Owned(new (Context) BreakStmt(BreakLoc));
 }
+
+StmtResult
+Sema::ActOnCilkSyncStmt(SourceLocation SyncLoc) {
+  return Owned(new (Context) CilkSyncStmt(SyncLoc));
+}
+
 
 /// \brief Determine whether the given expression is a candidate for
 /// copy elision in either a return statement or a throw expression.

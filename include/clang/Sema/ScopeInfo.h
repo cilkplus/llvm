@@ -37,7 +37,7 @@ namespace sema {
 class CompoundScopeInfo {
 public:
   CompoundScopeInfo()
-    : HasEmptyLoopBodies(false) { }
+    : HasEmptyLoopBodies(false), HasCilkSpawn(false) { }
 
   /// \brief Whether this compound stamement contains `for' or `while' loops
   /// with empty bodies.
@@ -45,6 +45,13 @@ public:
 
   void setHasEmptyLoopBodies() {
     HasEmptyLoopBodies = true;
+  }
+
+  /// \brief Whether this compound statement contains _Cilk_spawn statements.
+  bool HasCilkSpawn;
+
+  void setHasCilkSpawn() {
+    HasCilkSpawn = true;
   }
 };
 

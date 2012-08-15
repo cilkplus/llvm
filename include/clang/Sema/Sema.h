@@ -2524,6 +2524,12 @@ public:
   StmtResult ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope);
   StmtResult ActOnBreakStmt(SourceLocation GotoLoc, Scope *CurScope);
 
+  void DiagnoseCilkSpawn(Stmt *S);
+
+  StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
+  ExprResult ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E);
+  ExprResult BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E);
+
   const VarDecl *getCopyElisionCandidate(QualType ReturnType, Expr *E,
                                          bool AllowFunctionParameters);
 

@@ -1515,6 +1515,20 @@ void ASTStmtWriter::VisitAsTypeExpr(AsTypeExpr *E) {
 }
 
 //===----------------------------------------------------------------------===//
+// Cilk Plus Expressions and Statements.
+//===----------------------------------------------------------------------===//
+void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
+  VisitStmt(S);
+  Writer.AddSourceLocation(S->getSyncLoc(), Record);
+}
+
+void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+  VisitExpr(E);
+  Writer.AddSourceLocation(E->getSpawnLoc(), Record);
+  Writer.AddStmt(E->getCall());
+}
+
+//===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements.
 //===----------------------------------------------------------------------===//
 void ASTStmtWriter::VisitCXXUuidofExpr(CXXUuidofExpr *E) {

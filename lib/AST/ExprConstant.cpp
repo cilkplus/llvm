@@ -6477,6 +6477,7 @@ static ICEDiag CheckICE(const Expr* E, ASTContext &Ctx) {
   case Expr::AtomicExprClass:
   case Expr::InitListExprClass:
   case Expr::LambdaExprClass:
+  case Expr::CilkSpawnExprClass:
     return ICEDiag(2, E->getLocStart());
 
   case Expr::SizeOfPackExprClass:

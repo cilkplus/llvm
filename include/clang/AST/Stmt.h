@@ -1816,6 +1816,29 @@ public:
   static bool classof(SEHTryStmt *) { return true; }
 };
 
+/// CilkSyncStmt - This represents a _Cilk_sync
+class CilkSyncStmt : public Stmt {
+  SourceLocation SyncLoc;
+
+  friend class ASTStmtReader;
+
+public:
+  CilkSyncStmt(SourceLocation SL) : Stmt(CilkSyncStmtClass), SyncLoc(SL) {}
+
+  SourceLocation getSyncLoc() const { return SyncLoc; }
+
+  SourceRange getSourceRange() const LLVM_READONLY {
+    return SourceRange(SyncLoc);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CilkSyncStmtClass;
+  }
+  static bool classof(CilkSyncStmt *) { return true; }
+
+  child_range children() { return child_range(); }
+};
+
 }  // end namespace clang
 
 #endif
