@@ -1525,7 +1525,7 @@ void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
 void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
   VisitExpr(E);
   Writer.AddSourceLocation(E->getSpawnLoc(), Record);
-  Writer.AddStmt(E->getCall());
+  Writer.AddStmt(E->getSubExpr());
 }
 
 //===----------------------------------------------------------------------===//

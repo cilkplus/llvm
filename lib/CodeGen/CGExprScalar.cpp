@@ -272,7 +272,7 @@ public:
   }
 
   Value *VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
-    return VisitCallExpr(E->getCall());
+    return Visit(E->getSubExpr());
   }
 
   Value *VisitStmtExpr(const StmtExpr *E);

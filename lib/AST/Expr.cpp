@@ -3970,14 +3970,14 @@ unsigned AtomicExpr::getNumSubExprs(AtomicOp Op) {
   llvm_unreachable("unknown atomic op");
 }
 
-CilkSpawnExpr::CilkSpawnExpr(SourceLocation SL, CallExpr *C)
+CilkSpawnExpr::CilkSpawnExpr(SourceLocation SL, Expr *E)
   : Expr(CilkSpawnExprClass,
-         C->getType(),
-         C->getValueKind(),
+         E->getType(),
+         E->getValueKind(),
          OK_Ordinary,
-         C->isTypeDependent(),
-         C->isValueDependent(),
-         C->isInstantiationDependent(),
-         C->containsUnexpandedParameterPack()),
-    Call(C),
+         E->isTypeDependent(),
+         E->isValueDependent(),
+         E->isInstantiationDependent(),
+         E->containsUnexpandedParameterPack()),
+    Call(E),
     SpawnLoc(SL) {}

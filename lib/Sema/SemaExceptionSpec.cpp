@@ -891,7 +891,7 @@ CanThrowResult Sema::canThrow(const Expr *E) {
   }
 
   case Expr::CilkSpawnExprClass:
-    return canThrow(cast<CilkSpawnExpr>(E)->getCall());
+    return canThrow(cast<CilkSpawnExpr>(E)->getSubExpr());
 
   case Expr::CXXConstructExprClass:
   case Expr::CXXTemporaryObjectExprClass: {

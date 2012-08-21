@@ -11803,8 +11803,12 @@ ExprResult
 Sema::BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
   assert(E && "null expression");
 
-  bool isCall = isa<CallExpr>(E);
-  if (CXXOperatorCallExpr *O = dyn_cast<CXXOperatorCallExpr>(E))
+  Expr *InnerE = E;
+  if (CXXBindTemporaryExpr *T = dyn_cast<CXXBindTemporaryExpr>(E))
+    InnerE = T->getSubExpr();
+
+  bool isCall = isa<CallExpr>(InnerE);
+  if (CXXOperatorCallExpr *O = dyn_cast<CXXOperatorCallExpr>(InnerE))
     isCall = O->getOperator() == OO_Call;
 
   if (isa<CilkSpawnExpr>(E)) {
@@ -11817,5 +11821,5 @@ Sema::BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
     return ExprError();
   }
 
-  return Owned(new (Context) CilkSpawnExpr(SpawnLoc, cast<CallExpr>(E)));
+  return Owned(new (Context) CilkSpawnExpr(SpawnLoc, E));
 }

@@ -1801,7 +1801,7 @@ void StmtPrinter::VisitCilkSyncStmt(CilkSyncStmt *) {
 
 void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
   OS << "_Cilk_spawn(";
-  PrintExpr(Node->getCall());
+  PrintExpr(Node->getSubExpr());
   OS << ", " << Node->getType().getAsString();
   OS << ")";
 }

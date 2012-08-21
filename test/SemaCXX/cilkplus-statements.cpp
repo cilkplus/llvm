@@ -46,3 +46,58 @@ void test() {
 
   // check the errors from .c file, but type-dependent
 }
+
+struct t1 {
+};
+t1 make_t1();
+
+struct t2 {
+  t2& operator=(const t2&);
+  const t2& operator=(const t2&) const;
+};
+t2 make_t2();
+t2& make_t2ref();
+
+struct t3 {
+  t3(const t3&);
+};
+t3 make_t3();
+t3& make_t3ref();
+
+struct t4 {
+  ~t4();
+};
+t4 make_t4();
+
+class t5 {
+  ~t5(); // expected-note {{implicitly declared private here}} \
+            expected-note {{implicitly declared private here}} \
+            expected-note {{implicitly declared private here}}
+};
+t5 make_t5();
+
+void test_objects() {
+  t1 a = _Cilk_spawn make_t1();
+  a = _Cilk_spawn make_t1();
+
+  t2 b = _Cilk_spawn make_t2();
+  b = _Cilk_spawn make_t2();
+
+  t2 c = _Cilk_spawn make_t2ref();
+  t2& cr = _Cilk_spawn make_t2ref();
+  c = _Cilk_spawn make_t2ref();
+
+  t3 d = _Cilk_spawn make_t3();
+  d = _Cilk_spawn make_t3();
+
+  t3 e = _Cilk_spawn make_t3ref();
+  t3& er = _Cilk_spawn make_t3ref();
+  e = _Cilk_spawn make_t3ref();
+
+  t4 f = _Cilk_spawn make_t4();
+  f = _Cilk_spawn make_t4();
+
+  t5 g = _Cilk_spawn make_t5(); // expected-error {{temporary of type 't5' has private destructor}} \
+                                   expected-error {{variable of type 't5' has private destructor}}
+  g = _Cilk_spawn make_t5();    // expected-error {{temporary of type 't5' has private destructor}}
+}

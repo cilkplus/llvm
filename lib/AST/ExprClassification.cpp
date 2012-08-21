@@ -284,7 +284,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
     return ClassifyUnnamed(Ctx, cast<CallExpr>(E)->getCallReturnType());
 
   case Expr::CilkSpawnExprClass:
-    return ClassifyUnnamed(Ctx, cast<CilkSpawnExpr>(E)->getCall()->getCallReturnType());
+    return ClassifyInternal(Ctx, cast<CilkSpawnExpr>(E)->getSubExpr());
 
     // __builtin_choose_expr is equivalent to the chosen expression.
   case Expr::ChooseExprClass:

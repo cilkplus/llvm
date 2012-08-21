@@ -661,7 +661,7 @@ void AggExprEmitter::VisitCallExpr(const CallExpr *E) {
 }
 
 void AggExprEmitter::VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
-  return VisitCallExpr(E->getCall());
+  return Visit(E->getSubExpr());
 }
 
 void AggExprEmitter::VisitObjCMessageExpr(ObjCMessageExpr *E) {

@@ -4578,9 +4578,9 @@ class CilkSpawnExpr : public Expr {
   friend class ASTStmtReader;
 
 public:
-  CilkSpawnExpr(SourceLocation SL, CallExpr *C);
+  CilkSpawnExpr(SourceLocation SL, Expr *E);
 
-  CallExpr *getCall() const { return reinterpret_cast<CallExpr*>(Call); }
+  Expr *getSubExpr() const { return reinterpret_cast<Expr*>(Call); }
 
   SourceLocation getSpawnLoc() const { return SpawnLoc; }
 

@@ -186,7 +186,7 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
     return;
 
   if (const CilkSpawnExpr *EE = dyn_cast<CilkSpawnExpr>(E))
-    return DiagnoseUnusedExprResult(EE->getCall());
+    return DiagnoseUnusedExprResult(EE->getSubExpr());
 
   E = WarnExpr;
   if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
@@ -298,6 +298,7 @@ public:
 void Sema::DiagnoseCilkSpawn(Stmt *S) {
   DiagnoseCilkSpawnHelper D(*this);
 
+  Expr *RHS = 0;
   switch (S->getStmtClass()) {
   case Stmt::CompoundStmtClass:
     return; // already checked
@@ -310,6 +311,9 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     DiagnoseCilkSpawn(FR->getBody());
     break;
   }
+  case Stmt::ExprWithCleanupsClass:
+    DiagnoseCilkSpawn(cast<ExprWithCleanups>(S)->getSubExpr());
+    break;
   case Stmt::CXXTryStmtClass:
     DiagnoseCilkSpawn(cast<CXXTryStmt>(S)->getTryBlock());
     break;
@@ -317,16 +321,28 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     DeclStmt *DS = cast<DeclStmt>(S);
     if (DS->isSingleDecl() && isa<VarDecl>(DS->getSingleDecl())) {
       VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
-      if (VD->hasInit()) {
-        Expr *RHS = VD->getInit();
-        if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(RHS))
-          RHS = ICE->getSubExprAsWritten();
-        if (CilkSpawnExpr *E = dyn_cast<CilkSpawnExpr>(RHS))
-          D.TraverseStmt(E->getCall());
-        else
-          D.TraverseStmt(RHS);
-      }
-    } else D.TraverseStmt(DS);
+      if (VD->hasInit())
+        RHS = VD->getInit();
+    } else
+      D.TraverseStmt(DS);
+    break;
+  }
+  case Stmt::BinaryOperatorClass: {
+    BinaryOperator *B = cast<BinaryOperator>(S);
+    if (B->getOpcode() == BO_Assign) {
+      D.TraverseStmt(B->getLHS());
+      RHS = B->getRHS();
+    } else
+      D.TraverseStmt(B);
+    break;
+  }
+  case Stmt::CXXOperatorCallExprClass: {
+    CXXOperatorCallExpr *OC = cast<CXXOperatorCallExpr>(S);
+    if (OC->getOperator() == OO_Equal) {
+      D.TraverseStmt(OC->getArg(0));
+      RHS = OC->getArg(1);
+    } else
+      D.TraverseStmt(OC);
     break;
   }
   case Stmt::DoStmtClass: {
@@ -336,22 +352,8 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     break;
   }
   case Stmt::CilkSpawnExprClass:
-    D.TraverseStmt(cast<CilkSpawnExpr>(S)->getCall());
+    D.TraverseStmt(cast<CilkSpawnExpr>(S)->getSubExpr());
     break;
-  case Stmt::BinaryOperatorClass: {
-    BinaryOperator *B = cast<BinaryOperator>(S);
-    if (B->getOpcode() == BO_Assign) {
-      D.TraverseStmt(B->getLHS());
-      Expr *RHS = B->getRHS();
-      if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(RHS))
-        RHS = ICE->getSubExprAsWritten();
-      if (CilkSpawnExpr *E = dyn_cast<CilkSpawnExpr>(RHS))
-        D.TraverseStmt(E->getCall());
-      else
-        D.TraverseStmt(RHS);
-    } else D.TraverseStmt(B);
-    break;
-  }
   case Stmt::ForStmtClass: {
     ForStmt *F = cast<ForStmt>(S);
     if (F->getInit())
@@ -385,6 +387,30 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     D.TraverseStmt(S);
     break;
   }
+
+  if (!RHS) return;
+
+  // assignment or initializer
+  // - the RHS may be wrapped in casts and/or involve object constructors
+  while (true) {
+    if (ImplicitCastExpr *E = dyn_cast<ImplicitCastExpr>(RHS))
+      RHS = E->getSubExprAsWritten();
+    else if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(RHS))
+      RHS = E->getSubExpr();
+    else if (MaterializeTemporaryExpr *E = dyn_cast<MaterializeTemporaryExpr>(RHS))
+      RHS = E->GetTemporaryExpr();
+    else if (CXXConstructExpr *E = dyn_cast<CXXConstructExpr>(RHS)) {
+      if (E->getConstructor()->isCopyOrMoveConstructor())
+        RHS = E->getArg(0);
+      else break;
+    } else
+      break;
+  }
+
+  if (CilkSpawnExpr *E = dyn_cast<CilkSpawnExpr>(RHS))
+    D.TraverseStmt(E->getSubExpr());
+  else
+    D.TraverseStmt(RHS);
 }
 
 StmtResult
