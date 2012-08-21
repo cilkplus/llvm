@@ -43,8 +43,6 @@ void test() {
 
   _Cilk_spawn baz.operator+(1);
   _Cilk_spawn baz + 1; // expected-error {{the argument to _Cilk_spawn must be a function call}}
-
-  // check the errors from .c file, but type-dependent
 }
 
 struct t1 {
@@ -71,6 +69,7 @@ t4 make_t4();
 
 class t5 {
   ~t5(); // expected-note {{implicitly declared private here}} \
+            expected-note {{implicitly declared private here}} \
             expected-note {{implicitly declared private here}} \
             expected-note {{implicitly declared private here}}
 };
@@ -101,3 +100,90 @@ void test_objects() {
                                    expected-error {{variable of type 't5' has private destructor}}
   g = _Cilk_spawn make_t5();    // expected-error {{temporary of type 't5' has private destructor}}
 }
+
+template<typename T>
+struct test_templates {
+  T foo();
+
+  void test() {
+    _Cilk_spawn foo(); // expected-error {{temporary of type 't5' has private destructor}}
+    _Cilk_sync;
+  }
+};
+
+template<typename T1, typename T2>
+struct test_templates2 {
+  T1 foo();
+
+  void test() {
+    _Cilk_spawn foo();
+    T1 b = _Cilk_spawn foo();
+    b = _Cilk_spawn foo();
+    if (1) _Cilk_spawn foo();
+    if (1) {} else _Cilk_spawn foo();
+    while (1) _Cilk_spawn foo();
+    for (;;) _Cilk_spawn foo();
+    switch (1) {
+    case 0: _Cilk_spawn foo(); break;
+    default: _Cilk_spawn foo(); break;
+    }
+    _Cilk_sync;
+
+    _Cilk_spawn 5;         // expected-error {{the argument to _Cilk_spawn must be a function call}}
+    _Cilk_spawn foo() + 5; // expected-error {{_Cilk_spawn is not at statement level}}
+    _Cilk_spawn _Cilk_spawn foo(); // expected-error {{consecutive _Cilk_spawn tokens not allowed}}
+
+    T2 c = _Cilk_spawn foo(); // expected-error {{no viable conversion from 'int' to 'tt'}}
+    T2 d;
+    d = _Cilk_spawn foo();    // expected-error {{no viable overloaded '='}}
+    _Cilk_sync;
+  }
+};
+
+struct tt { // expected-note {{candidate constructor (the implicit copy constructor) not viable: no known conversion from 'int' to 'const tt &' for 1st argument}} \
+expected-note {{candidate constructor (the implicit move constructor) not viable: no known conversion from 'int' to 'tt &&' for 1st argument}} \
+expected-note {{candidate function (the implicit copy assignment operator) not viable: no known conversion from 'int' to 'const tt' for 1st argument}} \
+expected-note {{candidate function (the implicit move assignment operator) not viable: no known conversion from 'int' to 'tt' for 1st argument}}
+};
+
+void test_templates_helper() {
+  test_templates<int> one;
+  one.test();
+
+  test_templates<t5> two;
+  two.test(); // expected-note {{in instantiation of member function 'test_templates<t5>::test' requested here}}
+
+  test_templates2<int, tt> three;
+  three.test(); // expected-note {{in instantiation of member function 'test_templates2<int, tt>::test' requested here}}
+}
+
+// Not instantiated
+template<typename T1, typename T2>
+struct test_templates3 {
+  T1 foo();
+
+  void test() {
+    _Cilk_spawn foo();
+    T1 b = _Cilk_spawn foo();
+    b = _Cilk_spawn foo();
+    if (1) _Cilk_spawn foo();
+    if (1) {} else _Cilk_spawn foo();
+    while (1) _Cilk_spawn foo();
+    for (;;) _Cilk_spawn foo();
+    switch (1) {
+    case 0: _Cilk_spawn foo(); break;
+    default: _Cilk_spawn foo(); break;
+    }
+    _Cilk_sync;
+
+    _Cilk_spawn 5;         // expected-error {{the argument to _Cilk_spawn must be a function call}}
+    _Cilk_spawn foo() + 5; // expected-error {{_Cilk_spawn is not at statement level}}
+    _Cilk_spawn _Cilk_spawn foo(); // expected-error {{consecutive _Cilk_spawn tokens not allowed}}
+
+    // No errors, since T2 may declare constructors/assignment from type T1
+    T2 c = _Cilk_spawn foo();
+    T2 d;
+    d = _Cilk_spawn foo();
+    _Cilk_sync;
+  }
+};

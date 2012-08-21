@@ -1507,6 +1507,14 @@ public:
                                    move(Args), RParenLoc, ExecConfig);
   }
 
+  /// \brief Build a new Cilk spawn expression.
+  ///
+  /// By default, performs semantic analysis to build the new expression.
+  /// Subclasses may override this routine to provide different behavior.
+  ExprResult RebuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
+    return getSema().BuildCilkSpawnExpr(SpawnLoc, E);
+  }
+
   /// \brief Build a new member access expression.
   ///
   /// By default, performs semantic analysis to build the new expression.
@@ -9298,30 +9306,22 @@ TreeTransform<Derived>::RebuildCXXPseudoDestructorExpr(Expr *Base,
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
-  return StmtError();
+  return Owned(S);
 }
-
-/*
-template<typename Derived>
-StmtResult
-TreeTransform<Derived>::RebuildCilkSyncStmt(CilkSyncStmt *S) {
-  return StmtError();
-}
-*/
 
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
-  return ExprError();
-}
+  // Transform the call.
+  ExprResult Call = getDerived().TransformExpr(E->getSubExpr());
+  if (Call.isInvalid())
+    return ExprError();
 
-/*
-template<typename Derived>
-ExprResult
-TreeTransform<Derived>::RebuildCilkSpawnExpr(CilkSpawnExpr *E) {
-  return ExprError();
+  if (!getDerived().AlwaysRebuild() && Call.get() == E->getSubExpr())
+    return Owned(E);
+
+  return getDerived().RebuildCilkSpawnExpr(E->getSpawnLoc(), Call.get());
 }
-*/
 
 } // end namespace clang
 
