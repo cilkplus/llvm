@@ -187,3 +187,146 @@ struct test_templates3 {
     _Cilk_sync;
   }
 };
+
+namespace extra {
+
+int foo();
+
+void test1() {
+  decltype(_Cilk_spawn foo()) x; // icc reports an error
+  decltype(_Cilk_spawn) y; // expected-error{{expected expression}}
+}
+
+class X {
+  unsigned size;
+  int *data;
+public:
+  explicit X(unsigned n) : size(n) {
+    data = new int [size];
+  }
+
+  ~X() { delete [] data; data = 0; }
+
+  X(const X& other) {
+    if (size != other.size) {
+      delete [] data;
+      size = other.size;
+      data = new int[size];
+    }
+  }
+
+  X& operator=(const X& other) {
+    if (size != other.size) {
+      delete [] data;
+      size = other.size;
+      data = new int[size];
+    }
+
+    return *this;
+  }
+
+  int operator[](unsigned i) const {
+    return data[i];
+  }
+
+  int& operator[](unsigned i) {
+    return data[i];
+  }
+
+  void operator++() {
+    data[0]++;
+  }
+
+  void operator++(int) {
+    ++data[0];
+  }
+};
+
+void test2() {
+  // NOTE: this is an icc extension
+  _Cilk_spawn X(100); // expected-error{{the argument to _Cilk_spawn must be a function call}}
+
+  {
+    X a(100);
+    _Cilk_spawn a.~X();
+    (void)a;
+  }
+
+  // NOTE: this is an icc extension
+  {
+    X a(100);
+    _Cilk_spawn a[0]; // expected-error{{the argument to _Cilk_spawn must be a function call}}
+    _Cilk_spawn a++; // expected-error{{the argument to _Cilk_spawn must be a function call}}
+    _Cilk_spawn ++a; // expected-error{{the argument to _Cilk_spawn must be a function call}}
+  }
+
+  // NOTE: this is an icc extension
+  {
+    X a(100);
+    X&& b = _Cilk_spawn X(a); // expected-error{{the argument to _Cilk_spawn must be a function call}}
+  }
+
+  // NOTE: this is an icc extension
+  {
+    X a(100);
+    X b = _Cilk_spawn a; // expected-error{{the argument to _Cilk_spawn must be a function call}}
+  }
+}
+
+void test3() {
+  extern void foo_a();
+  _Cilk_spawn foo_a();
+
+  // FIXME: this is not an error for icc, should support ignore expression
+  {
+    _Cilk_spawn (foo_a()); // expected-error{{the argument to _Cilk_spawn must be a function call}}
+    _Cilk_spawn ((foo_a())); // expected-error{{the argument to _Cilk_spawn must be a function call}}
+    _Cilk_spawn ((foo_a())); // expected-error{{the argument to _Cilk_spawn must be a function call}}
+  }
+}
+
+void test4() {
+  extern float foo_b();
+  int a = _Cilk_spawn foo_b(); // OK
+  int b = _Cilk_spawn (int)foo_b(); // expected-error{{the argument to _Cilk_spawn must be a function call}}
+}
+
+class Base {
+public:
+  virtual void func1() const {}
+  void func2() const {}
+};
+
+class Derived : public Base {
+public:
+  void func1() const {}
+  void func2() const {}
+};
+
+void test5() {
+  Base B;
+  Derived D;
+  Base *pB = &D;
+  _Cilk_spawn pB->func1();
+  _Cilk_spawn pB->func2();
+}
+
+void bar();
+
+void test6() {
+  void (*bar_ptr)() = bar;
+  _Cilk_spawn bar_ptr();
+}
+
+struct NoInt {
+  void f(double i);     // expected-note{{candidate function}}
+  void f(int) = delete; // expected-note{{candidate function has been explicitly deleted}}
+};
+
+void test7() {
+  NoInt ni;
+  _Cilk_spawn ni.f(1.0);
+  _Cilk_spawn ni.f(1); // expected-error{{call to deleted member function 'f'}}
+}
+
+}
