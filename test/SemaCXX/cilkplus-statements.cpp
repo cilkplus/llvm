@@ -329,4 +329,28 @@ void test7() {
   _Cilk_spawn ni.f(1); // expected-error{{call to deleted member function 'f'}}
 }
 
+void test8(int& x) {
+  x++;
+  if (x > 0)
+    goto L;
+  x++;
+
+  // FIXME: [DE 9609] a label statement should be accepted.
+L:
+  x = _Cilk_spawn foo(); // expected-error{{_Cilk_spawn is not at statement level}}
+}
+
+void test9(int& x) {
+  [[]] int y1 = _Cilk_spawn foo();
+  [[bar]] int y2 = _Cilk_spawn foo();
+  _Cilk_sync;
+  x = y1 + y2;
+}
+
+int& bz();
+
+void test10(int& x) {
+  x = _Cilk_spawn bz();
+}
+
 }
