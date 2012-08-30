@@ -330,14 +330,16 @@ void test7() {
 }
 
 void test8(int& x) {
-  x++;
   if (x > 0)
-    goto L;
+    goto L1;
   x++;
 
-  // FIXME: [DE 9609] a label statement should be accepted.
-L:
-  x = _Cilk_spawn foo(); // expected-error{{_Cilk_spawn is not at statement level}}
+L1:
+  x = _Cilk_spawn foo();
+L2:
+  _Cilk_spawn foo();
+L3:
+  _Cilk_spawn 5; // expected-error {{argument to _Cilk_spawn must be a function call}}
 }
 
 void test9(int& x) {
@@ -351,6 +353,7 @@ int& bz();
 
 void test10(int& x) {
   x = _Cilk_spawn bz();
+  _Cilk_spawn bz();
 }
 
 }

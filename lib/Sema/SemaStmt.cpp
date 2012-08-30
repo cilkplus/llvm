@@ -373,6 +373,9 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
       DiagnoseCilkSpawn(I->getElse());
     break;
   }
+  case Stmt::LabelStmtClass:
+    DiagnoseCilkSpawn(cast<LabelStmt>(S)->getSubStmt());
+    break;
   case Stmt::CaseStmtClass:
   case Stmt::DefaultStmtClass:
     DiagnoseCilkSpawn(cast<SwitchCase>(S)->getSubStmt());
