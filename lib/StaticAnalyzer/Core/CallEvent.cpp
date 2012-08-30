@@ -207,10 +207,14 @@ SourceRange CallEvent::getArgSourceRange(unsigned Index) const {
   return ArgE->getSourceRange();
 }
 
+void CallEvent::dump() const {
+  dump(llvm::errs());
+}
+
 void CallEvent::dump(raw_ostream &Out) const {
   ASTContext &Ctx = getState()->getStateManager().getContext();
   if (const Expr *E = getOriginExpr()) {
-    E->printPretty(Out, Ctx, 0, Ctx.getPrintingPolicy());
+    E->printPretty(Out, 0, Ctx.getPrintingPolicy());
     Out << "\n";
     return;
   }
@@ -226,10 +230,10 @@ void CallEvent::dump(raw_ostream &Out) const {
 }
 
 
-bool CallEvent::mayBeInlined(const Stmt *S) {
-  // FIXME: Kill this.
+bool CallEvent::isCallStmt(const Stmt *S) {
   return isa<CallExpr>(S) || isa<ObjCMessageExpr>(S)
-                          || isa<CXXConstructExpr>(S);
+                          || isa<CXXConstructExpr>(S)
+                          || isa<CXXNewExpr>(S);
 }
 
 static void addParameterValuesToBindings(const StackFrameContext *CalleeCtx,
@@ -372,47 +376,49 @@ void CXXInstanceCall::getExtraInvalidatedRegions(RegionList &Regions) const {
     Regions.push_back(R);
 }
 
-static const CXXMethodDecl *devirtualize(const CXXMethodDecl *MD, SVal ThisVal){
-  const MemRegion *R = ThisVal.getAsRegion();
-  if (!R)
-    return 0;
-
-  const TypedValueRegion *TR = dyn_cast<TypedValueRegion>(R->StripCasts());
-  if (!TR)
-    return 0;
-
-  const CXXRecordDecl *RD = TR->getValueType()->getAsCXXRecordDecl();
-  if (!RD)
-    return 0;
-
-  const CXXMethodDecl *Result = MD->getCorrespondingMethodInClass(RD);
-  const FunctionDecl *Definition;
-  if (!Result->hasBody(Definition))
-    return 0;
-
-  return cast<CXXMethodDecl>(Definition);
-}
-
 
 RuntimeDefinition CXXInstanceCall::getRuntimeDefinition() const {
+  // Do we have a decl at all?
   const Decl *D = getDecl();
   if (!D)
     return RuntimeDefinition();
 
+  // If the method is non-virtual, we know we can inline it.
   const CXXMethodDecl *MD = cast<CXXMethodDecl>(D);
   if (!MD->isVirtual())
     return AnyFunctionCall::getRuntimeDefinition();
 
-  // If the method is virtual, see if we can find the actual implementation
-  // based on context-sensitivity.
-  // FIXME: Virtual method calls behave differently when an object is being
-  // constructed or destructed. It's not as simple as "no devirtualization"
-  // because a /partially/ constructed object can be referred to through a
-  // base pointer. We'll eventually want to use DynamicTypeInfo here.
-  if (const CXXMethodDecl *Devirtualized = devirtualize(MD, getCXXThisVal()))
-    return RuntimeDefinition(Devirtualized);
+  // Do we know the implicit 'this' object being called?
+  const MemRegion *R = getCXXThisVal().getAsRegion();
+  if (!R)
+    return RuntimeDefinition();
 
-  return RuntimeDefinition();
+  // Do we know anything about the type of 'this'?
+  DynamicTypeInfo DynType = getState()->getDynamicTypeInfo(R);
+  if (!DynType.isValid())
+    return RuntimeDefinition();
+
+  // Is the type a C++ class? (This is mostly a defensive check.)
+  QualType RegionType = DynType.getType()->getPointeeType();
+  const CXXRecordDecl *RD = RegionType->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return RuntimeDefinition();
+
+  // Find the decl for this method in that class.
+  const CXXMethodDecl *Result = MD->getCorrespondingMethodInClass(RD, true);
+  assert(Result && "At the very least the static decl should show up.");
+
+  // Does the decl that we found have an implementation?
+  const FunctionDecl *Definition;
+  if (!Result->hasBody(Definition))
+    return RuntimeDefinition();
+
+  // We found a definition. If we're not sure that this devirtualization is
+  // actually what will happen at runtime, make sure to provide the region so
+  // that ExprEngine can decide what to do with it.
+  if (DynType.canBeASubClass())
+    return RuntimeDefinition(Definition, R->StripCasts());
+  return RuntimeDefinition(Definition, /*DispatchRegion=*/0);
 }
 
 void CXXInstanceCall::getInitialStackFrameContents(
@@ -421,16 +427,17 @@ void CXXInstanceCall::getInitialStackFrameContents(
   AnyFunctionCall::getInitialStackFrameContents(CalleeCtx, Bindings);
 
   // Handle the binding of 'this' in the new stack frame.
-  // We need to make sure we have the proper layering of CXXBaseObjectRegions.
   SVal ThisVal = getCXXThisVal();
   if (!ThisVal.isUnknown()) {
     ProgramStateManager &StateMgr = getState()->getStateManager();
     SValBuilder &SVB = StateMgr.getSValBuilder();
-    
+
     const CXXMethodDecl *MD = cast<CXXMethodDecl>(CalleeCtx->getDecl());
     Loc ThisLoc = SVB.getCXXThis(MD, CalleeCtx);
 
-    if (const MemRegion *ThisReg = ThisVal.getAsRegion()) {
+    // If we devirtualized to a different member function, we need to make sure
+    // we have the proper layering of CXXBaseObjectRegions.
+    if (MD->getCanonicalDecl() != getDecl()->getCanonicalDecl()) {
       ASTContext &Ctx = SVB.getContext();
       const CXXRecordDecl *Class = MD->getParent();
       QualType Ty = Ctx.getPointerType(Ctx.getRecordType(Class));
@@ -439,13 +446,10 @@ void CXXInstanceCall::getInitialStackFrameContents(
       bool Failed;
       ThisVal = StateMgr.getStoreManager().evalDynamicCast(ThisVal, Ty, Failed);
       assert(!Failed && "Calling an incorrectly devirtualized method");
-
-      // If we couldn't build the correct cast, just strip off all casts.
-      if (ThisVal.isUnknown())
-        ThisVal = loc::MemRegionVal(ThisReg->StripCasts());
     }
 
-    Bindings.push_back(std::make_pair(ThisLoc, ThisVal));
+    if (!ThisVal.isUnknown())
+      Bindings.push_back(std::make_pair(ThisLoc, ThisVal));
   }
 }
 
@@ -570,6 +574,14 @@ QualType ObjCMethodCall::getDeclaredResultType() const {
   return D->getResultType();
 }
 
+SVal ObjCMethodCall::getSelfSVal() const {
+  const LocationContext *LCtx = getLocationContext();
+  const ImplicitParamDecl *SelfDecl = LCtx->getSelfDecl();
+  if (!SelfDecl)
+    return SVal();
+  return getState()->getSVal(getState()->getRegion(SelfDecl, LCtx));
+}
+
 SVal ObjCMethodCall::getReceiverSVal() const {
   // FIXME: Is this the best way to handle class receivers?
   if (!isInstanceMessage())
@@ -580,10 +592,23 @@ SVal ObjCMethodCall::getReceiverSVal() const {
 
   // An instance message with no expression means we are sending to super.
   // In this case the object reference is the same as 'self'.
-  const LocationContext *LCtx = getLocationContext();
-  const ImplicitParamDecl *SelfDecl = LCtx->getSelfDecl();
-  assert(SelfDecl && "No message receiver Expr, but not in an ObjC method");
-  return getState()->getSVal(getState()->getRegion(SelfDecl, LCtx));
+  assert(getOriginExpr()->getReceiverKind() == ObjCMessageExpr::SuperInstance);
+  SVal SelfVal = getSelfSVal();
+  assert(SelfVal.isValid() && "Calling super but not in ObjC method");
+  return SelfVal;
+}
+
+bool ObjCMethodCall::isReceiverSelfOrSuper() const {
+  if (getOriginExpr()->getReceiverKind() == ObjCMessageExpr::SuperInstance ||
+      getOriginExpr()->getReceiverKind() == ObjCMessageExpr::SuperClass)
+      return true;
+
+  if (!isInstanceMessage())
+    return false;
+
+  SVal RecVal = getSVal(getOriginExpr()->getInstanceReceiver());
+
+  return (RecVal == getSelfSVal());
 }
 
 SourceRange ObjCMethodCall::getSourceRange() const {
@@ -666,6 +691,9 @@ bool ObjCMethodCall::canBeOverridenInSubclass(ObjCInterfaceDecl *IDecl,
   if (InterfLoc.isValid() && SM.isFromMainFile(InterfLoc))
     return false;
 
+  // Assume that property accessors are not overridden.
+  if (getMessageKind() == OCM_PropertyAccess)
+    return false;
 
   // We assume that if the method is public (declared outside of main file) or
   // has a parent which publicly declares the method, the method could be
@@ -813,7 +841,8 @@ CallEventManager::getCaller(const StackFrameContext *CalleeCtx,
       return getSimpleCall(CE, State, CallerCtx);
 
     switch (CallSite->getStmtClass()) {
-    case Stmt::CXXConstructExprClass: {
+    case Stmt::CXXConstructExprClass:
+    case Stmt::CXXTemporaryObjectExprClass: {
       SValBuilder &SVB = State->getStateManager().getSValBuilder();
       const CXXMethodDecl *Ctor = cast<CXXMethodDecl>(CalleeCtx->getDecl());
       Loc ThisPtr = SVB.getCXXThis(Ctor, CalleeCtx);
@@ -853,4 +882,3 @@ CallEventManager::getCaller(const StackFrameContext *CalleeCtx,
   return getCXXDestructorCall(Dtor, Trigger, ThisVal.getAsRegion(),
                               State, CallerCtx);
 }
-

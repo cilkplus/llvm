@@ -38,13 +38,13 @@ int test_html7(int);
 int test_html8(int);
 
 // expected-warning@+2 {{HTML start tag prematurely ended, expected attribute name or '>'}} expected-note@+1 {{HTML tag started here}}
-/** Aaa bbb<ccc ddd eee
+/** Aaa bbb<img ddd eee
  * fff ggg.
  */
 int test_html9(int);
 
 // expected-warning@+1 {{HTML start tag prematurely ended, expected attribute name or '>'}}
-/** Aaa bbb<ccc ddd eee 42%
+/** Aaa bbb<img ddd eee 42%
  * fff ggg.
  */
 int test_html10(int);
@@ -218,9 +218,32 @@ int test_param12(int a);
 /// \param aab Blah blah.
 int test_param13(int aaa, int bbb);
 
+// expected-warning@+2 {{parameter 'aab' not found in the function declaration}} expected-note@+2 {{did you mean 'bbb'?}}
+/// \param aaa Blah blah.
+/// \param aab Blah blah.
+int test_param14(int aaa, int bbb);
+
 // expected-warning@+1 {{parameter 'aab' not found in the function declaration}}
 /// \param aab Blah blah.
-int test_param14(int bbb, int ccc);
+int test_param15(int bbb, int ccc);
+
+// expected-warning@+1 {{parameter 'aab' not found in the function declaration}}
+/// \param aab Ccc.
+/// \param aaa Aaa.
+/// \param bbb Bbb.
+int test_param16(int aaa, int bbb);
+
+// expected-warning@+2 {{parameter 'aab' not found in the function declaration}}
+/// \param aaa Aaa.
+/// \param aab Ccc.
+/// \param bbb Bbb.
+int test_param17(int aaa, int bbb);
+
+// expected-warning@+3 {{parameter 'aab' not found in the function declaration}}
+/// \param aaa Aaa.
+/// \param bbb Bbb.
+/// \param aab Ccc.
+int test_param18(int aaa, int bbb);
 
 class C {
   // expected-warning@+1 {{parameter 'aaa' not found in the function declaration}}
@@ -229,26 +252,50 @@ class C {
 
   // expected-warning@+1 {{parameter 'aaa' not found in the function declaration}}
   /// \param aaa Blah blah.
- int test_param15(int bbb, int ccc);
+ int test_param19(int bbb, int ccc);
 };
 
 // expected-warning@+1 {{parameter 'aab' not found in the function declaration}}
 /// \param aab Blah blah.
 template<typename T>
-void test_param16(int bbb, int ccc);
+void test_param20(int bbb, int ccc);
 
 // expected-warning@+3 {{parameter 'a' is already documented}}
 // expected-note@+1 {{previous documentation}}
 /// \param a Aaa.
 /// \param a Aaa.
-int test_param17(int a);
+int test_param21(int a);
 
 // expected-warning@+4 {{parameter 'x2' is already documented}}
 // expected-note@+2 {{previous documentation}}
 /// \param x1 Aaa.
 /// \param x2 Bbb.
 /// \param x2 Ccc.
-int test_param18(int x1, int x2, int x3);
+int test_param22(int x1, int x2, int x3);
+
+// expected-warning@+2 {{parameter 'bbb' not found in the function declaration}} expected-note@+2 {{did you mean 'ccc'?}}
+/// \param aaa Meow.
+/// \param bbb Bbb.
+/// \returns aaa.
+typedef int test_param23(int aaa, int ccc);
+
+// expected-warning@+2 {{parameter 'bbb' not found in the function declaration}} expected-note@+2 {{did you mean 'ccc'?}}
+/// \param aaa Meow.
+/// \param bbb Bbb.
+/// \returns aaa.
+typedef int (*test_param24)(int aaa, int ccc);
+
+// expected-warning@+2 {{parameter 'bbb' not found in the function declaration}} expected-note@+2 {{did you mean 'ccc'?}}
+/// \param aaa Meow.
+/// \param bbb Bbb.
+/// \returns aaa.
+typedef int (* const test_param25)(int aaa, int ccc);
+
+// expected-warning@+2 {{parameter 'bbb' not found in the function declaration}} expected-note@+2 {{did you mean 'ccc'?}}
+/// \param aaa Meow.
+/// \param bbb Bbb.
+/// \returns aaa.
+typedef int (C::*test_param26)(int aaa, int ccc);
 
 
 // expected-warning@+1 {{'\tparam' command used in a comment that is not attached to a template declaration}}
@@ -624,13 +671,9 @@ class test_attach37 {
   /// \brief\author Aaa
   /// \tparam T Aaa
   void test_attach38(int aaa, int bbb);
-};
 
-// expected-warning@+1 {{empty paragraph passed to '\brief' command}}
-/// \brief\author Aaa
-/// \tparam T Aaa
-template<typename T>
-void test_attach37<T>::test_attach38(int aaa, int bbb) {}
+  void test_attach39(int aaa, int bbb);
+};
 
 // expected-warning@+2 {{empty paragraph passed to '\brief' command}}
 // expected-warning@+2 {{template parameter 'T' not found in the template declaration}}
@@ -638,6 +681,29 @@ void test_attach37<T>::test_attach38(int aaa, int bbb) {}
 /// \tparam T Aaa
 template<>
 void test_attach37<int>::test_attach38(int aaa, int bbb) {}
+
+// expected-warning@+1 {{empty paragraph passed to '\brief' command}}
+/// \brief\author Aaa
+/// \tparam T Aaa
+template<typename T>
+void test_attach37<T>::test_attach39(int aaa, int bbb) {}
+
+// We used to emit warning that parameter 'a' is not found because we parsed
+// the comment in context of the redeclaration which does not have parameter
+// names.
+template <typename T>
+struct test_attach38 {
+  /*!
+    \param a  First param
+    \param b  Second param
+  */
+  template <typename B>
+  void test_attach39(T a, B b);
+};
+
+template <>
+template <typename B>
+void test_attach38<int>::test_attach39(int, B);
 
 
 // PR13411, reduced.  We used to crash on this.
@@ -652,7 +718,7 @@ void test_nocrash1(int);
 /// \param\brief
 void test_nocrash2(int);
 
-// PR13593
+// PR13593, example 1 and 2
 
 /**
 * Bla.
@@ -668,3 +734,30 @@ template <typename>
 void test_nocrash3()
 {
 }
+
+// PR13593, example 3
+
+/**
+ * aaa
+ */
+template <typename T>
+inline T test_nocrash5(T a1)
+{
+    return a1;
+}
+
+///
+//,
+
+inline void test_nocrash6()
+{
+    test_nocrash5(1);
+}
+
+// We used to crash on this.
+
+/*!
+  Blah.
+*/
+typedef const struct test_nocrash7 * test_nocrash8;
+

@@ -815,7 +815,7 @@ def err_friend_def_in_local_class : Error<
   "friend function cannot be defined in a local class">;
   
 def err_abstract_type_in_decl : Error<
-  "%select{return|parameter|variable|field}0 type %1 is an abstract class">;
+  "%select{return|parameter|variable|field|ivar}0 type %1 is an abstract class">;
 def err_allocation_of_abstract_type : Error<
   "allocating an object of abstract class type %0">;
 def err_throw_abstract_type : Error<
@@ -1216,8 +1216,15 @@ def note_uninit_reference_member : Note<
   "uninitialized reference member is here">;
 def warn_field_is_uninit : Warning<"field is uninitialized when used here">,
   InGroup<Uninitialized>;
+def warn_reference_field_is_uninit : Warning<
+  "reference is not yet bound to a value when used here">,
+  InGroup<Uninitialized>;
 def warn_uninit_self_reference_in_init : Warning<
   "variable %0 is uninitialized when used within its own initialization">,
+  InGroup<Uninitialized>;
+def warn_uninit_self_reference_in_reference_init : Warning<
+  "reference %0 is not yet bound to a value when used within its own"
+  " initialization">,
   InGroup<Uninitialized>;
 def warn_uninit_var : Warning<
   "variable %0 is uninitialized when %select{used here|captured by block}1">,
@@ -1408,7 +1415,15 @@ def err_for_range_member_begin_end_mismatch : Error<
   "range type %0 has '%select{begin|end}1' member but no '%select{end|begin}1' member">;
 def err_for_range_begin_end_types_differ : Error<
   "'begin' and 'end' must return the same type (got %0 and %1)">;
-def note_for_range_type : Note<"range has type %0">;
+def note_in_for_range: Note<
+  "when looking up '%select{begin|end}0' function for range expression "
+  "of type %1">;
+def err_for_range_invalid: Error<
+  "invalid range expression of type %0; no viable '%select{begin|end}1' "
+  "function available">;
+def err_for_range_dereference : Error<
+  "invalid range expression of type %0; did you mean to dereference it "
+  "with '*'?">;
 def note_for_range_begin_end : Note<
   "selected '%select{begin|end}0' %select{function|template }1%2 with iterator type %3">;
 
@@ -1489,6 +1504,11 @@ def note_non_literal_user_provided_dtor : Note<
   "%0 is not literal because it has a user-provided destructor">;
 def note_non_literal_nontrivial_dtor : Note<
   "%0 is not literal because it has a non-trivial destructor">;
+def warn_private_extern : Warning<
+  "use of __private_extern__ on a declaration may not produce external symbol "
+  "private to the linkage unit and is deprecated">, InGroup<PrivateExtern>;
+def note_private_extern : Note<
+  "use __attribute__((visibility(\"hidden\"))) attribute instead">;
 
 // C++11 char16_t/char32_t
 def warn_cxx98_compat_unicode_type : Warning<
@@ -1542,6 +1562,8 @@ def err_attribute_argument_n_not_int : Error<
   "'%0' attribute requires parameter %1 to be an integer constant">;
 def err_attribute_argument_n_not_string : Error<
   "'%0' attribute requires parameter %1 to be a string">;
+def err_attribute_argument_n_not_identifier : Error<
+  "'%0' attribute requires parameter %1 to be an identifier">;
 def err_attribute_argument_out_of_bounds : Error<
   "'%0' attribute parameter %1 is out of bounds">;
 def err_attribute_requires_objc_interface : Error<
@@ -1550,6 +1572,8 @@ def err_attribute_uuid_malformed_guid : Error<
   "uuid attribute contains a malformed GUID">;
 def warn_nonnull_pointers_only : Warning<
   "nonnull attribute only applies to pointer arguments">;
+def err_attribute_pointers_only : Error<
+  "'%0' attribute only applies to pointer arguments">;
 def err_attribute_invalid_implicit_this_argument : Error<
   "'%0' attribute is invalid for the implicit this argument">;
 def err_ownership_type : Error<
@@ -1765,7 +1789,6 @@ def err_attribute_can_be_applied_only_to_value_decl : Error<
 def warn_attribute_not_on_decl : Error<
   "%0 attribute ignored when parsing type">;
 
-
 // Availability attribute
 def warn_availability_unknown_platform : Warning<
   "unknown platform %0 in availability macro">, InGroup<Availability>;
@@ -1907,6 +1930,9 @@ def warn_non_literal_null_pointer : Warning<
 def warn_impcast_null_pointer_to_integer : Warning<
     "implicit conversion of NULL constant to %0">,
     InGroup<NullConversion>;
+def warn_impcast_floating_point_to_bool : Warning<
+    "implicit conversion turns floating-point number into bool: %0 to %1">,
+    InGroup<ImplicitConversionFloatingPointToBool>;
 def warn_impcast_function_to_bool : Warning<
     "address of function %q0 will always evaluate to 'true'">,
     InGroup<BoolConversion>;
@@ -3677,6 +3703,10 @@ def err_illegal_decl_array_of_references : Error<
   "'%0' declared as array of references of type %1">;
 def err_decl_negative_array_size : Error<
   "'%0' declared as an array with a negative size">;
+def err_array_static_outside_prototype : Error<
+  "%0 used in array declarator outside of function prototype">;
+def err_array_static_not_outermost : Error<
+  "%0 used in non-outermost array type derivation">;
 def err_array_star_outside_prototype : Error<
   "star modifier used outside of function prototype">;
 def err_illegal_decl_pointer_to_reference : Error<
@@ -4953,6 +4983,12 @@ def err_typecheck_cast_to_union_no_type : Error<
   "cast to union type from type %0 not present in union">;
 def err_cast_pointer_from_non_pointer_int : Error<
   "operand of type %0 cannot be cast to a pointer type">;
+def warn_cast_pointer_from_sel : Warning<
+  "cast of type %0 to %1 is deprecated; use sel_getName instead">,
+  InGroup<SelTypeCast>;
+def warn_bad_function_cast : Warning<
+  "cast from function call of type %0 to non-matching type %1">,
+  InGroup<BadFunctionCast>, DefaultIgnore;
 def err_cast_pointer_to_non_pointer_int : Error<
   "pointer cannot be cast to type %0">;
 def err_typecheck_expect_scalar_operand : Error<
@@ -5040,9 +5076,6 @@ let CategoryName = "Inline Assembly Issue" in {
     "invalid use of a cast in a inline asm context requiring an l-value: "
     "accepted due to -fheinous-gnu-extensions, but clang may remove support "
     "for this in the future">;
-
-  def warn_unsupported_msasm : ExtWarn<
-    "MS-style inline assembly is not supported">, InGroup<Microsoft>;
 }
 
 let CategoryName = "Semantic Issue" in {
@@ -5466,6 +5499,23 @@ def warn_stringcompare : Warning<
 def warn_identity_field_assign : Warning<
   "assigning %select{field|instance variable}0 to itself">,
   InGroup<SelfAssignmentField>;
+
+// Type safety attributes
+def err_type_tag_for_datatype_not_ice : Error<
+  "'type_tag_for_datatype' attribute requires the initializer to be "
+  "an %select{integer|integral}0 constant expression">;
+def err_type_tag_for_datatype_too_large : Error<
+  "'type_tag_for_datatype' attribute requires the initializer to be "
+  "an %select{integer|integral}0 constant expression "
+  "that can be represented by a 64 bit integer">;
+def warn_type_tag_for_datatype_wrong_kind : Warning<
+  "this type tag was not designed to be used with this function">,
+  InGroup<TypeSafety>;
+def warn_type_safety_type_mismatch : Warning<
+  "argument type %0 doesn't match specified '%1' type tag "
+  "%select{that requires %3|}2">, InGroup<TypeSafety>;
+def warn_type_safety_null_pointer_required : Warning<
+  "specified %0 type tag requires a null pointer">, InGroup<TypeSafety>;
 
 // Generic selections.
 def err_assoc_type_incomplete : Error<

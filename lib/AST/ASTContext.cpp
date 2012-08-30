@@ -66,6 +66,28 @@ RawComment *ASTContext::getRawCommentForDeclNoCache(const Decl *D) const {
   if (D->isImplicit())
     return NULL;
 
+  // User can not attach documentation to implicit instantiations.
+  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+    if (FD->getTemplateSpecializationKind() == TSK_ImplicitInstantiation)
+      return NULL;
+  }
+
+  if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+    if (VD->isStaticDataMember() &&
+        VD->getTemplateSpecializationKind() == TSK_ImplicitInstantiation)
+      return NULL;
+  }
+
+  if (const CXXRecordDecl *CRD = dyn_cast<CXXRecordDecl>(D)) {
+    if (CRD->getTemplateSpecializationKind() == TSK_ImplicitInstantiation)
+      return NULL;
+  }
+
+  if (const EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
+    if (ED->getTemplateSpecializationKind() == TSK_ImplicitInstantiation)
+      return NULL;
+  }
+
   // TODO: handle comments for function parameters properly.
   if (isa<ParmVarDecl>(D))
     return NULL;
@@ -145,7 +167,6 @@ RawComment *ASTContext::getRawCommentForDeclNoCache(const Decl *D) const {
         SourceMgr.getLineNumber(DeclLocDecomp.first, DeclLocDecomp.second)
           == SourceMgr.getLineNumber(CommentBeginDecomp.first,
                                      CommentBeginDecomp.second)) {
-      (*Comment)->setDecl(D);
       return *Comment;
     }
   }
@@ -185,21 +206,86 @@ RawComment *ASTContext::getRawCommentForDeclNoCache(const Decl *D) const {
   if (Text.find_first_of(",;{}#@") != StringRef::npos)
     return NULL;
 
-   (*Comment)->setDecl(D);
   return *Comment;
 }
 
-const RawComment *ASTContext::getRawCommentForAnyRedecl(const Decl *D) const {
-  // If we have a 'templated' declaration for a template, adjust 'D' to
-  // refer to the actual template.
+namespace {
+/// If we have a 'templated' declaration for a template, adjust 'D' to
+/// refer to the actual template.
+/// If we have an implicit instantiation, adjust 'D' to refer to template.
+const Decl *adjustDeclToTemplate(const Decl *D) {
   if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+    // Is this function declaration part of a function template?
     if (const FunctionTemplateDecl *FTD = FD->getDescribedFunctionTemplate())
-      D = FTD;
-  } else if (const CXXRecordDecl *RD = dyn_cast<CXXRecordDecl>(D)) {
-    if (const ClassTemplateDecl *CTD = RD->getDescribedClassTemplate())
-      D = CTD;
+      return FTD;
+
+    // Nothing to do if function is not an implicit instantiation.
+    if (FD->getTemplateSpecializationKind() != TSK_ImplicitInstantiation)
+      return D;
+
+    // Function is an implicit instantiation of a function template?
+    if (const FunctionTemplateDecl *FTD = FD->getPrimaryTemplate())
+      return FTD;
+
+    // Function is instantiated from a member definition of a class template?
+    if (const FunctionDecl *MemberDecl =
+            FD->getInstantiatedFromMemberFunction())
+      return MemberDecl;
+
+    return D;
   }
-  // FIXME: Alias templates?
+  if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+    // Static data member is instantiated from a member definition of a class
+    // template?
+    if (VD->isStaticDataMember())
+      if (const VarDecl *MemberDecl = VD->getInstantiatedFromStaticDataMember())
+        return MemberDecl;
+
+    return D;
+  }
+  if (const CXXRecordDecl *CRD = dyn_cast<CXXRecordDecl>(D)) {
+    // Is this class declaration part of a class template?
+    if (const ClassTemplateDecl *CTD = CRD->getDescribedClassTemplate())
+      return CTD;
+
+    // Class is an implicit instantiation of a class template or partial
+    // specialization?
+    if (const ClassTemplateSpecializationDecl *CTSD =
+            dyn_cast<ClassTemplateSpecializationDecl>(CRD)) {
+      if (CTSD->getSpecializationKind() != TSK_ImplicitInstantiation)
+        return D;
+      llvm::PointerUnion<ClassTemplateDecl *,
+                         ClassTemplatePartialSpecializationDecl *>
+          PU = CTSD->getSpecializedTemplateOrPartial();
+      return PU.is<ClassTemplateDecl*>() ?
+          static_cast<const Decl*>(PU.get<ClassTemplateDecl *>()) :
+          static_cast<const Decl*>(
+              PU.get<ClassTemplatePartialSpecializationDecl *>());
+    }
+
+    // Class is instantiated from a member definition of a class template?
+    if (const MemberSpecializationInfo *Info =
+                   CRD->getMemberSpecializationInfo())
+      return Info->getInstantiatedFrom();
+
+    return D;
+  }
+  if (const EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
+    // Enum is instantiated from a member definition of a class template?
+    if (const EnumDecl *MemberDecl = ED->getInstantiatedFromMemberEnum())
+      return MemberDecl;
+
+    return D;
+  }
+  // FIXME: Adjust alias templates?
+  return D;
+}
+} // unnamed namespace
+
+const RawComment *ASTContext::getRawCommentForAnyRedecl(
+                                                const Decl *D,
+                                                const Decl **OriginalDecl) const {
+  D = adjustDeclToTemplate(D);
 
   // Check whether we have cached a comment for this declaration already.
   {
@@ -207,13 +293,17 @@ const RawComment *ASTContext::getRawCommentForAnyRedecl(const Decl *D) const {
         RedeclComments.find(D);
     if (Pos != RedeclComments.end()) {
       const RawCommentAndCacheFlags &Raw = Pos->second;
-      if (Raw.getKind() != RawCommentAndCacheFlags::NoCommentInDecl)
+      if (Raw.getKind() != RawCommentAndCacheFlags::NoCommentInDecl) {
+        if (OriginalDecl)
+          *OriginalDecl = Raw.getOriginalDecl();
         return Raw.getRaw();
+      }
     }
   }
 
   // Search for comments attached to declarations in the redeclaration chain.
   const RawComment *RC = NULL;
+  const Decl *OriginalDeclForRC = NULL;
   for (Decl::redecl_iterator I = D->redecls_begin(),
                              E = D->redecls_end();
        I != E; ++I) {
@@ -223,16 +313,19 @@ const RawComment *ASTContext::getRawCommentForAnyRedecl(const Decl *D) const {
       const RawCommentAndCacheFlags &Raw = Pos->second;
       if (Raw.getKind() != RawCommentAndCacheFlags::NoCommentInDecl) {
         RC = Raw.getRaw();
+        OriginalDeclForRC = Raw.getOriginalDecl();
         break;
       }
     } else {
       RC = getRawCommentForDeclNoCache(*I);
+      OriginalDeclForRC = *I;
       RawCommentAndCacheFlags Raw;
       if (RC) {
         Raw.setRaw(RC);
         Raw.setKind(RawCommentAndCacheFlags::FromDecl);
       } else
         Raw.setKind(RawCommentAndCacheFlags::NoCommentInDecl);
+      Raw.setOriginalDecl(*I);
       RedeclComments[*I] = Raw;
       if (RC)
         break;
@@ -242,10 +335,14 @@ const RawComment *ASTContext::getRawCommentForAnyRedecl(const Decl *D) const {
   // If we found a comment, it should be a documentation comment.
   assert(!RC || RC->isDocumentation());
 
+  if (OriginalDecl)
+    *OriginalDecl = OriginalDeclForRC;
+
   // Update cache for every declaration in the redeclaration chain.
   RawCommentAndCacheFlags Raw;
   Raw.setRaw(RC);
   Raw.setKind(RawCommentAndCacheFlags::FromRedecl);
+  Raw.setOriginalDecl(OriginalDeclForRC);
 
   for (Decl::redecl_iterator I = D->redecls_begin(),
                              E = D->redecls_end();
@@ -259,11 +356,28 @@ const RawComment *ASTContext::getRawCommentForAnyRedecl(const Decl *D) const {
 }
 
 comments::FullComment *ASTContext::getCommentForDecl(const Decl *D) const {
-  const RawComment *RC = getRawCommentForAnyRedecl(D);
+  D = adjustDeclToTemplate(D);
+  const Decl *Canonical = D->getCanonicalDecl();
+  llvm::DenseMap<const Decl *, comments::FullComment *>::iterator Pos =
+      ParsedComments.find(Canonical);
+  if (Pos != ParsedComments.end())
+    return Pos->second;
+
+  const Decl *OriginalDecl;
+  const RawComment *RC = getRawCommentForAnyRedecl(D, &OriginalDecl);
   if (!RC)
     return NULL;
 
-  return RC->getParsed(*this);
+  // If the RawComment was attached to other redeclaration of this Decl, we
+  // should parse the comment in context of that other Decl.  This is important
+  // because comments can contain references to parameter names which can be
+  // different across redeclarations.
+  if (D != OriginalDecl)
+    return getCommentForDecl(OriginalDecl);
+
+  comments::FullComment *FC = RC->parse(*this, D);
+  ParsedComments[Canonical] = FC;
+  return FC;
 }
 
 void 
@@ -1023,6 +1137,27 @@ CharUnits ASTContext::getDeclAlign(const Decl *D, bool RefAsPointee) const {
   }
 
   return toCharUnitsFromBits(Align);
+}
+
+// getTypeInfoDataSizeInChars - Return the size of a type, in
+// chars. If the type is a record, its data size is returned.  This is
+// the size of the memcpy that's performed when assigning this type
+// using a trivial copy/move assignment operator.
+std::pair<CharUnits, CharUnits>
+ASTContext::getTypeInfoDataSizeInChars(QualType T) const {
+  std::pair<CharUnits, CharUnits> sizeAndAlign = getTypeInfoInChars(T);
+
+  // In C++, objects can sometimes be allocated into the tail padding
+  // of a base-class subobject.  We decide whether that's possible
+  // during class layout, so here we can just trust the layout results.
+  if (getLangOpts().CPlusPlus) {
+    if (const RecordType *RT = T->getAs<RecordType>()) {
+      const ASTRecordLayout &layout = getASTRecordLayout(RT->getDecl());
+      sizeAndAlign.first = layout.getDataSize();
+    }
+  }
+
+  return sizeAndAlign;
 }
 
 std::pair<CharUnits, CharUnits>
@@ -5437,7 +5572,8 @@ ASTContext::getQualifiedTemplateName(NestedNameSpecifier *NNS,
   QualifiedTemplateName *QTN =
     QualifiedTemplateNames.FindNodeOrInsertPos(ID, InsertPos);
   if (!QTN) {
-    QTN = new (*this,4) QualifiedTemplateName(NNS, TemplateKeyword, Template);
+    QTN = new (*this, llvm::alignOf<QualifiedTemplateName>())
+        QualifiedTemplateName(NNS, TemplateKeyword, Template);
     QualifiedTemplateNames.InsertNode(QTN, InsertPos);
   }
 
@@ -5464,10 +5600,12 @@ ASTContext::getDependentTemplateName(NestedNameSpecifier *NNS,
 
   NestedNameSpecifier *CanonNNS = getCanonicalNestedNameSpecifier(NNS);
   if (CanonNNS == NNS) {
-    QTN = new (*this,4) DependentTemplateName(NNS, Name);
+    QTN = new (*this, llvm::alignOf<DependentTemplateName>())
+        DependentTemplateName(NNS, Name);
   } else {
     TemplateName Canon = getDependentTemplateName(CanonNNS, Name);
-    QTN = new (*this,4) DependentTemplateName(NNS, Name, Canon);
+    QTN = new (*this, llvm::alignOf<DependentTemplateName>())
+        DependentTemplateName(NNS, Name, Canon);
     DependentTemplateName *CheckQTN =
       DependentTemplateNames.FindNodeOrInsertPos(ID, InsertPos);
     assert(!CheckQTN && "Dependent type name canonicalization broken");
@@ -5498,10 +5636,12 @@ ASTContext::getDependentTemplateName(NestedNameSpecifier *NNS,
   
   NestedNameSpecifier *CanonNNS = getCanonicalNestedNameSpecifier(NNS);
   if (CanonNNS == NNS) {
-    QTN = new (*this,4) DependentTemplateName(NNS, Operator);
+    QTN = new (*this, llvm::alignOf<DependentTemplateName>())
+        DependentTemplateName(NNS, Operator);
   } else {
     TemplateName Canon = getDependentTemplateName(CanonNNS, Operator);
-    QTN = new (*this,4) DependentTemplateName(NNS, Operator, Canon);
+    QTN = new (*this, llvm::alignOf<DependentTemplateName>())
+        DependentTemplateName(NNS, Operator, Canon);
     
     DependentTemplateName *CheckQTN
       = DependentTemplateNames.FindNodeOrInsertPos(ID, InsertPos);
@@ -5660,7 +5800,7 @@ ASTContext::ProtocolCompatibleWithProtocol(ObjCProtocolDecl *lProto,
   return false;
 }
 
-/// QualifiedIdConformsQualifiedId - compare id<p,...> with id<p1,...>
+/// QualifiedIdConformsQualifiedId - compare id<pr,...> with id<pr1,...>
 /// return true if lhs's protocols conform to rhs's protocol; false
 /// otherwise.
 bool ASTContext::QualifiedIdConformsQualifiedId(QualType lhs, QualType rhs) {
@@ -5669,8 +5809,8 @@ bool ASTContext::QualifiedIdConformsQualifiedId(QualType lhs, QualType rhs) {
   return false;
 }
 
-/// ObjCQualifiedClassTypesAreCompatible - compare  Class<p,...> and
-/// Class<p1, ...>.
+/// ObjCQualifiedClassTypesAreCompatible - compare  Class<pr,...> and
+/// Class<pr1, ...>.
 bool ASTContext::ObjCQualifiedClassTypesAreCompatible(QualType lhs, 
                                                       QualType rhs) {
   const ObjCObjectPointerType *lhsQID = lhs->getAs<ObjCObjectPointerType>();
@@ -6273,10 +6413,13 @@ QualType ASTContext::mergeFunctionTypes(QualType lhs, QualType rhs,
     for (unsigned i = 0; i < proto_nargs; ++i) {
       QualType argTy = proto->getArgType(i);
       
-      // Look at the promotion type of enum types, since that is the type used
+      // Look at the converted type of enum types, since that is the type used
       // to pass enum values.
-      if (const EnumType *Enum = argTy->getAs<EnumType>())
-        argTy = Enum->getDecl()->getPromotionType();
+      if (const EnumType *Enum = argTy->getAs<EnumType>()) {
+        argTy = Enum->getDecl()->getIntegerType();
+        if (argTy.isNull())
+          return QualType();
+      }
       
       if (argTy->isPromotableIntegerType() ||
           getCanonicalType(argTy).getUnqualifiedType() == FloatTy)

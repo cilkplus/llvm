@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -analyze -analyzer-checker=core,unix.Malloc,debug.ExprInspection -analyzer-store region -analyzer-ipa=inlining -cfg-add-implicit-dtors -Wno-null-dereference -verify %s
 
 void clang_analyzer_eval(bool);
+void clang_analyzer_checkInlined(bool);
 
 class A {
 public:
@@ -102,7 +103,7 @@ void testMultipleInheritance3() {
     // Remove dead bindings...
     doSomething();
     // destructor called here
-    // expected-warning@27 {{Attempt to free released memory}}
+    // expected-warning@28 {{Attempt to free released memory}}
   }
 }
 
@@ -172,4 +173,81 @@ void testDefaultArg() {
   InheritsDefaultArg a;
   // Force a bug to be emitted.
   *(char *)0 = 1; // expected-warning{{Dereference of null pointer}}
+}
+
+
+namespace DestructorVirtualCalls {
+  class A {
+  public:
+    int *out1, *out2, *out3;
+
+    virtual int get() { return 1; }
+
+    ~A() {
+      *out1 = get();
+    }
+  };
+
+  class B : public A {
+  public:
+    virtual int get() { return 2; }
+
+    ~B() {
+      *out2 = get();
+    }
+  };
+
+  class C : public B {
+  public:
+    virtual int get() { return 3; }
+
+    ~C() {
+      *out3 = get();
+    }
+  };
+
+  void test() {
+    int a, b, c;
+
+    // New scope for the C object.
+    {
+      C obj;
+      clang_analyzer_eval(obj.get() == 3); // expected-warning{{TRUE}}
+
+      // Sanity check for devirtualization.
+      A *base = &obj;
+      clang_analyzer_eval(base->get() == 3); // expected-warning{{TRUE}}
+
+      obj.out1 = &a;
+      obj.out2 = &b;
+      obj.out3 = &c;
+    }
+
+    clang_analyzer_eval(a == 1); // expected-warning{{TRUE}}
+    clang_analyzer_eval(b == 2); // expected-warning{{TRUE}}
+    clang_analyzer_eval(c == 3); // expected-warning{{TRUE}}
+  }
+}
+
+
+namespace DestructorsShouldNotAffectReturnValues {
+  class Dtor {
+  public:
+    ~Dtor() {
+      clang_analyzer_checkInlined(true); // expected-warning{{TRUE}}
+    }
+  };
+
+  void *allocate() {
+    Dtor d;
+    return malloc(4); // no-warning
+  }
+
+  void test() {
+    // At one point we had an issue where the statements inside an
+    // inlined destructor kept us from finding the return statement,
+    // leading the analyzer to believe that the malloc'd memory had leaked.
+    void *p = allocate();
+    free(p); // no-warning
+  }
 }

@@ -2258,6 +2258,51 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         ASM = ArrayType::Normal;
         D.setInvalidType(true);
       }
+
+      // C99 6.7.5.2p1: The optional type qualifiers and the keyword static
+      // shall appear only in a declaration of a function parameter with an
+      // array type, ...
+      if (ASM == ArrayType::Static || ATI.TypeQuals) {
+        if (!(D.isPrototypeContext() ||
+              D.getContext() == Declarator::KNRTypeListContext)) {
+          S.Diag(DeclType.Loc, diag::err_array_static_outside_prototype) <<
+              (ASM == ArrayType::Static ? "'static'" : "type qualifier");
+          // Remove the 'static' and the type qualifiers.
+          if (ASM == ArrayType::Static)
+            ASM = ArrayType::Normal;
+          ATI.TypeQuals = 0;
+          D.setInvalidType(true);
+        }
+
+        // C99 6.7.5.2p1: ... and then only in the outermost array type
+        // derivation.
+        unsigned x = chunkIndex;
+        while (x != 0) {
+          // Walk outwards along the declarator chunks.
+          x--;
+          const DeclaratorChunk &DC = D.getTypeObject(x);
+          switch (DC.Kind) {
+          case DeclaratorChunk::Paren:
+            continue;
+          case DeclaratorChunk::Array:
+          case DeclaratorChunk::Pointer:
+          case DeclaratorChunk::Reference:
+          case DeclaratorChunk::MemberPointer:
+            S.Diag(DeclType.Loc, diag::err_array_static_not_outermost) <<
+              (ASM == ArrayType::Static ? "'static'" : "type qualifier");
+            if (ASM == ArrayType::Static)
+              ASM = ArrayType::Normal;
+            ATI.TypeQuals = 0;
+            D.setInvalidType(true);
+            break;
+          case DeclaratorChunk::Function:
+          case DeclaratorChunk::BlockPointer:
+            // These are invalid anyway, so just ignore.
+            break;
+          }
+        }
+      }
+
       T = S.BuildArrayType(T, ASM, ArraySize, ATI.TypeQuals,
                            SourceRange(DeclType.Loc, DeclType.EndLoc), Name);
       break;
@@ -3224,7 +3269,6 @@ namespace {
       assert(Chunk.Kind == DeclaratorChunk::Function);
       TL.setLocalRangeBegin(Chunk.Loc);
       TL.setLocalRangeEnd(Chunk.EndLoc);
-      TL.setTrailingReturn(Chunk.Fun.hasTrailingReturnType());
 
       const DeclaratorChunk::FunctionTypeInfo &FTI = Chunk.Fun;
       for (unsigned i = 0, e = TL.getNumArgs(), tpi = 0; i != e; ++i) {
@@ -3544,7 +3588,7 @@ static bool handleObjCOwnershipTypeAttr(TypeProcessingState &state,
 
   // Forbid __weak if the runtime doesn't support it.
   if (lifetime == Qualifiers::OCL_Weak &&
-      !S.getLangOpts().ObjCRuntimeHasWeak && !NonObjCPointer) {
+      !S.getLangOpts().ObjCARCWeak && !NonObjCPointer) {
 
     // Actually, delay this until we know what we're parsing.
     if (S.DelayedDiagnostics.shouldDelayDiagnostics()) {
@@ -3567,11 +3611,12 @@ static bool handleObjCOwnershipTypeAttr(TypeProcessingState &state,
     while (const PointerType *ptr = T->getAs<PointerType>())
       T = ptr->getPointeeType();
     if (const ObjCObjectPointerType *ObjT = T->getAs<ObjCObjectPointerType>()) {
-      ObjCInterfaceDecl *Class = ObjT->getInterfaceDecl();
-      if (Class->isArcWeakrefUnavailable()) {
-          S.Diag(AttrLoc, diag::err_arc_unsupported_weak_class);
-          S.Diag(ObjT->getInterfaceDecl()->getLocation(),
-                 diag::note_class_declared);
+      if (ObjCInterfaceDecl *Class = ObjT->getInterfaceDecl()) {
+        if (Class->isArcWeakrefUnavailable()) {
+            S.Diag(AttrLoc, diag::err_arc_unsupported_weak_class);
+            S.Diag(ObjT->getInterfaceDecl()->getLocation(),
+                   diag::note_class_declared);
+        }
       }
     }
   }

@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -analyze -analyzer-checker=core,experimental.deadcode.UnreachableCode,experimental.core.CastSize,experimental.unix.MallocWithAnnotations -analyzer-store=region -verify %s
+// RUN: %clang_cc1 -analyze -analyzer-checker=core,alpha.deadcode.UnreachableCode,alpha.core.CastSize,alpha.unix.MallocWithAnnotations -analyzer-store=region -verify %s
 typedef __typeof(sizeof(int)) size_t;
 void *malloc(size_t);
 void free(void *);
@@ -208,11 +208,11 @@ void f7_realloc() {
 }
 
 void PR6123() {
-  int *x = malloc(11); // expected-warning{{Cast a region whose size is not a multiple of the destination type size.}}
+  int *x = malloc(11); // expected-warning{{Cast a region whose size is not a multiple of the destination type size}}
 }
 
 void PR7217() {
-  int *buf = malloc(2); // expected-warning{{Cast a region whose size is not a multiple of the destination type size.}}
+  int *buf = malloc(2); // expected-warning{{Cast a region whose size is not a multiple of the destination type size}}
   buf[1] = 'c'; // not crash
 }
 

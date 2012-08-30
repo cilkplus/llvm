@@ -80,7 +80,9 @@ public:
 
   llvm::Type *ConvertType(QualType T) { return CGF.ConvertType(T); }
   LValue EmitLValue(const Expr *E) { return CGF.EmitLValue(E); }
-  LValue EmitCheckedLValue(const Expr *E) { return CGF.EmitCheckedLValue(E); }
+  LValue EmitCheckedLValue(const Expr *E, CodeGenFunction::CheckType CT) {
+    return CGF.EmitCheckedLValue(E, CT);
+  }
 
   Value *EmitLoadOfLValue(LValue LV) {
     return CGF.EmitLoadOfLValue(LV).getScalarVal();
@@ -90,7 +92,7 @@ public:
   /// value l-value, this method emits the address of the l-value, then loads
   /// and returns the result.
   Value *EmitLoadOfLValue(const Expr *E) {
-    return EmitLoadOfLValue(EmitCheckedLValue(E));
+    return EmitLoadOfLValue(EmitCheckedLValue(E, CodeGenFunction::CT_Load));
   }
 
   /// EmitConversionToBool - Convert the specified expression value to a
@@ -396,10 +398,12 @@ public:
   Value *EmitMul(const BinOpInfo &Ops) {
     if (Ops.Ty->isSignedIntegerOrEnumerationType()) {
       switch (CGF.getContext().getLangOpts().getSignedOverflowBehavior()) {
-      case LangOptions::SOB_Undefined:
-        return Builder.CreateNSWMul(Ops.LHS, Ops.RHS, "mul");
       case LangOptions::SOB_Defined:
         return Builder.CreateMul(Ops.LHS, Ops.RHS, "mul");
+      case LangOptions::SOB_Undefined:
+        if (!CGF.CatchUndefined)
+          return Builder.CreateNSWMul(Ops.LHS, Ops.RHS, "mul");
+        // Fall through.
       case LangOptions::SOB_Trapping:
         return EmitOverflowCheckedBinOp(Ops);
       }
@@ -410,8 +414,8 @@ public:
     return Builder.CreateMul(Ops.LHS, Ops.RHS, "mul");
   }
   bool isTrapvOverflowBehavior() {
-    return CGF.getContext().getLangOpts().getSignedOverflowBehavior() 
-               == LangOptions::SOB_Trapping; 
+    return CGF.getContext().getLangOpts().getSignedOverflowBehavior()
+               == LangOptions::SOB_Trapping || CGF.CatchUndefined;
   }
   /// Create a binary op that checks for overflow.
   /// Currently only supports +, - and *.
@@ -1253,10 +1257,12 @@ EmitAddConsiderOverflowBehavior(const UnaryOperator *E,
                                 llvm::Value *InVal,
                                 llvm::Value *NextVal, bool IsInc) {
   switch (CGF.getContext().getLangOpts().getSignedOverflowBehavior()) {
-  case LangOptions::SOB_Undefined:
-    return Builder.CreateNSWAdd(InVal, NextVal, IsInc ? "inc" : "dec");
   case LangOptions::SOB_Defined:
     return Builder.CreateAdd(InVal, NextVal, IsInc ? "inc" : "dec");
+  case LangOptions::SOB_Undefined:
+    if (!CGF.CatchUndefined)
+      return Builder.CreateNSWAdd(InVal, NextVal, IsInc ? "inc" : "dec");
+    // Fall through.
   case LangOptions::SOB_Trapping:
     BinOpInfo BinOp;
     BinOp.LHS = InVal;
@@ -1304,7 +1310,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
   // Most common case by far: integer increment.
   } else if (type->isIntegerType()) {
 
-    llvm::Value *amt = llvm::ConstantInt::get(value->getType(), amount);
+    llvm::Value *amt = llvm::ConstantInt::get(value->getType(), amount, true);
 
     // Note that signed integer inc/dec with width less than int can't
     // overflow because of promotion rules; we're just eliding a few steps here.
@@ -1684,7 +1690,7 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
   OpInfo.Opcode = E->getOpcode();
   OpInfo.E = E;
   // Load/convert the LHS.
-  LValue LHSLV = EmitCheckedLValue(E->getLHS());
+  LValue LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::CT_Store);
   OpInfo.LHS = EmitLoadOfLValue(LHSLV);
 
   llvm::PHINode *atomicPHI = 0;
@@ -2012,10 +2018,12 @@ Value *ScalarExprEmitter::EmitAdd(const BinOpInfo &op) {
 
   if (op.Ty->isSignedIntegerOrEnumerationType()) {
     switch (CGF.getContext().getLangOpts().getSignedOverflowBehavior()) {
-    case LangOptions::SOB_Undefined:
-      return Builder.CreateNSWAdd(op.LHS, op.RHS, "add");
     case LangOptions::SOB_Defined:
       return Builder.CreateAdd(op.LHS, op.RHS, "add");
+    case LangOptions::SOB_Undefined:
+      if (!CGF.CatchUndefined)
+        return Builder.CreateNSWAdd(op.LHS, op.RHS, "add");
+      // Fall through.
     case LangOptions::SOB_Trapping:
       return EmitOverflowCheckedBinOp(op);
     }
@@ -2032,10 +2040,12 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
   if (!op.LHS->getType()->isPointerTy()) {
     if (op.Ty->isSignedIntegerOrEnumerationType()) {
       switch (CGF.getContext().getLangOpts().getSignedOverflowBehavior()) {
-      case LangOptions::SOB_Undefined:
-        return Builder.CreateNSWSub(op.LHS, op.RHS, "sub");
       case LangOptions::SOB_Defined:
         return Builder.CreateSub(op.LHS, op.RHS, "sub");
+      case LangOptions::SOB_Undefined:
+        if (!CGF.CatchUndefined)
+          return Builder.CreateNSWSub(op.LHS, op.RHS, "sub");
+        // Fall through.
       case LangOptions::SOB_Trapping:
         return EmitOverflowCheckedBinOp(op);
       }
@@ -2112,14 +2122,38 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
   if (Ops.LHS->getType() != RHS->getType())
     RHS = Builder.CreateIntCast(RHS, Ops.LHS->getType(), false, "sh_prom");
 
-  if (CGF.CatchUndefined 
-      && isa<llvm::IntegerType>(Ops.LHS->getType())) {
+  if (CGF.CatchUndefined && isa<llvm::IntegerType>(Ops.LHS->getType())) {
     unsigned Width = cast<llvm::IntegerType>(Ops.LHS->getType())->getBitWidth();
-    llvm::BasicBlock *Cont = CGF.createBasicBlock("cont");
-    CGF.Builder.CreateCondBr(Builder.CreateICmpULT(RHS,
-                                 llvm::ConstantInt::get(RHS->getType(), Width)),
-                             Cont, CGF.getTrapBB());
+    llvm::BasicBlock *Cont = CGF.createBasicBlock("shl.cont");
+    llvm::BasicBlock *Trap = CGF.getTrapBB();
+    llvm::Value *WidthMinusOne =
+      llvm::ConstantInt::get(RHS->getType(), Width - 1);
+    CGF.Builder.CreateCondBr(Builder.CreateICmpULE(RHS, WidthMinusOne),
+                             Cont, Trap);
     CGF.EmitBlock(Cont);
+
+    if (Ops.Ty->hasSignedIntegerRepresentation()) {
+      // Check whether we are shifting any non-zero bits off the top of the
+      // integer.
+      Cont = CGF.createBasicBlock("shl.ok");
+      llvm::Value *BitsShiftedOff =
+        Builder.CreateLShr(Ops.LHS,
+                           Builder.CreateSub(WidthMinusOne, RHS, "shl.zeros",
+                                             /*NUW*/true, /*NSW*/true),
+                           "shl.check");
+      if (CGF.getLangOpts().CPlusPlus) {
+        // In C99, we are not permitted to shift a 1 bit into the sign bit.
+        // Under C++11's rules, shifting a 1 bit into the sign bit is
+        // OK, but shifting a 1 bit out of it is not. (C89 and C++03 don't
+        // define signed left shifts, so we use the C99 and C++11 rules there).
+        llvm::Value *One = llvm::ConstantInt::get(BitsShiftedOff->getType(), 1);
+        BitsShiftedOff = Builder.CreateLShr(BitsShiftedOff, One);
+      }
+      llvm::Value *Zero = llvm::ConstantInt::get(BitsShiftedOff->getType(), 0);
+      Builder.CreateCondBr(Builder.CreateICmpEQ(BitsShiftedOff, Zero),
+                           Cont, Trap);
+      CGF.EmitBlock(Cont);
+    }
   }
 
   return Builder.CreateShl(Ops.LHS, RHS, "shl");
@@ -2132,8 +2166,7 @@ Value *ScalarExprEmitter::EmitShr(const BinOpInfo &Ops) {
   if (Ops.LHS->getType() != RHS->getType())
     RHS = Builder.CreateIntCast(RHS, Ops.LHS->getType(), false, "sh_prom");
 
-  if (CGF.CatchUndefined 
-      && isa<llvm::IntegerType>(Ops.LHS->getType())) {
+  if (CGF.CatchUndefined && isa<llvm::IntegerType>(Ops.LHS->getType())) {
     unsigned Width = cast<llvm::IntegerType>(Ops.LHS->getType())->getBitWidth();
     llvm::BasicBlock *Cont = CGF.createBasicBlock("cont");
     CGF.Builder.CreateCondBr(Builder.CreateICmpULT(RHS,
@@ -2330,7 +2363,7 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
 
   case Qualifiers::OCL_Weak:
     RHS = Visit(E->getRHS());
-    LHS = EmitCheckedLValue(E->getLHS());    
+    LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::CT_Store);
     RHS = CGF.EmitARCStoreWeak(LHS.getAddress(), RHS, Ignore);
     break;
 
@@ -2340,7 +2373,7 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
     // __block variables need to have the rhs evaluated first, plus
     // this should improve codegen just a little.
     RHS = Visit(E->getRHS());
-    LHS = EmitCheckedLValue(E->getLHS());
+    LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::CT_Store);
 
     // Store the value into the LHS.  Bit-fields are handled specially
     // because the result is altered by the store, i.e., [C99 6.5.16p1]

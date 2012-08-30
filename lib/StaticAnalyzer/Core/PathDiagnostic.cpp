@@ -157,13 +157,13 @@ void PathDiagnosticConsumer::HandlePathDiagnostic(PathDiagnostic *D) {
           return; // FIXME: Emit a warning?
       
         // Check the source ranges.
-        for (PathDiagnosticPiece::range_iterator RI = piece->ranges_begin(),
-             RE = piece->ranges_end();
-             RI != RE; ++RI) {
-          SourceLocation L = SMgr.getExpansionLoc(RI->getBegin());
+        ArrayRef<SourceRange> Ranges = piece->getRanges();
+        for (ArrayRef<SourceRange>::iterator I = Ranges.begin(),
+                                             E = Ranges.end(); I != E; ++I) {
+          SourceLocation L = SMgr.getExpansionLoc(I->getBegin());
           if (!L.isFileID() || SMgr.getFileID(L) != FID)
             return; // FIXME: Emit a warning?
-          L = SMgr.getExpansionLoc(RI->getEnd());
+          L = SMgr.getExpansionLoc(I->getEnd());
           if (!L.isFileID() || SMgr.getFileID(L) != FID)
             return; // FIXME: Emit a warning?
         }
@@ -240,8 +240,8 @@ struct CompareDiagnostics {
 };  
 }
 
-void
-PathDiagnosticConsumer::FlushDiagnostics(SmallVectorImpl<std::string> *Files) {
+void PathDiagnosticConsumer::FlushDiagnostics(
+                                     PathDiagnosticConsumer::FilesMade *Files) {
   if (flushed)
     return;
   
@@ -269,6 +269,46 @@ PathDiagnosticConsumer::FlushDiagnostics(SmallVectorImpl<std::string> *Files) {
     const PathDiagnostic *D = *it;
     delete D;
   }
+}
+
+static void ProfileDiagnostic(const PathDiagnostic &PD,
+                              llvm::FoldingSetNodeID &NodeID) {
+  NodeID.AddString(PD.getBugType());
+  NodeID.AddString(PD.getDescription());
+  NodeID.Add(PD.getLocation());
+}
+
+void PathDiagnosticConsumer::FilesMade::addDiagnostic(const PathDiagnostic &PD,
+                                                      StringRef ConsumerName,
+                                                      StringRef FileName) {
+  llvm::FoldingSetNodeID NodeID;
+  ProfileDiagnostic(PD, NodeID);
+  void *InsertPos;
+  PDFileEntry *Entry = FindNodeOrInsertPos(NodeID, InsertPos);
+  if (!Entry) {
+    Entry = Alloc.Allocate<PDFileEntry>();
+    Entry = new (Entry) PDFileEntry(NodeID);
+    InsertNode(Entry, InsertPos);
+  }
+  
+  // Allocate persistent storage for the file name.
+  char *FileName_cstr = (char*) Alloc.Allocate(FileName.size(), 1);
+  memcpy(FileName_cstr, FileName.data(), FileName.size());
+
+  Entry->files.push_back(std::make_pair(ConsumerName,
+                                        StringRef(FileName_cstr,
+                                                  FileName.size())));
+}
+
+PathDiagnosticConsumer::PDFileEntry::ConsumerFiles *
+PathDiagnosticConsumer::FilesMade::getFiles(const PathDiagnostic &PD) {
+  llvm::FoldingSetNodeID NodeID;
+  ProfileDiagnostic(PD, NodeID);
+  void *InsertPos;
+  PDFileEntry *Entry = FindNodeOrInsertPos(NodeID, InsertPos);
+  if (!Entry)
+    return 0;
+  return &Entry->files;
 }
 
 //===----------------------------------------------------------------------===//
@@ -718,7 +758,9 @@ void PathDiagnosticPiece::Profile(llvm::FoldingSetNodeID &ID) const {
   ID.AddString(str);
   // FIXME: Add profiling support for code hints.
   ID.AddInteger((unsigned) getDisplayHint());
-  for (range_iterator I = ranges_begin(), E = ranges_end(); I != E; ++I) {
+  ArrayRef<SourceRange> Ranges = getRanges();
+  for (ArrayRef<SourceRange>::iterator I = Ranges.begin(), E = Ranges.end();
+                                        I != E; ++I) {
     ID.AddInteger(I->getBegin().getRawEncoding());
     ID.AddInteger(I->getEnd().getRawEncoding());
   }  

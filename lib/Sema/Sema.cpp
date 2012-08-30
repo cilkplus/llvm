@@ -507,6 +507,11 @@ void Sema::ActOnEndOfTranslationUnit() {
   assert(DelayedDiagnostics.getCurrentPool() == NULL
          && "reached end of translation unit with a pool attached?");
 
+  // If code completion is enabled, don't perform any end-of-translation-unit
+  // work.
+  if (PP.isCodeCompletionEnabled())
+    return;
+
   // Only complete translation units define vtables and perform implicit
   // instantiations.
   if (TUKind == TU_Complete) {
@@ -1237,8 +1242,7 @@ bool Sema::tryToRecoverWithCall(ExprResult &E, const PartialDiagnostic &PD,
     // FIXME: Try this before emitting the fixit, and suppress diagnostics
     // while doing so.
     E = ActOnCallExpr(0, E.take(), ParenInsertionLoc,
-                      MultiExprArg(*this, 0, 0),
-                      ParenInsertionLoc.getLocWithOffset(1));
+                      MultiExprArg(), ParenInsertionLoc.getLocWithOffset(1));
     return true;
   }
 

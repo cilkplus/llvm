@@ -656,7 +656,7 @@ Sema::BuildMemberReferenceExpr(Expr *Base, QualType BaseType,
     }
 
     if (Result.get())
-      return move(Result);
+      return Result;
 
     // LookupMemberExpr can modify Base, and thus change BaseType
     BaseType = Base->getType();
@@ -1137,7 +1137,7 @@ Sema::LookupMemberExpr(LookupResult &R, ExprResult &BaseExpr,
         goto fail;
       // There's an implicit 'isa' ivar on all objects.
       // But we only actually find it this way on objects of type 'id',
-      // apparently.ghjg
+      // apparently.
       if (OTy->isObjCId() && Member->isStr("isa")) {
         Diag(MemberLoc, diag::warn_objc_isa_use);
         return Owned(new (Context) ObjCIsaExpr(BaseExpr.take(), IsArrow, MemberLoc,
@@ -1550,7 +1550,7 @@ ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
           Id.getKind() == UnqualifiedId::IK_DestructorName)
         return DiagnoseDtorReference(NameInfo.getLoc(), Result.get());
 
-      return move(Result);
+      return Result;
     }
 
     ActOnMemberAccessExtraArgs ExtraArgs = {S, Id, ObjCImpDecl, HasTrailingLParen};
@@ -1560,7 +1560,7 @@ ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
                                       false, &ExtraArgs);
   }
 
-  return move(Result);
+  return Result;
 }
 
 static ExprResult

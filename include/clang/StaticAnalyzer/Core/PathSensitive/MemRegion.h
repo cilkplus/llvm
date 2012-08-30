@@ -52,7 +52,9 @@ class RegionOffset {
   int64_t Offset;
 
 public:
-  enum { Symbolic = INT64_MAX };
+  // We're using a const instead of an enumeration due to the size required;
+  // Visual Studio will only create enumerations of size int, not long long.
+  static const int64_t Symbolic = INT64_MAX;
 
   RegionOffset() : R(0) {}
   RegionOffset(const MemRegion *r, int64_t off) : R(r), Offset(off) {}
@@ -97,11 +99,11 @@ public:
     // Untyped regions.
     SymbolicRegionKind,
     AllocaRegionKind,
-    BlockDataRegionKind,
     // Typed regions.
     BEG_TYPED_REGIONS,
     FunctionTextRegionKind = BEG_TYPED_REGIONS,
     BlockTextRegionKind,
+    BlockDataRegionKind,
     BEG_TYPED_VALUE_REGIONS,
     CompoundLiteralRegionKind = BEG_TYPED_VALUE_REGIONS,
     CXXThisRegionKind,
@@ -601,7 +603,7 @@ public:
 ///  which correspond to "code+data".  The distinction is important, because
 ///  like a closure a block captures the values of externally referenced
 ///  variables.
-class BlockDataRegion : public SubRegion {
+class BlockDataRegion : public TypedRegion {
   friend class MemRegionManager;
   const BlockTextRegion *BC;
   const LocationContext *LC; // Can be null */
@@ -610,13 +612,15 @@ class BlockDataRegion : public SubRegion {
 
   BlockDataRegion(const BlockTextRegion *bc, const LocationContext *lc,
                   const MemRegion *sreg)
-  : SubRegion(sreg, BlockDataRegionKind), BC(bc), LC(lc),
+  : TypedRegion(sreg, BlockDataRegionKind), BC(bc), LC(lc),
     ReferencedVars(0), OriginalVars(0) {}
 
 public:
   const BlockTextRegion *getCodeRegion() const { return BC; }
   
   const BlockDecl *getDecl() const { return BC->getDecl(); }
+
+  QualType getLocationType() const { return BC->getLocationType(); }
   
   class referenced_vars_iterator {
     const MemRegion * const *R;

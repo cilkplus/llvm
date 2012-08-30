@@ -75,7 +75,7 @@ void CallAndMessageChecker::emitBadCall(BugType *BT, CheckerContext &C,
   BugReport *R = new BugReport(*BT, BT->getName(), N);
   if (BadE) {
     R->addRange(BadE->getSourceRange());
-    bugreporter::addTrackNullOrUndefValueVisitor(N, BadE, R);
+    bugreporter::trackNullOrUndefValue(N, BadE, *R);
   }
   C.EmitReport(R);
 }
@@ -122,7 +122,7 @@ bool CallAndMessageChecker::PreVisitProcessArg(CheckerContext &C,
       BugReport *R = new BugReport(*BT, Desc, N);
       R->addRange(argRange);
       if (argEx)
-        bugreporter::addTrackNullOrUndefValueVisitor(N, argEx, R);
+        bugreporter::trackNullOrUndefValue(N, argEx, *R);
       C.EmitReport(R);
     }
     return true;
@@ -235,17 +235,20 @@ void CallAndMessageChecker::checkPreStmt(const CallExpr *CE,
   ProgramStateRef StNonNull, StNull;
   llvm::tie(StNonNull, StNull) = State->assume(cast<DefinedOrUnknownSVal>(L));
 
-  // FIXME: Do we want to record the non-null assumption here?
   if (StNull && !StNonNull) {
     if (!BT_call_null)
       BT_call_null.reset(
         new BuiltinBug("Called function pointer is null (null dereference)"));
     emitBadCall(BT_call_null.get(), C, Callee);
   }
+
+  C.addTransition(StNonNull);
 }
 
 void CallAndMessageChecker::checkPreCall(const CallEvent &Call,
                                          CheckerContext &C) const {
+  ProgramStateRef State = C.getState();
+
   // If this is a call to a C++ method, check if the callee is null or
   // undefined.
   if (const CXXInstanceCall *CC = dyn_cast<CXXInstanceCall>(&Call)) {
@@ -258,11 +261,9 @@ void CallAndMessageChecker::checkPreCall(const CallEvent &Call,
       return;
     }
 
-    ProgramStateRef State = C.getState();
     ProgramStateRef StNonNull, StNull;
     llvm::tie(StNonNull, StNull) = State->assume(cast<DefinedOrUnknownSVal>(V));
 
-    // FIXME: Do we want to record the non-null assumption here?
     if (StNull && !StNonNull) {
       if (!BT_cxx_call_null)
         BT_cxx_call_null.reset(new BuiltinBug("Called C++ object pointer "
@@ -270,6 +271,8 @@ void CallAndMessageChecker::checkPreCall(const CallEvent &Call,
       emitBadCall(BT_cxx_call_null.get(), C, CC->getCXXThisExpr());
       return;
     }
+
+    State = StNonNull;
   }
 
   // Don't check for uninitialized field values in arguments if the
@@ -291,6 +294,9 @@ void CallAndMessageChecker::checkPreCall(const CallEvent &Call,
                            Call.getArgExpr(i), /*IsFirstArgument=*/i == 0,
                            checkUninitFields, Call, *BT))
       return;
+
+  // If we make it here, record our assumptions about the callee.
+  C.addTransition(State);
 }
 
 void CallAndMessageChecker::checkPreObjCMessage(const ObjCMethodCall &msg,
@@ -329,7 +335,7 @@ void CallAndMessageChecker::checkPreObjCMessage(const ObjCMethodCall &msg,
 
       // FIXME: getTrackNullOrUndefValueVisitor can't handle "super" yet.
       if (const Expr *ReceiverE = ME->getInstanceReceiver())
-        bugreporter::addTrackNullOrUndefValueVisitor(N, ReceiverE, R);
+        bugreporter::trackNullOrUndefValue(N, ReceiverE, *R);
       C.EmitReport(R);
     }
     return;
@@ -371,7 +377,7 @@ void CallAndMessageChecker::emitNilReceiverBug(CheckerContext &C,
   report->addRange(ME->getReceiverRange());
   // FIXME: This won't track "self" in messages to super.
   if (const Expr *receiver = ME->getInstanceReceiver()) {
-    bugreporter::addTrackNullOrUndefValueVisitor(N, receiver, report);
+    bugreporter::trackNullOrUndefValue(N, receiver, *report);
   }
   C.EmitReport(report);
 }

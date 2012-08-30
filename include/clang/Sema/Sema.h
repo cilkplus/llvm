@@ -1203,7 +1203,7 @@ public:
       assert(Kind == NC_TypeTemplate || Kind == NC_FunctionTemplate);
       return Kind == NC_TypeTemplate? TNK_Type_template : TNK_Function_template;
     }
-};
+  };
 
   /// \brief Perform name lookup on the given name, classifying it based on
   /// the results of name lookup and the following token.
@@ -1223,11 +1223,19 @@ public:
   ///
   /// \param NextToken The token following the identifier. Used to help
   /// disambiguate the name.
+  ///
+  /// \param IsAddressOfOperand True if this name is the operand of a unary
+  ///        address of ('&') expression, assuming it is classified as an
+  ///        expression.
+  ///
+  /// \param CCC The correction callback, if typo correction is desired.
   NameClassification ClassifyName(Scope *S,
                                   CXXScopeSpec &SS,
                                   IdentifierInfo *&Name,
                                   SourceLocation NameLoc,
-                                  const Token &NextToken);
+                                  const Token &NextToken,
+                                  bool IsAddressOfOperand,
+                                  CorrectionCandidateCallback *CCC = 0);
 
   Decl *ActOnDeclarator(Scope *S, Declarator &D);
 
@@ -1916,6 +1924,30 @@ public:
                                    OverloadCandidateSet &CandidateSet,
                                    bool PartialOverloading = false);
 
+  // An enum used to represent the different possible results of building a
+  // range-based for loop.
+  enum ForRangeStatus {
+    FRS_Success,
+    FRS_NoViableFunction,
+    FRS_DiagnosticIssued
+  };
+
+  // An enum to represent whether something is dealing with a call to begin()
+  // or a call to end() in a range-based for loop.
+  enum BeginEndFunction {
+    BEF_begin,
+    BEF_end
+  };
+
+  ForRangeStatus BuildForRangeBeginEndCall(Scope *S, SourceLocation Loc,
+                                           SourceLocation RangeLoc,
+                                           VarDecl *Decl,
+                                           BeginEndFunction BEF,
+                                           const DeclarationNameInfo &NameInfo,
+                                           LookupResult &MemberLookup,
+                                           OverloadCandidateSet *CandidateSet,
+                                           Expr *Range, ExprResult *CallExpr);
+
   ExprResult BuildOverloadedCallExpr(Scope *S, Expr *Fn,
                                      UnresolvedLookupExpr *ULE,
                                      SourceLocation LParenLoc,
@@ -1923,6 +1955,12 @@ public:
                                      SourceLocation RParenLoc,
                                      Expr *ExecConfig,
                                      bool AllowTypoCorrection=true);
+
+  bool buildOverloadedCallSet(Scope *S, Expr *Fn, UnresolvedLookupExpr *ULE,
+                              Expr **Args, unsigned NumArgs,
+                              SourceLocation RParenLoc,
+                              OverloadCandidateSet *CandidateSet,
+                              ExprResult *Result);
 
   ExprResult CreateOverloadedUnaryOp(SourceLocation OpLoc,
                                      unsigned Opc,
@@ -2148,7 +2186,8 @@ public:
                              bool EnteringContext = false,
                              const ObjCObjectPointerType *OPT = 0);
 
-  void FindAssociatedClassesAndNamespaces(llvm::ArrayRef<Expr *> Args,
+  void FindAssociatedClassesAndNamespaces(SourceLocation InstantiationLoc,
+                                          llvm::ArrayRef<Expr *> Args,
                                    AssociatedNamespaceSet &AssociatedNamespaces,
                                    AssociatedClassSet &AssociatedClasses);
 
@@ -2399,7 +2438,7 @@ public:
     FullExprArg(const FullExprArg& Other) : E(Other.E) {}
 
     ExprResult release() {
-      return move(E);
+      return E;
     }
 
     Expr *get() const { return E; }
@@ -2498,21 +2537,21 @@ public:
   ExprResult CheckObjCForCollectionOperand(SourceLocation forLoc,
                                            Expr *collection);
   StmtResult ActOnObjCForCollectionStmt(SourceLocation ForColLoc,
-                                        SourceLocation LParenLoc,
                                         Stmt *First, Expr *collection,
                                         SourceLocation RParenLoc);
   StmtResult FinishObjCForCollectionStmt(Stmt *ForCollection, Stmt *Body);
 
-  StmtResult ActOnCXXForRangeStmt(SourceLocation ForLoc,
-                                  SourceLocation LParenLoc, Stmt *LoopVar,
+  StmtResult ActOnCXXForRangeStmt(SourceLocation ForLoc, Stmt *LoopVar,
                                   SourceLocation ColonLoc, Expr *Collection,
-                                  SourceLocation RParenLoc);
+                                  SourceLocation RParenLoc,
+                                  bool ShouldTryDeref);
   StmtResult BuildCXXForRangeStmt(SourceLocation ForLoc,
                                   SourceLocation ColonLoc,
                                   Stmt *RangeDecl, Stmt *BeginEndDecl,
                                   Expr *Cond, Expr *Inc,
                                   Stmt *LoopVarDecl,
-                                  SourceLocation RParenLoc);
+                                  SourceLocation RParenLoc,
+                                  bool ShouldTryDeref);
   StmtResult FinishCXXForRangeStmt(Stmt *ForRange, Stmt *Body);
 
   StmtResult ActOnGotoStmt(SourceLocation GotoLoc,
@@ -2536,21 +2575,15 @@ public:
   StmtResult ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
   StmtResult ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
 
-  StmtResult ActOnAsmStmt(SourceLocation AsmLoc,
-                          bool IsSimple, bool IsVolatile,
-                          unsigned NumOutputs, unsigned NumInputs,
-                          IdentifierInfo **Names,
-                          MultiExprArg Constraints,
-                          MultiExprArg Exprs,
-                          Expr *AsmString,
-                          MultiExprArg Clobbers,
-                          SourceLocation RParenLoc,
-                          bool MSAsm = false);
+  StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
+                             bool IsVolatile, unsigned NumOutputs,
+                             unsigned NumInputs, IdentifierInfo **Names,
+                             MultiExprArg Constraints, MultiExprArg Exprs,
+                             Expr *AsmString, MultiExprArg Clobbers,
+                             SourceLocation RParenLoc);
 
-  StmtResult ActOnMSAsmStmt(SourceLocation AsmLoc,
-                            ArrayRef<Token> AsmToks,
-                            ArrayRef<unsigned> LineEnds,
-                            SourceLocation EndLoc);
+  StmtResult ActOnMSAsmStmt(SourceLocation AsmLoc, SourceLocation LBraceLoc,
+                            ArrayRef<Token> AsmToks, SourceLocation EndLoc);
 
   VarDecl *BuildObjCExceptionDecl(TypeSourceInfo *TInfo, QualType ExceptionType,
                                   SourceLocation StartLoc,
@@ -3523,7 +3556,7 @@ public:
   bool CompleteConstructorCall(CXXConstructorDecl *Constructor,
                                MultiExprArg ArgsPtr,
                                SourceLocation Loc,
-                               ASTOwningVector<Expr*> &ConvertedArgs,
+                               SmallVectorImpl<Expr*> &ConvertedArgs,
                                bool AllowExplicit = false);
 
   ParsedType getDestructorName(SourceLocation TildeLoc,
@@ -4469,6 +4502,7 @@ public:
     AbstractParamType,
     AbstractVariableType,
     AbstractFieldType,
+    AbstractIvarType,
     AbstractArrayType
   };
 
@@ -4629,8 +4663,6 @@ public:
 
   /// \brief Parsed an elaborated-type-specifier that refers to a template-id,
   /// such as \c class T::template apply<U>.
-  ///
-  /// \param TUK
   TypeResult ActOnTagTemplateIdType(TagUseKind TUK,
                                     TypeSpecifierType TagSpec,
                                     SourceLocation TagLoc,
@@ -7151,6 +7183,42 @@ private:
 
   void CheckBitFieldInitialization(SourceLocation InitLoc, FieldDecl *Field,
                                    Expr *Init);
+
+public:
+  /// \brief Register a magic integral constant to be used as a type tag.
+  void RegisterTypeTagForDatatype(const IdentifierInfo *ArgumentKind,
+                                  uint64_t MagicValue, QualType Type,
+                                  bool LayoutCompatible, bool MustBeNull);
+
+  struct TypeTagData {
+    TypeTagData() {}
+
+    TypeTagData(QualType Type, bool LayoutCompatible, bool MustBeNull) :
+        Type(Type), LayoutCompatible(LayoutCompatible),
+        MustBeNull(MustBeNull)
+    {}
+
+    QualType Type;
+
+    /// If true, \c Type should be compared with other expression's types for
+    /// layout-compatibility.
+    unsigned LayoutCompatible : 1;
+    unsigned MustBeNull : 1;
+  };
+
+  /// A pair of ArgumentKind identifier and magic value.  This uniquely
+  /// identifies the magic value.
+  typedef std::pair<const IdentifierInfo *, uint64_t> TypeTagMagicValue;
+
+private:
+  /// \brief A map from magic value to type information.
+  OwningPtr<llvm::DenseMap<TypeTagMagicValue, TypeTagData> >
+      TypeTagForDatatypeMagicValues;
+
+  /// \brief Peform checks on a call of a function with argument_with_type_tag
+  /// or pointer_with_type_tag attributes.
+  void CheckArgumentWithTypeTag(const ArgumentWithTypeTagAttr *Attr,
+                                const Expr * const *ExprArgs);
 
   /// \brief The parser's current scope.
   ///

@@ -129,28 +129,16 @@ ProgramStateRef ProgramState::bindCompoundLiteral(const CompoundLiteralExpr *CL,
                                             const LocationContext *LC,
                                             SVal V) const {
   const StoreRef &newStore = 
-    getStateManager().StoreMgr->BindCompoundLiteral(getStore(), CL, LC, V);
+    getStateManager().StoreMgr->bindCompoundLiteral(getStore(), CL, LC, V);
   return makeWithStore(newStore);
 }
 
-ProgramStateRef ProgramState::bindDecl(const VarRegion* VR, SVal IVal) const {
-  const StoreRef &newStore =
-    getStateManager().StoreMgr->BindDecl(getStore(), VR, IVal);
-  return makeWithStore(newStore);
-}
-
-ProgramStateRef ProgramState::bindDeclWithNoInit(const VarRegion* VR) const {
-  const StoreRef &newStore =
-    getStateManager().StoreMgr->BindDeclWithNoInit(getStore(), VR);
-  return makeWithStore(newStore);
-}
-
-ProgramStateRef ProgramState::bindLoc(Loc LV, SVal V) const {
+ProgramStateRef ProgramState::bindLoc(Loc LV, SVal V, bool notifyChanges) const {
   ProgramStateManager &Mgr = getStateManager();
   ProgramStateRef newState = makeWithStore(Mgr.StoreMgr->Bind(getStore(), 
                                                              LV, V));
   const MemRegion *MR = LV.getAsRegion();
-  if (MR && Mgr.getOwningEngine())
+  if (MR && Mgr.getOwningEngine() && notifyChanges)
     return Mgr.getOwningEngine()->processRegionChange(newState, MR);
 
   return newState;
@@ -204,11 +192,12 @@ ProgramState::invalidateRegionsImpl(ArrayRef<const MemRegion *> Regions,
   return makeWithStore(newStore);
 }
 
-ProgramStateRef ProgramState::unbindLoc(Loc LV) const {
+ProgramStateRef ProgramState::killBinding(Loc LV) const {
   assert(!isa<loc::MemRegionVal>(LV) && "Use invalidateRegion instead.");
 
   Store OldStore = getStore();
-  const StoreRef &newStore = getStateManager().StoreMgr->Remove(OldStore, LV);
+  const StoreRef &newStore =
+    getStateManager().StoreMgr->killBinding(OldStore, LV);
 
   if (newStore.getStore() == OldStore)
     return this;
@@ -745,14 +734,16 @@ template<> struct ProgramStateTrait<DynamicTypeMap>
 }}
 
 DynamicTypeInfo ProgramState::getDynamicTypeInfo(const MemRegion *Reg) const {
+  Reg = Reg->StripCasts();
+
   // Look up the dynamic type in the GDM.
   const DynamicTypeInfo *GDMType = get<DynamicTypeMap>(Reg);
   if (GDMType)
     return *GDMType;
 
   // Otherwise, fall back to what we know about the region.
-  if (const TypedValueRegion *TR = dyn_cast<TypedValueRegion>(Reg))
-    return DynamicTypeInfo(TR->getValueType());
+  if (const TypedRegion *TR = dyn_cast<TypedRegion>(Reg))
+    return DynamicTypeInfo(TR->getLocationType(), /*CanBeSubclass=*/false);
 
   if (const SymbolicRegion *SR = dyn_cast<SymbolicRegion>(Reg)) {
     SymbolRef Sym = SR->getSymbol();
@@ -764,6 +755,7 @@ DynamicTypeInfo ProgramState::getDynamicTypeInfo(const MemRegion *Reg) const {
 
 ProgramStateRef ProgramState::setDynamicTypeInfo(const MemRegion *Reg,
                                                  DynamicTypeInfo NewTy) const {
+  Reg = Reg->StripCasts();
   ProgramStateRef NewState = set<DynamicTypeMap>(Reg, NewTy);
   assert(NewState);
   return NewState;

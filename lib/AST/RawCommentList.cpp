@@ -65,7 +65,7 @@ bool mergedCommentIsTrailingComment(StringRef Comment) {
 RawComment::RawComment(const SourceManager &SourceMgr, SourceRange SR,
                        bool Merged) :
     Range(SR), RawTextValid(false), BriefTextValid(false),
-    IsAlmostTrailingComment(false),
+    IsAttached(false), IsAlmostTrailingComment(false),
     BeginLineValid(false), EndLineValid(false) {
   // Extract raw comment text, if possible.
   if (SR.getBegin() == SR.getEnd() || getRawText(SourceMgr).empty()) {
@@ -85,16 +85,6 @@ RawComment::RawComment(const SourceManager &SourceMgr, SourceRange SR,
     Kind = RCK_Merged;
     IsTrailingComment = mergedCommentIsTrailingComment(RawText);
   }
-}
-
-const Decl *RawComment::getDecl() const {
-  if (DeclOrParsedComment.isNull())
-    return NULL;
-
-  if (const Decl *D = DeclOrParsedComment.dyn_cast<const Decl *>())
-    return D;
-
-  return DeclOrParsedComment.get<comments::FullComment *>()->getDecl();
 }
 
 unsigned RawComment::getBeginLine(const SourceManager &SM) const {
@@ -169,7 +159,8 @@ const char *RawComment::extractBriefText(const ASTContext &Context) const {
   return BriefTextPtr;
 }
 
-comments::FullComment *RawComment::parse(const ASTContext &Context) const {
+comments::FullComment *RawComment::parse(const ASTContext &Context,
+                                         const Decl *D) const {
   // Make sure that RawText is valid.
   getRawText(Context.getSourceManager());
 
@@ -179,13 +170,11 @@ comments::FullComment *RawComment::parse(const ASTContext &Context) const {
                     RawText.begin(), RawText.end());
   comments::Sema S(Context.getAllocator(), Context.getSourceManager(),
                    Context.getDiagnostics(), Traits);
-  S.setDecl(getDecl());
+  S.setDecl(D);
   comments::Parser P(L, S, Context.getAllocator(), Context.getSourceManager(),
                      Context.getDiagnostics(), Traits);
 
-  comments::FullComment *FC = P.parseFullComment();
-  DeclOrParsedComment = FC;
-  return FC;
+  return P.parseFullComment();
 }
 
 namespace {
@@ -255,15 +244,20 @@ void RawCommentList::addComment(const RawComment &RC,
 
   // Merge comments only if there is only whitespace between them.
   // Can't merge trailing and non-trailing comments.
-  // Merge trailing comments if they are on same or consecutive lines.
+  // Merge comments if they are on same or consecutive lines.
+  bool Merged = false;
   if (OnlyWhitespaceSeen &&
-      (C1.isTrailingComment() == C2.isTrailingComment()) &&
-      (!C1.isTrailingComment() ||
-       C1.getEndLine(SourceMgr) + 1 >= C2.getBeginLine(SourceMgr))) {
-    SourceRange MergedRange(C1.getSourceRange().getBegin(),
-                            C2.getSourceRange().getEnd());
-    *Comments.back() = RawComment(SourceMgr, MergedRange, true);
-  } else
+      (C1.isTrailingComment() == C2.isTrailingComment())) {
+    unsigned C1EndLine = C1.getEndLine(SourceMgr);
+    unsigned C2BeginLine = C2.getBeginLine(SourceMgr);
+    if (C1EndLine + 1 == C2BeginLine || C1EndLine == C2BeginLine) {
+      SourceRange MergedRange(C1.getSourceRange().getBegin(),
+                              C2.getSourceRange().getEnd());
+      *Comments.back() = RawComment(SourceMgr, MergedRange, true);
+      Merged = true;
+    }
+  }
+  if (!Merged)
     Comments.push_back(new (Allocator) RawComment(RC));
 
   OnlyWhitespaceSeen = true;

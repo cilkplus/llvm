@@ -442,6 +442,20 @@ static bool GetVersionFromSimulatorDefine(StringRef define,
 void Darwin::AddDeploymentTarget(DerivedArgList &Args) const {
   const OptTable &Opts = getDriver().getOpts();
 
+  // Support allowing the SDKROOT environment variable used by xcrun and other
+  // Xcode tools to define the default sysroot, by making it the default for
+  // isysroot.
+  if (!Args.hasArg(options::OPT_isysroot)) {
+    if (char *env = ::getenv("SDKROOT")) {
+      // We only use this value as the default if it is an absolute path and
+      // exists.
+      if (llvm::sys::path::is_absolute(env) && llvm::sys::fs::exists(env)) {
+        Args.append(Args.MakeSeparateArg(
+                      0, Opts.getOption(options::OPT_isysroot), env));
+      }
+    }
+  }
+
   Arg *OSXVersion = Args.getLastArg(options::OPT_mmacosx_version_min_EQ);
   Arg *iOSVersion = Args.getLastArg(options::OPT_miphoneos_version_min_EQ);
   Arg *iOSSimVersion = Args.getLastArg(
@@ -937,8 +951,10 @@ bool Darwin::SupportsObjCGC() const {
   return !isTargetIPhoneOS();
 }
 
-bool Darwin::SupportsObjCARC() const {
-  return isTargetIPhoneOS() || !isMacosxVersionLT(10, 6);
+void Darwin::CheckObjCARC() const {
+  if (isTargetIPhoneOS() || !isMacosxVersionLT(10, 6))
+    return;
+  getDriver().Diag(diag::err_arc_unsupported_on_toolchain);
 }
 
 std::string
