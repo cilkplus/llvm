@@ -2231,6 +2231,14 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
                                          NumArrayIndexVars);
       break;
     }
+
+    case STMT_CILKSYNC:
+      S = new (Context) CilkSyncStmt(Empty);
+      break;
+
+    case EXPR_CILKSPAWN:
+      S = new (Context) CilkSpawnExpr(Empty);
+      break;
     }
     
     // We hit a STMT_STOP, so we're done with this expression.

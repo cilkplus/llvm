@@ -1212,6 +1212,8 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
     return ExprError();
   }
 
+  // postfix-expression: [CP]
+  //   _Cilk_spawn[opt] postfix-expression '(' argument-expression-list[opt] ')'
   case tok::kw__Cilk_spawn: {
     SourceLocation SpawnLoc = ConsumeToken();
     Res = ParseCastExpression(false);

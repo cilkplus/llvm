@@ -1799,14 +1799,12 @@ void StmtPrinter::VisitAsTypeExpr(AsTypeExpr *Node) {
 }
 
 void StmtPrinter::VisitCilkSyncStmt(CilkSyncStmt *) {
-  OS << "_Cilk_sync;\n";
+  Indent() << "_Cilk_sync;\n";
 }
 
 void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
-  OS << "_Cilk_spawn(";
+  OS << "_Cilk_spawn ";
   PrintExpr(Node->getSubExpr());
-  OS << ", " << Node->getType().getAsString();
-  OS << ")";
 }
 
 //===----------------------------------------------------------------------===//

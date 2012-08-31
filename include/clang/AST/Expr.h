@@ -4574,6 +4574,7 @@ class CilkSpawnExpr : public Expr {
 
 public:
   CilkSpawnExpr(SourceLocation SL, Expr *E);
+  explicit CilkSpawnExpr(EmptyShell E) : Expr(CilkSpawnExprClass, E) { }
 
   Expr *getSubExpr() const { return reinterpret_cast<Expr*>(Call); }
 

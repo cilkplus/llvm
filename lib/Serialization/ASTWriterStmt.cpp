@@ -1521,12 +1521,14 @@ void ASTStmtWriter::VisitAsTypeExpr(AsTypeExpr *E) {
 void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
   VisitStmt(S);
   Writer.AddSourceLocation(S->getSyncLoc(), Record);
+  Code = serialization::STMT_CILKSYNC;
 }
 
 void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
   VisitExpr(E);
   Writer.AddSourceLocation(E->getSpawnLoc(), Record);
   Writer.AddStmt(E->getSubExpr());
+  Code = serialization::EXPR_CILKSPAWN;
 }
 
 //===----------------------------------------------------------------------===//

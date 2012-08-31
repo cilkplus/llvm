@@ -11780,7 +11780,7 @@ Sema::ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
   assert(FunctionScopes.size() > 0 && "FunctionScopes missing TU scope");
   if (FunctionScopes.size() < 1 ||
       getCurFunction()->CompoundScopes.size() < 1) {
-    Diag(SpawnLoc, diag::err_spawn_global);
+    Diag(SpawnLoc, diag::err_spawn_invalid_scope);
     return ExprError();
   }
 

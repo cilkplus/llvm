@@ -356,4 +356,39 @@ void test10(int& x) {
   _Cilk_spawn bz();
 }
 
+struct Y {
+  Y(int y);
+};
+
+struct Z {
+  Z(int z, int w=0);
+};
+
+struct W {
+  W();
+  W(const W&);
+  W(W&&);
+};
+
+W makew();
+const W& makewref();
+W&& makewrefref();
+
+void test11() {
+  Y &&y1 = foo();
+  Y &&y2 = Y(_Cilk_spawn foo());  // expected-error {{_Cilk_spawn is not at statement level}}
+  Y y3 = foo();
+  Y y4 = Y(_Cilk_spawn foo());    // expected-error {{_Cilk_spawn is not at statement level}}
+
+  Z &&z1 = foo();
+  Z &&z2 = Z(_Cilk_spawn foo());  // expected-error {{_Cilk_spawn is not at statement level}}
+  Z z3 = foo();
+  Z z4 = Z(_Cilk_spawn foo());    // expected-error {{_Cilk_spawn is not at statement level}}
+  Z z5 = Z(_Cilk_spawn foo(), 1); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  W w1 = W(_Cilk_spawn makew());  // expected-error {{_Cilk_spawn is not at statement level}}
+  W w2 = W(_Cilk_spawn makewref()); // expected-error {{_Cilk_spawn is not at statement level}}
+  W w3 = W(_Cilk_spawn makewrefref()); // expected-error {{_Cilk_spawn is not at statement level}}
+}
+
 }
