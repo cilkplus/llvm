@@ -114,7 +114,7 @@
       <arg>$(base.dir)/$(kw.reports)</arg>
       <arg>--table-dir</arg>
       <arg>$(kw.tables)</arg>
-      <artifact name="klocwork report" file="$(kw.reports)/$(artifacts.reports)" publish="true">
+      <artifact name="klocwork report" file="$(kw.reports)/$(artifacts.kw_report)" publish="true">
         <process processor="${klocwork.pp}" />
       </artifact>
       <dir-artifact name="reports" base="$(kw.reports)" featured="true" />
