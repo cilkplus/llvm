@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<project>
+  <property name="make.jobs"  value="$(cpu.AVAILABLE_CORES)" />
+  <property name="build.dir"  value="build" />
+  <property name="build.type" value="$(build.type)" />
+
+  <property name="artifacts.llvm" value="artifacts/llvm.zip" />
+  <property name="llvm.dir"       value="llvm" />
+
+  <property name="unzip" value="$(unzip.bin)" />
+  <property name="sed"   value="$(sed.bin)" />
+
+  <macro name="linux-common-setup">
+    <executable name="decompress llvm install" exe="$(unzip)">
+      <arg>$(artifacts.llvm)</arg>
+    </executable>
+
+    <!-- this is set to an absolute path into the llvm build directory, but we need it to point to the installed location -->
+    <executable name="fix tools dir" exe="$(sed)">
+      <arg>-i</arg>
+      <arg>-e</arg>
+      <arg>s:(LLVM_TOOLS_BINARY_DIR .*):(LLVM_TOOLS_BINARY_DIR $(base.dir)/$(llvm.dir)/bin):</arg>
+      <arg>$(llvm.dir)/share/llvm/cmake/LLVMConfig.cmake</arg>
+    </executable>
+
+    <executable name="create build dir" exe="mkdir">
+      <arg>$(build.dir)</arg>
+    </executable>
+
+    <executable name="configure" working-dir="$(build.dir)" exe="/usr/bin/cmake">
+      <arg>-DLLVM_LIT_ARGS=</arg>
+      <arg>-DCMAKE_BUILD_TYPE=$(build.type)</arg>
+      <arg>-DCLANG_PATH_TO_LLVM_BUILD=../$(llvm.dir)</arg>
+      <arg>-DCMAKE_CXX_COMPILER=ccache</arg>
+      <arg>-DCMAKE_CXX_COMPILER_ARG1=g++</arg>
+      <arg>..</arg>
+    </executable>
+  </macro>
+
+  <regex-test.pp name="clang-test.pp"
+                 status-group="1"
+                 suite-group="2"
+                 name-group="3"
+                 resolve-conflicts="append"
+                 regex="([A-Z]+):\\s*\\w*\\s*::\\s*([-_.A-Za-z0-9/]*)/([-_.A-Za-z0-9]*).*">
+    <pass-status>PASS</pass-status>
+    <pass-status>XFAIL</pass-status>
+    <skipped-status>UNSUPPORTED</skipped-status>
+    <skipped-status>UNRESOLVED</skipped-status>
+    <failure-status>FAIL</failure-status>
+    <failure-status>XPASS</failure-status>
+  </regex-test.pp>
+
+  <recipe name="linux-build-test">
+    <macro-ref macro="$(linux-common-setup)" />
+
+    <make name="build" working-dir="$(build.dir)">
+      <environment name="CCACHE_BASEDIR" value="$(base.dir)" />
+      <arg>-j$(make.jobs)</arg>
+    </make>
+
+    <make name="test" working-dir="$(build.dir)"  targets="clang-test">
+      <arg>-j$(make.jobs)</arg>
+      <process processor="$(clang-test.pp)" />
+    </make>
+  </recipe>
+
+  <property name="artifacts.kw_report" value="kw_report.txt" />
+  <property name="kw.project" value="clang_cilkplus" />
+  <property name="kw.reports" value="report/$(kw.project)" />
+  <property name="kw.tables"  value="/home/klocwork/kwtables/$(kw.project)" />
+  <property name="kw.url"     value="http://klocwork.kw.intel.com:8080" />
+  <property name="kw.log"     value="/home/klocwork/kwtables/kwinject_$(kw.project)" />
+
+  <regex.pp name="klocwork.pp">
+    <pattern category="error"   expression="^.*;\\d+;\\d+;(Critical|Error|Severe);\\d+;"/>
+    <pattern category="warning" expression="^.*;\\d+;\\d+;Warning;\\d+;"/>
+    <pattern category="info"    expression="^.*;\\d+;\\d+;Unexpected;\\d+;"/>
+  </regex.pp>
+
+  <recipe name="linux-klocwork">
+    <macro-ref macro="$(linux-common-setup)" />
+
+    <executable name="kwinject" working-dir="$(build.dir)" exe="kwinject">
+      <environment name="CCACHE_BASEDIR" value="$(base.dir)" />
+      <arg>--update</arg>
+      <arg>make</arg>
+      <arg>-j$(make.jobs)</arg>
+    </executable>
+
+   <executable name="kwbuildproject" working-dir="$(build.dir)" exe="kwbuildproject">
+      <environment name="CCACHE_BASEDIR" value="$(base.dir)" />
+      <arg>--url</arg><arg>$(kw.url)/$(kw.project)</arg>
+      <arg>-o</arg><arg>$(kw.tables)</arg>
+      <arg>--incremental</arg>
+      <arg>--jobs-num</arg><arg>$(make.jobs)</arg>
+    </executable>
+
+    <executable name="kwadmin" working-dir="$(build.dir)" exe="kwadmin">
+      <arg>--url</arg>
+      <arg>$(kw.url)</arg>
+      <arg>load</arg>
+      <arg>$(kw.project)</arg>
+      <arg>$(kw.tables)</arg>
+    </executable>
+
+    <executable name="create reports dir" exe="mkdir">
+      <arg>-p</arg>
+      <arg>$(kw.reports)</arg>
+    </executable>
+
+    <executable name="kwinspect" working-dir="$(build.dir)" exe="kwinspect">
+      <arg>--report-directory</arg>
+      <arg>$(base.dir)/$(kw.reports)</arg>
+      <arg>--table-dir</arg>
+      <arg>$(kw.tables)</arg>
+      <artifact name="klocwork report" file="$(kw.reports)/$(artifacts.reports)" publish="true">
+        <process processor="${klocwork.pp}" />
+      </artifact>
+      <dir-artifact name="reports" base="$(kw.reports)" featured="true" />
+    </executable>
+  </recipe>
+</project>
