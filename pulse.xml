@@ -81,6 +81,11 @@
   <recipe name="linux-klocwork">
     <macro-ref macro="$(linux-common-setup)" />
 
+    <executable name="create table dir" exe="mkdir">
+      <arg>-p</arg>
+      <arg>$(kw.tables)</arg>
+    </executable>
+
     <executable name="kwinject" working-dir="$(build.dir)" exe="kwinject">
       <environment name="CCACHE_BASEDIR" value="$(base.dir)" />
       <arg>--update</arg>
@@ -94,6 +99,7 @@
       <arg>-o</arg><arg>$(kw.tables)</arg>
       <arg>--incremental</arg>
       <arg>--jobs-num</arg><arg>$(make.jobs)</arg>
+      <arg>kwinject.out</arg>
     </executable>
 
     <executable name="kwadmin" working-dir="$(build.dir)" exe="kwadmin">
