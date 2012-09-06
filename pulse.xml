@@ -65,7 +65,6 @@
     </make>
   </recipe>
 
-  <property name="artifacts.kw_report" value="kw_report.txt" />
   <property name="kw.project" value="clang_cilkplus" />
   <property name="kw.reports" value="report/$(kw.project)" />
   <property name="kw.tables"  value="/home/klocwork/kwtables/$(kw.project)" />
@@ -120,7 +119,7 @@
       <arg>$(base.dir)/$(kw.reports)</arg>
       <arg>--table-dir</arg>
       <arg>$(kw.tables)</arg>
-      <artifact name="klocwork report" file="$(kw.reports)/$(artifacts.kw_report)" publish="true">
+      <artifact name="klocwork report" file="$(kw.reports)/report.txt" publish="true">
         <process processor="${klocwork.pp}" />
       </artifact>
       <dir-artifact name="reports" base="$(kw.reports)" featured="true" />
