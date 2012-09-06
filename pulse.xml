@@ -10,6 +10,17 @@
   <property name="unzip" value="$(unzip.bin)" />
   <property name="sed"   value="$(sed.bin)" />
 
+  <macro name="ccache-zero-stats">
+    <executable name="ccache zero stats" exe="ccache">
+      <arg>-z</arg>
+    </executable>
+  </macro>
+  <macro name="ccache-stats">
+    <executable name="ccache stats" exe="ccache">
+      <arg>-s</arg>
+    </executable>
+  </macro>
+
   <macro name="linux-common-setup">
     <executable name="decompress llvm install" exe="$(unzip)">
       <arg>$(artifacts.llvm)</arg>
@@ -85,12 +96,14 @@
       <arg>$(kw.tables)</arg>
     </executable>
 
+    <macro-ref macro="$(ccache-zero-stats)" />
     <executable name="kwinject" working-dir="$(build.dir)" exe="kwinject">
       <environment name="CCACHE_BASEDIR" value="$(base.dir)" />
       <arg>--update</arg>
       <arg>make</arg>
       <arg>-j$(make.jobs)</arg>
     </executable>
+    <macro-ref macro="$(ccache-stats)" />
 
    <executable name="kwbuildproject" working-dir="$(build.dir)" exe="kwbuildproject">
       <environment name="CCACHE_BASEDIR" value="$(base.dir)" />
