@@ -2421,17 +2421,16 @@ public:
 
     // Build a reference to the __builtin_shufflevector builtin
     FunctionDecl *Builtin = cast<FunctionDecl>(*Lookup.first);
-    ExprResult Callee
-      = SemaRef.Owned(new (SemaRef.Context) DeclRefExpr(Builtin, false,
-                                                        Builtin->getType(),
-                                                        VK_LValue, BuiltinLoc));
-    Callee = SemaRef.UsualUnaryConversions(Callee.take());
-    if (Callee.isInvalid())
-      return ExprError();
+    Expr *Callee = new (SemaRef.Context) DeclRefExpr(Builtin, false,
+                                                  SemaRef.Context.BuiltinFnTy,
+                                                  VK_RValue, BuiltinLoc);
+    QualType CalleePtrTy = SemaRef.Context.getPointerType(Builtin->getType());
+    Callee = SemaRef.ImpCastExprToType(Callee, CalleePtrTy,
+                                       CK_BuiltinFnToFnPtr).take();
 
     // Build the CallExpr
     ExprResult TheCall = SemaRef.Owned(
-      new (SemaRef.Context) CallExpr(SemaRef.Context, Callee.take(), SubExprs,
+      new (SemaRef.Context) CallExpr(SemaRef.Context, Callee, SubExprs,
                                      Builtin->getCallResultType(),
                             Expr::getValueKindForType(Builtin->getResultType()),
                                      RParenLoc));
@@ -6377,7 +6376,7 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
   if (!getDerived().AlwaysRebuild() &&
       Callee.get() == E->getCallee() &&
       !ArgChanged)
-    return SemaRef.MaybeBindToTemporary(E);;
+    return SemaRef.MaybeBindToTemporary(E);
 
   // FIXME: Wrong source location information for the '('.
   SourceLocation FakeLParenLoc
@@ -8324,6 +8323,13 @@ template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformSubstNonTypeTemplateParmExpr(
                                           SubstNonTypeTemplateParmExpr *E) {
+  // Default behavior is to do nothing with this transformation.
+  return SemaRef.Owned(E);
+}
+
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformFunctionParmPackExpr(FunctionParmPackExpr *E) {
   // Default behavior is to do nothing with this transformation.
   return SemaRef.Owned(E);
 }
