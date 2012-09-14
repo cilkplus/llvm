@@ -13,6 +13,13 @@ struct baz bazmaker();
 
 void test() {
   _Cilk_spawn foo();
+
+  // These are valid statements that Clang doesn't recognize.
+  // When this bug is fixed remove the "expected error" statements
+  int x, y = _Cilk_spawn foo(), z;                        // expected-error {{_Cilk_spawn is not at statement level}}
+  int x1 = _Cilk_spawn foo(), y1, z1 = _Cilk_spawn foo(); // expected-error {{_Cilk_spawn is not at statement level}} \
+                                                             expected-error {{_Cilk_spawn is not at statement level}}
+
   int b = _Cilk_spawn foo();
   b = _Cilk_spawn foo();
   if (1) _Cilk_spawn foo();
