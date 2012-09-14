@@ -1821,7 +1821,11 @@ enum CXCursorKind {
    */
   CXCursor_ObjCBoolLiteralExpr           = 145,
 
-  CXCursor_LastExpr                      = CXCursor_ObjCBoolLiteralExpr,
+  /** \brief A spawning expression from the Cilk Plus extensions to C/C++
+    */
+  CXCursor_CilkSpawnExpr                 = 146,
+
+  CXCursor_LastExpr                      = CXCursor_CilkSpawnExpr,
 
   /* Statements */
   CXCursor_FirstStmt                     = 200,
@@ -1975,7 +1979,11 @@ enum CXCursorKind {
    */
   CXCursor_DeclStmt                      = 231,
 
-  CXCursor_LastStmt                      = CXCursor_DeclStmt,
+  /** \brief A syncing statement from the Cilk Plus extensions to C/C++
+    */
+  CXCursor_CilkSyncStmt                  = 232,
+
+  CXCursor_LastStmt                      = CXCursor_CilkSyncStmt,
 
   /**
    * \brief Cursor that represents the translation unit itself.

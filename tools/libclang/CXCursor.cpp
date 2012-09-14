@@ -482,6 +482,14 @@ CXCursor cxcursor::MakeCXCursor(Stmt *S, Decl *Parent, CXTranslationUnit TU,
   case Stmt::MSDependentExistsStmtClass:
     K = CXCursor_UnexposedStmt;
     break;
+
+  case Stmt::CilkSyncStmtClass:
+    K = CXCursor_CilkSyncStmt;
+    break;
+
+  case Stmt::CilkSpawnExprClass:
+    K = CXCursor_CilkSpawnExpr;
+    break;
   }
   
   CXCursor C = { K, 0, { Parent, S, TU } };
