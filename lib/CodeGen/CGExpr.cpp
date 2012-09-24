@@ -14,6 +14,7 @@
 #include "CodeGenFunction.h"
 #include "CodeGenModule.h"
 #include "CGCall.h"
+#include "CGCilkPlusRuntime.h"
 #include "CGCXXABI.h"
 #include "CGDebugInfo.h"
 #include "CGRecordLayout.h"
@@ -723,7 +724,8 @@ LValue CodeGenFunction::EmitLValue(const Expr *E) {
   case Expr::UserDefinedLiteralClass:
     return EmitCallExprLValue(cast<CallExpr>(E));
   case Expr::CilkSpawnExprClass:
-    return EmitLValue(cast<CilkSpawnExpr>(E)->getSubExpr());
+    return CGM.getCilkPlusRuntime().EmitCilkSpawn(*this,
+                                                  cast<CilkSpawnExpr>(*E));
   case Expr::VAArgExprClass:
     return EmitVAArgExprLValue(cast<VAArgExpr>(E));
   case Expr::DeclRefExprClass:

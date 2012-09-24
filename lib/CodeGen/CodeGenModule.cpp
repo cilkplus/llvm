@@ -20,6 +20,7 @@
 #include "CGCXXABI.h"
 #include "CGObjCRuntime.h"
 #include "CGOpenCLRuntime.h"
+#include "CGCilkPlusRuntime.h"
 #include "TargetInfo.h"
 #include "clang/Frontend/CodeGenOptions.h"
 #include "clang/AST/ASTContext.h"
@@ -70,6 +71,7 @@ CodeGenModule::CodeGenModule(ASTContext &C, const CodeGenOptions &CGO,
     Types(*this),
     TBAA(0),
     VTables(*this), ObjCRuntime(0), OpenCLRuntime(0), CUDARuntime(0),
+    CilkPlusRuntime(0),
     DebugInfo(0), ARCData(0), NoObjCARCExceptionsMetadata(0),
     RRData(0), CFConstantStringClassRef(0),
     ConstantStringClassRef(0), NSConstantStringType(0),
@@ -101,6 +103,8 @@ CodeGenModule::CodeGenModule(ASTContext &C, const CodeGenOptions &CGO,
     createOpenCLRuntime();
   if (LangOpts.CUDA)
     createCUDARuntime();
+  if (LangOpts.CilkPlus)
+    createCilkPlusRuntime();
 
   // Enable TBAA unless it's suppressed. ThreadSanitizer needs TBAA even at O0.
   if (LangOpts.ThreadSanitizer ||
@@ -159,6 +163,11 @@ void CodeGenModule::createOpenCLRuntime() {
 
 void CodeGenModule::createCUDARuntime() {
   CUDARuntime = CreateNVCUDARuntime(*this);
+}
+
+void CodeGenModule::createCilkPlusRuntime() {
+  //CilkPlusRuntime = CreateCilkPlusRuntime(*this);
+  CilkPlusRuntime = CreateCilkPlusFakeRuntime(*this);
 }
 
 void CodeGenModule::Release() {

@@ -77,6 +77,7 @@ namespace CodeGen {
   class CGObjCRuntime;
   class CGOpenCLRuntime;
   class CGCUDARuntime;
+  class CGCilkPlusRuntime;
   class BlockFieldFlags;
   class FunctionArgList;
   
@@ -233,6 +234,7 @@ class CodeGenModule : public CodeGenTypeCache {
   CGObjCRuntime* ObjCRuntime;
   CGOpenCLRuntime* OpenCLRuntime;
   CGCUDARuntime* CUDARuntime;
+  CGCilkPlusRuntime *CilkPlusRuntime;
   CGDebugInfo* DebugInfo;
   ARCEntrypoints *ARCData;
   llvm::MDNode *NoObjCARCExceptionsMetadata;
@@ -331,6 +333,7 @@ class CodeGenModule : public CodeGenTypeCache {
 
   void createOpenCLRuntime();
   void createCUDARuntime();
+  void createCilkPlusRuntime();
 
   bool isTriviallyRecursive(const FunctionDecl *F);
   bool shouldEmitFunction(const FunctionDecl *F);
@@ -386,6 +389,11 @@ public:
   CGCUDARuntime &getCUDARuntime() {
     assert(CUDARuntime != 0);
     return *CUDARuntime;
+  }
+
+  CGCilkPlusRuntime &getCilkPlusRuntime() {
+    assert(CilkPlusRuntime != 0);
+    return *CilkPlusRuntime;
   }
 
   /// getCXXABI() - Return a reference to the configured C++ ABI.

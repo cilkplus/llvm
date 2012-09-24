@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CGDebugInfo.h"
+#include "CGCilkPlusRuntime.h"
 #include "CodeGenModule.h"
 #include "CodeGenFunction.h"
 #include "TargetInfo.h"
@@ -173,7 +174,7 @@ bool CodeGenFunction::EmitSimpleStmt(const Stmt *S) {
   switch (S->getStmtClass()) {
   default: return false;
   case Stmt::CilkSyncStmtClass:
-    // FIXME: implement this by calling the Cilk Plus runtime
+    CGM.getCilkPlusRuntime().EmitCilkSync(*this, cast<CilkSyncStmt>(*S)); break;
   case Stmt::NullStmtClass: break;
   case Stmt::CompoundStmtClass: EmitCompoundStmt(cast<CompoundStmt>(*S)); break;
   case Stmt::DeclStmtClass:     EmitDeclStmt(cast<DeclStmt>(*S));         break;
