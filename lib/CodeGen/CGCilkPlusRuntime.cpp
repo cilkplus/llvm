@@ -14,6 +14,8 @@
 #include "CodeGenFunction.h"
 #include "clang/AST/Stmt.h"
 #include "llvm/TypeBuilder.h"
+#include "llvm/InlineAsm.h"
+#include "llvm/Function.h"
 #include "llvm/ValueSymbolTable.h"
 
 namespace {
@@ -254,8 +256,22 @@ static llvm::Value *LoadField(CGBuilderTy &B, llvm::Value *Src, int field)
   return B.CreateLoad(GEP(B, Src, field));
 }
 
+// Only for x86
 static void EmitSaveFloatState(CGBuilderTy &Builder, llvm::Value *SF)
 {
+  typedef void (AsmPrototype)(uint32_t*, uint16_t*);
+  llvm::FunctionType *FTy =
+    llvm::TypeBuilder<AsmPrototype, false>::get(Builder.getContext());
+
+  llvm::Value *Asm = llvm::InlineAsm::get(FTy,
+                                          "stmxcsr $0\n\tfnstcw $1",
+                                          "*m,*m,~{dirflag},~{fpsr},~{flags}",
+                                          /*sideeffects*/ true);
+
+  llvm::Value *mxcsrSlot = GEP(Builder, SF, StackFrameBuilder::mxcsr);
+  llvm::Value *fpcsrSlot = GEP(Builder, SF, StackFrameBuilder::fpcsr);
+  
+  Builder.CreateCall2(Asm, mxcsrSlot, fpcsrSlot);
 }
 
 static llvm::Value *EmitCilkSetJmp(CGBuilderTy &B, llvm::Value *SF)
