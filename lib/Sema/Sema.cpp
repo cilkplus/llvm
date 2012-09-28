@@ -58,6 +58,7 @@ void FunctionScopeInfo::Clear() {
 
 BlockScopeInfo::~BlockScopeInfo() { }
 LambdaScopeInfo::~LambdaScopeInfo() { }
+SpawnLambdaScopeInfo::~SpawnLambdaScopeInfo() { }
 
 PrintingPolicy Sema::getPrintingPolicy(const ASTContext &Context,
                                        const Preprocessor &PP) {
@@ -1024,6 +1025,19 @@ LambdaScopeInfo *Sema::getCurLambda() {
     return 0;
   
   return dyn_cast<LambdaScopeInfo>(FunctionScopes.back());  
+}
+
+void Sema::PushSpawnLambdaScope(CXXRecordDecl *Lambda,
+                                CXXMethodDecl *CallOperator) {
+  FunctionScopes.push_back(new SpawnLambdaScopeInfo(getDiagnostics(), Lambda,
+                                                    CallOperator));
+}
+
+SpawnLambdaScopeInfo *Sema::getCurSpawnLambda() {
+  if (FunctionScopes.empty())
+    return 0;
+
+  return dyn_cast<SpawnLambdaScopeInfo>(FunctionScopes.back());
 }
 
 void Sema::ActOnComment(SourceRange Comment) {
