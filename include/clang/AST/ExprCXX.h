@@ -1108,24 +1108,9 @@ public:
   friend class ASTStmtReader;
 };
 
-/// \brief A C++ lambda expression, which produces a function object
-/// (of unspecified type) that can be invoked later.
-///
-/// Example:
-/// \code
-/// void low_pass_filter(std::vector<double> &values, double cutoff) {
-///   values.erase(std::remove_if(values.begin(), values.end(),
-//                                [=](double value) { return value > cutoff; });
-/// }
-/// \endcode
-///
-/// Lambda expressions can capture local variables, either by copying
-/// the values of those local variables at the time the function
-/// object is constructed (not when it is called!) or by holding a
-/// reference to the local variable. These captures can occur either
-/// implicitly or can be written explicitly between the square
-/// brackets ([...]) that start the lambda expression.
-class LambdaExpr : public Expr {
+// Common base for LambdaExpr and SpawnLambdaExpr
+class LambdaExprBase {
+public:
   enum {
     /// \brief Flag used by the Capture class to indicate that the given
     /// capture was implicit.
@@ -1136,42 +1121,6 @@ class LambdaExpr : public Expr {
     Capture_ByCopy = 0x02
   };
 
-  /// \brief The source range that covers the lambda introducer ([...]).
-  SourceRange IntroducerRange;
-
-  /// \brief The number of captures.
-  unsigned NumCaptures : 16;
-  
-  /// \brief The default capture kind, which is a value of type
-  /// LambdaCaptureDefault.
-  unsigned CaptureDefault : 2;
-
-  /// \brief Whether this lambda had an explicit parameter list vs. an
-  /// implicit (and empty) parameter list.
-  unsigned ExplicitParams : 1;
-
-  /// \brief Whether this lambda had the result type explicitly specified.
-  unsigned ExplicitResultType : 1;
-  
-  /// \brief Whether there are any array index variables stored at the end of
-  /// this lambda expression.
-  unsigned HasArrayIndexVars : 1;
-  
-  /// \brief The location of the closing brace ('}') that completes
-  /// the lambda.
-  /// 
-  /// The location of the brace is also available by looking up the
-  /// function call operator in the lambda class. However, it is
-  /// stored here to improve the performance of getSourceRange(), and
-  /// to avoid having to deserialize the function call operator from a
-  /// module file just to determine the source range.
-  SourceLocation ClosingBrace;
-
-  // Note: The capture initializers are stored directly after the lambda
-  // expression, along with the index variables used to initialize by-copy
-  // array captures.
-
-public:
   /// \brief Describes the capture of either a variable or 'this'.
   class Capture {
     llvm::PointerIntPair<VarDecl *, 2> VarAndBits;
@@ -1247,6 +1196,81 @@ public:
     }
   };
 
+  enum LambdaKind {
+    LK_Lambda,
+    LK_SpawnLambda
+  };
+
+  LambdaKind Kind;
+  explicit LambdaExprBase(LambdaKind K) : Kind(K) {}
+
+  bool isSpawnLambda() const { return Kind == LK_SpawnLambda; }
+
+  /// \brief An iterator that walks over the captures of the lambda,
+  /// both implicit and explicit.
+  typedef const Capture *capture_iterator;
+
+  /// \brief Iterator that walks over the capture initialization
+  /// arguments.
+  typedef Expr **capture_init_iterator;
+
+  static bool classof(LambdaExprBase*) { return true; }
+};
+
+/// \brief A C++ lambda expression, which produces a function object
+/// (of unspecified type) that can be invoked later.
+///
+/// Example:
+/// \code
+/// void low_pass_filter(std::vector<double> &values, double cutoff) {
+///   values.erase(std::remove_if(values.begin(), values.end(),
+//                                [=](double value) { return value > cutoff; });
+/// }
+/// \endcode
+///
+/// Lambda expressions can capture local variables, either by copying
+/// the values of those local variables at the time the function
+/// object is constructed (not when it is called!) or by holding a
+/// reference to the local variable. These captures can occur either
+/// implicitly or can be written explicitly between the square
+/// brackets ([...]) that start the lambda expression.
+class LambdaExpr : public Expr, public LambdaExprBase {
+
+  /// \brief The source range that covers the lambda introducer ([...]).
+  SourceRange IntroducerRange;
+
+  /// \brief The number of captures.
+  unsigned NumCaptures : 16;
+  
+  /// \brief The default capture kind, which is a value of type
+  /// LambdaCaptureDefault.
+  unsigned CaptureDefault : 2;
+
+  /// \brief Whether this lambda had an explicit parameter list vs. an
+  /// implicit (and empty) parameter list.
+  unsigned ExplicitParams : 1;
+
+  /// \brief Whether this lambda had the result type explicitly specified.
+  unsigned ExplicitResultType : 1;
+  
+  /// \brief Whether there are any array index variables stored at the end of
+  /// this lambda expression.
+  unsigned HasArrayIndexVars : 1;
+  
+  /// \brief The location of the closing brace ('}') that completes
+  /// the lambda.
+  /// 
+  /// The location of the brace is also available by looking up the
+  /// function call operator in the lambda class. However, it is
+  /// stored here to improve the performance of getSourceRange(), and
+  /// to avoid having to deserialize the function call operator from a
+  /// module file just to determine the source range.
+  SourceLocation ClosingBrace;
+
+  // Note: The capture initializers are stored directly after the lambda
+  // expression, along with the index variables used to initialize by-copy
+  // array captures.
+
 private:
   /// \brief Construct a lambda expression.
   LambdaExpr(QualType T, SourceRange IntroducerRange,
@@ -1262,7 +1286,7 @@ private:
 
   /// \brief Construct an empty lambda expression.
   LambdaExpr(EmptyShell Empty, unsigned NumCaptures, bool HasArrayIndexVars)
-    : Expr(LambdaExprClass, Empty),
+    : Expr(LambdaExprClass, Empty), LambdaExprBase(LK_Lambda),
       NumCaptures(NumCaptures), CaptureDefault(LCD_None), ExplicitParams(false),
       ExplicitResultType(false), HasArrayIndexVars(true) { 
     getStoredStmts()[NumCaptures] = 0;
@@ -1396,10 +1420,127 @@ public:
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == LambdaExprClass;
   }
+  static bool classof(const LambdaExprBase *L) { return !L->isSpawnLambda(); }
   static bool classof(const LambdaExpr *) { return true; }
 
   SourceRange getSourceRange() const LLVM_READONLY {
     return SourceRange(IntroducerRange.getBegin(), ClosingBrace);
+  }
+
+  child_range children() {
+    return child_range(getStoredStmts(), getStoredStmts() + NumCaptures + 1);
+  }
+
+  friend class ASTStmtReader;
+  friend class ASTStmtWriter;
+};
+
+class SpawnLambdaExpr : public Expr, public LambdaExprBase {
+  /// \brief The number of (implicit) captures
+  unsigned NumCaptures : 16;
+
+  /// \brief Whether there are any array index variables stored at the end of
+  /// this lambda expression.
+  unsigned HasArrayIndexVars : 1;
+
+  /// \brief The source location of Cilk spawn
+  SourceLocation SpawnLoc;
+
+public:
+  /// \brief Construct a spawn lambda expression.
+  SpawnLambdaExpr(QualType T, SourceLocation Loc,
+                  ArrayRef<Capture> Captures,
+                  ArrayRef<Expr *> CaptureInits,
+                  ArrayRef<VarDecl *> ArrayIndexVars,
+                  ArrayRef<unsigned> ArrayIndexStarts);
+
+  /// \brief Construct an empty lambda expression.
+  SpawnLambdaExpr(EmptyShell Empty, unsigned NumCaptures,
+                  unsigned HasArrayIndexVars)
+    : Expr(SpawnLambdaExprClass, Empty), LambdaExprBase(LK_SpawnLambda),
+      NumCaptures(NumCaptures), HasArrayIndexVars(HasArrayIndexVars),
+      SpawnLoc(SourceLocation()) {
+    getStoredStmts()[NumCaptures] = 0;
+  }
+
+  Stmt **getStoredStmts() const {
+    return reinterpret_cast<Stmt **>(const_cast<SpawnLambdaExpr*>(this) + 1);
+  }
+
+  /// \brief Retrieve the mapping from captures to the first array index
+  /// variable.
+  unsigned *getArrayIndexStarts() const {
+    return reinterpret_cast<unsigned *>(getStoredStmts() + NumCaptures + 1);
+  }
+
+  /// \brief Retrieve the complete set of array-index variables.
+  VarDecl **getArrayIndexVars() const {
+    unsigned ArrayIndexSize =
+        llvm::RoundUpToAlignment(sizeof(unsigned) * (NumCaptures + 1),
+                                 llvm::alignOf<VarDecl*>());
+    return reinterpret_cast<VarDecl **>(
+        reinterpret_cast<char*>(getArrayIndexStarts()) + ArrayIndexSize);
+  }
+
+public:
+  /// \brief Construct a new spawn lambda expression.
+  static SpawnLambdaExpr *Create(ASTContext &C, SourceLocation Loc,
+                                 CXXRecordDecl *Class,
+                                 ArrayRef<Capture> Captures,
+                                 ArrayRef<Expr *> CaptureInits,
+                                 ArrayRef<VarDecl *> ArrayIndexVars,
+                                 ArrayRef<unsigned> ArrayIndexStarts);
+
+  /// \brief Construct a new lambda expression that will be deserialized from
+  /// an external source.
+  static SpawnLambdaExpr *CreateDeserialized(ASTContext &C,
+                                             unsigned NumCaptures,
+                                             unsigned NumArrayIndexVars);
+
+  /// \brief Retrieve an iterator pointing to the first lambda capture.
+  capture_iterator capture_begin() const;
+
+  /// \brief Retrieve an iterator pointing past the end of the
+  /// sequence of lambda captures.
+  capture_iterator capture_end() const;
+
+  /// \brief Retrieve the first initialization argument for this
+  /// lambda expression (which initializes the first capture field).
+  capture_init_iterator capture_init_begin() const {
+    return reinterpret_cast<Expr **>(getStoredStmts());
+  }
+
+  /// \brief Retrieve the iterator pointing one past the last
+  /// initialization argument for this lambda expression.
+  capture_init_iterator capture_init_end() const {
+    return capture_init_begin() + NumCaptures;
+  }
+
+  /// \brief Retrieve the set of index variables used in the capture
+  /// initializer of an array captured by copy.
+  ///
+  /// \param Iter The iterator that points at the capture initializer for
+  /// which we are extracting the corresponding index variables.
+  ArrayRef<VarDecl *> getCaptureInitIndexVars(capture_init_iterator Iter) const;
+
+  /// \brief Retrieve the class that corresponds to the lambda
+  CXXRecordDecl *getLambdaClass() const;
+
+  /// \brief Retrieve the function call operator associated with this
+  /// lambda expression.
+  CXXMethodDecl *getCallOperator() const;
+
+  /// \brief Retrieve the body of the lambda.
+  CompoundStmt *getBody() const;
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == SpawnLambdaExprClass;
+  }
+  static bool classof(const SpawnLambdaExpr *) { return true; }
+  static bool classof(const LambdaExprBase *L) { return L->isSpawnLambda(); }
+
+  SourceRange getSourceRange() const {
+    return SourceRange(SpawnLoc, getBody()->getLocEnd());
   }
 
   child_range children() {

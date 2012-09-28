@@ -175,3 +175,4 @@ def AsTypeExpr : DStmt<Expr>;
 // Cilk Plus Extensions.
 def CilkSyncStmt : Stmt;
 def CilkSpawnExpr : DStmt<Expr>;
+def SpawnLambdaExpr : DStmt<Expr>;

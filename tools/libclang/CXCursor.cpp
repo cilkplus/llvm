@@ -490,6 +490,10 @@ CXCursor cxcursor::MakeCXCursor(Stmt *S, Decl *Parent, CXTranslationUnit TU,
   case Stmt::CilkSpawnExprClass:
     K = CXCursor_CilkSpawnExpr;
     break;
+
+  case Stmt::SpawnLambdaExprClass:
+    K = CXCursor_SpawnLambdaExpr;
+    break;
   }
   
   CXCursor C = { K, 0, { Parent, S, TU } };

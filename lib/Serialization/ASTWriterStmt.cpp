@@ -1116,6 +1116,34 @@ void ASTStmtWriter::VisitLambdaExpr(LambdaExpr *E) {
   Code = serialization::EXPR_LAMBDA;
 }
 
+void ASTStmtWriter::VisitSpawnLambdaExpr(SpawnLambdaExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->NumCaptures);
+  unsigned NumArrayIndexVars = 0;
+  if (E->HasArrayIndexVars)
+    NumArrayIndexVars = E->getArrayIndexStarts()[E->NumCaptures];
+  Record.push_back(NumArrayIndexVars);
+  Writer.AddSourceLocation(E->SpawnLoc, Record);
+
+  // Add capture initializers.
+  for (LambdaExpr::capture_init_iterator C = E->capture_init_begin(),
+                                      CEnd = E->capture_init_end();
+       C != CEnd; ++C) {
+    Writer.AddStmt(*C);
+  }
+
+  // Add array index variables, if any.
+  if (NumArrayIndexVars) {
+    Record.append(E->getArrayIndexStarts(),
+                  E->getArrayIndexStarts() + E->NumCaptures + 1);
+    VarDecl **ArrayIndexVars = E->getArrayIndexVars();
+    for (unsigned I = 0; I != NumArrayIndexVars; ++I)
+      Writer.AddDeclRef(ArrayIndexVars[I], Record);
+  }
+
+  Code = serialization::EXPR_SPAWN_LAMBDA;
+}
+
 void ASTStmtWriter::VisitCXXNamedCastExpr(CXXNamedCastExpr *E) {
   VisitExplicitCastExpr(E);
   Writer.AddSourceRange(SourceRange(E->getOperatorLoc(), E->getRParenLoc()),

@@ -352,6 +352,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::CXXConstructExprClass:
   case Expr::CXXTemporaryObjectExprClass:
   case Expr::LambdaExprClass:
+  case Expr::SpawnLambdaExprClass:
     return Cl::CL_ClassTemporary;
 
   case Expr::VAArgExprClass:

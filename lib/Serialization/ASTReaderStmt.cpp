@@ -1138,6 +1138,31 @@ void ASTStmtReader::VisitLambdaExpr(LambdaExpr *E) {
   }
 }
 
+void ASTStmtReader::VisitSpawnLambdaExpr(SpawnLambdaExpr *E) {
+  VisitExpr(E);
+  unsigned NumCaptures = Record[Idx++];
+  assert(NumCaptures == E->NumCaptures);(void)NumCaptures;
+  unsigned NumArrayIndexVars = Record[Idx++];
+  E->SpawnLoc = ReadSourceLocation(Record, Idx);
+
+  // Read capture initializers.
+  for (SpawnLambdaExpr::capture_init_iterator C = E->capture_init_begin(),
+                                           CEnd = E->capture_init_end();
+       C != CEnd; ++C)
+    *C = Reader.ReadSubExpr();
+
+  // Read array capture index variables.
+  if (NumArrayIndexVars > 0) {
+    unsigned *ArrayIndexStarts = E->getArrayIndexStarts();
+    for (unsigned I = 0; I != NumCaptures + 1; ++I)
+      ArrayIndexStarts[I] = Record[Idx++];
+
+    VarDecl **ArrayIndexVars = E->getArrayIndexVars();
+    for (unsigned I = 0; I != NumArrayIndexVars; ++I)
+      ArrayIndexVars[I] = ReadDeclAs<VarDecl>(Record, Idx);
+  }
+}
+
 void ASTStmtReader::VisitCXXNamedCastExpr(CXXNamedCastExpr *E) {
   VisitExplicitCastExpr(E);
   SourceRange R = ReadSourceRange(Record, Idx);
@@ -2244,6 +2269,13 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       unsigned NumArrayIndexVars = Record[ASTStmtReader::NumExprFields + 1];
       S = LambdaExpr::CreateDeserialized(Context, NumCaptures, 
                                          NumArrayIndexVars);
+      break;
+    }
+    case EXPR_SPAWN_LAMBDA: {
+      unsigned NumCaptures = Record[ASTStmtReader::NumExprFields];
+      unsigned NumArrayIndexVars = Record[ASTStmtReader::NumExprFields + 1];
+      S = SpawnLambdaExpr::CreateDeserialized(Context, NumCaptures,
+                                              NumArrayIndexVars);
       break;
     }
 

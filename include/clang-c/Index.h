@@ -1825,7 +1825,11 @@ enum CXCursorKind {
     */
   CXCursor_CilkSpawnExpr                 = 146,
 
-  CXCursor_LastExpr                      = CXCursor_CilkSpawnExpr,
+  /** \brief A implicit lambda expression for a Cilk spawn expression
+    */
+  CXCursor_SpawnLambdaExpr               = 147,
+
+  CXCursor_LastExpr                      = CXCursor_SpawnLambdaExpr,
 
   /* Statements */
   CXCursor_FirstStmt                     = 200,

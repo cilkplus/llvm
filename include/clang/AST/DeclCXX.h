@@ -42,6 +42,7 @@ class CXXIndirectPrimaryBaseSet;
 class FriendDecl;
 class LambdaExpr;
 class UsingDecl;
+class SpawnLambdaExpr;
 
 /// \brief Represents any kind of function declaration, whether it is a
 /// concrete function or a function template.
@@ -506,6 +507,9 @@ class CXXRecordDecl : public RecordDecl {
     /// \brief Whether this class describes a C++ lambda.
     bool IsLambda : 1;
 
+    /// \brief Whether this class describes a Cilk spawn lambda.
+    bool IsSpawnLambda : 1;
+
     /// NumBases - The number of base class specifiers in Bases.
     unsigned NumBases;
 
@@ -569,6 +573,7 @@ class CXXRecordDecl : public RecordDecl {
         MethodTyInfo(Info) 
     {
       IsLambda = true;
+      IsSpawnLambda = false;
     }
 
     /// \brief Whether this lambda is known to be dependent, even if its
@@ -636,6 +641,7 @@ class CXXRecordDecl : public RecordDecl {
 
   friend class DeclContext;
   friend class LambdaExpr;
+  friend class SpawnLambdaExpr;
 
   /// \brief Notify the class that member has been added.
   ///
@@ -711,6 +717,9 @@ public:
   static CXXRecordDecl *CreateLambda(const ASTContext &C, DeclContext *DC,
                                      TypeSourceInfo *Info, SourceLocation Loc,
                                      bool DependentLambda);
+  static CXXRecordDecl *CreateSpawnLambda(const ASTContext &C, DeclContext *DC,
+                                          TypeSourceInfo *Info,
+                                          SourceLocation Loc);
   static CXXRecordDecl *CreateDeserialized(const ASTContext &C, unsigned ID);
 
   bool isDynamicClass() const {
@@ -991,7 +1000,10 @@ public:
 
   /// \brief Determine whether this class describes a lambda function object.
   bool isLambda() const { return hasDefinition() && data().IsLambda; }
-  
+
+  /// \brief Determine whether this class describes a Cilk Plus spawn lambda.
+  bool isSpawnLambda() const { return hasDefinition() && data().IsSpawnLambda; }
+
   /// \brief For a closure type, retrieve the mapping from captured
   /// variables and this to the non-static data members that store the
   /// values or references of the captures.

@@ -7857,6 +7857,13 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
 
 template<typename Derived>
 ExprResult
+TreeTransform<Derived>::TransformSpawnLambdaExpr(SpawnLambdaExpr *E) {
+  // A spawn expr does not need to be transformed
+  return Owned(E);
+}
+
+template<typename Derived>
+ExprResult
 TreeTransform<Derived>::TransformLambdaScope(LambdaExpr *E,
                                              CXXMethodDecl *CallOperator) {
   // Introduce the context of the call operator.

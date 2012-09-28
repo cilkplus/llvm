@@ -10151,19 +10151,32 @@ void Sema::PopExpressionEvaluationContext() {
       // C++11 [expr.prim.lambda]p2:
       //   A lambda-expression shall not appear in an unevaluated operand
       //   (Clause 5).
-      for (unsigned I = 0, N = Rec.Lambdas.size(); I != N; ++I)
-        Diag(Rec.Lambdas[I]->getLocStart(), 
-             diag::err_lambda_unevaluated_operand);
+      for (unsigned I = 0, N = Rec.Lambdas.size(); I != N; ++I) {
+        LambdaExprBase *L = Rec.Lambdas[I];
+        if (LambdaExpr *Lambda = dyn_cast<LambdaExpr>(L))
+          Diag(Lambda->getLocStart(), diag::err_lambda_unevaluated_operand);
+        else if (SpawnLambdaExpr *Lambda = dyn_cast<SpawnLambdaExpr>(L))
+          Diag(Lambda->getLocStart(), diag::err_lambda_unevaluated_operand);
+      }
     } else {
       // Mark the capture expressions odr-used. This was deferred
       // during lambda expression creation.
       for (unsigned I = 0, N = Rec.Lambdas.size(); I != N; ++I) {
-        LambdaExpr *Lambda = Rec.Lambdas[I];
-        for (LambdaExpr::capture_init_iterator 
-                  C = Lambda->capture_init_begin(),
-               CEnd = Lambda->capture_init_end();
-             C != CEnd; ++C) {
-          MarkDeclarationsReferencedInExpr(*C);
+        LambdaExprBase *L = Rec.Lambdas[I];
+        if (LambdaExpr *Lambda = dyn_cast<LambdaExpr>(L)) {
+          for (LambdaExpr::capture_init_iterator
+                    C = Lambda->capture_init_begin(),
+                 CEnd = Lambda->capture_init_end();
+               C != CEnd; ++C) {
+            MarkDeclarationsReferencedInExpr(*C);
+          }
+        } else if (SpawnLambdaExpr *Lambda = dyn_cast<SpawnLambdaExpr>(L)) {
+          for (SpawnLambdaExpr::capture_init_iterator
+                      C = Lambda->capture_init_begin(),
+                   CEnd = Lambda->capture_init_end();
+               C != CEnd; ++C) {
+            MarkDeclarationsReferencedInExpr(*C);
+          }
         }
       }
     }

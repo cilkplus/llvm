@@ -56,8 +56,9 @@ CXXRecordDecl::DefinitionData::DefinitionData(CXXRecordDecl *D)
     DeclaredCopyConstructor(false), DeclaredMoveConstructor(false),
     DeclaredCopyAssignment(false), DeclaredMoveAssignment(false),
     DeclaredDestructor(false), FailedImplicitMoveConstructor(false),
-    FailedImplicitMoveAssignment(false), IsLambda(false), NumBases(0),
-    NumVBases(0), Bases(), VBases(), Definition(D), FirstFriend(0) {
+    FailedImplicitMoveAssignment(false), IsLambda(false), IsSpawnLambda(false),
+    NumBases(0), NumVBases(0), Bases(), VBases(), Definition(D), FirstFriend(0)
+{
 }
 
 CXXBaseSpecifier *CXXRecordDecl::DefinitionData::getBasesSlowCase() const {
@@ -96,6 +97,19 @@ CXXRecordDecl *CXXRecordDecl::CreateLambda(const ASTContext &C, DeclContext *DC,
                                            0, 0);
   R->IsBeingDefined = true;
   R->DefinitionData = new (C) struct LambdaDefinitionData(R, Info, Dependent);
+  C.getTypeDeclType(R, /*PrevDecl=*/0);
+  return R;
+}
+
+CXXRecordDecl *CXXRecordDecl::CreateSpawnLambda(const ASTContext &C,
+                                                DeclContext *DC,
+                                                TypeSourceInfo *Info,
+                                                SourceLocation Loc) {
+  CXXRecordDecl *R = new (C) CXXRecordDecl(CXXRecord, TTK_Class, DC, Loc, Loc,
+                                           0, 0);
+  R->IsBeingDefined = true;
+  R->DefinitionData = new (C) struct LambdaDefinitionData(R, Info, false);
+  R->DefinitionData->IsSpawnLambda = true;
   C.getTypeDeclType(R, /*PrevDecl=*/0);
   return R;
 }

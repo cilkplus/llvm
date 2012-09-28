@@ -1897,7 +1897,7 @@ class CilkSyncStmt : public Stmt {
 
 public:
   explicit CilkSyncStmt(SourceLocation SL) : Stmt(CilkSyncStmtClass), SyncLoc(SL) {}
-  explicit CilkSyncStmt(EmptyShell E) : Stmt(CilkSpawnExprClass, E) { }
+  explicit CilkSyncStmt(EmptyShell E) : Stmt(CilkSyncStmtClass, E) { }
 
   SourceLocation getSyncLoc() const { return SyncLoc; }
 
