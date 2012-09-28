@@ -393,9 +393,11 @@ public:
   OwningPtr<ExternalASTSource> ExternalSource;
   ASTMutationListener *Listener;
 
-  clang::PrintingPolicy getPrintingPolicy() const { return PrintingPolicy; }
+  const clang::PrintingPolicy &getPrintingPolicy() const {
+    return PrintingPolicy;
+  }
 
-  void setPrintingPolicy(clang::PrintingPolicy Policy) {
+  void setPrintingPolicy(const clang::PrintingPolicy &Policy) {
     PrintingPolicy = Policy;
   }
   
@@ -2027,8 +2029,8 @@ public:
   static unsigned NumImplicitDestructorsDeclared;
   
 private:
-  ASTContext(const ASTContext&); // DO NOT IMPLEMENT
-  void operator=(const ASTContext&); // DO NOT IMPLEMENT
+  ASTContext(const ASTContext &) LLVM_DELETED_FUNCTION;
+  void operator=(const ASTContext &) LLVM_DELETED_FUNCTION;
 
 public:
   /// \brief Initialize built-in types.

@@ -18,7 +18,7 @@ This test serves two purposes:
 
 The list of warnings below should NEVER grow.  It should gradually shrink to 0.
 
-CHECK: Warnings without flags (159):
+CHECK: Warnings without flags (158):
 CHECK-NEXT:   ext_delete_void_ptr_operand
 CHECK-NEXT:   ext_enum_friend
 CHECK-NEXT:   ext_expected_semi_decl_list
@@ -101,7 +101,6 @@ CHECK-NEXT:   warn_integer_too_large_for_signed
 CHECK-NEXT:   warn_invalid_asm_cast_lvalue
 CHECK-NEXT:   warn_many_braces_around_scalar_init
 CHECK-NEXT:   warn_maynot_respond
-CHECK-NEXT:   warn_member_extra_qualification
 CHECK-NEXT:   warn_method_param_redefinition
 CHECK-NEXT:   warn_mismatched_exception_spec
 CHECK-NEXT:   warn_missing_case_for_condition
@@ -181,4 +180,4 @@ CHECK-NEXT:   warn_weak_import
 
 The list of warnings in -Wpedantic should NEVER grow.
 
-CHECK: Number in -Wpedantic (not covered by other -W flags): 38
+CHECK: Number in -Wpedantic (not covered by other -W flags): 37

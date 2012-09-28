@@ -87,6 +87,13 @@ static AvailabilityResult DiagnoseAvailabilityOfDecl(Sema &S,
       if (const EnumDecl *TheEnumDecl = dyn_cast<EnumDecl>(DC))
         Result = TheEnumDecl->getAvailability(&Message);
     }
+  const ObjCPropertyDecl *ObjCPDecl = 0;
+  if (Result == AR_Deprecated || Result == AR_Unavailable)
+    if (ObjCPropertyDecl *ND = S.PropertyIfSetterOrGetter(D)) {
+      AvailabilityResult PDeclResult = ND->getAvailability(0);
+      if (PDeclResult == Result)
+        ObjCPDecl = ND;
+    }
   
   switch (Result) {
     case AR_Available:
@@ -94,23 +101,30 @@ static AvailabilityResult DiagnoseAvailabilityOfDecl(Sema &S,
       break;
             
     case AR_Deprecated:
-      S.EmitDeprecationWarning(D, Message, Loc, UnknownObjCClass);
+      S.EmitDeprecationWarning(D, Message, Loc, UnknownObjCClass, ObjCPDecl);
       break;
             
     case AR_Unavailable:
       if (S.getCurContextAvailability() != AR_Unavailable) {
         if (Message.empty()) {
-          if (!UnknownObjCClass)
+          if (!UnknownObjCClass) {
             S.Diag(Loc, diag::err_unavailable) << D->getDeclName();
+            if (ObjCPDecl)
+              S.Diag(ObjCPDecl->getLocation(), diag::note_property_attribute)
+                << ObjCPDecl->getDeclName() << 1;
+          }
           else
             S.Diag(Loc, diag::warn_unavailable_fwdclass_message) 
               << D->getDeclName();
         }
-        else 
+        else
           S.Diag(Loc, diag::err_unavailable_message) 
             << D->getDeclName() << Message;
-          S.Diag(D->getLocation(), diag::note_unavailable_here) 
-          << isa<FunctionDecl>(D) << false;
+        S.Diag(D->getLocation(), diag::note_unavailable_here)
+                  << isa<FunctionDecl>(D) << false;
+        if (ObjCPDecl)
+          S.Diag(ObjCPDecl->getLocation(), diag::note_property_attribute)
+          << ObjCPDecl->getDeclName() << 1;
       }
       break;
     }
@@ -2630,19 +2644,20 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
     return ActOnIntegerConstant(Tok.getLocation(), Val-'0');
   }
 
-  SmallString<512> IntegerBuffer;
-  // Add padding so that NumericLiteralParser can overread by one character.
-  IntegerBuffer.resize(Tok.getLength()+1);
-  const char *ThisTokBegin = &IntegerBuffer[0];
+  SmallString<128> SpellingBuffer;
+  // NumericLiteralParser wants to overread by one character.  Add padding to
+  // the buffer in case the token is copied to the buffer.  If getSpelling()
+  // returns a StringRef to the memory buffer, it should have a null char at
+  // the EOF, so it is also safe.
+  SpellingBuffer.resize(Tok.getLength() + 1);
 
   // Get the spelling of the token, which eliminates trigraphs, etc.
   bool Invalid = false;
-  unsigned ActualLength = PP.getSpelling(Tok, ThisTokBegin, &Invalid);
+  StringRef TokSpelling = PP.getSpelling(Tok, SpellingBuffer, &Invalid);
   if (Invalid)
     return ExprError();
 
-  NumericLiteralParser Literal(ThisTokBegin, ThisTokBegin+ActualLength,
-                               Tok.getLocation(), PP);
+  NumericLiteralParser Literal(TokSpelling, Tok.getLocation(), PP);
   if (Literal.hadError)
     return ExprError();
 
@@ -2708,7 +2723,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
           Context.CharTy, llvm::APInt(32, Length + 1),
           ArrayType::Normal, 0);
       Expr *Lit = StringLiteral::Create(
-          Context, StringRef(ThisTokBegin, Length), StringLiteral::Ascii,
+          Context, StringRef(TokSpelling.data(), Length), StringLiteral::Ascii,
           /*Pascal*/false, StrTy, &TokLoc, 1);
       return BuildLiteralOperatorCall(R, OpNameInfo,
                                       llvm::makeArrayRef(&Lit, 1), TokLoc);
@@ -2724,7 +2739,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
       bool CharIsUnsigned = Context.CharTy->isUnsignedIntegerType();
       llvm::APSInt Value(CharBits, CharIsUnsigned);
       for (unsigned I = 0, N = Literal.getUDSuffixOffset(); I != N; ++I) {
-        Value = ThisTokBegin[I];
+        Value = TokSpelling[I];
         TemplateArgument Arg(Context, Value, Context.CharTy);
         TemplateArgumentLocInfo ArgInfo;
         ExplicitArgs.addArgument(TemplateArgumentLoc(Arg, ArgInfo));
@@ -2762,11 +2777,15 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
   } else {
     QualType Ty;
 
-    // long long is a C99 feature.
-    if (!getLangOpts().C99 && Literal.isLongLong)
-      Diag(Tok.getLocation(),
-           getLangOpts().CPlusPlus0x ?
-             diag::warn_cxx98_compat_longlong : diag::ext_longlong);
+    // 'long long' is a C99 or C++11 feature.
+    if (!getLangOpts().C99 && Literal.isLongLong) {
+      if (getLangOpts().CPlusPlus)
+        Diag(Tok.getLocation(),
+             getLangOpts().CPlusPlus0x ?
+             diag::warn_cxx98_compat_longlong : diag::ext_cxx11_longlong);
+      else
+        Diag(Tok.getLocation(), diag::ext_c99_longlong);
+    }
 
     // Get the value in the widest-possible width.
     unsigned MaxWidth = Context.getTargetInfo().getIntMaxTWidth();
@@ -7214,7 +7233,10 @@ QualType Sema::CheckCompareOperands(ExprResult &LHS, ExprResult &RHS,
       (LHSType->isIntegerType() && RHSType->isAnyPointerType())) {
     unsigned DiagID = 0;
     bool isError = false;
-    if ((LHSIsNull && LHSType->isIntegerType()) ||
+    if (LangOpts.DebuggerSupport) {
+      // Under a debugger, allow the comparison of pointers to integers,
+      // since users tend to want to compare addresses.
+    } else if ((LHSIsNull && LHSType->isIntegerType()) ||
         (RHSIsNull && RHSType->isIntegerType())) {
       if (IsRelational && !getLangOpts().CPlusPlus)
         DiagID = diag::ext_typecheck_ordered_comparison_of_pointer_and_zero;
@@ -7695,10 +7717,18 @@ QualType Sema::CheckAssignmentOperands(Expr *LHSExpr, ExprResult &RHS,
     }
 
     if (ConvTy == Compatible) {
-      if (LHSType.getObjCLifetime() == Qualifiers::OCL_Strong)
-        checkRetainCycles(LHSExpr, RHS.get());
-      else if (getLangOpts().ObjCAutoRefCount)
+      if (LHSType.getObjCLifetime() == Qualifiers::OCL_Strong) {
+        // Warn about retain cycles where a block captures the LHS, but
+        // not if the LHS is a simple variable into which the block is
+        // being stored...unless that variable can be captured by reference!
+        const Expr *InnerLHS = LHSExpr->IgnoreParenCasts();
+        const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(InnerLHS);
+        if (!DRE || DRE->getDecl()->hasAttr<BlocksAttr>())
+          checkRetainCycles(LHSExpr, RHS.get());
+
+      } else if (getLangOpts().ObjCAutoRefCount) {
         checkUnsafeExprAssigns(Loc, LHSExpr, RHS.get());
+      }
     }
   } else {
     // Compound assignment "x += y"
@@ -10103,6 +10133,14 @@ Sema::PushExpressionEvaluationContext(ExpressionEvaluationContext NewContext,
   ExprNeedsCleanups = false;
   if (!MaybeODRUseExprs.empty())
     std::swap(MaybeODRUseExprs, ExprEvalContexts.back().SavedMaybeODRUseExprs);
+}
+
+void
+Sema::PushExpressionEvaluationContext(ExpressionEvaluationContext NewContext,
+                                      ReuseLambdaContextDecl_t,
+                                      bool IsDecltype) {
+  Decl *LambdaContextDecl = ExprEvalContexts.back().LambdaContextDecl;
+  PushExpressionEvaluationContext(NewContext, LambdaContextDecl, IsDecltype);
 }
 
 void Sema::PopExpressionEvaluationContext() {

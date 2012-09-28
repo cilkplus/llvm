@@ -92,6 +92,9 @@ static void getDarwinDefines(MacroBuilder &Builder, const LangOptions &Opts,
   Builder.defineMacro("__APPLE__");
   Builder.defineMacro("__MACH__");
   Builder.defineMacro("OBJC_NEW_PROPERTIES");
+  // AddressSanitizer doesn't play well with source fortification, which is on
+  // by default on Darwin.
+  if (Opts.AddressSanitizer) Builder.defineMacro("_FORTIFY_SOURCE", "0");
 
   if (!Opts.ObjCAutoRefCount) {
     // __weak is always defined, for use in blocks and with objc pointers.
@@ -641,6 +644,8 @@ public:
       .Case("970", true)
       .Case("g5", true)
       .Case("a2", true)
+      .Case("e500mc", true)
+      .Case("e5500", true)
       .Case("pwr6", true)
       .Case("pwr7", true)
       .Case("ppc", true)
@@ -2936,7 +2941,7 @@ public:
   void getDefaultFeatures(llvm::StringMap<bool> &Features) const {
     if (CPU == "arm1136jf-s" || CPU == "arm1176jzf-s" || CPU == "mpcore")
       Features["vfp2"] = true;
-    else if (CPU == "cortex-a8" || CPU == "cortex-a9")
+    else if (CPU == "cortex-a8" || CPU == "cortex-a9" || CPU == "cortex-a15")
       Features["neon"] = true;
   }
 
@@ -3005,7 +3010,7 @@ public:
       .Cases("arm1176jz-s", "arm1176jzf-s", "6ZK")
       .Cases("arm1136jf-s", "mpcorenovfp", "mpcore", "6K")
       .Cases("arm1156t2-s", "arm1156t2f-s", "6T2")
-      .Cases("cortex-a8", "cortex-a9", "7A")
+      .Cases("cortex-a8", "cortex-a9", "cortex-a15", "7A")
       .Cases("cortex-m3", "cortex-m4", "7M")
       .Case("cortex-m0", "6M")
       .Default(0);

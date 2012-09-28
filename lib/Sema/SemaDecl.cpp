@@ -1264,7 +1264,7 @@ static bool ShouldDiagnoseUnusedDecl(const NamedDecl *D) {
     QualType Ty = VD->getType();
 
     // Only look at the outermost level of typedef.
-    if (const TypedefType *TT = dyn_cast<TypedefType>(Ty)) {
+    if (const TypedefType *TT = Ty->getAs<TypedefType>()) {
       if (TT->getDecl()->hasAttr<UnusedAttr>())
         return false;
     }
@@ -2442,7 +2442,7 @@ void Sema::MergeVarDeclTypes(VarDecl *New, VarDecl *Old) {
   }
   if (MergedT.isNull()) {
     Diag(New->getLocation(), diag::err_redefinition_different_type)
-      << New->getDeclName();
+      << New->getDeclName() << New->getType() << Old->getType();
     Diag(Old->getLocation(), diag::note_previous_definition);
     return New->setInvalidDecl();
   }
@@ -3523,7 +3523,8 @@ bool Sema::diagnoseQualifiedDeclaration(CXXScopeSpec &SS, DeclContext *DC,
   //   void X::f();
   // };
   if (Cur->Equals(DC)) {
-    Diag(Loc, diag::warn_member_extra_qualification)
+    Diag(Loc, LangOpts.MicrosoftExt? diag::warn_member_extra_qualification
+                                   : diag::err_member_extra_qualification)
       << Name << FixItHint::CreateRemoval(SS.getRange());
     SS.clear();
     return false;
@@ -5127,6 +5128,22 @@ static FunctionDecl* CreateNewFunctionDecl(Sema &SemaRef, Declarator &D,
   }
 }
 
+void Sema::checkVoidParamDecl(ParmVarDecl *Param) {
+  // In C++, the empty parameter-type-list must be spelled "void"; a
+  // typedef of void is not permitted.
+  if (getLangOpts().CPlusPlus &&
+      Param->getType().getUnqualifiedType() != Context.VoidTy) {
+    bool IsTypeAlias = false;
+    if (const TypedefType *TT = Param->getType()->getAs<TypedefType>())
+      IsTypeAlias = isa<TypeAliasDecl>(TT->getDecl());
+    else if (const TemplateSpecializationType *TST =
+               Param->getType()->getAs<TemplateSpecializationType>())
+      IsTypeAlias = TST->isTypeAlias();
+    Diag(Param->getLocation(), diag::err_param_typedef_of_void)
+      << IsTypeAlias;
+  }
+}
+
 NamedDecl*
 Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
                               TypeSourceInfo *TInfo, LookupResult &Previous,
@@ -5193,11 +5210,12 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       NewFD->setImplicitlyInline();
     }
 
-    // if this is a method defined in an __interface, set pure
-    // (isVirtual will already return true)
-    if (CXXRecordDecl *Parent = dyn_cast<CXXRecordDecl>(
-        NewFD->getDeclContext())) {
-      if (Parent->getTagKind() == TTK_Interface)
+    // If this is a method defined in an __interface, and is not a constructor
+    // or an overloaded operator, then set the pure flag (isVirtual will already
+    // return true).
+    if (const CXXRecordDecl *Parent =
+          dyn_cast<CXXRecordDecl>(NewFD->getDeclContext())) {
+      if (Parent->isInterface() && cast<CXXMethodDecl>(NewFD)->isUserProvided())
         NewFD->setPure(true);
     }
 
@@ -5476,21 +5494,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
         FTI.ArgInfo[0].Param &&
         cast<ParmVarDecl>(FTI.ArgInfo[0].Param)->getType()->isVoidType()) {
       // Empty arg list, don't push any params.
-      ParmVarDecl *Param = cast<ParmVarDecl>(FTI.ArgInfo[0].Param);
-
-      // In C++, the empty parameter-type-list must be spelled "void"; a
-      // typedef of void is not permitted.
-      if (getLangOpts().CPlusPlus &&
-          Param->getType().getUnqualifiedType() != Context.VoidTy) {
-        bool IsTypeAlias = false;
-        if (const TypedefType *TT = Param->getType()->getAs<TypedefType>())
-          IsTypeAlias = isa<TypeAliasDecl>(TT->getDecl());
-        else if (const TemplateSpecializationType *TST =
-                   Param->getType()->getAs<TemplateSpecializationType>())
-          IsTypeAlias = TST->isTypeAlias();
-        Diag(Param->getLocation(), diag::err_param_typedef_of_void)
-          << IsTypeAlias;
-      }
+      checkVoidParamDecl(cast<ParmVarDecl>(FTI.ArgInfo[0].Param));
     } else if (FTI.NumArgs > 0 && FTI.ArgInfo[0].Param != 0) {
       for (unsigned i = 0, e = FTI.NumArgs; i != e; ++i) {
         ParmVarDecl *Param = cast<ParmVarDecl>(FTI.ArgInfo[i].Param);
@@ -6325,14 +6329,12 @@ namespace {
     void HandleDeclRefExpr(DeclRefExpr *DRE) {
       Decl* ReferenceDecl = DRE->getDecl(); 
       if (OrigDecl != ReferenceDecl) return;
-      LookupResult Result(S, DRE->getNameInfo(), Sema::LookupOrdinaryName,
-                          Sema::NotForRedeclaration);
       unsigned diag = isReferenceType
           ? diag::warn_uninit_self_reference_in_reference_init
           : diag::warn_uninit_self_reference_in_init;
       S.DiagRuntimeBehavior(DRE->getLocStart(), DRE,
                             S.PDiag(diag)
-                              << Result.getLookupName()
+                              << DRE->getNameInfo().getName()
                               << OrigDecl->getLocation()
                               << DRE->getSourceRange());
     }
@@ -6581,8 +6583,12 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
   // Check any implicit conversions within the expression.
   CheckImplicitConversions(Init, VDecl->getLocation());
 
-  if (!VDecl->isInvalidDecl())
+  if (!VDecl->isInvalidDecl()) {
     checkUnsafeAssigns(VDecl->getLocation(), VDecl->getType(), Init);
+
+    if (VDecl->hasAttr<BlocksAttr>())
+      checkRetainCycles(VDecl, Init);
+  }
 
   Init = MaybeCreateExprWithCleanups(Init);
   // Attach the initializer to the decl.
@@ -10116,42 +10122,6 @@ void Sema::ActOnFields(Scope* S,
           Convs->setAccess(I, (*I)->getAccess());
         
         if (!CXXRecord->isDependentType()) {
-          // Objective-C Automatic Reference Counting:
-          //   If a class has a non-static data member of Objective-C pointer
-          //   type (or array thereof), it is a non-POD type and its
-          //   default constructor (if any), copy constructor, copy assignment
-          //   operator, and destructor are non-trivial.
-          //
-          // This rule is also handled by CXXRecordDecl::completeDefinition(). 
-          // However, here we check whether this particular class is only 
-          // non-POD because of the presence of an Objective-C pointer member. 
-          // If so, objects of this type cannot be shared between code compiled 
-          // with ARC and code compiled with manual retain/release.
-          if (getLangOpts().ObjCAutoRefCount &&
-              CXXRecord->hasObjectMember() && 
-              CXXRecord->getLinkage() == ExternalLinkage) {
-            if (CXXRecord->isPOD()) {
-              Diag(CXXRecord->getLocation(), 
-                   diag::warn_arc_non_pod_class_with_object_member)
-               << CXXRecord;
-            } else {
-              // FIXME: Fix-Its would be nice here, but finding a good location
-              // for them is going to be tricky.
-              if (CXXRecord->hasTrivialCopyConstructor())
-                Diag(CXXRecord->getLocation(), 
-                     diag::warn_arc_trivial_member_function_with_object_member)
-                  << CXXRecord << 0;
-              if (CXXRecord->hasTrivialCopyAssignment())
-                Diag(CXXRecord->getLocation(), 
-                     diag::warn_arc_trivial_member_function_with_object_member)
-                << CXXRecord << 1;
-              if (CXXRecord->hasTrivialDestructor())
-                Diag(CXXRecord->getLocation(), 
-                     diag::warn_arc_trivial_member_function_with_object_member)
-                << CXXRecord << 2;
-            }
-          }
-          
           // Adjust user-defined destructor exception spec.
           if (getLangOpts().CPlusPlus0x &&
               CXXRecord->hasUserDeclaredDestructor())
@@ -10552,233 +10522,6 @@ Decl *Sema::ActOnEnumConstant(Scope *S, Decl *theEnumDecl, Decl *lastEnumConst,
   return New;
 }
 
-// Emits a warning if every element in the enum is the same value and if
-// every element is initialized with a integer or boolean literal.
-static void CheckForUniqueEnumValues(Sema &S, Decl **Elements,
-                                     unsigned NumElements, EnumDecl *Enum,
-                                     QualType EnumType) {
-  if (S.Diags.getDiagnosticLevel(diag::warn_identical_enum_values,
-                                 Enum->getLocation()) ==
-      DiagnosticsEngine::Ignored)
-    return;
-
-  if (NumElements < 2)
-    return;
-
-  if (!Enum->getIdentifier())
-    return;
-
-  llvm::APSInt FirstVal;
-
-  for (unsigned i = 0; i != NumElements; ++i) {
-    EnumConstantDecl *ECD = cast_or_null<EnumConstantDecl>(Elements[i]);
-    if (!ECD)
-      return;
-
-    Expr *InitExpr = ECD->getInitExpr();
-    if (!InitExpr)
-      return;
-    InitExpr = InitExpr->IgnoreImpCasts();
-    if (!isa<IntegerLiteral>(InitExpr) && !isa<CXXBoolLiteralExpr>(InitExpr))
-      return;
-
-    if (i == 0) {
-      FirstVal = ECD->getInitVal();
-      continue;
-    }
-
-    if (!llvm::APSInt::isSameValue(FirstVal, ECD->getInitVal()))
-      return;
-  }
-
-  S.Diag(Enum->getLocation(), diag::warn_identical_enum_values)
-      << EnumType << FirstVal.toString(10)
-      << Enum->getSourceRange();
-
-  EnumConstantDecl *Last = cast<EnumConstantDecl>(Elements[NumElements - 1]),
-                   *Next = cast<EnumConstantDecl>(Elements[NumElements - 2]);
-
-  S.Diag(Last->getLocation(), diag::note_identical_enum_values)
-    << FixItHint::CreateReplacement(Last->getInitExpr()->getSourceRange(),
-                                    Next->getName());
-}
-
-// Returns true when the enum initial expression does not trigger the
-// duplicate enum warning.  A few common cases are exempted as follows:
-// Element2 = Element1
-// Element2 = Element1 + 1
-// Element2 = Element1 - 1
-// Where Element2 and Element1 are from the same enum.
-static bool ValidDuplicateEnum(EnumConstantDecl *ECD, EnumDecl *Enum) {
-  Expr *InitExpr = ECD->getInitExpr();
-  if (!InitExpr)
-    return true;
-  InitExpr = InitExpr->IgnoreImpCasts();
-
-  if (BinaryOperator *BO = dyn_cast<BinaryOperator>(InitExpr)) {
-    if (!BO->isAdditiveOp())
-      return true;
-    IntegerLiteral *IL = dyn_cast<IntegerLiteral>(BO->getRHS());
-    if (!IL)
-      return true;
-    if (IL->getValue() != 1)
-      return true;
-
-    InitExpr = BO->getLHS();
-  }
-
-  // This checks if the elements are from the same enum.
-  DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(InitExpr);
-  if (!DRE)
-    return true;
-
-  EnumConstantDecl *EnumConstant = dyn_cast<EnumConstantDecl>(DRE->getDecl());
-  if (!EnumConstant)
-    return true;
-
-  if (cast<EnumDecl>(TagDecl::castFromDeclContext(ECD->getDeclContext())) !=
-      Enum)
-    return true;
-
-  return false;
-}
-
-struct DupKey {
-  int64_t val;
-  bool isTombstoneOrEmptyKey;
-  DupKey(int64_t val, bool isTombstoneOrEmptyKey)
-    : val(val), isTombstoneOrEmptyKey(isTombstoneOrEmptyKey) {}
-};
-
-static DupKey GetDupKey(const llvm::APSInt& Val) {
-  return DupKey(Val.isSigned() ? Val.getSExtValue() : Val.getZExtValue(),
-                false);
-}
-
-struct DenseMapInfoDupKey {
-  static DupKey getEmptyKey() { return DupKey(0, true); }
-  static DupKey getTombstoneKey() { return DupKey(1, true); }
-  static unsigned getHashValue(const DupKey Key) {
-    return (unsigned)(Key.val * 37);
-  }
-  static bool isEqual(const DupKey& LHS, const DupKey& RHS) {
-    return LHS.isTombstoneOrEmptyKey == RHS.isTombstoneOrEmptyKey &&
-           LHS.val == RHS.val;
-  }
-};
-
-// Emits a warning when an element is implicitly set a value that
-// a previous element has already been set to.
-static void CheckForDuplicateEnumValues(Sema &S, Decl **Elements,
-                                        unsigned NumElements, EnumDecl *Enum,
-                                        QualType EnumType) {
-  if (S.Diags.getDiagnosticLevel(diag::warn_duplicate_enum_values,
-                                 Enum->getLocation()) ==
-      DiagnosticsEngine::Ignored)
-    return;
-  // Avoid anonymous enums
-  if (!Enum->getIdentifier())
-    return;
-
-  // Only check for small enums.
-  if (Enum->getNumPositiveBits() > 63 || Enum->getNumNegativeBits() > 64)
-    return;
-
-  typedef llvm::SmallVector<EnumConstantDecl*, 3> ECDVector;
-  typedef llvm::SmallVector<ECDVector*, 3> DuplicatesVector;
-
-  typedef llvm::PointerUnion<EnumConstantDecl*, ECDVector*> DeclOrVector;
-  typedef llvm::DenseMap<DupKey, DeclOrVector, DenseMapInfoDupKey>
-          ValueToVectorMap;
-
-  DuplicatesVector DupVector;
-  ValueToVectorMap EnumMap;
-
-  // Populate the EnumMap with all values represented by enum constants without
-  // an initialier.
-  for (unsigned i = 0; i < NumElements; ++i) {
-    EnumConstantDecl *ECD = cast<EnumConstantDecl>(Elements[i]);
-
-    // Null EnumConstantDecl means a previous diagnostic has been emitted for
-    // this constant.  Skip this enum since it may be ill-formed.
-    if (!ECD) {
-      return;
-    }
-
-    if (ECD->getInitExpr())
-      continue;
-
-    DupKey Key = GetDupKey(ECD->getInitVal());
-    DeclOrVector &Entry = EnumMap[Key];
-
-    // First time encountering this value.
-    if (Entry.isNull())
-      Entry = ECD;
-  }
-
-  // Create vectors for any values that has duplicates.
-  for (unsigned i = 0; i < NumElements; ++i) {
-    EnumConstantDecl *ECD = cast<EnumConstantDecl>(Elements[i]);
-    if (!ValidDuplicateEnum(ECD, Enum))
-      continue;
-
-    DupKey Key = GetDupKey(ECD->getInitVal());
-
-    DeclOrVector& Entry = EnumMap[Key];
-    if (Entry.isNull())
-      continue;
-
-    if (EnumConstantDecl *D = Entry.dyn_cast<EnumConstantDecl*>()) {
-      // Ensure constants are different.
-      if (D == ECD)
-        continue;
-
-      // Create new vector and push values onto it.
-      ECDVector *Vec = new ECDVector();
-      Vec->push_back(D);
-      Vec->push_back(ECD);
-
-      // Update entry to point to the duplicates vector.
-      Entry = Vec;
-
-      // Store the vector somewhere we can consult later for quick emission of
-      // diagnostics.
-      DupVector.push_back(Vec);
-      continue;
-    }
-
-    ECDVector *Vec = Entry.get<ECDVector*>();
-    // Make sure constants are not added more than once.
-    if (*Vec->begin() == ECD)
-      continue;
-
-    Vec->push_back(ECD);
-  }
-
-  // Emit diagnostics.
-  for (DuplicatesVector::iterator DupVectorIter = DupVector.begin(),
-                                  DupVectorEnd = DupVector.end();
-       DupVectorIter != DupVectorEnd; ++DupVectorIter) {
-    ECDVector *Vec = *DupVectorIter;
-    assert(Vec->size() > 1 && "ECDVector should have at least 2 elements.");
-
-    // Emit warning for one enum constant.
-    ECDVector::iterator I = Vec->begin();
-    S.Diag((*I)->getLocation(), diag::warn_duplicate_enum_values)
-      << (*I)->getName() << (*I)->getInitVal().toString(10)
-      << (*I)->getSourceRange();
-    ++I;
-
-    // Emit one note for each of the remaining enum constants with
-    // the same value.
-    for (ECDVector::iterator E = Vec->end(); I != E; ++I)
-      S.Diag((*I)->getLocation(), diag::note_duplicate_element)
-        << (*I)->getName() << (*I)->getInitVal().toString(10)
-        << (*I)->getSourceRange();
-    delete Vec;
-  }
-}
-
 void Sema::ActOnEnumBody(SourceLocation EnumLoc, SourceLocation LBraceLoc,
                          SourceLocation RBraceLoc, Decl *EnumDeclX,
                          Decl **Elements, unsigned NumElements,
@@ -11001,9 +10744,6 @@ void Sema::ActOnEnumBody(SourceLocation EnumLoc, SourceLocation LBraceLoc,
   // it needs to go into the function scope.
   if (InFunctionDeclarator)
     DeclsInPrototypeScope.push_back(Enum);
-
-  CheckForUniqueEnumValues(*this, Elements, NumElements, Enum, EnumType);
-  CheckForDuplicateEnumValues(*this, Elements, NumElements, Enum, EnumType);
 }
 
 Decl *Sema::ActOnFileScopeAsmDecl(Expr *expr,

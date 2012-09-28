@@ -11,6 +11,9 @@ class Command<string name> {
   bit IsReturnsCommand = 0;
   bit IsParamCommand = 0;
   bit IsTParamCommand = 0;
+  bit IsDeprecatedCommand = 0;
+
+  bit IsEmptyParagraphAllowed = 0;
 
   bit IsVerbatimBlockCommand = 0;
   bit IsVerbatimBlockEndCommand = 0;
@@ -73,12 +76,18 @@ def Tparam : BlockCommand<"tparam"> { let IsTParamCommand = 1; }
 // HeaderDoc
 def Templatefield : BlockCommand<"templatefield"> { let IsTParamCommand = 1; }
 
+def Deprecated : BlockCommand<"deprecated"> {
+  let IsEmptyParagraphAllowed = 1;
+  let IsDeprecatedCommand = 1;
+}
+
 def Author     : BlockCommand<"author">;
 def Authors    : BlockCommand<"authors">;
 def Bug        : BlockCommand<"bug">;
 def Copyright  : BlockCommand<"copyright">;
 def Date       : BlockCommand<"date">;
 def Details    : BlockCommand<"details">;
+def Invariant  : BlockCommand<"invariant">;
 def Note       : BlockCommand<"note">;
 def Post       : BlockCommand<"post">;
 def Pre        : BlockCommand<"pre">;
@@ -123,11 +132,12 @@ def Subpage  : VerbatimLineCommand<"subpage">;
 def Ref      : VerbatimLineCommand<"ref">;
 
 // Doxygen commands.
-def Fn       : DeclarationVerbatimLineCommand<"fn">;
-def Var      : DeclarationVerbatimLineCommand<"var">;
-def Property : DeclarationVerbatimLineCommand<"property">;
-def Typedef  : DeclarationVerbatimLineCommand<"typedef">;
-def Overload : DeclarationVerbatimLineCommand<"overload">;
+def Fn        : DeclarationVerbatimLineCommand<"fn">;
+def Namespace : DeclarationVerbatimLineCommand<"namespace">;
+def Overload  : DeclarationVerbatimLineCommand<"overload">;
+def Property  : DeclarationVerbatimLineCommand<"property">;
+def Typedef   : DeclarationVerbatimLineCommand<"typedef">;
+def Var       : DeclarationVerbatimLineCommand<"var">;
 
 // HeaderDoc commands.
 def Class     : DeclarationVerbatimLineCommand<"class">;

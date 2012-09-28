@@ -429,3 +429,56 @@
 // CHECK-ANDROID-PIE: "-lgcc"
 // CHECK-ANDROID-PIE-NOT: "gcc_s"
 // CHECK-ANDROID-PIE: "{{.*}}/crtend_android.o"
+//
+// Check linker invocation on Debian 6 MIPS 32/64-bit.
+// RUN: %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
+// RUN:     -target mipsel-linux-gnu \
+// RUN:     --sysroot=%S/Inputs/debian_6_mips_tree \
+// RUN:   | FileCheck --check-prefix=CHECK-DEBIAN-ML-MIPSEL %s
+// CHECK-DEBIAN-ML-MIPSEL: "{{.*}}ld{{(.exe)?}}" "--sysroot=[[SYSROOT:[^"]+]]"
+// CHECK-DEBIAN-ML-MIPSEL: "{{.*}}/usr/lib/gcc/mipsel-linux-gnu/4.4/../../../../lib/crt1.o"
+// CHECK-DEBIAN-ML-MIPSEL: "{{.*}}/usr/lib/gcc/mipsel-linux-gnu/4.4/../../../../lib/crti.o"
+// CHECK-DEBIAN-ML-MIPSEL: "{{.*}}/usr/lib/gcc/mipsel-linux-gnu/4.4/crtbegin.o"
+// CHECK-DEBIAN-ML-MIPSEL: "-L[[SYSROOT]]/usr/lib/gcc/mipsel-linux-gnu/4.4"
+// CHECK-DEBIAN-ML-MIPSEL: "-L[[SYSROOT]]/usr/lib/gcc/mipsel-linux-gnu/4.4/../../../../lib"
+// CHECK-DEBIAN-ML-MIPSEL: "-L[[SYSROOT]]/lib/../lib"
+// CHECK-DEBIAN-ML-MIPSEL: "-L[[SYSROOT]]/usr/lib/../lib"
+// CHECK-DEBIAN-ML-MIPSEL: "-L[[SYSROOT]]/usr/lib/gcc/mipsel-linux-gnu/4.4/../../.."
+// CHECK-DEBIAN-ML-MIPSEL: "-L[[SYSROOT]]/lib"
+// CHECK-DEBIAN-ML-MIPSEL: "-L[[SYSROOT]]/usr/lib"
+//
+// RUN: %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
+// RUN:     -target mips64el-linux-gnu \
+// RUN:     --sysroot=%S/Inputs/debian_6_mips_tree \
+// RUN:   | FileCheck --check-prefix=CHECK-DEBIAN-ML-MIPS64EL %s
+// CHECK-DEBIAN-ML-MIPS64EL: "{{.*}}ld{{(.exe)?}}" "--sysroot=[[SYSROOT:[^"]+]]"
+// CHECK-DEBIAN-ML-MIPS64EL: "{{.*}}/usr/lib/gcc/mipsel-linux-gnu/4.4/../../../../lib64/crt1.o"
+// CHECK-DEBIAN-ML-MIPS64EL: "{{.*}}/usr/lib/gcc/mipsel-linux-gnu/4.4/../../../../lib64/crti.o"
+// CHECK-DEBIAN-ML-MIPS64EL: "{{.*}}/usr/lib/gcc/mipsel-linux-gnu/4.4/64/crtbegin.o"
+// CHECK-DEBIAN-ML-MIPS64EL: "-L[[SYSROOT]]/usr/lib/gcc/mipsel-linux-gnu/4.4/64"
+// CHECK-DEBIAN-ML-MIPS64EL: "-L[[SYSROOT]]/usr/lib/gcc/mipsel-linux-gnu/4.4/../../../../lib64"
+// CHECK-DEBIAN-ML-MIPS64EL: "-L[[SYSROOT]]/lib/../lib64"
+// CHECK-DEBIAN-ML-MIPS64EL: "-L[[SYSROOT]]/usr/lib/../lib64"
+// CHECK-DEBIAN-ML-MIPS64EL: "-L[[SYSROOT]]/usr/lib/gcc/mipsel-linux-gnu/4.4/../../.."
+// CHECK-DEBIAN-ML-MIPS64EL: "-L[[SYSROOT]]/lib"
+// CHECK-DEBIAN-ML-MIPS64EL: "-L[[SYSROOT]]/usr/lib"
+//
+// Test linker invocation for Freescale SDK (OpenEmbedded).
+// RUN: %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
+// RUN:     -target powerpc-fsl-linux \
+// RUN:     --sysroot=%S/Inputs/freescale_ppc_tree \
+// RUN:   | FileCheck --check-prefix=CHECK-FSL-PPC %s
+// CHECK-FSL-PPC: "{{.*}}ld{{(.exe)?}}" "--sysroot=[[SYSROOT:[^"]+]]"
+// CHECK-FSL-PPC: "-m" "elf32ppclinux"
+// CHECK-FSL-PPC: "{{.*}}/crt1.o"
+// CHECK-FSL-PPC: "{{.*}}/crtbegin.o"
+// CHECK-FSL-PPC: "-L[[SYSROOT]]/usr/lib"
+// RUN: %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
+// RUN:     -target powerpc64-fsl-linux \
+// RUN:     --sysroot=%S/Inputs/freescale_ppc64_tree \
+// RUN:   | FileCheck --check-prefix=CHECK-FSL-PPC64 %s
+// CHECK-FSL-PPC64: "{{.*}}ld{{(.exe)?}}" "--sysroot=[[SYSROOT:[^"]+]]"
+// CHECK-FSL-PPC64: "-m" "elf64ppc"
+// CHECK-FSL-PPC64: "{{.*}}/crt1.o"
+// CHECK-FSL-PPC64: "{{.*}}/crtbegin.o"
+// CHECK-FSL-PPC64: "-L[[SYSROOT]]/usr/lib64/powerpc64-fsl-linux/4.6.2/../.."

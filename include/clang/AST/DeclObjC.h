@@ -33,8 +33,8 @@ class ObjCPropertyImplDecl;
 class CXXCtorInitializer;
 
 class ObjCListBase {
-  void operator=(const ObjCListBase &);     // DO NOT IMPLEMENT
-  ObjCListBase(const ObjCListBase&);        // DO NOT IMPLEMENT
+  ObjCListBase(const ObjCListBase &) LLVM_DELETED_FUNCTION;
+  void operator=(const ObjCListBase &) LLVM_DELETED_FUNCTION;
 protected:
   /// List is an array of pointers to objects that are not owned by this object.
   void **List;
@@ -1882,6 +1882,9 @@ public:
   virtual SourceRange getSourceRange() const LLVM_READONLY {
     return SourceRange(AtLoc, getLocation());
   }
+  
+  /// Get the default name of the synthesized ivar.
+  IdentifierInfo *getDefaultSynthIvarName(ASTContext &Ctx) const;
 
   /// Lookup a property by name in the specified DeclContext.
   static ObjCPropertyDecl *findPropertyDecl(const DeclContext *DC,

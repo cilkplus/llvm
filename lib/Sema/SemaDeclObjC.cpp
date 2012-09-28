@@ -287,21 +287,18 @@ void Sema::AddAnyMethodToGlobalPool(Decl *D) {
 static bool
 HasExplicitOwnershipAttr(Sema &S, ParmVarDecl *Param) {
   QualType T = Param->getType();
-  if (!T->isObjCIndirectLifetimeType())
+  
+  if (const PointerType *PT = T->getAs<PointerType>()) {
+    T = PT->getPointeeType();
+  } else if (const ReferenceType *RT = T->getAs<ReferenceType>()) {
+    T = RT->getPointeeType();
+  } else {
     return true;
-  if (!T->isPointerType() && !T->isReferenceType())
-    return true;
-  T = T->isPointerType() 
-        ? T->getAs<PointerType>()->getPointeeType() 
-        : T->getAs<ReferenceType>()->getPointeeType();
-  if (T->isObjCLifetimeType()) {
-    // when lifetime is Qualifiers::OCL_None it means that it has
-    // no implicit ownership qualifier (which means it is explicit).
-    Qualifiers::ObjCLifetime lifetime = 
-      T.getLocalQualifiers().getObjCLifetime();
-    return lifetime == Qualifiers::OCL_None;
   }
-  return true;
+  
+  // If we have a lifetime qualifier, but it's local, we must have 
+  // inferred it. So, it is implicit.
+  return !T.getLocalQualifiers().hasObjCLifetime();
 }
 
 /// ActOnStartOfObjCMethodDef - This routine sets up parameters; invisible

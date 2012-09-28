@@ -32,6 +32,10 @@ const Driver &ToolChain::getDriver() const {
  return D;
 }
 
+bool ToolChain::IsUnwindTablesDefault() const {
+  return false;
+}
+
 std::string ToolChain::GetFilePath(const char *Name) const {
   return D.GetFilePath(Name, *this);
 
@@ -119,7 +123,7 @@ static const char *getLLVMArchSuffixForARM(StringRef CPU) {
     .Cases("arm1136j-s",  "arm1136jf-s",  "arm1176jz-s", "v6")
     .Cases("arm1176jzf-s",  "mpcorenovfp",  "mpcore", "v6")
     .Cases("arm1156t2-s",  "arm1156t2f-s", "v6t2")
-    .Cases("cortex-a8", "cortex-a9", "v7")
+    .Cases("cortex-a8", "cortex-a9", "cortex-a15", "v7")
     .Case("cortex-m3", "v7m")
     .Case("cortex-m4", "v7m")
     .Case("cortex-m0", "v6m")

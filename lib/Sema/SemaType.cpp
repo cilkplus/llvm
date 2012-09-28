@@ -698,11 +698,15 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
       case DeclSpec::TSW_longlong:
         Result = Context.LongLongTy;
 
-        // long long is a C99 feature.
-        if (!S.getLangOpts().C99)
-          S.Diag(DS.getTypeSpecWidthLoc(),
-                 S.getLangOpts().CPlusPlus0x ?
-                   diag::warn_cxx98_compat_longlong : diag::ext_longlong);
+        // 'long long' is a C99 or C++11 feature.
+        if (!S.getLangOpts().C99) {
+          if (S.getLangOpts().CPlusPlus)
+            S.Diag(DS.getTypeSpecWidthLoc(),
+                   S.getLangOpts().CPlusPlus0x ?
+                   diag::warn_cxx98_compat_longlong : diag::ext_cxx11_longlong);
+          else
+            S.Diag(DS.getTypeSpecWidthLoc(), diag::ext_c99_longlong);
+        }
         break;
       }
     } else {
@@ -713,11 +717,15 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
       case DeclSpec::TSW_longlong:
         Result = Context.UnsignedLongLongTy;
 
-        // long long is a C99 feature.
-        if (!S.getLangOpts().C99)
-          S.Diag(DS.getTypeSpecWidthLoc(),
-                 S.getLangOpts().CPlusPlus0x ?
-                   diag::warn_cxx98_compat_longlong : diag::ext_longlong);
+        // 'long long' is a C99 or C++11 feature.
+        if (!S.getLangOpts().C99) {
+          if (S.getLangOpts().CPlusPlus)
+            S.Diag(DS.getTypeSpecWidthLoc(),
+                   S.getLangOpts().CPlusPlus0x ?
+                   diag::warn_cxx98_compat_longlong : diag::ext_cxx11_longlong);
+          else
+            S.Diag(DS.getTypeSpecWidthLoc(), diag::ext_c99_longlong);
+        }
         break;
       }
     }
@@ -4595,15 +4603,21 @@ static QualType getDecltypeForExpr(Sema &S, Expr *E) {
   //       member access (5.2.5), decltype(e) is the type of the entity named
   //       by e. If there is no such entity, or if e names a set of overloaded
   //       functions, the program is ill-formed;
+  //
+  // We apply the same rules for Objective-C ivar and property references.
   if (const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E)) {
     if (const ValueDecl *VD = dyn_cast<ValueDecl>(DRE->getDecl()))
       return VD->getType();
-  }
-  if (const MemberExpr *ME = dyn_cast<MemberExpr>(E)) {
+  } else if (const MemberExpr *ME = dyn_cast<MemberExpr>(E)) {
     if (const FieldDecl *FD = dyn_cast<FieldDecl>(ME->getMemberDecl()))
       return FD->getType();
+  } else if (const ObjCIvarRefExpr *IR = dyn_cast<ObjCIvarRefExpr>(E)) {
+    return IR->getDecl()->getType();
+  } else if (const ObjCPropertyRefExpr *PR = dyn_cast<ObjCPropertyRefExpr>(E)) {
+    if (PR->isExplicitProperty())
+      return PR->getExplicitProperty()->getType();
   }
-
+  
   // C++11 [expr.lambda.prim]p18:
   //   Every occurrence of decltype((x)) where x is a possibly
   //   parenthesized id-expression that names an entity of automatic

@@ -555,6 +555,7 @@ static MakeDeductionFailureInfo(ASTContext &Context,
   Result.Data = 0;
   switch (TDK) {
   case Sema::TDK_Success:
+  case Sema::TDK_Invalid:
   case Sema::TDK_InstantiationDepth:
   case Sema::TDK_TooManyArguments:
   case Sema::TDK_TooFewArguments:
@@ -597,6 +598,7 @@ static MakeDeductionFailureInfo(ASTContext &Context,
 void OverloadCandidate::DeductionFailureInfo::Destroy() {
   switch (static_cast<Sema::TemplateDeductionResult>(Result)) {
   case Sema::TDK_Success:
+  case Sema::TDK_Invalid:
   case Sema::TDK_InstantiationDepth:
   case Sema::TDK_Incomplete:
   case Sema::TDK_TooManyArguments:
@@ -637,6 +639,7 @@ TemplateParameter
 OverloadCandidate::DeductionFailureInfo::getTemplateParameter() {
   switch (static_cast<Sema::TemplateDeductionResult>(Result)) {
   case Sema::TDK_Success:
+  case Sema::TDK_Invalid:
   case Sema::TDK_InstantiationDepth:
   case Sema::TDK_TooManyArguments:
   case Sema::TDK_TooFewArguments:
@@ -664,6 +667,7 @@ TemplateArgumentList *
 OverloadCandidate::DeductionFailureInfo::getTemplateArgumentList() {
   switch (static_cast<Sema::TemplateDeductionResult>(Result)) {
     case Sema::TDK_Success:
+    case Sema::TDK_Invalid:
     case Sema::TDK_InstantiationDepth:
     case Sema::TDK_TooManyArguments:
     case Sema::TDK_TooFewArguments:
@@ -688,6 +692,7 @@ OverloadCandidate::DeductionFailureInfo::getTemplateArgumentList() {
 const TemplateArgument *OverloadCandidate::DeductionFailureInfo::getFirstArg() {
   switch (static_cast<Sema::TemplateDeductionResult>(Result)) {
   case Sema::TDK_Success:
+  case Sema::TDK_Invalid:
   case Sema::TDK_InstantiationDepth:
   case Sema::TDK_Incomplete:
   case Sema::TDK_TooManyArguments:
@@ -713,6 +718,7 @@ const TemplateArgument *
 OverloadCandidate::DeductionFailureInfo::getSecondArg() {
   switch (static_cast<Sema::TemplateDeductionResult>(Result)) {
   case Sema::TDK_Success:
+  case Sema::TDK_Invalid:
   case Sema::TDK_InstantiationDepth:
   case Sema::TDK_Incomplete:
   case Sema::TDK_TooManyArguments:
@@ -1668,7 +1674,7 @@ bool Sema::IsIntegralPromotion(Expr *From, QualType FromType, QualType ToType) {
     return To->getKind() == BuiltinType::UInt;
   }
 
-  // C++0x [conv.prom]p3:
+  // C++11 [conv.prom]p3:
   //   A prvalue of an unscoped enumeration type whose underlying type is not
   //   fixed (7.2) can be converted to an rvalue a prvalue of the first of the
   //   following types that can represent all the values of the enumeration
@@ -1680,11 +1686,25 @@ bool Sema::IsIntegralPromotion(Expr *From, QualType FromType, QualType ToType) {
   //   with lowest integer conversion rank (4.13) greater than the rank of long
   //   long in which all the values of the enumeration can be represented. If
   //   there are two such extended types, the signed one is chosen.
+  // C++11 [conv.prom]p4:
+  //   A prvalue of an unscoped enumeration type whose underlying type is fixed
+  //   can be converted to a prvalue of its underlying type. Moreover, if
+  //   integral promotion can be applied to its underlying type, a prvalue of an
+  //   unscoped enumeration type whose underlying type is fixed can also be
+  //   converted to a prvalue of the promoted underlying type.
   if (const EnumType *FromEnumType = FromType->getAs<EnumType>()) {
     // C++0x 7.2p9: Note that this implicit enum to int conversion is not
     // provided for a scoped enumeration.
     if (FromEnumType->getDecl()->isScoped())
       return false;
+
+    // We can perform an integral promotion to the underlying type of the enum,
+    // even if that's not the promoted type.
+    if (FromEnumType->getDecl()->isFixed()) {
+      QualType Underlying = FromEnumType->getDecl()->getIntegerType();
+      return Context.hasSameUnqualifiedType(Underlying, ToType) ||
+             IsIntegralPromotion(From, Underlying, ToType);
+    }
 
     // We have already pre-calculated the promotion type, so this is trivial.
     if (ToType->isIntegerType() &&
@@ -5531,7 +5551,7 @@ Sema::AddMethodTemplateCandidate(FunctionTemplateDecl *MethodTmpl,
   //   functions. In such a case, the candidate functions generated from each
   //   function template are combined with the set of non-template candidate
   //   functions.
-  TemplateDeductionInfo Info(Context, CandidateSet.getLocation());
+  TemplateDeductionInfo Info(CandidateSet.getLocation());
   FunctionDecl *Specialization = 0;
   if (TemplateDeductionResult Result
       = DeduceTemplateArguments(MethodTmpl, ExplicitTemplateArgs, Args,
@@ -5581,7 +5601,7 @@ Sema::AddTemplateOverloadCandidate(FunctionTemplateDecl *FunctionTemplate,
   //   functions. In such a case, the candidate functions generated from each
   //   function template are combined with the set of non-template candidate
   //   functions.
-  TemplateDeductionInfo Info(Context, CandidateSet.getLocation());
+  TemplateDeductionInfo Info(CandidateSet.getLocation());
   FunctionDecl *Specialization = 0;
   if (TemplateDeductionResult Result
         = DeduceTemplateArguments(FunctionTemplate, ExplicitTemplateArgs, Args,
@@ -5765,7 +5785,7 @@ Sema::AddTemplateConversionCandidate(FunctionTemplateDecl *FunctionTemplate,
   if (!CandidateSet.isNewCandidate(FunctionTemplate))
     return;
 
-  TemplateDeductionInfo Info(Context, CandidateSet.getLocation());
+  TemplateDeductionInfo Info(CandidateSet.getLocation());
   CXXConversionDecl *Specialization = 0;
   if (TemplateDeductionResult Result
         = DeduceTemplateArguments(FunctionTemplate, ToType,
@@ -6770,17 +6790,16 @@ public:
   //        bool       operator==(T, T);
   //        bool       operator!=(T, T);
   void addRelationalPointerOrEnumeralOverloads() {
-    // C++ [over.built]p1:
-    //   If there is a user-written candidate with the same name and parameter
-    //   types as a built-in candidate operator function, the built-in operator
-    //   function is hidden and is not included in the set of candidate
-    //   functions.
+    // C++ [over.match.oper]p3:
+    //   [...]the built-in candidates include all of the candidate operator
+    //   functions defined in 13.6 that, compared to the given operator, [...]
+    //   do not have the same parameter-type-list as any non-template non-member
+    //   candidate.
     //
-    // The text is actually in a note, but if we don't implement it then we end
-    // up with ambiguities when the user provides an overloaded operator for
-    // an enumeration type. Note that only enumeration types have this problem,
-    // so we track which enumeration types we've seen operators for. Also, the
-    // only other overloaded operator with enumeration argumenst, operator=,
+    // Note that in practice, this only affects enumeration types because there
+    // aren't any built-in candidates of record type, and a user-defined operator
+    // must have an operand of record or enumeration type. Also, the only other
+    // overloaded operator with enumeration arguments, operator=,
     // cannot be overloaded for enumeration types, so this is the only place
     // where we must suppress candidates like this.
     llvm::DenseSet<std::pair<CanQualType, CanQualType> >
@@ -6793,6 +6812,9 @@ public:
                                          CEnd = CandidateSet.end();
              C != CEnd; ++C) {
           if (!C->Viable || !C->Function || C->Function->getNumParams() != 2)
+            continue;
+
+          if (C->Function->isFunctionTemplateSpecialization())
             continue;
 
           QualType FirstParamType =
@@ -8561,6 +8583,7 @@ RankDeductionFailure(const OverloadCandidate::DeductionFailureInfo &DFI) {
   case Sema::TDK_Success:
     llvm_unreachable("TDK_success while diagnosing bad deduction");
 
+  case Sema::TDK_Invalid:
   case Sema::TDK_Incomplete:
     return 1;
 
@@ -8979,7 +9002,7 @@ private:
     //   function template specialization, which is added to the set of
     //   overloaded functions considered.
     FunctionDecl *Specialization = 0;
-    TemplateDeductionInfo Info(Context, OvlExpr->getNameLoc());
+    TemplateDeductionInfo Info(OvlExpr->getNameLoc());
     if (Sema::TemplateDeductionResult Result
           = S.DeduceTemplateArguments(FunctionTemplate, 
                                       &OvlExplicitTemplateArgs,
@@ -9257,7 +9280,7 @@ Sema::ResolveSingleFunctionTemplateSpecialization(OverloadExpr *ovl,
     //   function template specialization, which is added to the set of
     //   overloaded functions considered.
     FunctionDecl *Specialization = 0;
-    TemplateDeductionInfo Info(Context, ovl->getNameLoc());
+    TemplateDeductionInfo Info(ovl->getNameLoc());
     if (TemplateDeductionResult Result
           = DeduceTemplateArguments(FunctionTemplate, &ExplicitTemplateArgs,
                                     Specialization, Info)) {
@@ -9632,6 +9655,20 @@ class NoTypoCorrectionCCC : public CorrectionCandidateCallback {
     return false;
   }
 };
+
+class BuildRecoveryCallExprRAII {
+  Sema &SemaRef;
+public:
+  BuildRecoveryCallExprRAII(Sema &S) : SemaRef(S) {
+    assert(SemaRef.IsBuildingRecoveryCallExpr == false);
+    SemaRef.IsBuildingRecoveryCallExpr = true;
+  }
+
+  ~BuildRecoveryCallExprRAII() {
+    SemaRef.IsBuildingRecoveryCallExpr = false;
+  }
+};
+
 }
 
 /// Attempts to recover from a call where no functions were found.
@@ -9644,6 +9681,15 @@ BuildRecoveryCallExpr(Sema &SemaRef, Scope *S, Expr *Fn,
                       llvm::MutableArrayRef<Expr *> Args,
                       SourceLocation RParenLoc,
                       bool EmptyLookup, bool AllowTypoCorrection) {
+  // Do not try to recover if it is already building a recovery call.
+  // This stops infinite loops for template instantiations like
+  //
+  // template <typename T> auto foo(T t) -> decltype(foo(t)) {}
+  // template <typename T> auto foo(T t) -> decltype(foo(&t)) {}
+  //
+  if (SemaRef.IsBuildingRecoveryCallExpr)
+    return ExprError();
+  BuildRecoveryCallExprRAII RCE(SemaRef);
 
   CXXScopeSpec SS;
   SS.Adopt(ULE->getQualifierLoc());

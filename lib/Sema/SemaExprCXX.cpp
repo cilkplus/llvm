@@ -1275,14 +1275,6 @@ Sema::BuildCXXNew(SourceLocation StartLoc, bool UseGlobal,
       }
     }
 
-    // ARC: warn about ABI issues.
-    if (getLangOpts().ObjCAutoRefCount) {
-      QualType BaseAllocType = Context.getBaseElementType(AllocType);
-      if (BaseAllocType.hasStrongOrWeakObjCLifetime())
-        Diag(StartLoc, diag::warn_err_new_delete_object_array)
-          << 0 << BaseAllocType;
-    }
-
     // Note that we do *not* convert the argument in any way.  It can
     // be signed, larger than size_t, whatever.
   }
@@ -1633,7 +1625,7 @@ bool Sema::FindAllocationFunctions(SourceLocation StartLoc, SourceRange Range,
             = dyn_cast<FunctionTemplateDecl>((*D)->getUnderlyingDecl())) {
         // Perform template argument deduction to try to match the
         // expected function type.
-        TemplateDeductionInfo Info(Context, StartLoc);
+        TemplateDeductionInfo Info(StartLoc);
         if (DeduceTemplateArguments(FnTmpl, 0, ExpectedFunctionType, Fn, Info))
           continue;
       } else
@@ -2206,13 +2198,6 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
         }
       }
 
-    } else if (getLangOpts().ObjCAutoRefCount &&
-               PointeeElem->isObjCLifetimeType() &&
-               (PointeeElem.getObjCLifetime() == Qualifiers::OCL_Strong ||
-                PointeeElem.getObjCLifetime() == Qualifiers::OCL_Weak) &&
-               ArrayForm) {
-      Diag(StartLoc, diag::warn_err_new_delete_object_array)
-        << 1 << PointeeElem;
     }
 
     if (!OperatorDelete) {
@@ -2593,8 +2578,16 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
 
   case ICK_Integral_Promotion:
   case ICK_Integral_Conversion:
-    From = ImpCastExprToType(From, ToType, CK_IntegralCast, 
-                             VK_RValue, /*BasePath=*/0, CCK).take();
+    if (ToType->isBooleanType()) {
+      assert(FromType->castAs<EnumType>()->getDecl()->isFixed() &&
+             SCS.Second == ICK_Integral_Promotion &&
+             "only enums with fixed underlying type can promote to bool");
+      From = ImpCastExprToType(From, ToType, CK_IntegralToBoolean,
+                               VK_RValue, /*BasePath=*/0, CCK).take();
+    } else {
+      From = ImpCastExprToType(From, ToType, CK_IntegralCast,
+                               VK_RValue, /*BasePath=*/0, CCK).take();
+    }
     break;
 
   case ICK_Floating_Promotion:
@@ -2934,6 +2927,7 @@ static bool CheckUnaryTypeTraitTypeCompleteness(Sema &S,
   case UTT_IsEmpty:
   case UTT_IsPolymorphic:
   case UTT_IsAbstract:
+  case UTT_IsInterfaceClass:
     // Fall-through
 
   // These traits require a complete type.
@@ -3063,6 +3057,10 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, UnaryTypeTrait UTT,
   case UTT_IsAbstract:
     if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
       return RD->isAbstract();
+    return false;
+  case UTT_IsInterfaceClass:
+    if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
+      return RD->isInterface();
     return false;
   case UTT_IsFinal:
     if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())

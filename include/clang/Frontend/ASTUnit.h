@@ -374,8 +374,8 @@ private:
   /// \brief Clear out and deallocate 
   void ClearCachedCompletionResults();
   
-  ASTUnit(const ASTUnit&); // DO NOT IMPLEMENT
-  ASTUnit &operator=(const ASTUnit &); // DO NOT IMPLEMENT
+  ASTUnit(const ASTUnit &) LLVM_DELETED_FUNCTION;
+  void operator=(const ASTUnit &) LLVM_DELETED_FUNCTION;
   
   explicit ASTUnit(bool MainFileIsAST);
 
@@ -792,8 +792,9 @@ public:
 
   /// \brief Save this translation unit to a file with the given name.
   ///
-  /// \returns An indication of whether the save was successful or not.
-  CXSaveError Save(StringRef File);
+  /// \returns true if there was a file error or false if the save was
+  /// successful.
+  bool Save(StringRef File);
 
   /// \brief Serialize this translation unit with the given output stream.
   ///

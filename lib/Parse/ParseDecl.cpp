@@ -2277,6 +2277,8 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
           isInvalid = DS.SetTypeSpecType(DeclSpec::TST_typename,
                                          Tok.getAnnotationEndLoc(),
                                          PrevSpec, DiagID, T);
+          if (isInvalid)
+            break;
         }
         else
           DS.SetTypeSpecError();
@@ -2482,12 +2484,12 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
     case tok::kw___forceinline: {
       isInvalid = DS.SetFunctionSpecInline(Loc, PrevSpec, DiagID);
       IdentifierInfo *AttrName = Tok.getIdentifierInfo();
-      SourceLocation AttrNameLoc = ConsumeToken();
+      SourceLocation AttrNameLoc = Tok.getLocation();
       // FIXME: This does not work correctly if it is set to be a declspec
       //        attribute, and a GNU attribute is simply incorrect.
       DS.getAttributes().addNew(AttrName, AttrNameLoc, 0, AttrNameLoc, 0,
                                 SourceLocation(), 0, 0, AttributeList::AS_GNU);
-      continue;
+      break;
     }
 
     case tok::kw___ptr64:
@@ -5076,7 +5078,8 @@ void Parser::ParseTypeofSpecifier(DeclSpec &DS) {
 
   const bool hasParens = Tok.is(tok::l_paren);
 
-  EnterExpressionEvaluationContext Unevaluated(Actions, Sema::Unevaluated);
+  EnterExpressionEvaluationContext Unevaluated(Actions, Sema::Unevaluated,
+                                               Sema::ReuseLambdaContextDecl);
 
   bool isCastExpr;
   ParsedType CastTy;

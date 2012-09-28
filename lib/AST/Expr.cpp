@@ -784,19 +784,19 @@ void StringLiteral::setString(ASTContext &C, StringRef Str,
   switch(CharByteWidth) {
     case 1: {
       char *AStrData = new (C) char[Length];
-      std::memcpy(AStrData,Str.data(),Str.size());
+      std::memcpy(AStrData,Str.data(),Length*sizeof(*AStrData));
       StrData.asChar = AStrData;
       break;
     }
     case 2: {
       uint16_t *AStrData = new (C) uint16_t[Length];
-      std::memcpy(AStrData,Str.data(),Str.size());
+      std::memcpy(AStrData,Str.data(),Length*sizeof(*AStrData));
       StrData.asUInt16 = AStrData;
       break;
     }
     case 4: {
       uint32_t *AStrData = new (C) uint32_t[Length];
-      std::memcpy(AStrData,Str.data(),Str.size());
+      std::memcpy(AStrData,Str.data(),Length*sizeof(*AStrData));
       StrData.asUInt32 = AStrData;
       break;
     }
@@ -2019,6 +2019,7 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     R1 = getSourceRange();
     return true;
   }
+  case CXXFunctionalCastExprClass:
   case CStyleCastExprClass: {
     // Ignore an explicit cast to void unless the operand is a non-trivial
     // volatile lvalue.
