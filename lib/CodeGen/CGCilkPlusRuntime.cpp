@@ -212,7 +212,7 @@ public:
 
   LValue EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnExpr &E)
   {
-    return CGF.EmitLValue(cast<CilkSpawnExpr>(E).getSubExpr());
+    return CGF.EmitLValue(E.getSubExpr());
   }
 
   void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S)
@@ -575,24 +575,26 @@ static void EmitSpawnHelperPrologue(CGBuilderTy &B,
                                     llvm::Value *W)
 {
   using namespace llvm;
+  LLVMContext &Ctx = B.getContext();
+
   // sf->call_parent = w->current_stack_frame;
   StoreField(B, LoadField(B, W, WorkerBuilder::current_stack_frame),
              SF, StackFrameBuilder::call_parent);
   // sf->worker = w;
   StoreField(B, W, SF, StackFrameBuilder::worker);
   // sf->flags = CILK_FRAME_VERSION;
-#if 0
   {
-  StoreField(B,
-             CILK_FRAME_VERSION,
-             SF, StackFrameBuilder::flags);
+    StructType *STy = StackFrameBuilder::get(Ctx);
+    llvm::Type *Ty = STy->getElementType(StackFrameBuilder::flags);
+    StoreField(B,
+               ConstantInt::get(Ty, CILK_FRAME_VERSION),
+               SF, StackFrameBuilder::flags);
   }
   // sf->reserved = 0;
   {
     Value *R = GEP(B, SF, StackFrameBuilder::reserved);
     B.CreateStore(ConstantInt::get(R->getType()->getPointerElementType(), 0), R);
   }
-#endif
   // w->current_stack_frame = sf;
   StoreField(B, SF, W, WorkerBuilder::current_stack_frame);
   // __cilkrts_stack_frame *volatile *tail = w->tail;
@@ -607,10 +609,14 @@ static void EmitSpawnHelperPrologue(CGBuilderTy &B,
              LoadField(B, SF, StackFrameBuilder::call_parent),
              StackFrameBuilder::parent_pedigree);
   // w->pedigree.rank = 0;
-//  StoreField(B,
-//             Zero,
-//             LoadField(B, W, WorkerBuilder::pedigree),
-//             PedigreeBuilder::rank);
+  {
+    StructType *STy = PedigreeBuilder::get(Ctx);
+    llvm::Type *Ty = STy->getElementType(PedigreeBuilder::rank);
+    StoreField(B,
+               ConstantInt::get(Ty, 0),
+               LoadField(B, W, WorkerBuilder::pedigree),
+               PedigreeBuilder::rank);
+  }
   // w->pedigree.next = &sf->spawn_helper_pedigree;
   StoreField(B,
              GEP(B, SF, StackFrameBuilder::parent_pedigree),
