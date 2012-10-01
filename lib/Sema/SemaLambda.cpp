@@ -18,6 +18,8 @@
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/RecursiveASTVisitor.h"
+
 using namespace clang;
 using namespace sema;
 
@@ -968,4 +970,430 @@ ExprResult Sema::BuildBlockForLambdaConversion(SourceLocation CurrentLocation,
   ExprNeedsCleanups = true;
 
   return BuildBlock;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Transforming Cilk spawn into lambdas
+////////////////////////////////////////////////////////////////////////////////
+
+static CXXRecordDecl *createSpawnLambdaClosureType(Sema &S,
+                                                   SourceLocation SpawnLoc,
+                                                   TypeSourceInfo *Info,
+                                                   bool KnownDependent) {
+  DeclContext *DC = S.CurContext;
+  while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
+    DC = DC->getParent();
+
+  // Use the same DefinitionData as lambda expressions,
+  CXXRecordDecl *Class = CXXRecordDecl::CreateSpawnLambda(S.Context, DC,
+                                                          Info,
+                                                          SpawnLoc,
+                                                          KnownDependent);
+  Class->setImplicit();
+  DC->addDecl(Class);
+
+  return Class;
+}
+
+static SpawnLambdaScopeInfo *enterSpawnLambdaScope(Sema &S,
+                                                   CXXMethodDecl *CallOp) {
+  S.PushSpawnLambdaScope(CallOp->getParent(), CallOp);
+  SpawnLambdaScopeInfo *LSI = S.getCurSpawnLambda();
+  LSI->ReturnType = CallOp->getResultType();
+  return LSI;
+}
+
+static CXXMethodDecl *startSpawnLambdaDefinition(Sema &S, CXXRecordDecl *Class,
+                                                 SourceLocation SpawnLoc,
+                                                 TypeSourceInfo *MethodType,
+                                           llvm::ArrayRef<ParmVarDecl *> Params)
+{
+  DeclarationName MethodName
+    = S.Context.DeclarationNames.getCXXOperatorName(OO_Call);
+
+  DeclarationNameLoc MethodNameLoc;
+  CXXMethodDecl *Method = CXXMethodDecl::Create(S.Context, Class, SpawnLoc,
+                                                DeclarationNameInfo(MethodName,
+                                                                    SpawnLoc,
+                                                                    MethodNameLoc),
+                                                MethodType->getType(),
+                                                MethodType,
+                                                /*isStatic=*/false,
+                                                SC_None,
+                                                /*isInline=*/true,
+                                                /*isConstExpr=*/false,
+                                                SpawnLoc);
+  Method->setAccess(AS_public);
+  Method->setLexicalDeclContext(S.CurContext);
+
+  // Add parameters.
+  if (!Params.empty()) {
+    Method->setParams(Params);
+    S.CheckParmsForFunctionDef(const_cast<ParmVarDecl **>(Params.begin()),
+                               const_cast<ParmVarDecl **>(Params.end()),
+                               /*CheckParameterNames=*/false);
+
+    for (CXXMethodDecl::param_iterator P = Method->param_begin(),
+                                    PEnd = Method->param_end();
+         P != PEnd; ++P)
+      (*P)->setOwningFunction(Method);
+  }
+
+  Decl *ContextDecl = S.ExprEvalContexts.back().LambdaContextDecl;
+
+  enum ContextKind {
+    Normal,
+    DefaultArgument,
+    DataMember,
+    StaticDataMember
+  } Kind = Normal;
+
+  if (ContextDecl) {
+    if (ParmVarDecl *Param = dyn_cast<ParmVarDecl>(ContextDecl)) {
+      if (const DeclContext *LexicalDC
+          = Param->getDeclContext()->getLexicalParent())
+        if (LexicalDC->isRecord())
+          Kind = DefaultArgument;
+    } else if (VarDecl *Var = dyn_cast<VarDecl>(ContextDecl)) {
+      if (Var->getDeclContext()->isRecord())
+        Kind = StaticDataMember;
+    } else if (isa<FieldDecl>(ContextDecl)) {
+      Kind = DataMember;
+    }
+  }
+
+  bool IsInNonspecializedTemplate = !S.ActiveTemplateInstantiations.empty() ||
+                                     S.CurContext->isDependentContext();
+  unsigned ManglingNumber;
+  switch (Kind) {
+  case Normal:
+    //  -- the bodies of non-exported nonspecialized template functions
+    //  -- the bodies of inline functions
+    if ((IsInNonspecializedTemplate &&
+         !(ContextDecl && isa<ParmVarDecl>(ContextDecl))) ||
+        isInInlineFunction(S.CurContext))
+      ManglingNumber = S.Context.getLambdaManglingNumber(Method);
+    else
+      ManglingNumber = 0;
+
+    // There is no special context for this lambda.
+    ContextDecl = 0;
+    break;
+
+  case StaticDataMember:
+    //  -- the initializers of nonspecialized static members of template classes
+    if (!IsInNonspecializedTemplate) {
+      ManglingNumber = 0;
+      ContextDecl = 0;
+      break;
+    }
+    // Fall through to assign a mangling number.
+
+  case DataMember:
+    //  -- the in-class initializers of class members
+  case DefaultArgument:
+    //  -- default arguments appearing in class definitions
+    ManglingNumber = S.ExprEvalContexts.back().getLambdaMangleContext()
+                       .getManglingNumber(Method);
+    break;
+  }
+
+  Class->setLambdaMangling(ManglingNumber, ContextDecl);
+  return Method;
+}
+
+namespace {
+// Helper to capture all variables in a statement
+class CaptureHelper: public RecursiveASTVisitor<CaptureHelper> {
+  Sema &S;
+
+public:
+  CaptureHelper(Sema &S) : S(S) {}
+  // Do not capture variables inside a lambda expression
+  bool TraverseLambdaExpr(LambdaExpr *E) { return true; }
+  bool VisitDeclRefExpr(DeclRefExpr *E) {
+    S.MarkDeclRefReferenced(E);
+    return true;
+  }
+};
+} // anonymous namespace
+
+static void beginSpawnLambda(Sema &S, SourceLocation SpawnLoc, Scope *CurScope,
+                             QualType ReturnTy) {
+
+  bool KnownDependent = false;
+  if (Scope *TmplScope = CurScope->getTemplateParamParent())
+    if (!TmplScope->decl_empty())
+      KnownDependent = true;
+
+  TypeSourceInfo *MethodTyInfo;
+  {
+    FunctionProtoType::ExtProtoInfo EPI;
+    QualType MethodTy
+      = S.Context.getFunctionType(ReturnTy, /*Args=*/0, /*NumArgs=*/0, EPI);
+    MethodTyInfo = S.Context.getTrivialTypeSourceInfo(MethodTy);
+  }
+
+  CXXRecordDecl *Class
+    = createSpawnLambdaClosureType(S, SpawnLoc, MethodTyInfo, KnownDependent);
+
+  llvm::SmallVector<ParmVarDecl *, 8> Params;
+  CXXMethodDecl *Method
+    = startSpawnLambdaDefinition(S, Class, SpawnLoc, MethodTyInfo, Params);
+
+  S.PushDeclContext(CurScope, Method);
+  enterSpawnLambdaScope(S, Method);
+  S.addLambdaParameters(Method, CurScope);
+  S.PushExpressionEvaluationContext(Sema::PotentiallyEvaluated);
+}
+
+// Transform a spawning expression containing into a spawn lambda call
+static ExprResult LambdifyExpr(Sema &S, Scope *CurScope, Expr *E,
+                               SourceLocation SpawnLoc, bool IsInit) {
+  assert(SpawnLoc.isValid() && "Invalid Spawn Location");
+
+  CaptureHelper Helper(S);
+  Helper.TraverseStmt(E);
+
+  Stmt *Spawn = E;
+  if (IsInit)
+    Spawn = S.ActOnReturnStmt(E->getLocStart(), E).take();
+
+  Stmt *Body = new (S.Context) CompoundStmt(S.Context, &Spawn, 1,
+                                            E->getLocStart(),
+                                            E->getLocEnd());
+
+  // Collect information from the lambda scope.
+  llvm::SmallVector<SpawnLambdaExpr::Capture, 4> Captures;
+  llvm::SmallVector<Expr *, 4> CaptureInits;
+
+  SpawnLambdaScopeInfo *LSI = S.getCurSpawnLambda();
+  CXXRecordDecl *Class = LSI->Lambda;
+  CXXMethodDecl *CallOperator = LSI->CallOperator;
+  bool LambdaExprNeedsCleanups = LSI->ExprNeedsCleanups;
+  llvm::SmallVector<VarDecl *, 4> ArrayIndexVars;
+  llvm::SmallVector<unsigned, 4> ArrayIndexStarts;
+  ArrayIndexVars.swap(LSI->ArrayIndexVars);
+  ArrayIndexStarts.swap(LSI->ArrayIndexStarts);
+
+  // Translate captures.
+  for (unsigned I = 0, N = LSI->Captures.size(); I != N; ++I) {
+    SpawnLambdaScopeInfo::Capture From = LSI->Captures[I];
+
+    // Handle 'this' capture.
+    if (From.isThisCapture()) {
+      Captures.push_back(SpawnLambdaExpr::Capture(From.getLocation(),
+                                                  /*IsImplicit*/true,
+                                                  LCK_This));
+      CaptureInits.push_back(new (S.Context) CXXThisExpr(From.getLocation(),
+                                                         S.getCurrentThisType(),
+                                                         /*IsImplicit=*/true));
+      continue;
+    }
+
+    VarDecl *Var = From.getVariable();
+    LambdaCaptureKind Kind = From.isCopyCapture()? LCK_ByCopy : LCK_ByRef;
+    Captures.push_back(SpawnLambdaExpr::Capture(From.getLocation(),
+                                                /*IsImplicit*/true,
+                                                Kind, Var,
+                                                From.getEllipsisLoc()));
+    CaptureInits.push_back(From.getCopyExpr());
+  }
+
+  S.ActOnFinishFunctionBody(CallOperator, Body, /*IsInstantiation*/false);
+  CallOperator->setLexicalDeclContext(Class);
+  Class->addDecl(CallOperator);
+  S.PopExpressionEvaluationContext();
+
+  // Finalize the lambda class.
+  SmallVector<Decl*, 4> Fields;
+  for (RecordDecl::field_iterator i = Class->field_begin(),
+                                  e = Class->field_end(); i != e; ++i)
+    Fields.push_back(*i);
+  S.ActOnFields(0, Class->getLocation(), Class, Fields,
+                SourceLocation(), SourceLocation(), 0);
+  S.CheckCompletedCXXClass(Class);
+
+  if (LambdaExprNeedsCleanups)
+    S.ExprNeedsCleanups = true;
+
+  SpawnLambdaExpr *Lambda = SpawnLambdaExpr::Create(S.Context, SpawnLoc, Class,
+                                                    Captures, CaptureInits,
+                                                    ArrayIndexVars,
+                                                    ArrayIndexStarts);
+
+  if (!S.CurContext->isDependentContext()) {
+    switch (S.ExprEvalContexts.back().Context) {
+    case Sema::Unevaluated:
+      S.ExprEvalContexts.back().Lambdas.push_back(Lambda);
+      break;
+
+    case Sema::ConstantEvaluated:
+    case Sema::PotentiallyEvaluated:
+    case Sema::PotentiallyEvaluatedIfUsed:
+      break;
+    }
+  }
+
+  return S.MaybeBindToTemporary(Lambda);
+}
+
+namespace {
+class SpawnLocHelper : public RecursiveASTVisitor<SpawnLocHelper> {
+  Sema &SemaRef;
+  SourceLocation SpawnLoc;
+public:
+  SpawnLocHelper(Sema &S) : SemaRef(S) {}
+  bool TraverseCompoundStmt(Stmt *) { return true; }
+  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    SpawnLoc = E->getSpawnLoc();
+    return false; // terminate if found
+  }
+
+  SourceLocation GetSpawnLoc() const { return SpawnLoc; }
+};
+} // anonymous namespace
+
+static StmtResult BuildCilkSpawnStmt(Sema &S, Expr *E, SourceLocation SpawnLoc,
+                                     VarDecl *D = 0) {
+  // FIXME: build the correct type
+  QualType ReturnTy = D ? D->getType() : S.Context.VoidTy;
+
+  beginSpawnLambda(S, SpawnLoc, S.getCurScope(), ReturnTy);
+  ExprResult Lambda = LambdifyExpr(S, S.getCurScope(), E, SpawnLoc, D != 0);
+  ExprResult Call = S.BuildCallToObjectOfClassType(S.getCurScope(),
+                                                   Lambda.get(),
+                                                   SpawnLoc,
+                                                   /*Args*/0,
+                                                   /*NumArgs*/0,
+                                                   SpawnLoc);
+  if (D)
+    D->setInit(0);
+
+  return new (S.Context) CilkSpawnStmt(S.Context, D, Call.take());
+}
+
+static StmtResult LambdifyDeclStmt(Sema &S, DeclStmt *DS) {
+  assert(DS && "DeclStmt expected");
+  if (!DS->isSingleDecl())
+    return DS;
+
+  VarDecl *D = dyn_cast<VarDecl>(DS->getSingleDecl());
+  if (!D || !D->hasInit())
+    return DS;
+
+  SpawnLocHelper Helper(S);
+  Helper.TraverseStmt(DS);
+  SourceLocation SpawnLoc = Helper.GetSpawnLoc();
+
+  // No spawn
+  if (!SpawnLoc.isValid())
+    return DS;
+
+  // FIXME: enable reference type etc
+  QualType T = D->getType();
+  if (T->isReferenceType() || !T->isScalarType())
+    return DS;
+
+  return BuildCilkSpawnStmt(S, D->getInit(), SpawnLoc, D);
+}
+
+template <typename T>
+static StmtResult LambdifyExpr(Sema &S, T *E) {
+  assert(E && "Expr expected");
+  SpawnLocHelper Helper(S);
+  Helper.TraverseStmt(E);
+  SourceLocation SpawnLoc = Helper.GetSpawnLoc();
+
+  // No spawn
+  if (!SpawnLoc.isValid())
+    return E;
+  return BuildCilkSpawnStmt(S, E, SpawnLoc);
+}
+
+void Sema::LambdifyCilkSpawn(Stmt *&S) {
+  switch (S->getStmtClass()) {
+  default:
+    break; // No need to tranform
+  case Stmt::CXXForRangeStmtClass: {
+    CXXForRangeStmt *FR = cast<CXXForRangeStmt>(S);
+    if (Stmt *Body = FR->getBody()) {
+      LambdifyCilkSpawn(Body);
+      FR->setBody(Body);
+    }
+    break;
+  }
+  case Stmt::ExprWithCleanupsClass:
+    S = LambdifyExpr(*this, cast<ExprWithCleanups>(S)).take();
+    break;
+  case Stmt::DeclStmtClass:
+    S = LambdifyDeclStmt(*this, cast<DeclStmt>(S)).take();
+    break;
+  case Stmt::BinaryOperatorClass:
+    S = LambdifyExpr(*this, cast<BinaryOperator>(S)).take();
+    break;
+  case Stmt::DoStmtClass: {
+    DoStmt *DS = cast<DoStmt>(S);
+    if (Stmt *Body = DS->getBody()) {
+      LambdifyCilkSpawn(Body);
+      DS->setBody(Body);
+    }
+    break;
+  }
+  case Stmt::CilkSpawnExprClass: {
+    CilkSpawnExpr *E = cast<CilkSpawnExpr>(S);
+    S = BuildCilkSpawnStmt(*this, E, E->getSpawnLoc()).take();
+    break;
+  }
+  case Stmt::ForStmtClass: {
+    ForStmt *F = cast<ForStmt>(S);
+    if (Stmt *Body = F->getBody()) {
+      LambdifyCilkSpawn(Body);
+      F->setBody(Body);
+    }
+    break;
+  }
+  case Stmt::IfStmtClass: {
+    if (Stmt *Then = cast<IfStmt>(S)->getThen()) {
+      LambdifyCilkSpawn(Then);
+      cast<IfStmt>(S)->setThen(Then);
+    } else if (Stmt *Else = cast<IfStmt>(S)->getElse()) {
+      LambdifyCilkSpawn(Else);
+      cast<IfStmt>(S)->setElse(Else);
+    }
+    break;
+  }
+  case Stmt::LabelStmtClass: {
+    LabelStmt *LS = cast<LabelStmt>(S);
+    if (Stmt *SS = LS->getSubStmt()) {
+      LambdifyCilkSpawn(SS);
+      LS->setSubStmt(SS);
+    }
+    break;
+  }
+  case Stmt::CaseStmtClass: {
+    CaseStmt *CS = cast<CaseStmt>(S);
+    if (Stmt *SS = CS->getSubStmt()) {
+      LambdifyCilkSpawn(SS);
+      CS->setSubStmt(SS);
+    }
+    break;
+  }
+  case Stmt::DefaultStmtClass: {
+    DefaultStmt *DS = cast<DefaultStmt>(S);
+    if (Stmt *SS = DS->getSubStmt()) {
+      LambdifyCilkSpawn(SS);
+      DS->setSubStmt(SS);
+    }
+    break;
+  }
+  case Stmt::WhileStmtClass: {
+    WhileStmt *W = cast<WhileStmt>(S);
+    if (Stmt *Body = W->getBody()) {
+      LambdifyCilkSpawn(Body);
+      W->setBody(Body);
+    }
+    break;
+  }
+  }
 }

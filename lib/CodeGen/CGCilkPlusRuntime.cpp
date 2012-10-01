@@ -770,11 +770,14 @@ CGCilkPlusRuntime::~CGCilkPlusRuntime()
 {
 }
 
-LValue
+void
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                 const CilkSpawnExpr &E)
+                                 const CilkSpawnStmt &S)
 {
-  return CGF.EmitLValue(E.getSubExpr());
+  if (const Stmt *DS = S.getReceiverDecl())
+    CGF.EmitStmt(DS);
+
+  CGF.EmitIgnoredExpr(S.getRHS());
 }
 
 void

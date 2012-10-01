@@ -1855,3 +1855,21 @@ void CodeGenFunction::EmitLambdaExpr(const LambdaExpr *E, AggValueSlot Slot) {
     EmitInitializerForField(*CurField, LV, *i, ArrayIndexes);
   }
 }
+
+void CodeGenFunction::EmitSpawnLambdaExpr(const SpawnLambdaExpr *E, AggValueSlot Slot) {
+  RunCleanupsScope Scope(*this);
+  LValue SlotLV = MakeAddrLValue(Slot.getAddr(), E->getType(),
+                                 Slot.getAlignment());
+
+  CXXRecordDecl::field_iterator CurField = E->getLambdaClass()->field_begin();
+  for (SpawnLambdaExpr::capture_init_iterator i = E->capture_init_begin(),
+                                              e = E->capture_init_end();
+       i != e; ++i, ++CurField) {
+    // Emit initialization
+    LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
+    ArrayRef<VarDecl *> ArrayIndexes;
+    if (CurField->getType()->isArrayType())
+      ArrayIndexes = E->getCaptureInitIndexVars(i);
+    EmitInitializerForField(*CurField, LV, *i, ArrayIndexes);
+  }
+}

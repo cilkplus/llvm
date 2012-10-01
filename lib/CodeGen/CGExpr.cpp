@@ -14,7 +14,6 @@
 #include "CodeGenFunction.h"
 #include "CodeGenModule.h"
 #include "CGCall.h"
-#include "CGCilkPlusRuntime.h"
 #include "CGCXXABI.h"
 #include "CGDebugInfo.h"
 #include "CGRecordLayout.h"
@@ -724,8 +723,7 @@ LValue CodeGenFunction::EmitLValue(const Expr *E) {
   case Expr::UserDefinedLiteralClass:
     return EmitCallExprLValue(cast<CallExpr>(E));
   case Expr::CilkSpawnExprClass:
-    return CGM.getCilkPlusRuntime().EmitCilkSpawn(*this,
-                                                  cast<CilkSpawnExpr>(*E));
+    return EmitLValue(cast<CilkSpawnExpr>(E)->getSubExpr());
   case Expr::VAArgExprClass:
     return EmitVAArgExprLValue(cast<VAArgExpr>(E));
   case Expr::DeclRefExprClass:
@@ -751,6 +749,8 @@ LValue CodeGenFunction::EmitLValue(const Expr *E) {
     return EmitCXXBindTemporaryLValue(cast<CXXBindTemporaryExpr>(E));
   case Expr::LambdaExprClass:
     return EmitLambdaLValue(cast<LambdaExpr>(E));
+  case Expr::SpawnLambdaExprClass:
+    return EmitSpawnLambdaLValue(cast<SpawnLambdaExpr>(E));
 
   case Expr::ExprWithCleanupsClass: {
     const ExprWithCleanups *cleanups = cast<ExprWithCleanups>(E);
@@ -3426,4 +3426,11 @@ RValue CodeGenFunction::EmitPseudoObjectRValue(const PseudoObjectExpr *E,
 
 LValue CodeGenFunction::EmitPseudoObjectLValue(const PseudoObjectExpr *E) {
   return emitPseudoObjectExpr(*this, E, true, AggValueSlot::ignored()).LV;
+}
+
+LValue
+CodeGenFunction::EmitSpawnLambdaLValue(const SpawnLambdaExpr *E) {
+  AggValueSlot Slot = CreateAggTemp(E->getType(), "temp.lvalue");
+  EmitSpawnLambdaExpr(E, Slot);
+  return MakeAddrLValue(Slot.getAddr(), E->getType());
 }

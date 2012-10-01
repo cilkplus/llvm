@@ -166,6 +166,7 @@ public:
   void VisitCXXBindTemporaryExpr(CXXBindTemporaryExpr *E);
   void VisitCXXConstructExpr(const CXXConstructExpr *E);
   void VisitLambdaExpr(LambdaExpr *E);
+  void VisitSpawnLambdaExpr(SpawnLambdaExpr *E);
   void VisitExprWithCleanups(ExprWithCleanups *E);
   void VisitCXXScalarValueInitExpr(CXXScalarValueInitExpr *E);
   void VisitCXXTypeidExpr(CXXTypeidExpr *E) { EmitAggLoadOfLValue(E); }
@@ -881,6 +882,12 @@ void
 AggExprEmitter::VisitLambdaExpr(LambdaExpr *E) {
   AggValueSlot Slot = EnsureSlot(E->getType());
   CGF.EmitLambdaExpr(E, Slot);
+}
+
+void
+AggExprEmitter::VisitSpawnLambdaExpr(SpawnLambdaExpr *E) {
+  AggValueSlot Slot = EnsureSlot(E->getType());
+  CGF.EmitSpawnLambdaExpr(E, Slot);
 }
 
 void AggExprEmitter::VisitExprWithCleanups(ExprWithCleanups *E) {

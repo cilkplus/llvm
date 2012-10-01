@@ -4198,6 +4198,9 @@ public:
   /// \brief Retrieve the current spawn lambda expression, if any.
   sema::SpawnLambdaScopeInfo *getCurSpawnLambda();
 
+  /// \brief Transform a statement containing a single Cilk spawn expression
+  void LambdifyCilkSpawn(Stmt *&S);
+
   //===--------------------------------------------------------------------===//
   // C++ Declarations
   //

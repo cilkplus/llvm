@@ -2016,7 +2016,6 @@ public:
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
-  void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//
@@ -2196,6 +2195,7 @@ public:
   LValue EmitCXXConstructLValue(const CXXConstructExpr *E);
   LValue EmitCXXBindTemporaryLValue(const CXXBindTemporaryExpr *E);
   LValue EmitLambdaLValue(const LambdaExpr *E);
+  LValue EmitSpawnLambdaLValue(const SpawnLambdaExpr *E);
   LValue EmitCXXTypeidLValue(const CXXTypeidExpr *E);
 
   LValue EmitObjCMessageExprLValue(const ObjCMessageExpr *E);
@@ -2485,6 +2485,7 @@ public:
   void EmitCXXThrowExpr(const CXXThrowExpr *E);
 
   void EmitLambdaExpr(const LambdaExpr *E, AggValueSlot Dest);
+  void EmitSpawnLambdaExpr(const SpawnLambdaExpr *E, AggValueSlot Dest);
 
   RValue EmitAtomicExpr(AtomicExpr *E, llvm::Value *Dest = 0);
 
