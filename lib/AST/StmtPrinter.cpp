@@ -1844,6 +1844,14 @@ void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
   PrintExpr(Node->getSubExpr());
 }
 
+void StmtPrinter::VisitCilkSpawnStmt(CilkSpawnStmt *Node) {
+  if (Node->getReceiverVar()) {
+    PrintRawDecl(Node->getReceiverVar());
+    OS << " = ";
+  }
+  PrintExpr(Node->getRHS());
+}
+
 //===----------------------------------------------------------------------===//
 // Stmt method implementations
 //===----------------------------------------------------------------------===//

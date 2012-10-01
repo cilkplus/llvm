@@ -1913,6 +1913,51 @@ public:
   child_range children() { return child_range(); }
 };
 
+/// \brief This represents a _Cilk_spawn statement.
+class CilkSpawnStmt : public Stmt {
+  enum { RECDECL, RHS, END_EXPR };
+  Stmt* SubExprs[END_EXPR];
+
+  friend class ASTStmtReader;
+public:
+  CilkSpawnStmt(ASTContext &C, VarDecl *V, Expr *E);
+
+  explicit CilkSpawnStmt(EmptyShell E) : Stmt(CilkSpawnStmtClass, E) {}
+
+  VarDecl *getReceiverVar();
+  const VarDecl *getReceiverVar() const;
+  void setReceiverVar(ASTContext &C, VarDecl *V);
+
+  DeclStmt *getReceiverDecl() {
+    return reinterpret_cast<DeclStmt*>(SubExprs[RECDECL]);
+  }
+  const DeclStmt *getReceiverDecl() const {
+    return reinterpret_cast<DeclStmt*>(SubExprs[RECDECL]);
+  }
+  void setReceiverDecl(Stmt *S) {
+    SubExprs[RECDECL] = S;
+  }
+
+  Expr *getRHS() {
+    return reinterpret_cast<Expr*>(SubExprs[RHS]);
+  }
+  const Expr *getRHS() const {
+    return reinterpret_cast<Expr*>(SubExprs[RHS]);
+  }
+  void setRHS(Expr *E) { SubExprs[RHS] = reinterpret_cast<Stmt*>(E); }
+
+  SourceRange getSourceRange() const LLVM_READONLY;
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CilkSpawnStmtClass;
+  }
+  static bool classof(CilkSpawnStmt *) { return true; }
+
+  child_range children() {
+    return child_range(&SubExprs[0], &SubExprs[0] + END_EXPR);
+  }
+};
+
 }  // end namespace clang
 
 #endif

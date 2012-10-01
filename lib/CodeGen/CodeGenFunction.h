@@ -2016,7 +2016,7 @@ public:
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
-
+  void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//

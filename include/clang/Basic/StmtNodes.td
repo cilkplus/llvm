@@ -176,3 +176,4 @@ def AsTypeExpr : DStmt<Expr>;
 def CilkSyncStmt : Stmt;
 def CilkSpawnExpr : DStmt<Expr>;
 def SpawnLambdaExpr : DStmt<Expr>;
+def CilkSpawnStmt : Stmt;

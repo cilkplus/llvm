@@ -167,6 +167,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHTryStmtClass:
     // FIXME Not yet implemented
     break;
+  case Stmt::CilkSpawnStmtClass:
+    EmitCilkSpawnStmt(cast<CilkSpawnStmt>(*S));
+    break;
   }
 }
 
@@ -1686,4 +1689,11 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
 
     EmitStoreThroughLValue(RValue::get(Tmp), ResultRegDests[i]);
   }
+}
+
+void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
+  if (const Stmt *DS = S.getReceiverDecl())
+    EmitStmt(DS);
+
+  EmitIgnoredExpr(S.getRHS());
 }

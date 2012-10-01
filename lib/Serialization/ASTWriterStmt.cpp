@@ -1570,6 +1570,13 @@ void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
   Code = serialization::EXPR_CILKSPAWN;
 }
 
+void ASTStmtWriter::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
+  VisitStmt(S);
+  Writer.AddDeclRef(S->getReceiverVar(), Record);
+  Writer.AddStmt(S->getRHS());
+  Code = serialization::STMT_CILKSPAWN;
+}
+
 //===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements.
 //===----------------------------------------------------------------------===//

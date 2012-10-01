@@ -1035,3 +1035,43 @@ SEHFinallyStmt* SEHFinallyStmt::Create(ASTContext &C,
                                        Stmt *Block) {
   return new(C)SEHFinallyStmt(Loc,Block);
 }
+
+CilkSpawnStmt::CilkSpawnStmt(ASTContext &C, VarDecl *V, Expr *E)
+  : Stmt(CilkSpawnStmtClass)
+{
+  setReceiverVar(C, V);
+  SubExprs[RHS] = reinterpret_cast<Stmt*>(E);
+}
+
+VarDecl *CilkSpawnStmt::getReceiverVar() {
+  if (!SubExprs[RECDECL])
+    return 0;
+
+  DeclStmt *DS = cast<DeclStmt>(SubExprs[RECDECL]);
+  return cast<VarDecl>(DS->getSingleDecl());
+}
+
+const VarDecl *CilkSpawnStmt::getReceiverVar() const {
+  return const_cast<CilkSpawnStmt*>(this)->getReceiverVar();
+}
+
+void CilkSpawnStmt::setReceiverVar(ASTContext &C, VarDecl *V) {
+  if (!V) {
+    SubExprs[RECDECL] = 0;
+    return;
+  }
+
+  SourceRange VarRange = V->getSourceRange();
+  SubExprs[RECDECL] = new (C) DeclStmt(DeclGroupRef(V), VarRange.getBegin(),
+                                       VarRange.getEnd());
+}
+
+SourceRange CilkSpawnStmt::getSourceRange() const {
+  SourceLocation StartLoc = SubExprs[RHS]->getLocStart();
+  SourceLocation EndLoc = SubExprs[RHS]->getLocEnd();
+
+  if (SubExprs[RECDECL])
+    StartLoc = getReceiverVar()->getLocStart();
+
+  return SourceRange(StartLoc, EndLoc);
+}

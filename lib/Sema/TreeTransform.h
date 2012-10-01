@@ -9263,6 +9263,12 @@ TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
   return getDerived().RebuildCilkSpawnExpr(E->getSpawnLoc(), Call.get());
 }
 
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformCilkSpawnStmt(CilkSpawnStmt *S) {
+  return Owned(S);
+}
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_SEMA_TREETRANSFORM_H

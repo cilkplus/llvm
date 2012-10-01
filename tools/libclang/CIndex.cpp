@@ -3649,6 +3649,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return createCXString("CilkSpawnExpr");
   case CXCursor_SpawnLambdaExpr:
     return createCXString("CilkSpawnLambdaExpr");
+  case CXCursor_CilkSpawnStmt:
+    return createCXString("CilkSpawnStmt");
   }
 
   llvm_unreachable("Unhandled CXCursorKind");

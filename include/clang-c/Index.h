@@ -1988,7 +1988,11 @@ enum CXCursorKind {
     */
   CXCursor_CilkSyncStmt                  = 232,
 
-  CXCursor_LastStmt                      = CXCursor_CilkSyncStmt,
+  /** \brief A Spawn statement from the Cilk Plus extensions to C/C++
+    */
+  CXCursor_CilkSpawnStmt                 = 233,
+
+  CXCursor_LastStmt                      = CXCursor_CilkSpawnStmt,
 
   /**
    * \brief Cursor that represents the translation unit itself.

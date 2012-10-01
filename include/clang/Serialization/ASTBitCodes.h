@@ -1218,6 +1218,7 @@ namespace clang {
       // Cilk Plus
       STMT_CILKSYNC,
       EXPR_CILKSPAWN,
+      STMT_CILKSPAWN,
       EXPR_SPAWN_LAMBDA
     };
 

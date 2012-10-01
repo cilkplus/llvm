@@ -2213,6 +2213,7 @@ DEF_TRAVERSE_STMT(CUDAKernelCallExpr, { })
 
 DEF_TRAVERSE_STMT(CilkSyncStmt, { })
 DEF_TRAVERSE_STMT(CilkSpawnExpr, { })
+DEF_TRAVERSE_STMT(CilkSpawnStmt, { })
 
 // Only the lambda body is explicit.
 template<typename Derived>

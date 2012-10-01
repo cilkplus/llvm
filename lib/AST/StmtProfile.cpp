@@ -728,6 +728,10 @@ void StmtProfiler::VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
   VisitExpr(E);
 }
 
+void StmtProfiler::VisitCilkSpawnStmt(const CilkSpawnStmt *S) {
+  VisitStmt(S);
+}
+
 void StmtProfiler::VisitCXXNamedCastExpr(const CXXNamedCastExpr *S) {
   VisitExplicitCastExpr(S);
 }
