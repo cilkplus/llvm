@@ -17,6 +17,7 @@
 #include "llvm/InlineAsm.h"
 #include "llvm/Function.h"
 #include "llvm/ValueSymbolTable.h"
+#include "llvm/Intrinsics.h"
 
 namespace {
 
@@ -257,26 +258,59 @@ static llvm::Value *LoadField(CGBuilderTy &B, llvm::Value *Src, int field)
 }
 
 // Only for x86
-static void EmitSaveFloatState(CGBuilderTy &Builder, llvm::Value *SF)
+static void EmitSaveFloatState(CGBuilderTy &B, llvm::Value *SF)
 {
+  using namespace llvm;
+
   typedef void (AsmPrototype)(uint32_t*, uint16_t*);
   llvm::FunctionType *FTy =
-    llvm::TypeBuilder<AsmPrototype, false>::get(Builder.getContext());
+    TypeBuilder<AsmPrototype, false>::get(B.getContext());
 
-  llvm::Value *Asm = llvm::InlineAsm::get(FTy,
-                                          "stmxcsr $0\n\tfnstcw $1",
-                                          "*m,*m,~{dirflag},~{fpsr},~{flags}",
-                                          /*sideeffects*/ true);
+  Value *Asm = InlineAsm::get(FTy,
+                              "stmxcsr $0\n\tfnstcw $1",
+                              "*m,*m,~{dirflag},~{fpsr},~{flags}",
+                              /*sideeffects*/ true);
 
-  llvm::Value *mxcsrSlot = GEP(Builder, SF, StackFrameBuilder::mxcsr);
-  llvm::Value *fpcsrSlot = GEP(Builder, SF, StackFrameBuilder::fpcsr);
-  
-  Builder.CreateCall2(Asm, mxcsrSlot, fpcsrSlot);
+  Value *mxcsrField = GEP(B, SF, StackFrameBuilder::mxcsr);
+  Value *fpcsrField = GEP(B, SF, StackFrameBuilder::fpcsr);
+
+  B.CreateCall2(Asm, mxcsrField, fpcsrField);
 }
 
-static llvm::Value *EmitCilkSetJmp(CGBuilderTy &B, llvm::Value *SF)
+static llvm::Value *EmitCilkSetJmp(CGBuilderTy &B, llvm::Value *SF,
+                                   CodeGenModule &CGM)
 {
-  return llvm::ConstantInt::get(llvm::Type::getInt32Ty(B.getContext()), 0);
+  using namespace llvm;
+
+  llvm::Type *Int32Ty =
+      llvm::Type::getInt32Ty(CGM.getLLVMContext());
+
+  llvm::Type *Int8PtrTy =
+      llvm::Type::getInt8PtrTy(CGM.getLLVMContext());
+
+  // Get the buffer to store program state
+  // Buffer is a void**.
+  Value *Buf = GEP(B, SF, StackFrameBuilder::ctx);
+
+  // Store the frame pointer in the 0th slot
+  Value *FrameAddr =
+    B.CreateCall(CGM.getIntrinsic(Intrinsic::frameaddress),
+                 ConstantInt::get(Int32Ty, 0));
+
+  Value *FrameSaveSlot = GEP(B, Buf, 0);
+  B.CreateStore(FrameAddr, FrameSaveSlot);
+
+  // Store stack pointer in the 2nd slot
+  Value *StackAddr =
+    B.CreateCall(CGM.getIntrinsic(Intrinsic::stacksave));
+
+  Value *StackSaveSlot = GEP(B, Buf, 2);
+  B.CreateStore(StackAddr, StackSaveSlot);
+
+  // Call LLVM's EH setjmp, which is lightweight.
+  Value *F = CGM.getIntrinsic(Intrinsic::eh_sjlj_setjmp);
+  Buf = B.CreateBitCast(Buf, Int8PtrTy);
+  return B.CreateCall(F, Buf);
 }
 
 /// Generate a function that implements the cilk epilogue. The function
@@ -514,7 +548,7 @@ EmitCilkSyncFunction(const std::string &Name, CodeGenModule &CGM)
     // SAVE_FLOAT_STATE(sf);
     EmitSaveFloatState(B, SF);
     // if (!setjmp(sf.ctx))
-    Value *C = EmitCilkSetJmp(B, SF);
+    Value *C = EmitCilkSetJmp(B, SF, CGM);
     C = B.CreateNot(C);
     C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
     B.CreateCondBr(C, B2, Exit);
