@@ -109,6 +109,16 @@ void CodeGenFunction::EmitReturnBlock() {
   // simple cases.
   llvm::BasicBlock *CurBB = Builder.GetInsertBlock();
 
+  // If the return block is not empty then always emit it.
+  if (!ReturnBlock.getBlock()->empty()) {
+    if (CurBB) {
+      assert(!CurBB->getTerminator() && "Unexpected terminated block.");
+      Builder.CreateBr(ReturnBlock.getBlock());
+    }
+    EmitBlock(ReturnBlock.getBlock());
+    return;
+  }
+
   if (CurBB) {
     assert(!CurBB->getTerminator() && "Unexpected terminated block.");
 
