@@ -166,8 +166,8 @@ void CodeGenModule::createCUDARuntime() {
 }
 
 void CodeGenModule::createCilkPlusRuntime() {
-  //CilkPlusRuntime = CreateCilkPlusRuntime(*this);
-  CilkPlusRuntime = CreateCilkPlusFakeRuntime(*this);
+  CilkPlusRuntime = CreateCilkPlusRuntime(*this);
+  //CilkPlusRuntime = CreateCilkPlusFakeRuntime(*this);
 }
 
 void CodeGenModule::Release() {

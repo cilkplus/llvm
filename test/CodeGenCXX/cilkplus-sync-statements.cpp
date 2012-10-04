@@ -30,8 +30,19 @@ void test1() {
 // Note: the compiler may elide a sync if it can statically
 // determine that the sync will have no observable efect
 void test2() {
+  // Make sure Cilk enters the function properly
+  // CHECK: alloca %__cilkrts_stack_frame
+  // CHECK: alloca %__cilkrts_worker*
+  // CHECK: call void @__cilk_prologue(%__cilkrts_stack_frame* %__cilkrts_sf, %__cilkrts_worker** %__cilkrts_w)
+
   global = _Cilk_spawn Fib(BIG_NUM);
+
+  // Make sure explicit call to sync is made
+  // CHECK: call void @__cilk_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
   _Cilk_sync;
+
+  // Make sure Cilk exits the function properly
+  // CHECK: call void @__cilk_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
 }
 
 
@@ -55,8 +66,19 @@ int test4() {
 // Note: the compiler may elide a sync if it can statically
 // determine that the sync will have no observable efect
 void test5() {
+  // Make sure Cilk enters the function properly
+  // CHECK: alloca %__cilkrts_stack_frame
+  // CHECK: alloca %__cilkrts_worker*
+  // CHECK: call void @__cilk_prologue(%__cilkrts_stack_frame* %__cilkrts_sf, %__cilkrts_worker** %__cilkrts_w)
+
   global = Fib(BIG_NUM);
+
+  // Make sure explicit call to sync is made
+  // CHECK: call void @__cilk_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
   _Cilk_sync;
+
+  // Make sure Cilk exits the function properly
+  // CHECK: call void @__cilk_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
 }
 
 
@@ -75,13 +97,4 @@ void test6() {
 void test7() throw (int) {
   global = _Cilk_spawn Fib(BIG_NUM);
   throw BIG_NUM;
-}
-
-
-int main() {
-  // Need to have a CHECK statement somewhere
-  // When _Cilk_spawn functionality is added need to add CHECK
-  // statements to make sure all the tests work as expected
-  // CHECK: alloca
-  return 0;
 }
