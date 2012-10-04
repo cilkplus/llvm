@@ -211,9 +211,11 @@ public:
 
   ~CGCilkPlusFakeRuntime() {}
 
-  LValue EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnExpr &E)
+  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &S)
   {
-    return CGF.EmitLValue(E.getSubExpr());
+    if (const Stmt *DS = S.getReceiverDecl())
+      CGF.EmitStmt(DS);
+    CGF.EmitIgnoredExpr(S.getRHS());
   }
 
   void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S)
