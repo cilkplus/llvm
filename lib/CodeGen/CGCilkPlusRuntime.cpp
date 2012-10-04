@@ -648,7 +648,7 @@ static void EmitSpawnHelperPrologue(CGBuilderTy &B,
     llvm::Type *Ty = STy->getElementType(PedigreeBuilder::rank);
     StoreField(B,
                ConstantInt::get(Ty, 0),
-               LoadField(B, W, WorkerBuilder::pedigree),
+               GEP(B, W, WorkerBuilder::pedigree),
                PedigreeBuilder::rank);
   }
   // w->pedigree.next = &sf->spawn_helper_pedigree;
@@ -658,7 +658,7 @@ static void EmitSpawnHelperPrologue(CGBuilderTy &B,
              PedigreeBuilder::next);
   // *tail++ = sf->call_parent;
   B.CreateStore(LoadField(B, SF, StackFrameBuilder::call_parent), Tail);
-  B.CreateStore(B.CreateAdd(Tail, ConstantInt::get(Tail->getType(), 1)), Tail);
+  Tail = B.CreateConstGEP1_32(Tail, 1);
   // w->tail = tail;
   StoreField(B, Tail, W, WorkerBuilder::tail);
   // sf->flags |= CILK_FRAME_DETACHED;
@@ -682,21 +682,59 @@ static void EmitSpawnHelperEpilogue(CGBuilderTy &B,
                                     CodeGenModule &CGM,
                                     llvm::Value *SF)
 {
+  using namespace llvm;
+  llvm::Module &Module = CGM.getModule();
+  LLVMContext &Ctx = Module.getContext();
+
   // sf->worker->current_stack_frame = sf->call_parent;
   StoreField(B,
              LoadField(B, SF, StackFrameBuilder::call_parent),
              LoadField(B, SF, StackFrameBuilder::worker),
              WorkerBuilder::current_stack_frame);
   // sf->call_parent = 0;
-  StoreField(B, 0, SF, StackFrameBuilder::call_parent);
+  StoreField(B,
+             Constant::getNullValue(TypeBuilder<__cilkrts_stack_frame*,
+                                                false>::get(Ctx)),
+             SF, StackFrameBuilder::call_parent);
   // __cilkrts_leave_frame(sf);
   B.CreateCall(CILKRTS_FUNC(leave_frame, CGM), SF);
 }
 
-static void EmitSpawnHelper(CodeGenFunction &CFG)
+static void EmitSpawnHelperFunction(CodeGenModule &CGM)
 {
-  // After emitting SpawnLambda there should be a single
-  // use of the corresponding llvm function.
+  using namespace llvm;
+  llvm::Module &Module = CGM.getModule();
+  LLVMContext &Ctx = Module.getContext();
+
+  typedef void (__cilk_helper)(__cilkrts_worker*);
+  llvm::FunctionType *FTy = TypeBuilder<__cilk_helper, false>::get(Ctx);
+  Function *F = Function::Create(FTy,
+                                 GlobalValue::InternalLinkage,
+                                 "__cilk_helper",
+                                 &Module);
+
+  BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", F);
+
+  Value *W = F->arg_begin();
+  W->setName(WorkerName());
+
+  { // Entry
+    CGBuilderTy B(Entry);
+    llvm::Type *SFTy = StackFrameBuilder::get(Ctx);
+    Value *SF = B.CreateAlloca(SFTy, 0, StackFrameName());
+    EmitSpawnHelperPrologue(B, SF, W);
+    //TODO: call spawned function
+    EmitSpawnHelperEpilogue(B, CGM, SF);
+    B.CreateRetVoid();
+  }
+}
+
+static void EmitSpawnHelper(CodeGenFunction &CGF,
+                            llvm::Value *W)
+{
+  // TODO: emit call to spawned function then transplant it into the
+  // helper.
+  EmitSpawnHelperFunction(CGF.CGM);
 }
 
 static llvm::Value *GetNamedValue(CodeGenFunction &CGF,
