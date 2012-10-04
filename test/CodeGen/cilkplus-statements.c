@@ -1,5 +1,4 @@
 // RUN: %clang_cc1 -fcilkplus -emit-llvm %s -o - | FileCheck %s
-// XFAIL: *
 int foo(void);
 
 void test() {
