@@ -7,7 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This provides Cilk Plus code generation
+// This provides Cilk Plus code generation. The purpose of the runtime is to 
+// encapsulate everything for Cilk spawn/sync/for. This includes making calls
+// to the cilkrts library and generating spawn helper functions.
 //
 //===----------------------------------------------------------------------===//
 #include "CGCilkPlusRuntime.h"
@@ -18,6 +20,7 @@
 #include "llvm/Function.h"
 #include "llvm/ValueSymbolTable.h"
 #include "llvm/Intrinsics.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 namespace {
 
@@ -203,6 +206,9 @@ public:
 using namespace clang;
 using namespace CodeGen;
 
+// The fake runtime can be used to turn Cilk spawn/sync/for statements in the
+// AST into serial code that does not require the cilkrts library. This class
+// is intended to be used mainly for testing everything in Cilk before codegen.
 class CGCilkPlusFakeRuntime : public CGCilkPlusRuntime {
 public:
   CGCilkPlusFakeRuntime(CodeGenModule &CGM)
@@ -213,6 +219,7 @@ public:
 
   void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &S)
   {
+    // Emit the statement as a regular call.
     if (const Stmt *DS = S.getReceiverDecl())
       CGF.EmitStmt(DS);
     CGF.EmitIgnoredExpr(S.getRHS());
@@ -702,41 +709,70 @@ static void EmitSpawnHelperEpilogue(CGBuilderTy &B,
   B.CreateCall(CILKRTS_FUNC(leave_frame, CGM), SF);
 }
 
-static void EmitSpawnHelperFunction(CodeGenModule &CGM)
+static llvm::Function*
+EmitSpawnHelperFunction(CodeGenModule &CGM, llvm::CallInst *Call)
 {
   using namespace llvm;
   llvm::Module &Module = CGM.getModule();
   LLVMContext &Ctx = Module.getContext();
 
-  typedef void (__cilk_helper)(__cilkrts_worker*);
-  llvm::FunctionType *FTy = TypeBuilder<__cilk_helper, false>::get(Ctx);
+  Function *Callee = Call->getCalledFunction();
+
+  // Generate a name of the spawn helper.
+  std::string FName = "__cilk_spawn_helper_";
+  if (Callee && Callee->hasName())
+    FName = FName + Callee->getName().str();
+
+  // Get the function type of the spawn helper.
+  llvm::FunctionType *FTy = 0;
+  {
+    llvm::Type *RetTy = Call->getType();
+    assert(RetTy->isVoidTy() && "Expected void return type");
+
+    SmallVector<llvm::Type*, 4> Types;
+    Types.push_back(llvm::TypeBuilder<__cilkrts_worker*, false>::get(Ctx));
+    // If this is an indirect call the function pointer is an argument too.
+    if (!Callee)
+      Types.push_back(Call->getCalledValue()->getType());
+    for (unsigned i = 0; i < Call->getNumArgOperands(); ++i)
+      Types.push_back(Call->getArgOperand(i)->getType());
+    FTy = llvm::FunctionType::get(RetTy, Types, false);
+  }
+
   Function *F = Function::Create(FTy,
                                  GlobalValue::InternalLinkage,
-                                 "__cilk_helper",
+                                 FName,
                                  &Module);
+  // The Cilk spec requires that spawn helpers not be inlined.
+  Attributes Attrs(Attribute::NoInline);
+  F->addFnAttr(Attrs);
 
   BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", F);
 
-  Value *W = F->arg_begin();
+  Function::arg_iterator I = F->arg_begin();
+  Value *W = I++;
   W->setName(WorkerName());
+  Value *Func = Callee ? static_cast<Value*>(Callee)
+                       : static_cast<Value*>(I++);
 
-  { // Entry
-    CGBuilderTy B(Entry);
-    llvm::Type *SFTy = StackFrameBuilder::get(Ctx);
-    Value *SF = B.CreateAlloca(SFTy, 0, StackFrameName());
-    EmitSpawnHelperPrologue(B, SF, W);
-    //TODO: call spawned function
-    EmitSpawnHelperEpilogue(B, CGM, SF);
-    B.CreateRetVoid();
-  }
-}
+  CGBuilderTy B(Entry);
+  // Alloca the __cilkrts_stack_frame for the spawn helper and call the
+  // prologue.
+  llvm::Type *SFTy = StackFrameBuilder::get(Ctx);
+  Value *SF = B.CreateAlloca(SFTy, 0, StackFrameName());
+  EmitSpawnHelperPrologue(B, SF, W);
 
-static void EmitSpawnHelper(CodeGenFunction &CGF,
-                            llvm::Value *W)
-{
-  // TODO: emit call to spawned function then transplant it into the
-  // helper.
-  EmitSpawnHelperFunction(CGF.CGM);
+  // Emit a call to the spawned function.
+  SmallVector<Value*, 4> Args;
+  for (Function::arg_iterator IE = F->arg_end(); I != IE; ++I)
+    Args.push_back(I);
+  B.CreateCall(Func, Args);
+
+  // Call the spawn helper epilogue.
+  EmitSpawnHelperEpilogue(B, CGM, SF);
+  B.CreateRetVoid();
+
+  return F;
 }
 
 static llvm::Value *GetNamedValue(CodeGenFunction &CGF,
@@ -776,10 +812,41 @@ void
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
                                  const CilkSpawnStmt &S)
 {
+  assert(isa<CallExpr>(S.getRHS()) && "RHS is not a call expression.");
+
+  // Load the __cilkrts_worker* which is needed by the spawn helper.
+  llvm::Value *W = CGF.Builder.CreateLoad(GetWorker(CGF));
+
+  // Emit the CilkSpawnStmt as if it was a regular call.
   if (const Stmt *DS = S.getReceiverDecl())
     CGF.EmitStmt(DS);
-
   CGF.EmitIgnoredExpr(S.getRHS());
+
+  // FIXME: Implement proper handling of the receiver. For now just bail out.
+  if (S.getReceiverDecl())
+    return;
+  // If the current block is empty it's probably because an invoke instruction
+  // instead of a call was emitted. We don't handle invoke yet.
+  if (CGF.Builder.GetInsertBlock()->empty()) {
+    return;
+  }
+
+  // Find the CallInst that was just emitted.
+  llvm::Instruction *Inst = &CGF.Builder.GetInsertBlock()->back();
+  llvm::CallInst *Call = dyn_cast<llvm::CallInst>(Inst);
+  assert(Call && "Did not get spawned function call.");
+  // Generate the spawn helper function and replace Call with a call to
+  // the helper.
+  llvm::Function *Helper = EmitSpawnHelperFunction(CGF.CGM, Call);
+  SmallVector<llvm::Value*, 4> Args;
+  Args.push_back(W);
+  if (!Call->getCalledFunction())
+    Args.push_back(Call->getCalledValue());
+  for (unsigned i = 0, ie = Call->getNumArgOperands(); i < ie; ++i) {
+    Args.push_back(Call->getArgOperand(i));
+  }
+  llvm::CallInst *SpawnCall = llvm::CallInst::Create(Helper, Args);
+  llvm::ReplaceInstWithInst(Call, SpawnCall);
 }
 
 void
