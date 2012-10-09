@@ -1561,9 +1561,7 @@ void ASTStmtReader::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
 
 void ASTStmtReader::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
   VisitStmt(S);
-  S->setReceiverVar(Reader.getContext(),
-                    ReadDeclAs<VarDecl>(Record, Idx));
-  S->setRHS(Reader.ReadSubExpr());
+  S->setSubStmt(Reader.ReadSubStmt());
 }
 
 //===----------------------------------------------------------------------===//

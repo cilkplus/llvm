@@ -438,15 +438,6 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
     }
   }
 
-  // If there are _Cilk_spawn expressions in this compound statement, check
-  // whether they are used correctly.
-  if (getCurCompoundScope().HasCilkSpawn) {
-    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
-    for (unsigned i = 0; i != NumElts; ++i) {
-      DiagnoseCilkSpawn(Elts[i]);
-    }
-  }
-
   // Warn about unused expressions in statements.
   for (unsigned i = 0; i != NumElts; ++i) {
     // Ignore statements that are last in a statement expression.
@@ -463,6 +454,23 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       getCurCompoundScope().HasEmptyLoopBodies) {
     for (unsigned i = 0; i != NumElts - 1; ++i)
       DiagnoseEmptyLoopBody(Elts[i], Elts[i + 1]);
+  }
+
+  // If there are _Cilk_spawn expressions in this compound statement, check
+  // whether they are used correctly.
+  if (getCurCompoundScope().HasCilkSpawn) {
+    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
+    bool Dependent = CurContext->isDependentContext();
+    for (unsigned i = 0; i != NumElts; ++i) {
+      unsigned errors = getDiagnostics().getClient()->getNumErrors();
+      DiagnoseCilkSpawn(Elts[i]);
+      bool NoError = errors == getDiagnostics().getClient()->getNumErrors();
+      if (!Dependent && NoError) {
+        StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
+        if (!Spawn.isInvalid() && isa<CilkSpawnStmt>(Spawn.get()))
+          Elts[i] = Spawn.take();
+      }
+    }
   }
 
   return Owned(new (Context) CompoundStmt(Context, Elts, NumElts, L, R));
@@ -2985,4 +2993,121 @@ StmtResult Sema::ActOnMSDependentExistsStmt(SourceLocation KeywordLoc,
                                     SS.getWithLocInContext(Context),
                                     GetNameFromUnqualifiedId(Name),
                                     Nested);
+}
+
+namespace {
+class SpawnHelper : public RecursiveASTVisitor<SpawnHelper> {
+  Sema &SemaRef;
+  bool HasSpawn;
+public:
+  SpawnHelper(Sema &S) : SemaRef(S), HasSpawn(false) {}
+  bool TraverseCompoundStmt(Stmt *) { return true; }
+  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    HasSpawn = true;
+    return false; // terminate if found
+  }
+
+  bool hasSpawn() const { return HasSpawn; }
+};
+
+Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
+  if (!S)
+    return S;
+
+  SpawnHelper Helper(SemaRef);
+  Helper.TraverseStmt(S);
+  if (!Helper.hasSpawn())
+    return S;
+
+  return new (SemaRef.Context) CilkSpawnStmt(S);
+}
+
+} // anonymous namespace
+
+static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
+  switch (S->getStmtClass()) {
+  default:
+    break; // No need to tranform
+  case Stmt::CXXForRangeStmtClass: {
+    CXXForRangeStmt *FR = cast<CXXForRangeStmt>(S);
+    if (Stmt *Body = FR->getBody()) {
+      BuildCilkSpawnStmt(SemaRef, Body);
+      FR->setBody(Body);
+    }
+    break;
+  }
+  case Stmt::DeclStmtClass:
+  case Stmt::BinaryOperatorClass:
+  case Stmt::CilkSpawnExprClass:
+  case Stmt::CXXOperatorCallExprClass:
+  case Stmt::ExprWithCleanupsClass:
+    S = tryCreateCilkSpawnStmt(SemaRef, S);
+    break;
+  case Stmt::DoStmtClass: {
+    DoStmt *DS = cast<DoStmt>(S);
+    if (Stmt *Body = DS->getBody()) {
+      BuildCilkSpawnStmt(SemaRef, Body);
+      DS->setBody(Body);
+    }
+    break;
+  }
+  case Stmt::ForStmtClass: {
+    ForStmt *F = cast<ForStmt>(S);
+    if (Stmt *Body = F->getBody()) {
+      BuildCilkSpawnStmt(SemaRef, Body);
+      F->setBody(Body);
+    }
+    break;
+  }
+  case Stmt::IfStmtClass: {
+    if (Stmt *Then = cast<IfStmt>(S)->getThen()) {
+      BuildCilkSpawnStmt(SemaRef, Then);
+      cast<IfStmt>(S)->setThen(Then);
+    } else if (Stmt *Else = cast<IfStmt>(S)->getElse()) {
+      BuildCilkSpawnStmt(SemaRef, Else);
+      cast<IfStmt>(S)->setElse(Else);
+    }
+    break;
+  }
+  case Stmt::LabelStmtClass: {
+    LabelStmt *LS = cast<LabelStmt>(S);
+    if (Stmt *SS = LS->getSubStmt()) {
+      BuildCilkSpawnStmt(SemaRef, SS);
+      LS->setSubStmt(SS);
+    }
+    break;
+  }
+  case Stmt::CaseStmtClass: {
+    CaseStmt *CS = cast<CaseStmt>(S);
+    if (Stmt *SS = CS->getSubStmt()) {
+      BuildCilkSpawnStmt(SemaRef, SS);
+      CS->setSubStmt(SS);
+    }
+    break;
+  }
+  case Stmt::DefaultStmtClass: {
+    DefaultStmt *DS = cast<DefaultStmt>(S);
+    if (Stmt *SS = DS->getSubStmt()) {
+      BuildCilkSpawnStmt(SemaRef, SS);
+      DS->setSubStmt(SS);
+    }
+    break;
+  }
+  case Stmt::WhileStmtClass: {
+    WhileStmt *W = cast<WhileStmt>(S);
+    if (Stmt *Body = W->getBody()) {
+      BuildCilkSpawnStmt(SemaRef, Body);
+      W->setBody(Body);
+    }
+    break;
+  }
+  }
+}
+
+StmtResult Sema::ActOnCilkSpawnStmt(Stmt *S) {
+  if (!S)
+    return StmtError();
+
+  BuildCilkSpawnStmt(*this, S);
+  return Owned(S);
 }

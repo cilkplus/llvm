@@ -1692,8 +1692,5 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
 }
 
 void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
-  if (const Stmt *DS = S.getReceiverDecl())
-    EmitStmt(DS);
-
-  EmitIgnoredExpr(S.getRHS());
+  CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
 }

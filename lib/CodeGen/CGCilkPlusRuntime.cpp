@@ -219,10 +219,7 @@ public:
 
   void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &S)
   {
-    // Emit the statement as a regular call.
-    if (const Stmt *DS = S.getReceiverDecl())
-      CGF.EmitStmt(DS);
-    CGF.EmitIgnoredExpr(S.getRHS());
+    CGF.EmitStmt(S.getSubStmt());
   }
 
   void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S)
@@ -808,11 +805,11 @@ CGCilkPlusRuntime::~CGCilkPlusRuntime()
 {
 }
 
-LValue
+void
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                 const CilkSpawnExpr &E)
+                                 const CilkSpawnStmt &E)
 {
-  return CGF.EmitLValue(E.getSubExpr());
+  return CGF.EmitStmt(E.getSubStmt());
 }
 
 void

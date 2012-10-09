@@ -2590,6 +2590,7 @@ public:
   StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
   ExprResult ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E);
   ExprResult BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E);
+  StmtResult ActOnCilkSpawnStmt(Stmt *S);
 
   const VarDecl *getCopyElisionCandidate(QualType ReturnType, Expr *E,
                                          bool AllowFunctionParameters);

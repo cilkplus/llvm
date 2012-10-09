@@ -1915,36 +1915,19 @@ public:
 
 /// \brief This represents a _Cilk_spawn statement.
 class CilkSpawnStmt : public Stmt {
-  enum { RECDECL, RHS, END_EXPR };
-  Stmt* SubExprs[END_EXPR];
+  Stmt *SubStmt;
 
   friend class ASTStmtReader;
 public:
-  CilkSpawnStmt(ASTContext &C, VarDecl *V, Expr *E);
+  CilkSpawnStmt(Stmt *S) : Stmt(CilkSpawnStmtClass), SubStmt(S) {
+    assert(S && "null spawn");
+  }
 
   explicit CilkSpawnStmt(EmptyShell E) : Stmt(CilkSpawnStmtClass, E) {}
 
-  VarDecl *getReceiverVar();
-  const VarDecl *getReceiverVar() const;
-  void setReceiverVar(ASTContext &C, VarDecl *V);
-
-  DeclStmt *getReceiverDecl() {
-    return reinterpret_cast<DeclStmt*>(SubExprs[RECDECL]);
-  }
-  const DeclStmt *getReceiverDecl() const {
-    return reinterpret_cast<DeclStmt*>(SubExprs[RECDECL]);
-  }
-  void setReceiverDecl(Stmt *S) {
-    SubExprs[RECDECL] = S;
-  }
-
-  Expr *getRHS() {
-    return reinterpret_cast<Expr*>(SubExprs[RHS]);
-  }
-  const Expr *getRHS() const {
-    return reinterpret_cast<Expr*>(SubExprs[RHS]);
-  }
-  void setRHS(Expr *E) { SubExprs[RHS] = reinterpret_cast<Stmt*>(E); }
+  Stmt *getSubStmt() { return SubStmt; }
+  const Stmt *getSubStmt() const { return SubStmt; }
+  void setSubStmt(Stmt *S) { SubStmt = S; }
 
   SourceRange getSourceRange() const LLVM_READONLY;
 
@@ -1954,7 +1937,7 @@ public:
   static bool classof(CilkSpawnStmt *) { return true; }
 
   child_range children() {
-    return child_range(&SubExprs[0], &SubExprs[0] + END_EXPR);
+    return child_range(&SubStmt, &SubStmt + 1);
   }
 };
 
