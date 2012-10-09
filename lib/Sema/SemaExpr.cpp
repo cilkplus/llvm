@@ -10427,8 +10427,7 @@ diagnoseUncapturableValueReference(Sema &S, SourceLocation loc,
 }
 
 /// \brief Capture the given variable in the given lambda expression.
-template <typename T>
-static ExprResult captureInLambda(Sema &S, T *LSI,
+static ExprResult captureInLambda(Sema &S, LambdaScopeInfo *LSI,
                                   VarDecl *Var, QualType FieldType, 
                                   QualType DeclRefType,
                                   SourceLocation Loc,
@@ -10576,8 +10575,7 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       ParentDC = DC->getParent();
     else if (isa<CXXMethodDecl>(DC) &&
              cast<CXXMethodDecl>(DC)->getOverloadedOperator() == OO_Call &&
-             (cast<CXXRecordDecl>(DC->getParent())->isLambda() ||
-              cast<CXXRecordDecl>(DC->getParent())->isSpawnLambda()))
+             cast<CXXRecordDecl>(DC->getParent())->isLambda())
       ParentDC = DC->getParent()->getParent();
     else {
       if (BuildAndDiagnose)
@@ -10749,12 +10747,14 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       continue;
     } 
     
+    LambdaScopeInfo *LSI = cast<LambdaScopeInfo>(CSI);
+    
     // Determine whether we are capturing by reference or by value.
     bool ByRef = false;
     if (I == N - 1 && Kind != TryCapture_Implicit) {
       ByRef = (Kind == TryCapture_ExplicitByRef);
     } else {
-      ByRef = (CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_LambdaByref);
+      ByRef = (LSI->ImpCaptureStyle == LambdaScopeInfo::ImpCap_LambdaByref);
     }
     
     // Compute the type of the field that will capture this variable.
@@ -10802,13 +10802,9 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
     // Capture this variable in the lambda.
     Expr *CopyExpr = 0;
     if (BuildAndDiagnose) {
-      ExprResult Result;
-      if (LambdaScopeInfo *LSI = dyn_cast<LambdaScopeInfo>(CSI))
-        Result = captureInLambda(*this, LSI, Var, CaptureType, DeclRefType,
-                                 Loc, I == N-1);
-      else if (SpawnLambdaScopeInfo *LSI = dyn_cast<SpawnLambdaScopeInfo>(CSI))
-        Result = captureInLambda(*this, LSI, Var, CaptureType, DeclRefType,
-                                 Loc, I == N-1);
+      ExprResult Result = captureInLambda(*this, LSI, Var, CaptureType,
+                                          DeclRefType, Loc,
+                                          I == N-1);
       if (!Result.isInvalid())
         CopyExpr = Result.take();
     }
@@ -10823,9 +10819,8 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       //   declared const (9.3.1) if and only if the lambda-expression’s 
       //   parameter-declaration-clause is not followed by mutable.
       DeclRefType = CaptureType.getNonReferenceType();
-      if (LambdaScopeInfo *LSI = dyn_cast<LambdaScopeInfo>(CSI))
-        if (!LSI->Mutable && !CaptureType->isReferenceType())
-          DeclRefType.addConst();      
+      if (!LSI->Mutable && !CaptureType->isReferenceType())
+        DeclRefType.addConst();      
     }
     
     // Add the capture.

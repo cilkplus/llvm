@@ -719,8 +719,7 @@ public:
                                      bool DependentLambda);
   static CXXRecordDecl *CreateSpawnLambda(const ASTContext &C, DeclContext *DC,
                                           TypeSourceInfo *Info,
-                                          SourceLocation Loc,
-                                          bool Dependent = false);
+                                          SourceLocation Loc);
   static CXXRecordDecl *CreateDeserialized(const ASTContext &C, unsigned ID);
 
   bool isDynamicClass() const {

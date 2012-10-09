@@ -104,12 +104,11 @@ CXXRecordDecl *CXXRecordDecl::CreateLambda(const ASTContext &C, DeclContext *DC,
 CXXRecordDecl *CXXRecordDecl::CreateSpawnLambda(const ASTContext &C,
                                                 DeclContext *DC,
                                                 TypeSourceInfo *Info,
-                                                SourceLocation Loc,
-                                                bool Dependent) {
+                                                SourceLocation Loc) {
   CXXRecordDecl *R = new (C) CXXRecordDecl(CXXRecord, TTK_Class, DC, Loc, Loc,
                                            0, 0);
   R->IsBeingDefined = true;
-  R->DefinitionData = new (C) struct LambdaDefinitionData(R, Info, Dependent);
+  R->DefinitionData = new (C) struct LambdaDefinitionData(R, Info, false);
   R->DefinitionData->IsSpawnLambda = true;
   C.getTypeDeclType(R, /*PrevDecl=*/0);
   return R;

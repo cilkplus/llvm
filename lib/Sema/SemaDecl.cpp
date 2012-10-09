@@ -7823,10 +7823,9 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
           !FD->isDependentContext())
         computeNRVO(Body, getCurFunction());
     }
-    assert((FD == getCurFunctionDecl() ||
-           (getCurLambda() && getCurLambda()->CallOperator == FD) ||
-           (getCurSpawnLambda() && getCurSpawnLambda()->CallOperator == FD))
-        && "Function parsing confused");
+    
+    assert((FD == getCurFunctionDecl() || getCurLambda()->CallOperator == FD) &&
+           "Function parsing confused");
   } else if (ObjCMethodDecl *MD = dyn_cast_or_null<ObjCMethodDecl>(dcl)) {
     assert(MD == getCurMethodDecl() && "Method parsing confused");
     MD->setBody(Body);

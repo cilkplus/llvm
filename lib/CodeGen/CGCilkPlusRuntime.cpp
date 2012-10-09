@@ -808,45 +808,11 @@ CGCilkPlusRuntime::~CGCilkPlusRuntime()
 {
 }
 
-void
+LValue
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                 const CilkSpawnStmt &S)
+                                 const CilkSpawnExpr &E)
 {
-  assert(isa<CallExpr>(S.getRHS()) && "RHS is not a call expression.");
-
-  // Load the __cilkrts_worker* which is needed by the spawn helper.
-  llvm::Value *W = CGF.Builder.CreateLoad(GetWorker(CGF));
-
-  // Emit the CilkSpawnStmt as if it was a regular call.
-  if (const Stmt *DS = S.getReceiverDecl())
-    CGF.EmitStmt(DS);
-  CGF.EmitIgnoredExpr(S.getRHS());
-
-  // FIXME: Implement proper handling of the receiver. For now just bail out.
-  if (S.getReceiverDecl())
-    return;
-  // If the current block is empty it's probably because an invoke instruction
-  // instead of a call was emitted. We don't handle invoke yet.
-  if (CGF.Builder.GetInsertBlock()->empty()) {
-    return;
-  }
-
-  // Find the CallInst that was just emitted.
-  llvm::Instruction *Inst = &CGF.Builder.GetInsertBlock()->back();
-  llvm::CallInst *Call = dyn_cast<llvm::CallInst>(Inst);
-  assert(Call && "Did not get spawned function call.");
-  // Generate the spawn helper function and replace Call with a call to
-  // the helper.
-  llvm::Function *Helper = EmitSpawnHelperFunction(CGF.CGM, Call);
-  SmallVector<llvm::Value*, 4> Args;
-  Args.push_back(W);
-  if (!Call->getCalledFunction())
-    Args.push_back(Call->getCalledValue());
-  for (unsigned i = 0, ie = Call->getNumArgOperands(); i < ie; ++i) {
-    Args.push_back(Call->getArgOperand(i));
-  }
-  llvm::CallInst *SpawnCall = llvm::CallInst::Create(Helper, Args);
-  llvm::ReplaceInstWithInst(Call, SpawnCall);
+  return CGF.EmitLValue(E.getSubExpr());
 }
 
 void

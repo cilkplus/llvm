@@ -30,7 +30,7 @@ namespace llvm {
 
 namespace clang {
 
-class CilkSpawnStmt;
+class CilkSpawnExpr;
 class CilkSyncStmt;
 
 namespace CodeGen {
@@ -47,7 +47,7 @@ public:
   CGCilkPlusRuntime(CodeGenModule &CGM);
   virtual ~CGCilkPlusRuntime();
 
-  virtual void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &S);
+  virtual LValue EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnExpr &E);
   virtual void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
   //virtual void EmitCilkFor(CodeGenFunction &CGF, const CilkForStmt &S);
 };

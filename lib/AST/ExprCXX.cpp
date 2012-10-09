@@ -965,19 +965,6 @@ bool LambdaExpr::isMutable() const {
   return !getCallOperator()->isConst();
 }
 
-ArrayRef<VarDecl *>
-SpawnLambdaExpr::getCaptureInitIndexVars(capture_init_iterator Iter) const {
-  assert(HasArrayIndexVars && "No array index-var data?");
-
-  unsigned Index = Iter - capture_init_begin();
-  assert(Index < getLambdaClass()->getLambdaData().NumCaptures &&
-         "Capture index out-of-range");
-  VarDecl **IndexVars = getArrayIndexVars();
-  unsigned *IndexStarts = getArrayIndexStarts();
-  return ArrayRef<VarDecl *>(IndexVars + IndexStarts[Index],
-                             IndexVars + IndexStarts[Index + 1]);
-}
-
 CXXRecordDecl *SpawnLambdaExpr::getLambdaClass() const {
   return getType()->getAsCXXRecordDecl();
 }

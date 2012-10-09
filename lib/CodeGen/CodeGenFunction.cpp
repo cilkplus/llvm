@@ -435,8 +435,8 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   if (D && isa<CXXMethodDecl>(D) && cast<CXXMethodDecl>(D)->isInstance()) {
     CGM.getCXXABI().EmitInstanceFunctionProlog(*this);
     const CXXMethodDecl *MD = cast<CXXMethodDecl>(D);
-    if ((MD->getParent()->isLambda() || MD ->getParent()->isSpawnLambda()) &&
-         MD->getOverloadedOperator() == OO_Call) {
+    if (MD->getParent()->isLambda() &&
+        MD->getOverloadedOperator() == OO_Call) {
       // We're in a lambda; figure out the captures.
       MD->getParent()->getCaptureFields(LambdaCaptureFields,
                                         LambdaThisCaptureField);

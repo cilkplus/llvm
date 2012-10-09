@@ -271,7 +271,6 @@ public:
   DiagnoseCilkSpawnHelper(Sema &S) : SemaRef(S) { }
 
   bool TraverseCompoundStmt(Stmt *) { return true; }
-  bool TraverseCilkSpawnStmt(Stmt *) { return true; }
   bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
     SemaRef.Diag(E->getSpawnLoc(), SemaRef.PDiag(diag::err_spawn_not_whole_expr)
                                    << E->getSourceRange());
@@ -296,7 +295,6 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
 
   Expr *RHS = 0;
   switch (S->getStmtClass()) {
-  case Stmt::CilkSpawnStmtClass:
   case Stmt::CompoundStmtClass:
     return; // already checked
   case Stmt::CXXCatchStmtClass:
@@ -440,6 +438,15 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
     }
   }
 
+  // If there are _Cilk_spawn expressions in this compound statement, check
+  // whether they are used correctly.
+  if (getCurCompoundScope().HasCilkSpawn) {
+    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
+    for (unsigned i = 0; i != NumElts; ++i) {
+      DiagnoseCilkSpawn(Elts[i]);
+    }
+  }
+
   // Warn about unused expressions in statements.
   for (unsigned i = 0; i != NumElts; ++i) {
     // Ignore statements that are last in a statement expression.
@@ -456,20 +463,6 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       getCurCompoundScope().HasEmptyLoopBodies) {
     for (unsigned i = 0; i != NumElts - 1; ++i)
       DiagnoseEmptyLoopBody(Elts[i], Elts[i + 1]);
-  }
-
-  // If there are _Cilk_spawn expressions in this compound statement, check
-  // whether they are used correctly.
-  if (getCurCompoundScope().HasCilkSpawn) {
-    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
-    bool Dependent = CurContext->isDependentContext();
-    for (unsigned i = 0; i != NumElts; ++i) {
-      unsigned errors = getDiagnostics().getClient()->getNumErrors();
-      DiagnoseCilkSpawn(Elts[i]);
-      bool NoError = errors == getDiagnostics().getClient()->getNumErrors();
-      if (!Dependent && NoError)
-        LambdifyCilkSpawn(Elts[i]);
-    }
   }
 
   return Owned(new (Context) CompoundStmt(Context, Elts, NumElts, L, R));
@@ -2494,7 +2487,8 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
       Diag(ReturnLoc, diag::err_noreturn_block_has_return_expr);
       return StmtError();
     }
-  } else if (LambdaScopeInfo *LSI = dyn_cast<LambdaScopeInfo>(CurCap)) {
+  } else {
+    LambdaScopeInfo *LSI = cast<LambdaScopeInfo>(CurCap);
     if (LSI->CallOperator->getType()->getAs<FunctionType>()->getNoReturnAttr()){
       Diag(ReturnLoc, diag::err_noreturn_lambda_has_return_expr);
       return StmtError();
