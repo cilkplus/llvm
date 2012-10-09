@@ -73,8 +73,7 @@ protected:
   enum ScopeKind {
     SK_Function,
     SK_Block,
-    SK_Lambda,
-    SK_SpawnLambda
+    SK_Lambda
   };
   
 public:
@@ -305,8 +304,7 @@ public:
   }
 
   static bool classof(const FunctionScopeInfo *FSI) { 
-    return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda
-                                 || FSI->Kind == SK_SpawnLambda;
+    return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda; 
   }
   static bool classof(const CapturingScopeInfo *BSI) { return true; }
 };
@@ -394,32 +392,6 @@ public:
   }
   static bool classof(const LambdaScopeInfo *BSI) { return true; }
 
-};
-
-class SpawnLambdaScopeInfo : public CapturingScopeInfo {
-public:
-  CXXRecordDecl *Lambda;
-  CXXMethodDecl *CallOperator;
-
-  bool ExprNeedsCleanups;
-
-  llvm::SmallVector<VarDecl*, 4> ArrayIndexVars;
-  llvm::SmallVector<unsigned, 4> ArrayIndexStarts;
-
-  SpawnLambdaScopeInfo(DiagnosticsEngine &Diag, CXXRecordDecl *Lambda,
-                       CXXMethodDecl *Call)
-    : CapturingScopeInfo(Diag, ImpCap_LambdaByref), Lambda(Lambda),
-      CallOperator(Call), ExprNeedsCleanups(false)
-  {
-    Kind = SK_SpawnLambda;
-  }
-
-  virtual ~SpawnLambdaScopeInfo();
-
-  static bool classof(const FunctionScopeInfo *FSI) {
-    return FSI->Kind == SK_SpawnLambda;
-  }
-  static bool classof(const SpawnLambdaScopeInfo *) { return true; }
 };
 
 }

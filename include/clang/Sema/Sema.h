@@ -176,7 +176,6 @@ namespace sema {
   class DelayedDiagnosticPool;
   class FunctionScopeInfo;
   class LambdaScopeInfo;
-  class SpawnLambdaScopeInfo;
   class PossiblyUnreachableDiag;
   class TemplateDeductionInfo;
 }
@@ -829,7 +828,6 @@ public:
   void PushFunctionScope();
   void PushBlockScope(Scope *BlockScope, BlockDecl *Block);
   void PushLambdaScope(CXXRecordDecl *Lambda, CXXMethodDecl *CallOperator);
-  void PushSpawnLambdaScope(CXXRecordDecl *Lambda, CXXMethodDecl *CallOperator);
   void PopFunctionScopeInfo(const sema::AnalysisBasedWarnings::Policy *WP =0,
                             const Decl *D = 0, const BlockExpr *blkExpr = 0);
 
@@ -4190,12 +4188,6 @@ public:
                                          SourceLocation LParenLoc,
                                          SourceLocation ProtoIdLoc,
                                          SourceLocation RParenLoc);
-
-  //===--------------------------------------------------------------------===//
-  // Cilk Plus
-  //
-  /// \brief Retrieve the current spawn lambda expression, if any.
-  sema::SpawnLambdaScopeInfo *getCurSpawnLambda();
 
   //===--------------------------------------------------------------------===//
   // C++ Declarations
