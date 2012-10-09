@@ -2791,11 +2791,6 @@ bool Expr::HasSideEffects(const ASTContext &Ctx) const {
     return false;
   }
 
-  case SpawnLambdaExprClass: {
-    // All variables are captured by reference.
-    return false;
-  }
-
   case PseudoObjectExprClass: {
     // Only look for side-effects in the semantic form, and look past
     // OpaqueValueExpr bindings in that form.

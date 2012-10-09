@@ -911,16 +911,6 @@ CanThrowResult Sema::canThrow(const Expr *E) {
     return CT;
   }
 
-  case Expr::SpawnLambdaExprClass: {
-    const SpawnLambdaExpr *Lambda = cast<SpawnLambdaExpr>(E);
-    CanThrowResult CT = CT_Cannot;
-    for (SpawnLambdaExpr::capture_init_iterator Cap = Lambda->capture_init_begin(),
-                                             CapEnd = Lambda->capture_init_end();
-         Cap != CapEnd; ++Cap)
-      CT = mergeCanThrow(CT, canThrow(*Cap));
-    return CT;
-  }
-
   case Expr::CXXNewExprClass: {
     CanThrowResult CT;
     if (E->isTypeDependent())

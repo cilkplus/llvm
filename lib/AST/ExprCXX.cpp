@@ -768,9 +768,9 @@ CXXConstructExpr::CXXConstructExpr(ASTContext &C, StmtClass SC, QualType T,
   }
 }
 
-LambdaExprBase::Capture::Capture(SourceLocation Loc, bool Implicit,
-                                 LambdaCaptureKind Kind, VarDecl *Var,
-                                 SourceLocation EllipsisLoc)
+LambdaExpr::Capture::Capture(SourceLocation Loc, bool Implicit,
+                             LambdaCaptureKind Kind, VarDecl *Var,
+                             SourceLocation EllipsisLoc)
   : VarAndBits(Var, 0), Loc(Loc), EllipsisLoc(EllipsisLoc)
 {
   unsigned Bits = 0;
@@ -792,7 +792,7 @@ LambdaExprBase::Capture::Capture(SourceLocation Loc, bool Implicit,
   VarAndBits.setInt(Bits);
 }
 
-LambdaCaptureKind LambdaExprBase::Capture::getCaptureKind() const {
+LambdaCaptureKind LambdaExpr::Capture::getCaptureKind() const {
   if (capturesThis())
     return LCK_This;
 
@@ -813,7 +813,6 @@ LambdaExpr::LambdaExpr(QualType T,
   : Expr(LambdaExprClass, T, VK_RValue, OK_Ordinary,
          T->isDependentType(), T->isDependentType(), T->isDependentType(),
          ContainsUnexpandedParameterPack),
-    LambdaExprBase(LK_Lambda),
     IntroducerRange(IntroducerRange),
     NumCaptures(Captures.size()),
     CaptureDefault(CaptureDefault),
@@ -963,120 +962,6 @@ CompoundStmt *LambdaExpr::getBody() const {
 
 bool LambdaExpr::isMutable() const {
   return !getCallOperator()->isConst();
-}
-
-CXXRecordDecl *SpawnLambdaExpr::getLambdaClass() const {
-  return getType()->getAsCXXRecordDecl();
-}
-
-/// \brief Construct a spawn lambda expression.
-SpawnLambdaExpr::SpawnLambdaExpr(QualType T, SourceLocation Loc,
-                                 ArrayRef<Capture> Captures,
-                                 ArrayRef<Expr *> CaptureInits,
-                                 ArrayRef<VarDecl *> ArrayIndexVars,
-                                 ArrayRef<unsigned> ArrayIndexStarts)
-  : Expr(SpawnLambdaExprClass, T, VK_RValue, OK_Ordinary, T->isDependentType(),
-      T->isDependentType(), T->isDependentType(),
-      /*ContainsUnexpandedParameterPack*/false),
-  LambdaExprBase(LK_SpawnLambda), NumCaptures(Captures.size()), SpawnLoc(Loc)
-{
-  assert(CaptureInits.size() == Captures.size() && "Wrong number of arguments");
-  CXXRecordDecl *Class = getLambdaClass();
-  CXXRecordDecl::LambdaDefinitionData &Data = Class->getLambdaData();
-
-  // Copy captures.
-  ASTContext &Context = Class->getASTContext();
-  Data.NumCaptures = NumCaptures;
-  Data.NumExplicitCaptures = 0;
-  Data.Captures = (Capture *)Context.Allocate(sizeof(Capture) * NumCaptures);
-  Capture *ToCapture = Data.Captures;
-  for (unsigned I = 0, N = Captures.size(); I != N; ++I) {
-    assert(!Captures[I].isExplicit() && "no explicit capture");
-    *ToCapture++ = Captures[I];
-  }
-
-  // Copy initialization expressions for the non-static data members.
-  Stmt **Stored = getStoredStmts();
-  for (unsigned I = 0, N = CaptureInits.size(); I != N; ++I)
-    *Stored++ = CaptureInits[I];
-
-  // Copy the body of the lambda.
-  *Stored++ = getCallOperator()->getBody();
-
-  // Copy the array index variables, if any.
-  HasArrayIndexVars = !ArrayIndexVars.empty();
-  if (HasArrayIndexVars) {
-    assert(ArrayIndexStarts.size() == NumCaptures);
-    memcpy(getArrayIndexVars(), ArrayIndexVars.data(),
-           sizeof(VarDecl *) * ArrayIndexVars.size());
-    memcpy(getArrayIndexStarts(), ArrayIndexStarts.data(),
-           sizeof(unsigned) * Captures.size());
-    getArrayIndexStarts()[Captures.size()] = ArrayIndexVars.size();
-  }
-}
-
-SpawnLambdaExpr *SpawnLambdaExpr::Create(ASTContext &Context,
-                                         SourceLocation Loc,
-                                         CXXRecordDecl *Class,
-                                         ArrayRef<Capture> Captures,
-                                         ArrayRef<Expr*> CaptureInits,
-                                         ArrayRef<VarDecl *> ArrayIndexVars,
-                                         ArrayRef<unsigned> ArrayIndexStarts) {
-  // Determine the type of the expression (i.e., the type of the
-  // function object we're creating).
-  QualType T = Context.getTypeDeclType(Class);
-
-  // Stored statements are
-  // - capture_inits
-  // - compound statement of the call operator
-  unsigned Sz = sizeof(SpawnLambdaExpr) + sizeof(Stmt*) * (Captures.size() + 1);
-  if (!ArrayIndexVars.empty()) {
-    Sz += sizeof(unsigned) * (Captures.size() + 1);
-    // Realign for following VarDecl array.
-    Sz = llvm::RoundUpToAlignment(Sz, llvm::alignOf<VarDecl*>());
-    Sz += sizeof(VarDecl *) * ArrayIndexVars.size();
-  }
-  void *Mem = Context.Allocate(Sz);
-  return new (Mem) SpawnLambdaExpr(T, Loc, Captures, CaptureInits,
-                                   ArrayIndexVars, ArrayIndexStarts);
-}
-
-SpawnLambdaExpr *
-SpawnLambdaExpr::CreateDeserialized(ASTContext &C, unsigned NumCaptures,
-                                    unsigned NumArrayIndexVars) {
-  unsigned Size = sizeof(SpawnLambdaExpr) + sizeof(Stmt *) * (NumCaptures + 1);
-  if (NumArrayIndexVars)
-    Size += sizeof(VarDecl) * NumArrayIndexVars
-          + sizeof(unsigned) * (NumCaptures + 1);
-  void *Mem = C.Allocate(Size);
-  return new (Mem) SpawnLambdaExpr(EmptyShell(), NumCaptures,
-                                   NumArrayIndexVars > 0);
-}
-
-CXXMethodDecl *SpawnLambdaExpr::getCallOperator() const {
-  CXXRecordDecl *Record = getLambdaClass();
-  DeclarationName Name
-    = Record->getASTContext().DeclarationNames.getCXXOperatorName(OO_Call);
-  DeclContext::lookup_result Calls = Record->lookup(Name);
-  assert(Calls.first != Calls.second && "Missing lambda call operator!");
-  CXXMethodDecl *Result = cast<CXXMethodDecl>(*Calls.first++);
-  assert(Calls.first == Calls.second && "More than lambda one call operator?");
-  return Result;
-}
-
-CompoundStmt *SpawnLambdaExpr::getBody() const {
-  if (!getStoredStmts()[NumCaptures])
-    getStoredStmts()[NumCaptures] = getCallOperator()->getBody();
-
-  return reinterpret_cast<CompoundStmt *>(getStoredStmts()[NumCaptures]);
-}
-
-SpawnLambdaExpr::capture_iterator SpawnLambdaExpr::capture_begin() const {
-  return getLambdaClass()->getLambdaData().Captures;
-}
-
-SpawnLambdaExpr::capture_iterator SpawnLambdaExpr::capture_end() const {
-  return capture_begin() + NumCaptures;
 }
 
 ExprWithCleanups::ExprWithCleanups(Expr *subexpr,

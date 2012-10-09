@@ -2135,13 +2135,6 @@ DEF_TRAVERSE_STMT(CilkSyncStmt, { })
 DEF_TRAVERSE_STMT(CilkSpawnExpr, { })
 DEF_TRAVERSE_STMT(CilkSpawnStmt, { })
 
-// Only the lambda body is explicit.
-template<typename Derived>
-bool RecursiveASTVisitor<Derived>::TraverseSpawnLambdaExpr(SpawnLambdaExpr *S) {
-  TRY_TO(TraverseStmt(S->getBody()));
-  return true;
-}
-
 // These operators (all of them) do not need any action except
 // iterating over the children.
 DEF_TRAVERSE_STMT(BinaryConditionalOperator, { })

@@ -1392,13 +1392,6 @@ void StmtPrinter::VisitLambdaExpr(LambdaExpr *Node) {
   PrintStmt(Body);
 }
 
-void StmtPrinter::VisitSpawnLambdaExpr(SpawnLambdaExpr *Node) {
-  // FIXME: Attributes
-  OS << "_Cilk_spawn [&]() {";
-  PrintStmt(Node->getBody());
-  OS << "}";
-}
-
 void StmtPrinter::VisitCXXScalarValueInitExpr(CXXScalarValueInitExpr *Node) {
   if (TypeSourceInfo *TSInfo = Node->getTypeSourceInfo())
     OS << TSInfo->getType().getAsString(Policy) << "()";

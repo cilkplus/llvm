@@ -832,12 +832,6 @@ StmtProfiler::VisitLambdaExpr(const LambdaExpr *S) {
 }
 
 void
-StmtProfiler::VisitSpawnLambdaExpr(const SpawnLambdaExpr *E) {
-  VisitExpr(E);
-  VisitStmt(E->getBody());
-}
-
-void
 StmtProfiler::VisitCXXScalarValueInitExpr(const CXXScalarValueInitExpr *S) {
   VisitExpr(S);
 }

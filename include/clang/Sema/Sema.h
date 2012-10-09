@@ -166,7 +166,6 @@ namespace clang {
   class VisibilityAttr;
   class VisibleDeclConsumer;
   class IndirectFieldDecl;
-  class SpawnLambdaExpr;
 
 namespace sema {
   class AccessedEntity;
@@ -601,7 +600,7 @@ public:
 
     /// \brief The lambdas that are present within this context, if it
     /// is indeed an unevaluated context.
-    llvm::SmallVector<LambdaExprBase*, 2> Lambdas;
+    llvm::SmallVector<LambdaExpr *, 2> Lambdas;
 
     /// \brief The declaration that provides context for the lambda expression
     /// if the normal declaration context does not suffice, e.g., in a
