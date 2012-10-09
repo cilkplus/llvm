@@ -467,8 +467,7 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       unsigned errors = getDiagnostics().getClient()->getNumErrors();
       DiagnoseCilkSpawn(Elts[i]);
       bool NoError = errors == getDiagnostics().getClient()->getNumErrors();
-      // FIXME: Cilk for C is not supported
-      if (getLangOpts().CPlusPlus && !Dependent && NoError)
+      if (!Dependent && NoError)
         LambdifyCilkSpawn(Elts[i]);
     }
   }
