@@ -21,6 +21,8 @@
 #include "llvm/ValueSymbolTable.h"
 #include "llvm/Intrinsics.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/CodeExtractor.h"
+#include "llvm/Analysis/RegionInfo.h"
 
 namespace {
 
@@ -82,10 +84,10 @@ typedef void (__cilkrts_cilk_for_32)(__cilk_abi_f32_t body, void *data,
 typedef void (__cilkrts_cilk_for_64)(__cilk_abi_f64_t body, void *data,
                                      cilk64_t count, int grain);
 
-#define CILKRTS_FUNC(name, CGM) \
-   CGM.CreateRuntimeFunction(llvm::TypeBuilder<__cilkrts_##name, \
-                               false>::get(CGM.getLLVMContext()), \
-                             "__cilkrts_"#name)
+#define CILKRTS_FUNC(name, CGF) \
+   CGF.CGM.CreateRuntimeFunction(llvm::TypeBuilder<__cilkrts_##name, \
+                                 false>::get(CGF.getLLVMContext()), \
+                                 "__cilkrts_"#name)
 } // namespace
 
 typedef std::map<llvm::LLVMContext*, llvm::StructType*> TypeBuilderCache;
@@ -263,6 +265,13 @@ static llvm::Value *LoadField(CGBuilderTy &B, llvm::Value *Src, int field)
   return B.CreateLoad(GEP(B, Src, field));
 }
 
+void SetNoInline(llvm::Function *F)
+{
+  using namespace llvm;
+  Attributes Attrs(Attribute::NoInline);
+  F->addFnAttr(Attrs);
+}
+
 // Only for x86
 static void EmitSaveFloatState(CGBuilderTy &B, llvm::Value *SF)
 {
@@ -284,15 +293,13 @@ static void EmitSaveFloatState(CGBuilderTy &B, llvm::Value *SF)
 }
 
 static llvm::Value *EmitCilkSetJmp(CGBuilderTy &B, llvm::Value *SF,
-                                   CodeGenModule &CGM)
+                                   CodeGenFunction &CGF)
 {
   using namespace llvm;
+  LLVMContext &Ctx = CGF.getLLVMContext();
 
-  llvm::Type *Int32Ty =
-      llvm::Type::getInt32Ty(CGM.getLLVMContext());
-
-  llvm::Type *Int8PtrTy =
-      llvm::Type::getInt8PtrTy(CGM.getLLVMContext());
+  llvm::Type *Int32Ty = llvm::Type::getInt32Ty(Ctx);
+  llvm::Type *Int8PtrTy = llvm::Type::getInt8PtrTy(Ctx);
 
   // Get the buffer to store program state
   // Buffer is a void**.
@@ -300,21 +307,20 @@ static llvm::Value *EmitCilkSetJmp(CGBuilderTy &B, llvm::Value *SF,
 
   // Store the frame pointer in the 0th slot
   Value *FrameAddr =
-    B.CreateCall(CGM.getIntrinsic(Intrinsic::frameaddress),
+    B.CreateCall(CGF.CGM.getIntrinsic(Intrinsic::frameaddress),
                  ConstantInt::get(Int32Ty, 0));
 
   Value *FrameSaveSlot = GEP(B, Buf, 0);
   B.CreateStore(FrameAddr, FrameSaveSlot);
 
   // Store stack pointer in the 2nd slot
-  Value *StackAddr =
-    B.CreateCall(CGM.getIntrinsic(Intrinsic::stacksave));
+  Value *StackAddr = B.CreateCall(CGF.CGM.getIntrinsic(Intrinsic::stacksave));
 
   Value *StackSaveSlot = GEP(B, Buf, 2);
   B.CreateStore(StackAddr, StackSaveSlot);
 
   // Call LLVM's EH setjmp, which is lightweight.
-  Value *F = CGM.getIntrinsic(Intrinsic::eh_sjlj_setjmp);
+  Value *F = CGF.CGM.getIntrinsic(Intrinsic::eh_sjlj_setjmp);
   Buf = B.CreateBitCast(Buf, Int8PtrTy);
   return B.CreateCall(F, Buf);
 }
@@ -372,7 +378,7 @@ static void EmitCilkEpilogue(CodeGenFunction &CGF, llvm::Value *SF)
     { // B1
       CGBuilderTy B(B1);
       // __cilkrts_leave_frame(sf);
-      B.CreateCall(CILKRTS_FUNC(leave_frame, CGF.CGM), SF);
+      B.CreateCall(CILKRTS_FUNC(leave_frame, CGF), SF);
       B.CreateBr(Exit);
     }
     { // Exit
@@ -404,18 +410,17 @@ static void EmitCilkEpilogue(CodeGenFunction &CGF, llvm::Value *SF)
 ///   (*w)->current_stack_frame = sf;
 /// }
 static llvm::Function *
-EmitCilkPrologueFunction(const std::string &Name, CodeGenModule &CGM)
+EmitCilkPrologueFunction(const std::string &Name, CodeGenFunction &CGF)
 {
   using namespace llvm;
-  llvm::Module &Module = CGM.getModule();
-  LLVMContext &Ctx = Module.getContext();
+  LLVMContext &Ctx = CGF.getLLVMContext();
 
   typedef void (__cilk_prologue)(__cilkrts_stack_frame*, __cilkrts_worker**);
   llvm::FunctionType *FTy = TypeBuilder<__cilk_prologue, false>::get(Ctx);
   Function *F = Function::Create(FTy,
                                  GlobalValue::InternalLinkage,
                                  Name,
-                                 &Module);
+                                 &CGF.CGM.getModule());
 
   BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", F),
              *B1 = BasicBlock::Create(Ctx, "", F),
@@ -431,14 +436,14 @@ EmitCilkPrologueFunction(const std::string &Name, CodeGenModule &CGM)
     Flags = GEP(B, SF, StackFrameBuilder::flags);
     FlagsTy = Flags->getType()->getPointerElementType();
     // __cilkrts_worker *w = __cilkrts_get_tls_worker();
-    B.CreateStore(B.CreateCall(CILKRTS_FUNC(get_tls_worker, CGM)), W);
+    B.CreateStore(B.CreateCall(CILKRTS_FUNC(get_tls_worker, CGF)), W);
     // if (!w) {
     B.CreateCondBr(B.CreateIsNull(B.CreateLoad(W)), B1, B2);
   }
   { // B1
     CGBuilderTy B(B1);
     // w = __cilkrts_bind_thread_1();
-    B.CreateStore(B.CreateCall(CILKRTS_FUNC(bind_thread_1, CGM)), W);
+    B.CreateStore(B.CreateCall(CILKRTS_FUNC(bind_thread_1, CGF)), W);
     // sf.flags = CILK_FRAME_LAST;
     B.CreateStore(ConstantInt::get(FlagsTy, CILK_FRAME_UNSYNCHED),
                   Flags);
@@ -490,7 +495,7 @@ static void EmitCilkPrologue(CodeGenFunction &CGF)
   const std::string PrologueName = "__cilk_prologue";
   llvm::Function *Prologue = Module.getFunction(PrologueName);
   if (!Prologue) {
-    Prologue = EmitCilkPrologueFunction(PrologueName, CGF.CGM);
+    Prologue = EmitCilkPrologueFunction(PrologueName, CGF);
   }
 
   // Call the prologue to initialize the stack frame and worker.
@@ -514,18 +519,17 @@ static void EmitCilkPrologue(CodeGenFunction &CGF)
 ///   ++sf->worker->pedigree.rank;
 /// }
 static llvm::Function *
-EmitCilkSyncFunction(const std::string &Name, CodeGenModule &CGM)
+EmitCilkSyncFunction(const std::string &Name, CodeGenFunction &CGF)
 {
   using namespace llvm;
-  llvm::Module &Module = CGM.getModule();
-  LLVMContext &Ctx = Module.getContext();
+  LLVMContext &Ctx = CGF.getLLVMContext();
 
   typedef void (__cilk_sync)(__cilkrts_stack_frame*);
   llvm::FunctionType *FTy = TypeBuilder<__cilk_sync, false>::get(Ctx);
   Function *F = Function::Create(FTy,
                                  GlobalValue::InternalLinkage,
                                  Name,
-                                 &Module);
+                                 &CGF.CGM.getModule());
 
   BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", F),
              *B1 = BasicBlock::Create(Ctx, "", F),
@@ -554,7 +558,7 @@ EmitCilkSyncFunction(const std::string &Name, CodeGenModule &CGM)
     // SAVE_FLOAT_STATE(sf);
     EmitSaveFloatState(B, SF);
     // if (!setjmp(sf.ctx))
-    Value *C = EmitCilkSetJmp(B, SF, CGM);
+    Value *C = EmitCilkSetJmp(B, SF, CGF);
     C = B.CreateNot(C);
     C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
     B.CreateCondBr(C, B2, Exit);
@@ -562,7 +566,7 @@ EmitCilkSyncFunction(const std::string &Name, CodeGenModule &CGM)
   { // B2
     CGBuilderTy B(B2);
     // __cilkrts_sync(&sf);
-    B.CreateCall(CILKRTS_FUNC(sync, CGM), SF);
+    B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
     B.CreateBr(Exit);
   }
   { // Exit
@@ -585,7 +589,7 @@ static void EmitCilkSync(CodeGenFunction &CGF, llvm::Value *SF)
   const std::string SyncName = "__cilk_sync";
   llvm::Function *Sync = Module.getFunction(SyncName);
   if (!Sync) {
-    Sync = EmitCilkSyncFunction(SyncName, CGF.CGM);
+    Sync = EmitCilkSyncFunction(SyncName, CGF);
   }
   CGF.Builder.CreateCall(Sync, SF);
 }
@@ -593,8 +597,7 @@ static void EmitCilkSync(CodeGenFunction &CGF, llvm::Value *SF)
 /// Emit the prologue in the cilk spawn helper function. The prologue
 /// implements the following C code:
 ///
-/// void __cilk_helper_prologue(__cilkrts_stack_frame *sf,
-///                             __cilkrts_worker *w)
+/// void __cilkrts_detach(__cilkrts_stack_frame *sf, __cilkrts_worker *w)
 /// {
 ///   sf->call_parent = w->current_stack_frame;
 ///   sf->worker = w;
@@ -610,12 +613,25 @@ static void EmitCilkSync(CodeGenFunction &CGF, llvm::Value *SF)
 ///   w->tail = tail;
 ///   sf->flags |= CILK_FRAME_DETACHED;
 /// }
-static void EmitSpawnHelperPrologue(CGBuilderTy &B,
-                                    llvm::Value *SF,
-                                    llvm::Value *W)
+static llvm::Function *
+EmitCilkDetachFunction(const std::string &Name, CodeGenFunction &CGF)
 {
   using namespace llvm;
-  LLVMContext &Ctx = B.getContext();
+  LLVMContext &Ctx = CGF.getLLVMContext();
+
+  typedef void (__cilkrts_detach)(__cilkrts_stack_frame*,
+                                  __cilkrts_worker*);
+  llvm::FunctionType *FTy = TypeBuilder<__cilkrts_detach, false>::get(Ctx);
+  Function *F = Function::Create(FTy,
+                                 GlobalValue::InternalLinkage,
+                                 Name,
+                                 &CGF.CGM.getModule());
+
+  BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", F);
+  CGBuilderTy B(Entry);
+
+  Value *SF = F->arg_begin();
+  Value *W = ++F->arg_begin();
 
   // sf->call_parent = w->current_stack_frame;
   StoreField(B, LoadField(B, W, WorkerBuilder::current_stack_frame),
@@ -673,6 +689,25 @@ static void EmitSpawnHelperPrologue(CGBuilderTy &B,
     F = B.CreateOr(F, ConstantInt::get(F->getType(), CILK_FRAME_DETACHED));
     StoreField(B, F, SF, StackFrameBuilder::flags);
   }
+  B.CreateRetVoid();
+
+  return F;
+}
+
+static void EmitSpawnHelperPrologue(CodeGenFunction &CGF,
+                                    llvm::Value *SF,
+                                    llvm::Value *W)
+{
+  using namespace llvm;
+  llvm::Module &Module = CGF.CGM.getModule();
+
+  const std::string DetachName = "__cilkrts_detach";
+  llvm::Function *Detach = Module.getFunction(DetachName);
+  if (!Detach) {
+    Detach = EmitCilkDetachFunction(DetachName, CGF);
+  }
+  CGF.Builder.CreateCall2(Detach, SF, W);
+
 }
 
 /// Emit the epilogue in the cilk spawn helper function. The epilogue
@@ -685,12 +720,11 @@ static void EmitSpawnHelperPrologue(CGBuilderTy &B,
 ///   __cilkrts_leave_frame(sf);
 /// }
 static void EmitSpawnHelperEpilogue(CGBuilderTy &B,
-                                    CodeGenModule &CGM,
+                                    CodeGenFunction &CGF,
                                     llvm::Value *SF)
 {
   using namespace llvm;
-  llvm::Module &Module = CGM.getModule();
-  LLVMContext &Ctx = Module.getContext();
+  LLVMContext &Ctx = CGF.getLLVMContext();
 
   // sf->worker->current_stack_frame = sf->call_parent;
   StoreField(B,
@@ -703,73 +737,7 @@ static void EmitSpawnHelperEpilogue(CGBuilderTy &B,
                                                 false>::get(Ctx)),
              SF, StackFrameBuilder::call_parent);
   // __cilkrts_leave_frame(sf);
-  B.CreateCall(CILKRTS_FUNC(leave_frame, CGM), SF);
-}
-
-static llvm::Function*
-EmitSpawnHelperFunction(CodeGenModule &CGM, llvm::CallInst *Call)
-{
-  using namespace llvm;
-  llvm::Module &Module = CGM.getModule();
-  LLVMContext &Ctx = Module.getContext();
-
-  Function *Callee = Call->getCalledFunction();
-
-  // Generate a name of the spawn helper.
-  std::string FName = "__cilk_spawn_helper_";
-  if (Callee && Callee->hasName())
-    FName = FName + Callee->getName().str();
-
-  // Get the function type of the spawn helper.
-  llvm::FunctionType *FTy = 0;
-  {
-    llvm::Type *RetTy = Call->getType();
-    assert(RetTy->isVoidTy() && "Expected void return type");
-
-    SmallVector<llvm::Type*, 4> Types;
-    Types.push_back(llvm::TypeBuilder<__cilkrts_worker*, false>::get(Ctx));
-    // If this is an indirect call the function pointer is an argument too.
-    if (!Callee)
-      Types.push_back(Call->getCalledValue()->getType());
-    for (unsigned i = 0; i < Call->getNumArgOperands(); ++i)
-      Types.push_back(Call->getArgOperand(i)->getType());
-    FTy = llvm::FunctionType::get(RetTy, Types, false);
-  }
-
-  Function *F = Function::Create(FTy,
-                                 GlobalValue::InternalLinkage,
-                                 FName,
-                                 &Module);
-  // The Cilk spec requires that spawn helpers not be inlined.
-  Attributes Attrs(Attribute::NoInline);
-  F->addFnAttr(Attrs);
-
-  BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", F);
-
-  Function::arg_iterator I = F->arg_begin();
-  Value *W = I++;
-  W->setName(WorkerName());
-  Value *Func = Callee ? static_cast<Value*>(Callee)
-                       : static_cast<Value*>(I++);
-
-  CGBuilderTy B(Entry);
-  // Alloca the __cilkrts_stack_frame for the spawn helper and call the
-  // prologue.
-  llvm::Type *SFTy = StackFrameBuilder::get(Ctx);
-  Value *SF = B.CreateAlloca(SFTy, 0, StackFrameName());
-  EmitSpawnHelperPrologue(B, SF, W);
-
-  // Emit a call to the spawned function.
-  SmallVector<Value*, 4> Args;
-  for (Function::arg_iterator IE = F->arg_end(); I != IE; ++I)
-    Args.push_back(I);
-  B.CreateCall(Func, Args);
-
-  // Call the spawn helper epilogue.
-  EmitSpawnHelperEpilogue(B, CGM, SF);
-  B.CreateRetVoid();
-
-  return F;
+  B.CreateCall(CILKRTS_FUNC(leave_frame, CGF), SF);
 }
 
 static llvm::Value *GetNamedValue(CodeGenFunction &CGF,
@@ -809,7 +777,35 @@ void
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
                                  const CilkSpawnStmt &E)
 {
-  return CGF.EmitStmt(E.getSubStmt());
+  using namespace llvm;
+
+  // Load the __cilkrts_worker* which is needed by the spawn helper.
+  Value *W = CGF.Builder.CreateLoad(GetWorker(CGF));
+
+  BasicBlock *Entry = CGF.createBasicBlock("cilk.spawn"),
+             *Exit = CGF.createBasicBlock("cilk.continuation");
+  CGF.EmitBlock(Entry);
+  {
+    llvm::Type *SFTy = StackFrameBuilder::get(CGF.getLLVMContext());
+    Value *SF = CGF.CreateTempAlloca(SFTy);
+    SF->setName(StackFrameName());
+
+    EmitSpawnHelperPrologue(CGF, SF, W);
+
+    CGF.EmitStmt(E.getSubStmt());
+
+    EmitSpawnHelperEpilogue(CGF.Builder, CGF, SF);
+  }
+  CGF.EmitBlock(Exit);
+  
+  RegionInfo RI;
+  DominatorTree DT;
+  Region R(Entry, Exit, &RI, &DT);
+  Function *H = CodeExtractor(DT, *R.getNode(), false).extractCodeRegion();
+  if (H) {
+    SetNoInline(H);
+    H->setName("__cilk_spawn_helper");
+  }
 }
 
 void
