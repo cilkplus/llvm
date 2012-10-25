@@ -344,7 +344,7 @@ L3:
 
 void test9(int& x) {
   [[]] int y1 = _Cilk_spawn foo();
-  [[bar]] int y2 = _Cilk_spawn foo();
+  [[bar]] int y2 = _Cilk_spawn foo(); // expected-warning{{unknown attribute 'bar' ignored}}
   _Cilk_sync;
   x = y1 + y2;
 }

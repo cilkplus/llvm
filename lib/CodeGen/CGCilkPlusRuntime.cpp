@@ -23,6 +23,7 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/CodeExtractor.h"
 #include "llvm/Analysis/RegionInfo.h"
+#include "llvm/Attributes.h"
 
 namespace {
 
@@ -268,8 +269,7 @@ static llvm::Value *LoadField(CGBuilderTy &B, llvm::Value *Src, int field)
 void SetNoInline(llvm::Function *F)
 {
   using namespace llvm;
-  Attributes Attrs(Attribute::NoInline);
-  F->addFnAttr(Attrs);
+  F->addFnAttr(Attributes::NoInline);
 }
 
 // Only for x86
