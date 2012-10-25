@@ -268,6 +268,16 @@ public:
             !llvm::is_same<From, T>::value >::type* = 0)
       : Implementation(new ImplicitCastMatcher<From>(Other)) {}
 
+  /// \brief Implicitly converts \c Matcher<Type> to \c Matcher<QualType>.
+  ///
+  /// The resulting matcher is not strict, i.e. ignores qualifiers.
+  template <typename TypeT>
+  Matcher(const Matcher<TypeT> &Other,
+          typename llvm::enable_if_c<
+            llvm::is_same<T, QualType>::value &&
+            llvm::is_same<TypeT, Type>::value >::type* = 0)
+      : Implementation(new TypeToQualType<TypeT>(Other)) {}
+
   /// \brief Forwards the call to the underlying MatcherInterface<T> pointer.
   bool matches(const T &Node,
                ASTMatchFinder *Finder,
@@ -290,6 +300,29 @@ public:
     if (!Node) return false;
     return matches(*Node, Finder, Builder);
   }
+
+  /// \brief Allows the conversion of a \c Matcher<Type> to a \c
+  /// Matcher<QualType>.
+  ///
+  /// Depending on the constructor argument, the matcher is either strict, i.e.
+  /// does only matches in the absence of qualifiers, or not, i.e. simply
+  /// ignores any qualifiers.
+  template <typename TypeT>
+  class TypeToQualType : public MatcherInterface<QualType> {
+   public:
+    TypeToQualType(const Matcher<TypeT> &InnerMatcher)
+        : InnerMatcher(InnerMatcher) {}
+
+    virtual bool matches(const QualType &Node,
+                         ASTMatchFinder *Finder,
+                         BoundNodesTreeBuilder *Builder) const {
+      if (Node.isNull())
+        return false;
+      return InnerMatcher.matches(*Node, Finder, Builder);
+    }
+   private:
+    const Matcher<TypeT> InnerMatcher;
+  };
 
 private:
   /// \brief Allows conversion from Matcher<Base> to Matcher<T> if T
@@ -427,6 +460,14 @@ public:
     BK_All
   };
 
+  /// \brief Defines which ancestors are considered for a match.
+  enum AncestorMatchMode {
+    /// All ancestors.
+    AMM_All,
+    /// Direct parent only.
+    AMM_ParentOnly
+  };
+
   virtual ~ASTMatchFinder() {}
 
   /// \brief Returns true if the given class is directly or indirectly derived
@@ -466,12 +507,13 @@ public:
   template <typename T>
   bool matchesAncestorOf(const T &Node,
                          const DynTypedMatcher &Matcher,
-                         BoundNodesTreeBuilder *Builder) {
+                         BoundNodesTreeBuilder *Builder,
+                         AncestorMatchMode MatchMode) {
     TOOLING_COMPILE_ASSERT((llvm::is_base_of<Decl, T>::value ||
                             llvm::is_base_of<Stmt, T>::value),
                            only_Decl_or_Stmt_allowed_for_recursive_matching);
     return matchesAncestorOf(ast_type_traits::DynTypedNode::create(Node),
-                             Matcher, Builder);
+                             Matcher, Builder, MatchMode);
   }
 
 protected:
@@ -488,7 +530,8 @@ protected:
 
   virtual bool matchesAncestorOf(const ast_type_traits::DynTypedNode &Node,
                                  const DynTypedMatcher &Matcher,
-                                 BoundNodesTreeBuilder *Builder) = 0;
+                                 BoundNodesTreeBuilder *Builder,
+                                 AncestorMatchMode MatchMode) = 0;
 };
 
 /// \brief Converts a \c Matcher<T> to a matcher of desired type \c To by
@@ -831,6 +874,29 @@ public:
   const Matcher<DescendantT> DescendantMatcher;
 };
 
+/// \brief Matches nodes of type \c T that have a parent node of type \c ParentT
+/// for which the given inner matcher matches.
+///
+/// \c ParentT must be an AST base type.
+template <typename T, typename ParentT>
+class HasParentMatcher : public MatcherInterface<T> {
+  TOOLING_COMPILE_ASSERT(IsBaseType<ParentT>::value,
+                         has_parent_only_accepts_base_type_matcher);
+public:
+  explicit HasParentMatcher(const Matcher<ParentT> &ParentMatcher)
+      : ParentMatcher(ParentMatcher) {}
+
+  virtual bool matches(const T &Node,
+                       ASTMatchFinder *Finder,
+                       BoundNodesTreeBuilder *Builder) const {
+    return Finder->matchesAncestorOf(
+        Node, ParentMatcher, Builder, ASTMatchFinder::AMM_ParentOnly);
+  }
+
+ private:
+  const Matcher<ParentT> ParentMatcher;
+};
+
 /// \brief Matches nodes of type \c T that have at least one ancestor node of
 /// type \c AncestorT for which the given inner matcher matches.
 ///
@@ -847,7 +913,7 @@ public:
                        ASTMatchFinder *Finder,
                        BoundNodesTreeBuilder *Builder) const {
     return Finder->matchesAncestorOf(
-        Node, AncestorMatcher, Builder);
+        Node, AncestorMatcher, Builder, ASTMatchFinder::AMM_All);
   }
 
  private:
@@ -950,7 +1016,6 @@ class IsExplicitTemplateSpecializationMatcher : public MatcherInterface<T> {
   }
 };
 
-
 class IsArrowMatcher : public SingleNodeMatcherInterface<MemberExpr> {
 public:
   virtual bool matchesNode(const MemberExpr &Node) const {
@@ -1011,7 +1076,7 @@ template <typename TLoc, typename T>
 class LocMatcher : public MatcherInterface<TLoc> {
 public:
   explicit LocMatcher(const Matcher<T> &InnerMatcher)
-      : InnerMatcher(InnerMatcher) {}
+    : InnerMatcher(InnerMatcher) {}
 
   virtual bool matches(const TLoc &Node,
                        ASTMatchFinder *Finder,
@@ -1025,60 +1090,127 @@ private:
   const NestedNameSpecifier *extract(const NestedNameSpecifierLoc &Loc) const {
     return Loc.getNestedNameSpecifier();
   }
-  // FIXME: Add overload for TypeLoc when implementing TypeLoc-matchers.
 
   const Matcher<T> InnerMatcher;
 };
 
-/// \brief Matches nodes of type \c T for which the inner matcher matches on a
-/// another node of type \c T that can be reached using a given traverse
-/// function.
-template <typename T>
-class TraverseMatcher : public MatcherInterface<T> {
+/// \brief Matches \c NestedNameSpecifiers with a prefix matching another
+/// \c Matcher<NestedNameSpecifier>.
+class NestedNameSpecifierPrefixMatcher
+  : public MatcherInterface<NestedNameSpecifier> {
 public:
-  explicit TraverseMatcher(const Matcher<T> &InnerMatcher,
-                           T *(T::*TraverseFunction)() const)
-      : InnerMatcher(InnerMatcher), TraverseFunction(TraverseFunction) {}
+  explicit NestedNameSpecifierPrefixMatcher(
+    const Matcher<NestedNameSpecifier> &InnerMatcher)
+    : InnerMatcher(InnerMatcher) {}
 
-  virtual bool matches(const T &Node,
+  virtual bool matches(const NestedNameSpecifier &Node,
                        ASTMatchFinder *Finder,
                        BoundNodesTreeBuilder *Builder) const {
-    T* NextNode = (Node.*TraverseFunction)();
+    NestedNameSpecifier *NextNode = Node.getPrefix();
     if (NextNode == NULL)
       return false;
     return InnerMatcher.matches(*NextNode, Finder, Builder);
   }
 
 private:
-  const Matcher<T> InnerMatcher;
-  T *(T::*TraverseFunction)() const;
+  const Matcher<NestedNameSpecifier> InnerMatcher;
 };
 
-/// \brief Matches nodes of type \c T in a ..Loc hierarchy, for which the inner
-/// matcher matches on a another node of type \c T that can be reached using a
-/// given traverse function.
-template <typename T>
-class LocTraverseMatcher : public MatcherInterface<T> {
+/// \brief Matches \c NestedNameSpecifierLocs with a prefix matching another
+/// \c Matcher<NestedNameSpecifierLoc>.
+class NestedNameSpecifierLocPrefixMatcher
+  : public MatcherInterface<NestedNameSpecifierLoc> {
 public:
-  explicit LocTraverseMatcher(const Matcher<T> &InnerMatcher,
-                              T (T::*TraverseFunction)() const)
-      : InnerMatcher(InnerMatcher), TraverseFunction(TraverseFunction) {}
+  explicit NestedNameSpecifierLocPrefixMatcher(
+    const Matcher<NestedNameSpecifierLoc> &InnerMatcher)
+    : InnerMatcher(InnerMatcher) {}
 
-  virtual bool matches(const T &Node,
+  virtual bool matches(const NestedNameSpecifierLoc &Node,
                        ASTMatchFinder *Finder,
                        BoundNodesTreeBuilder *Builder) const {
-    if (!Node)
-      return false;
-    T NextNode = (Node.*TraverseFunction)();
+    NestedNameSpecifierLoc NextNode = Node.getPrefix();
     if (!NextNode)
       return false;
     return InnerMatcher.matches(NextNode, Finder, Builder);
   }
 
 private:
-  const Matcher<T> InnerMatcher;
-  T (T::*TraverseFunction)() const;
+  const Matcher<NestedNameSpecifierLoc> InnerMatcher;
 };
+
+/// \brief Matches \c TypeLocs based on an inner matcher matching a certain
+/// \c QualType.
+///
+/// Used to implement the \c loc() matcher.
+class TypeLocTypeMatcher : public MatcherInterface<TypeLoc> {
+public:
+  explicit TypeLocTypeMatcher(const Matcher<QualType> &InnerMatcher)
+      : InnerMatcher(InnerMatcher) {}
+
+  virtual bool matches(const TypeLoc &Node,
+                       ASTMatchFinder *Finder,
+                       BoundNodesTreeBuilder *Builder) const {
+    if (!Node)
+      return false;
+    return InnerMatcher.matches(Node.getType(), Finder, Builder);
+  }
+
+private:
+  const Matcher<QualType> InnerMatcher;
+};
+
+/// \brief Matches nodes of type \c T for which the inner matcher matches on a
+/// another node of type \c T that can be reached using a given traverse
+/// function.
+template <typename T>
+class TypeTraverseMatcher : public MatcherInterface<T> {
+public:
+  explicit TypeTraverseMatcher(const Matcher<QualType> &InnerMatcher,
+                               QualType (T::*TraverseFunction)() const)
+      : InnerMatcher(InnerMatcher), TraverseFunction(TraverseFunction) {}
+
+  virtual bool matches(const T &Node,
+                       ASTMatchFinder *Finder,
+                       BoundNodesTreeBuilder *Builder) const {
+    QualType NextNode = (Node.*TraverseFunction)();
+    if (NextNode.isNull())
+      return false;
+    return InnerMatcher.matches(NextNode, Finder, Builder);
+  }
+
+private:
+  const Matcher<QualType> InnerMatcher;
+  QualType (T::*TraverseFunction)() const;
+};
+
+/// \brief Matches nodes of type \c T in a ..Loc hierarchy, for which the inner
+/// matcher matches on a another node of type \c T that can be reached using a
+/// given traverse function.
+template <typename T>
+class TypeLocTraverseMatcher : public MatcherInterface<T> {
+public:
+  explicit TypeLocTraverseMatcher(const Matcher<TypeLoc> &InnerMatcher,
+                                  TypeLoc (T::*TraverseFunction)() const)
+      : InnerMatcher(InnerMatcher), TraverseFunction(TraverseFunction) {}
+
+  virtual bool matches(const T &Node,
+                       ASTMatchFinder *Finder,
+                       BoundNodesTreeBuilder *Builder) const {
+    TypeLoc NextNode = (Node.*TraverseFunction)();
+    if (!NextNode)
+      return false;
+    return InnerMatcher.matches(NextNode, Finder, Builder);
+  }
+
+private:
+  const Matcher<TypeLoc> InnerMatcher;
+  TypeLoc (T::*TraverseFunction)() const;
+};
+
+template <typename T, typename InnerT>
+T makeTypeAllOfComposite(ArrayRef<const Matcher<InnerT> *> InnerMatchers) {
+  return T(makeAllOfComposite<InnerT>(InnerMatchers));
+}
 
 } // end namespace internal
 } // end namespace ast_matchers

@@ -779,7 +779,7 @@ void AggExprEmitter::VisitBinAssign(const BinaryOperator *E) {
     Visit(E->getRHS());
 
     // Now emit the LHS and copy into it.
-    LValue LHS = CGF.EmitLValue(E->getLHS());
+    LValue LHS = CGF.EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
 
     EmitCopy(E->getLHS()->getType(),
              AggValueSlot::forLValue(LHS, AggValueSlot::IsDestructed,
@@ -1279,7 +1279,8 @@ LValue CodeGenFunction::EmitAggExprToLValue(const Expr *E) {
 void CodeGenFunction::EmitAggregateCopy(llvm::Value *DestPtr,
                                         llvm::Value *SrcPtr, QualType Ty,
                                         bool isVolatile,
-                                        CharUnits alignment) {
+                                        CharUnits alignment,
+                                        bool isAssignment) {
   assert(!Ty->isAnyComplexType() && "Shouldn't happen for complex");
 
   if (getContext().getLangOpts().CPlusPlus) {
@@ -1308,9 +1309,13 @@ void CodeGenFunction::EmitAggregateCopy(llvm::Value *DestPtr,
   // implementation handles this case safely.  If there is a libc that does not
   // safely handle this, we can add a target hook.
 
-  // Get data size and alignment info for this aggregate.
-  std::pair<CharUnits, CharUnits> TypeInfo = 
-    getContext().getTypeInfoDataSizeInChars(Ty);
+  // Get data size and alignment info for this aggregate. If this is an
+  // assignment don't copy the tail padding. Otherwise copying it is fine.
+  std::pair<CharUnits, CharUnits> TypeInfo;
+  if (isAssignment)
+    TypeInfo = getContext().getTypeInfoDataSizeInChars(Ty);
+  else
+    TypeInfo = getContext().getTypeInfoInChars(Ty);
 
   if (alignment.isZero())
     alignment = TypeInfo.second;
@@ -1367,11 +1372,17 @@ void CodeGenFunction::EmitAggregateCopy(llvm::Value *DestPtr,
       }
     }
   }
+
+  // Determine the metadata to describe the position of any padding in this
+  // memcpy, as well as the TBAA tags for the members of the struct, in case
+  // the optimizer wishes to expand it in to scalar memory operations.
+  llvm::MDNode *TBAAStructTag = CGM.getTBAAStructInfo(Ty);
   
   Builder.CreateMemCpy(DestPtr, SrcPtr,
                        llvm::ConstantInt::get(IntPtrTy, 
                                               TypeInfo.first.getQuantity()),
-                       alignment.getQuantity(), isVolatile);
+                       alignment.getQuantity(), isVolatile,
+                       /*TBAATag=*/0, TBAAStructTag);
 }
 
 void CodeGenFunction::MaybeEmitStdInitializerListCleanup(llvm::Value *loc,

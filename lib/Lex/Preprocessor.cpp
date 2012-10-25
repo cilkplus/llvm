@@ -49,6 +49,8 @@ using namespace clang;
 //===----------------------------------------------------------------------===//
 ExternalPreprocessorSource::~ExternalPreprocessorSource() { }
 
+PPMutationListener::~PPMutationListener() { }
+
 Preprocessor::Preprocessor(DiagnosticsEngine &diags, LangOptions &opts,
                            const TargetInfo *target, SourceManager &SM,
                            HeaderSearch &Headers, ModuleLoader &TheModuleLoader,
@@ -62,8 +64,8 @@ Preprocessor::Preprocessor(DiagnosticsEngine &diags, LangOptions &opts,
     IncrementalProcessing(IncrProcessing), CodeComplete(0), 
     CodeCompletionFile(0), CodeCompletionOffset(0), CodeCompletionReached(0),
     SkipMainFilePreamble(0, true), CurPPLexer(0), 
-    CurDirLookup(0), CurLexerKind(CLK_Lexer), Callbacks(0), MacroArgCache(0), 
-    Record(0), MIChainHead(0), MICache(0) 
+    CurDirLookup(0), CurLexerKind(CLK_Lexer), Callbacks(0), Listener(0),
+    MacroArgCache(0), Record(0), MIChainHead(0), MICache(0) 
 {
   OwnsHeaderSearch = OwnsHeaders;
   
@@ -283,6 +285,39 @@ Preprocessor::macro_end(bool IncludeExternalMacros) const {
   }
 
   return Macros.end();
+}
+
+/// \brief Compares macro tokens with a specified token value sequence.
+static bool MacroDefinitionEquals(const MacroInfo *MI,
+                                  llvm::ArrayRef<TokenValue> Tokens) {
+  return Tokens.size() == MI->getNumTokens() &&
+      std::equal(Tokens.begin(), Tokens.end(), MI->tokens_begin());
+}
+
+StringRef Preprocessor::getLastMacroWithSpelling(
+                                    SourceLocation Loc,
+                                    ArrayRef<TokenValue> Tokens) const {
+  SourceLocation BestLocation;
+  StringRef BestSpelling;
+  for (Preprocessor::macro_iterator I = macro_begin(), E = macro_end();
+       I != E; ++I) {
+    if (!I->second->isObjectLike())
+      continue;
+    const MacroInfo *MI = I->second->findDefinitionAtLoc(Loc, SourceMgr);
+    if (!MI)
+      continue;
+    if (!MacroDefinitionEquals(MI, Tokens))
+      continue;
+    SourceLocation Location = I->second->getDefinitionLoc();
+    // Choose the macro defined latest.
+    if (BestLocation.isInvalid() ||
+        (Location.isValid() &&
+         SourceMgr.isBeforeInTranslationUnit(BestLocation, Location))) {
+      BestLocation = Location;
+      BestSpelling = I->first->getName();
+    }
+  }
+  return BestSpelling;
 }
 
 void Preprocessor::recomputeCurLexerKind() {
@@ -641,10 +676,14 @@ void Preprocessor::LexAfterModuleImport(Token &Result) {
   }
 
   // If we have a non-empty module path, load the named module.
-  if (!ModuleImportPath.empty())
-    (void)TheModuleLoader.loadModule(ModuleImportLoc, ModuleImportPath,
-                                     Module::MacrosVisible,
-                                     /*IsIncludeDirective=*/false);
+  if (!ModuleImportPath.empty()) {
+    Module *Imported = TheModuleLoader.loadModule(ModuleImportLoc,
+                                                  ModuleImportPath,
+                                                  Module::MacrosVisible,
+                                                  /*IsIncludeDirective=*/false);
+    if (Callbacks)
+      Callbacks->moduleImport(ModuleImportLoc, ModuleImportPath, Imported);
+  }
 }
 
 void Preprocessor::addCommentHandler(CommentHandler *Handler) {

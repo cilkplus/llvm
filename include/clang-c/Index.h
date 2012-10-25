@@ -1035,13 +1035,15 @@ enum CXTranslationUnit_Flags {
    * code-completion operations.
    */
   CXTranslationUnit_CacheCompletionResults = 0x08,
+
   /**
-   * \brief DEPRECATED: Enable precompiled preambles in C++.
+   * \brief Used to indicate that the translation unit will be serialized with
+   * \c clang_saveTranslationUnit.
    *
-   * Note: this is a *temporary* option that is available only while
-   * we are testing C++ precompiled preamble support. It is deprecated.
+   * This option is typically used when parsing a header with the intent of
+   * producing a precompiled header.
    */
-  CXTranslationUnit_CXXPrecompiledPreamble = 0x10,
+  CXTranslationUnit_ForSerialization = 0x10,
 
   /**
    * \brief DEPRECATED: Enabled chained precompiled preambles in C++.
@@ -2022,7 +2024,15 @@ enum CXCursorKind {
   CXCursor_MacroInstantiation            = CXCursor_MacroExpansion,
   CXCursor_InclusionDirective            = 503,
   CXCursor_FirstPreprocessing            = CXCursor_PreprocessingDirective,
-  CXCursor_LastPreprocessing             = CXCursor_InclusionDirective
+  CXCursor_LastPreprocessing             = CXCursor_InclusionDirective,
+
+  /* Extra Declarations */
+  /**
+   * \brief A module import declaration.
+   */
+  CXCursor_ModuleImportDecl              = 600,
+  CXCursor_FirstExtraDecl                = CXCursor_ModuleImportDecl,
+  CXCursor_LastExtraDecl                 = CXCursor_ModuleImportDecl
 };
 
 /**
@@ -2599,6 +2609,7 @@ enum CXCallingConv {
   CXCallingConv_X86Pascal = 5,
   CXCallingConv_AAPCS = 6,
   CXCallingConv_AAPCS_VFP = 7,
+  CXCallingConv_PnaclCall = 8,
 
   CXCallingConv_Invalid = 100,
   CXCallingConv_Unexposed = 200
@@ -3203,6 +3214,65 @@ CINDEX_LINKAGE CXString clang_Cursor_getBriefCommentText(CXCursor C);
  * \c CXComment_FullComment AST node.
  */
 CINDEX_LINKAGE CXComment clang_Cursor_getParsedComment(CXCursor C);
+
+/**
+ * @}
+ */
+
+/**
+ * \defgroup CINDEX_MODULE Module introspection
+ *
+ * The functions in this group provide access to information about modules.
+ *
+ * @{
+ */
+
+typedef void *CXModule;
+
+/**
+ * \brief Given a CXCursor_ModuleImportDecl cursor, return the associated module.
+ */
+CINDEX_LINKAGE CXModule clang_Cursor_getModule(CXCursor C);
+
+/**
+ * \param Module a module object.
+ *
+ * \returns the parent of a sub-module or NULL if the given module is top-level,
+ * e.g. for 'std.vector' it will return the 'std' module.
+ */
+CINDEX_LINKAGE CXModule clang_Module_getParent(CXModule Module);
+
+/**
+ * \param Module a module object.
+ *
+ * \returns the name of the module, e.g. for the 'std.vector' sub-module it
+ * will return "vector".
+ */
+CINDEX_LINKAGE CXString clang_Module_getName(CXModule Module);
+
+/**
+ * \param Module a module object.
+ *
+ * \returns the full name of the module, e.g. "std.vector".
+ */
+CINDEX_LINKAGE CXString clang_Module_getFullName(CXModule Module);
+
+/**
+ * \param Module a module object.
+ *
+ * \returns the number of top level headers associated with this module.
+ */
+CINDEX_LINKAGE unsigned clang_Module_getNumTopLevelHeaders(CXModule Module);
+
+/**
+ * \param Module a module object.
+ *
+ * \param Index top level header index (zero-based).
+ *
+ * \returns the specified top level header associated with the module.
+ */
+CINDEX_LINKAGE
+CXFile clang_Module_getTopLevelHeader(CXModule Module, unsigned Index);
 
 /**
  * @}
@@ -4927,22 +4997,35 @@ typedef struct {
   CXFile file;
   int isImport;
   int isAngled;
+  /**
+   * \brief Non-zero if the directive was automatically turned into a module
+   * import.
+   */
+  int isModuleImport;
 } CXIdxIncludedFileInfo;
 
 /**
  * \brief Data for IndexerCallbacks#importedASTFile.
  */
 typedef struct {
+  /**
+   * \brief Top level AST file containing the imported PCH, module or submodule.
+   */
   CXFile file;
   /**
-   * \brief Location where the file is imported. It is useful mostly for
-   * modules.
+   * \brief The imported module or NULL if the AST file is a PCH.
+   */
+  CXModule module;
+  /**
+   * \brief Location where the file is imported. Applicable only for modules.
    */
   CXIdxLoc loc;
   /**
-   * \brief Non-zero if the AST file is a module otherwise it's a PCH.
+   * \brief Non-zero if an inclusion directive was automatically turned into
+   * a module import. Applicable only for modules.
    */
-  int isModule;
+  int isImplicit;
+
 } CXIdxImportedASTFileInfo;
 
 typedef enum {
@@ -5194,8 +5277,8 @@ typedef struct {
    * 
    * AST files will not get indexed (there will not be callbacks to index all
    * the entities in an AST file). The recommended action is that, if the AST
-   * file is not already indexed, to block further indexing and initiate a new
-   * indexing job specific to the AST file.
+   * file is not already indexed, to initiate a new indexing job specific to
+   * the AST file.
    */
   CXIdxClientASTFile (*importedASTFile)(CXClientData client_data,
                                         const CXIdxImportedASTFileInfo *);

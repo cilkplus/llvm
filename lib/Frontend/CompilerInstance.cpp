@@ -52,6 +52,7 @@ CompilerInstance::CompilerInstance()
 }
 
 CompilerInstance::~CompilerInstance() {
+  assert(OutputFiles.empty() && "Still output files in flight?");
 }
 
 void CompilerInstance::setInvocation(CompilerInvocation *Value) {
@@ -342,7 +343,8 @@ CompilerInstance::createPCHExternalASTSource(StringRef Path,
             static_cast<ASTDeserializationListener *>(DeserializationListener));
   switch (Reader->ReadAST(Path,
                           Preamble ? serialization::MK_Preamble
-                                   : serialization::MK_PCH)) {
+                                   : serialization::MK_PCH,
+                          ASTReader::ARR_None)) {
   case ASTReader::Success:
     // Set the predefines buffer as suggested by the PCH reader. Typically, the
     // predefines buffer will be empty.
@@ -353,7 +355,10 @@ CompilerInstance::createPCHExternalASTSource(StringRef Path,
     // Unrecoverable failure: don't even try to process the input file.
     break;
 
-  case ASTReader::IgnorePCH:
+  case ASTReader::OutOfDate:
+  case ASTReader::VersionMismatch:
+  case ASTReader::ConfigurationMismatch:
+  case ASTReader::HadErrors:
     // No suitable PCH file could be found. Return an error.
     break;
   }
@@ -836,6 +841,7 @@ static void compileModule(CompilerInstance &ImportingInstance,
   // FIXME: Even though we're executing under crash protection, it would still
   // be nice to do this with RemoveFileOnSignal when we can. However, that
   // doesn't make sense for all clients, so clean this up manually.
+  Instance.clearOutputFiles(/*EraseFiles=*/true);
   if (!TempModuleMapFileName.empty())
     llvm::sys::Path(TempModuleMapFileName).eraseFromDisk();
 }
@@ -946,6 +952,8 @@ Module *CompilerInstance::loadModule(SourceLocation ImportLoc,
           getASTConsumer().GetASTDeserializationListener());
         getASTContext().setASTMutationListener(
           getASTConsumer().GetASTMutationListener());
+        getPreprocessor().setPPMutationListener(
+          getASTConsumer().GetPPMutationListener());
       }
       OwningPtr<ExternalASTSource> Source;
       Source.reset(ModuleManager);
@@ -958,11 +966,15 @@ Module *CompilerInstance::loadModule(SourceLocation ImportLoc,
 
     // Try to load the module we found.
     switch (ModuleManager->ReadAST(ModuleFile->getName(),
-                                   serialization::MK_Module)) {
+                                   serialization::MK_Module,
+                                   ASTReader::ARR_None)) {
     case ASTReader::Success:
       break;
 
-    case ASTReader::IgnorePCH:
+    case ASTReader::OutOfDate:
+    case ASTReader::VersionMismatch:
+    case ASTReader::ConfigurationMismatch:
+    case ASTReader::HadErrors:
       // FIXME: The ASTReader will already have complained, but can we showhorn
       // that diagnostic information into a more useful form?
       KnownModules[Path[0].first] = 0;
@@ -980,6 +992,9 @@ Module *CompilerInstance::loadModule(SourceLocation ImportLoc,
       Module = PP->getHeaderSearchInfo().getModuleMap()
                  .findModule((Path[0].first->getName()));
     }
+
+    if (Module)
+      Module->setASTFile(ModuleFile);
     
     // Cache the result of this top-level module lookup for later.
     Known = KnownModules.insert(std::make_pair(Path[0].first, Module)).first;
@@ -1079,9 +1094,12 @@ Module *CompilerInstance::loadModule(SourceLocation ImportLoc,
   // implicit import declaration to capture it in the AST.
   if (IsInclusionDirective && hasASTContext()) {
     TranslationUnitDecl *TU = getASTContext().getTranslationUnitDecl();
-    TU->addDecl(ImportDecl::CreateImplicit(getASTContext(), TU,
-                                           ImportLoc, Module, 
-                                           Path.back().second));
+    ImportDecl *ImportD = ImportDecl::CreateImplicit(getASTContext(), TU,
+                                                     ImportLoc, Module,
+                                                     Path.back().second);
+    TU->addDecl(ImportD);
+    if (Consumer)
+      Consumer->HandleImplicitImportDecl(ImportD);
   }
   
   LastModuleImportLoc = ImportLoc;

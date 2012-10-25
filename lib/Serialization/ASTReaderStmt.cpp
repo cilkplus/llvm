@@ -565,6 +565,7 @@ void ASTStmtReader::VisitBinaryOperator(BinaryOperator *E) {
   E->setRHS(Reader.ReadSubExpr());
   E->setOpcode((BinaryOperator::Opcode)Record[Idx++]);
   E->setOperatorLoc(ReadSourceLocation(Record, Idx));
+  E->setFPContractable((bool)Record[Idx++]);
 }
 
 void ASTStmtReader::VisitCompoundAssignOperator(CompoundAssignOperator *E) {
@@ -1086,6 +1087,7 @@ void ASTStmtReader::VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
   VisitCallExpr(E);
   E->Operator = (OverloadedOperatorKind)Record[Idx++];
   E->Range = Reader.ReadSourceRange(F, Record, Idx);
+  E->setFPContractable((bool)Record[Idx++]);
 }
 
 void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
@@ -1366,8 +1368,6 @@ void ASTStmtReader::VisitUnresolvedMemberExpr(UnresolvedMemberExpr *E) {
 void ASTStmtReader::VisitUnresolvedLookupExpr(UnresolvedLookupExpr *E) {
   VisitOverloadExpr(E);
   E->RequiresADL = Record[Idx++];
-  if (E->RequiresADL)
-    E->StdIsAssociatedNamespace = Record[Idx++];
   E->Overloaded = Record[Idx++];
   E->NamingClass = ReadDeclAs<CXXRecordDecl>(Record, Idx);
 }

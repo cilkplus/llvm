@@ -13,7 +13,9 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Lex/Preprocessor.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/SmallString.h"
 
 namespace clang {
 namespace comments {
@@ -23,9 +25,10 @@ namespace {
 } // unnamed namespace
 
 Sema::Sema(llvm::BumpPtrAllocator &Allocator, const SourceManager &SourceMgr,
-           DiagnosticsEngine &Diags, CommandTraits &Traits) :
+           DiagnosticsEngine &Diags, CommandTraits &Traits,
+           const Preprocessor *PP) :
     Allocator(Allocator), SourceMgr(SourceMgr), Diags(Diags), Traits(Traits),
-    ThisDeclInfo(NULL), BriefCommand(NULL), ReturnsCommand(NULL) {
+    PP(PP), ThisDeclInfo(NULL), BriefCommand(NULL), ReturnsCommand(NULL) {
 }
 
 void Sema::setDecl(const Decl *D) {
@@ -33,7 +36,7 @@ void Sema::setDecl(const Decl *D) {
     return;
 
   ThisDeclInfo = new (Allocator) DeclInfo;
-  ThisDeclInfo->ThisDecl = D;
+  ThisDeclInfo->CommentDecl = D;
   ThisDeclInfo->IsFilled = false;
 }
 
@@ -438,7 +441,7 @@ void Sema::checkReturnsCommand(const BlockCommandComment *Command) {
   if (isFunctionDecl()) {
     if (ThisDeclInfo->ResultType->isVoidType()) {
       unsigned DiagKind;
-      switch (ThisDeclInfo->ThisDecl->getKind()) {
+      switch (ThisDeclInfo->CommentDecl->getKind()) {
       default:
         if (ThisDeclInfo->IsObjCMethod)
           DiagKind = 3;
@@ -505,7 +508,7 @@ void Sema::checkDeprecatedCommand(const BlockCommandComment *Command) {
   if (!Traits.getCommandInfo(Command->getCommandID())->IsDeprecatedCommand)
     return;
 
-  const Decl *D = ThisDeclInfo->ThisDecl;
+  const Decl *D = ThisDeclInfo->CommentDecl;
   if (!D)
     return;
 
@@ -527,10 +530,25 @@ void Sema::checkDeprecatedCommand(const BlockCommandComment *Command) {
         FD->doesThisDeclarationHaveABody())
       return;
 
+    StringRef AttributeSpelling = "__attribute__((deprecated))";
+    if (PP) {
+      TokenValue Tokens[] = {
+        tok::kw___attribute, tok::l_paren, tok::l_paren,
+        PP->getIdentifierInfo("deprecated"),
+        tok::r_paren, tok::r_paren
+      };
+      StringRef MacroName = PP->getLastMacroWithSpelling(FD->getLocation(),
+                                                         Tokens);
+      if (!MacroName.empty())
+        AttributeSpelling = MacroName;
+    }
+
+    SmallString<64> TextToInsert(" ");
+    TextToInsert += AttributeSpelling;
     Diag(FD->getLocEnd(),
          diag::note_add_deprecation_attr)
       << FixItHint::CreateInsertion(FD->getLocEnd().getLocWithOffset(1),
-                                    " __attribute__((deprecated))");
+                                    TextToInsert);
   }
 }
 
@@ -556,7 +574,7 @@ void Sema::resolveParamCommandIndexes(const FullComment *FC) {
     ParamCommandComment *PCC = dyn_cast<ParamCommandComment>(*I);
     if (!PCC || !PCC->hasParamName())
       continue;
-    StringRef ParamName = PCC->getParamName();
+    StringRef ParamName = PCC->getParamNameAsWritten();
 
     // Check that referenced parameter name is in the function decl.
     const unsigned ResolvedParamIndex = resolveParmVarReference(ParamName,
@@ -591,7 +609,7 @@ void Sema::resolveParamCommandIndexes(const FullComment *FC) {
     const ParamCommandComment *PCC = UnresolvedParamCommands[i];
 
     SourceRange ArgRange = PCC->getParamNameRange();
-    StringRef ParamName = PCC->getParamName();
+    StringRef ParamName = PCC->getParamNameAsWritten();
     Diag(ArgRange.getBegin(), diag::warn_doc_param_not_found)
       << ParamName << ArgRange;
 

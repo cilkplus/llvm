@@ -435,7 +435,8 @@ bool Sema::DiagnoseUnknownTypeName(IdentifierInfo *&II,
       else if (DeclContext *DC = computeDeclContext(*SS, false))
         Diag(IILoc, diag::err_unknown_nested_typename_suggest)
           << II << DC << CorrectedQuotedStr << SS->getRange()
-          << FixItHint::CreateReplacement(SourceRange(IILoc), CorrectedStr);
+          << FixItHint::CreateReplacement(Corrected.getCorrectionRange(),
+                                          CorrectedStr);
       else
         llvm_unreachable("could not have corrected a typo here");
 
@@ -684,11 +685,12 @@ Corrected:
           Diag(NameLoc, UnqualifiedDiag)
             << Name << CorrectedQuotedStr
             << FixItHint::CreateReplacement(NameLoc, CorrectedStr);
-        else
+        else // FIXME: is this even reachable? Test it.
           Diag(NameLoc, QualifiedDiag)
             << Name << computeDeclContext(SS, false) << CorrectedQuotedStr
             << SS.getRange()
-            << FixItHint::CreateReplacement(NameLoc, CorrectedStr);
+            << FixItHint::CreateReplacement(Corrected.getCorrectionRange(),
+                                            CorrectedStr);
 
         // Update the name, so that the caller has the new name.
         Name = Corrected.getCorrectionAsIdentifierInfo();
@@ -1721,6 +1723,25 @@ DeclHasAttr(const Decl *D, const Attr *A) {
   const AvailabilityAttr *AA = dyn_cast<AvailabilityAttr>(A);
   if (AA)
     return false;
+
+  // The following thread safety attributes can also be duplicated.
+  switch (A->getKind()) {
+    case attr::ExclusiveLocksRequired:
+    case attr::SharedLocksRequired:
+    case attr::LocksExcluded:
+    case attr::ExclusiveLockFunction:
+    case attr::SharedLockFunction:
+    case attr::UnlockFunction:
+    case attr::ExclusiveTrylockFunction:
+    case attr::SharedTrylockFunction:
+    case attr::GuardedBy:
+    case attr::PtGuardedBy:
+    case attr::AcquiredBefore:
+    case attr::AcquiredAfter:
+      return false;
+    default:
+      ;
+  }
 
   const OwnershipAttr *OA = dyn_cast<OwnershipAttr>(A);
   const AnnotateAttr *Ann = dyn_cast<AnnotateAttr>(A);
@@ -2774,8 +2795,7 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
         TypeSpecType == DeclSpec::TST_enum) {
       AttributeList* attrs = DS.getAttributes().getList();
       while (attrs) {
-        Diag(attrs->getScopeLoc(),
-             diag::warn_declspec_attribute_ignored)
+        Diag(attrs->getLoc(), diag::warn_declspec_attribute_ignored)
         << attrs->getName()
         << (TypeSpecType == DeclSpec::TST_class ? 0 :
             TypeSpecType == DeclSpec::TST_struct ? 1 :
@@ -3400,7 +3420,6 @@ static bool RebuildDeclaratorInCurrentInstantiation(Sema &S, Declarator &D,
   switch (DS.getTypeSpecType()) {
   case DeclSpec::TST_typename:
   case DeclSpec::TST_typeofType:
-  case DeclSpec::TST_decltype:
   case DeclSpec::TST_underlyingType:
   case DeclSpec::TST_atomic: {
     // Grab the type from the parser.
@@ -3424,6 +3443,7 @@ static bool RebuildDeclaratorInCurrentInstantiation(Sema &S, Declarator &D,
     break;
   }
 
+  case DeclSpec::TST_decltype:
   case DeclSpec::TST_typeofExpr: {
     Expr *E = DS.getRepAsExpr();
     ExprResult Result = S.RebuildExprInCurrentInstantiation(E);
@@ -4578,8 +4598,10 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
       && !NewVD->hasAttr<BlocksAttr>()) {
     if (getLangOpts().getGC() != LangOptions::NonGC)
       Diag(NewVD->getLocation(), diag::warn_gc_attribute_weak_on_local);
-    else
+    else {
+      assert(!getLangOpts().ObjCAutoRefCount);
       Diag(NewVD->getLocation(), diag::warn_attribute_weak_on_local);
+    }
   }
   
   bool isVM = T->isVariablyModifiedType();
@@ -4711,6 +4733,31 @@ static bool FindOverriddenMethod(const CXXBaseSpecifier *Specifier,
   return false;
 }
 
+namespace {
+  enum OverrideErrorKind { OEK_All, OEK_NonDeleted, OEK_Deleted };
+}
+/// \brief Report an error regarding overriding, along with any relevant
+/// overriden methods.
+///
+/// \param DiagID the primary error to report.
+/// \param MD the overriding method.
+/// \param OEK which overrides to include as notes.
+static void ReportOverrides(Sema& S, unsigned DiagID, const CXXMethodDecl *MD,
+                            OverrideErrorKind OEK = OEK_All) {
+  S.Diag(MD->getLocation(), DiagID) << MD->getDeclName();
+  for (CXXMethodDecl::method_iterator I = MD->begin_overridden_methods(),
+                                      E = MD->end_overridden_methods();
+       I != E; ++I) {
+    // This check (& the OEK parameter) could be replaced by a predicate, but
+    // without lambdas that would be overkill. This is still nicer than writing
+    // out the diag loop 3 times.
+    if ((OEK == OEK_All) ||
+        (OEK == OEK_NonDeleted && !(*I)->isDeleted()) ||
+        (OEK == OEK_Deleted && (*I)->isDeleted()))
+      S.Diag((*I)->getLocation(), diag::note_overridden_virtual_function);
+  }
+}
+
 /// AddOverriddenMethods - See if a method overrides any in the base classes,
 /// and if so, check that it's a valid override and remember it.
 bool Sema::AddOverriddenMethods(CXXRecordDecl *DC, CXXMethodDecl *MD) {
@@ -4719,6 +4766,8 @@ bool Sema::AddOverriddenMethods(CXXRecordDecl *DC, CXXMethodDecl *MD) {
   FindOverriddenMethodData Data;
   Data.Method = MD;
   Data.S = this;
+  bool hasDeletedOverridenMethods = false;
+  bool hasNonDeletedOverridenMethods = false;
   bool AddedAny = false;
   if (DC->lookupInBases(&FindOverriddenMethod, &Data, Paths)) {
     for (CXXBasePaths::decl_iterator I = Paths.found_decls_begin(),
@@ -4728,12 +4777,21 @@ bool Sema::AddOverriddenMethods(CXXRecordDecl *DC, CXXMethodDecl *MD) {
         if (!CheckOverridingFunctionReturnType(MD, OldMD) &&
             !CheckOverridingFunctionExceptionSpec(MD, OldMD) &&
             !CheckIfOverriddenFunctionIsMarkedFinal(MD, OldMD)) {
+          hasDeletedOverridenMethods |= OldMD->isDeleted();
+          hasNonDeletedOverridenMethods |= !OldMD->isDeleted();
           AddedAny = true;
         }
       }
     }
   }
-  
+
+  if (hasDeletedOverridenMethods && !MD->isDeleted()) {
+    ReportOverrides(*this, diag::err_non_deleted_override, MD, OEK_Deleted);
+  }
+  if (hasNonDeletedOverridenMethods && MD->isDeleted()) {
+    ReportOverrides(*this, diag::err_deleted_override, MD, OEK_NonDeleted);
+  }
+
   return AddedAny;
 }
 
@@ -4893,6 +4951,10 @@ static NamedDecl* DiagnoseInvalidRedeclaration(
   }
 
   if (Correction) {
+    // FIXME: use Correction.getCorrectionRange() instead of computing the range
+    // here. This requires passing in the CXXScopeSpec to CorrectTypo which in
+    // turn causes the correction to fully qualify the name. If we fix
+    // CorrectTypo to minimally qualify then this change should be good.
     SourceRange FixItLoc(NewFD->getLocation());
     CXXScopeSpec &SS = ExtraArgs.D.getCXXScopeSpec();
     if (Correction.getCorrectionSpecifier() && SS.isValid())
@@ -5456,6 +5518,20 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       Diag(D.getDeclSpec().getStorageClassSpecLoc(),
            diag::err_static_out_of_line)
         << FixItHint::CreateRemoval(D.getDeclSpec().getStorageClassSpecLoc());
+    }
+
+    // C++11 [except.spec]p15:
+    //   A deallocation function with no exception-specification is treated
+    //   as if it were specified with noexcept(true).
+    const FunctionProtoType *FPT = R->getAs<FunctionProtoType>();
+    if ((Name.getCXXOverloadedOperator() == OO_Delete ||
+         Name.getCXXOverloadedOperator() == OO_Array_Delete) &&
+        getLangOpts().CPlusPlus0x && FPT && !FPT->hasExceptionSpec()) {
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.ExceptionSpecType = EST_BasicNoexcept;
+      NewFD->setType(Context.getFunctionType(FPT->getResultType(),
+                                             FPT->arg_type_begin(),
+                                             FPT->getNumArgs(), EPI));
     }
   }
 
@@ -6037,20 +6113,12 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
     // Find any virtual functions that this function overrides.
     if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(NewFD)) {
       if (!Method->isFunctionTemplateSpecialization() && 
-          !Method->getDescribedFunctionTemplate()) {
+          !Method->getDescribedFunctionTemplate() &&
+          Method->isCanonicalDecl()) {
         if (AddOverriddenMethods(Method->getParent(), Method)) {
           // If the function was marked as "static", we have a problem.
           if (NewFD->getStorageClass() == SC_Static) {
-            Diag(NewFD->getLocation(), diag::err_static_overrides_virtual)
-              << NewFD->getDeclName();
-            for (CXXMethodDecl::method_iterator 
-                      Overridden = Method->begin_overridden_methods(),
-                   OverriddenEnd = Method->end_overridden_methods();
-                 Overridden != OverriddenEnd;
-                 ++Overridden) {
-              Diag((*Overridden)->getLocation(), 
-                   diag::note_overridden_virtual_function);
-            }
+            ReportOverrides(*this, diag::err_static_overrides_virtual, Method);
           }
         }
       }
@@ -6259,28 +6327,12 @@ namespace {
       }
     }
 
-    // Sometimes, the expression passed in lacks the casts that are used
-    // to determine which DeclRefExpr's to check.  Assume that the casts
-    // are present and continue visiting the expression.
-    void HandleExpr(Expr *E) {
-      // Skip checking T a = a where T is not a record or reference type.
-      // Doing so is a way to silence uninitialized warnings.
-      if (isRecordType || isReferenceType)
-        if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E))
-          HandleDeclRefExpr(DRE);
-
-      if (ConditionalOperator *CO = dyn_cast<ConditionalOperator>(E)) {
-        HandleValue(CO->getTrueExpr());
-        HandleValue(CO->getFalseExpr());
-      }
-
-      Visit(E);
-    }
-
     // For most expressions, the cast is directly above the DeclRefExpr.
     // For conditional operators, the cast can be outside the conditional
     // operator if both expressions are DeclRefExpr's.
     void HandleValue(Expr *E) {
+      if (isReferenceType)
+        return;
       E = E->IgnoreParenImpCasts();
       if (DeclRefExpr* DRE = dyn_cast<DeclRefExpr>(E)) {
         HandleDeclRefExpr(DRE);
@@ -6290,11 +6342,32 @@ namespace {
       if (ConditionalOperator *CO = dyn_cast<ConditionalOperator>(E)) {
         HandleValue(CO->getTrueExpr());
         HandleValue(CO->getFalseExpr());
+        return;
+      }
+
+      if (isa<MemberExpr>(E)) {
+        Expr *Base = E->IgnoreParenImpCasts();
+        while (MemberExpr *ME = dyn_cast<MemberExpr>(Base)) {
+          // Check for static member variables and don't warn on them.
+          if (!isa<FieldDecl>(ME->getMemberDecl()))
+            return;
+          Base = ME->getBase()->IgnoreParenImpCasts();
+        }
+        if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(Base))
+          HandleDeclRefExpr(DRE);
+        return;
       }
     }
 
+    // Reference types are handled here since all uses of references are
+    // bad, not just r-value uses.
+    void VisitDeclRefExpr(DeclRefExpr *E) {
+      if (isReferenceType)
+        HandleDeclRefExpr(E);
+    }
+
     void VisitImplicitCastExpr(ImplicitCastExpr *E) {
-      if ((!isRecordType && E->getCastKind() == CK_LValueToRValue) ||
+      if (E->getCastKind() == CK_LValueToRValue ||
           (isRecordType && E->getCastKind() == CK_NoOp))
         HandleValue(E->getSubExpr());
 
@@ -6305,22 +6378,36 @@ namespace {
       // Don't warn on arrays since they can be treated as pointers.
       if (E->getType()->canDecayToPointerType()) return;
 
-      ValueDecl *VD = E->getMemberDecl();
-      CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(VD);
-      if (isa<FieldDecl>(VD) || (MD && !MD->isStatic()))
-        if (DeclRefExpr *DRE
-              = dyn_cast<DeclRefExpr>(E->getBase()->IgnoreParenImpCasts())) {
-          HandleDeclRefExpr(DRE);
-          return;
-        }
+      // Warn when a non-static method call is followed by non-static member
+      // field accesses, which is followed by a DeclRefExpr.
+      CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(E->getMemberDecl());
+      bool Warn = (MD && !MD->isStatic());
+      Expr *Base = E->getBase()->IgnoreParenImpCasts();
+      while (MemberExpr *ME = dyn_cast<MemberExpr>(Base)) {
+        if (!isa<FieldDecl>(ME->getMemberDecl()))
+          Warn = false;
+        Base = ME->getBase()->IgnoreParenImpCasts();
+      }
 
-      Inherited::VisitMemberExpr(E);
+      if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(Base)) {
+        if (Warn)
+          HandleDeclRefExpr(DRE);
+        return;
+      }
+
+      // The base of a MemberExpr is not a MemberExpr or a DeclRefExpr.
+      // Visit that expression.
+      Visit(Base);
     }
 
     void VisitUnaryOperator(UnaryOperator *E) {
       // For POD record types, addresses of its own members are well-defined.
-      if (E->getOpcode() == UO_AddrOf && isRecordType && isPODType &&
-          isa<MemberExpr>(E->getSubExpr()->IgnoreParens())) return;
+      if (E->getOpcode() == UO_AddrOf && isRecordType &&
+          isa<MemberExpr>(E->getSubExpr()->IgnoreParens())) {
+        if (!isPODType)
+          HandleValue(E->getSubExpr());
+        return;
+      }
       Inherited::VisitUnaryOperator(E);
     } 
 
@@ -6339,11 +6426,28 @@ namespace {
                               << DRE->getSourceRange());
     }
   };
-}
 
-/// CheckSelfReference - Warns if OrigDecl is used in expression E.
-void Sema::CheckSelfReference(Decl* OrigDecl, Expr *E) {
-  SelfReferenceChecker(*this, OrigDecl).HandleExpr(E);
+  /// CheckSelfReference - Warns if OrigDecl is used in expression E.
+  static void CheckSelfReference(Sema &S, Decl* OrigDecl, Expr *E,
+                                 bool DirectInit) {
+    // Parameters arguments are occassionially constructed with itself,
+    // for instance, in recursive functions.  Skip them.
+    if (isa<ParmVarDecl>(OrigDecl))
+      return;
+
+    E = E->IgnoreParens();
+
+    // Skip checking T a = a where T is not a record or reference type.
+    // Doing so is a way to silence uninitialized warnings.
+    if (!DirectInit && !cast<VarDecl>(OrigDecl)->getType()->isRecordType())
+      if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E))
+        if (ICE->getCastKind() == CK_LValueToRValue)
+          if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(ICE->getSubExpr()))
+            if (DRE->getDecl() == OrigDecl)
+              return;
+
+    SelfReferenceChecker(S, OrigDecl).Visit(E);
+  }
 }
 
 /// AddInitializerToDecl - Adds the initializer Init to the
@@ -6379,15 +6483,6 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     RealDecl->setInvalidDecl();
     return;
   }
-
-  // Check for self-references within variable initializers.
-  // Variables declared within a function/method body (except for references)
-  // are handled by a dataflow analysis.
-  // Record types initialized by initializer list are handled here.
-  // Initialization by constructors are handled in TryConstructorInitialization.
-  if ((!VDecl->hasLocalStorage() || VDecl->getType()->isReferenceType()) &&
-      (isa<InitListExpr>(Init) || !VDecl->getType()->isRecordType()))
-    CheckSelfReference(RealDecl, Init);
 
   ParenListExpr *CXXDirectInit = dyn_cast<ParenListExpr>(Init);
 
@@ -6573,6 +6668,14 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     Init = Result.takeAs<Expr>();
   }
 
+  // Check for self-references within variable initializers.
+  // Variables declared within a function/method body (except for references)
+  // are handled by a dataflow analysis.
+  if (!VDecl->hasLocalStorage() || VDecl->getType()->isRecordType() ||
+      VDecl->getType()->isReferenceType()) {
+    CheckSelfReference(*this, RealDecl, Init, DirectInit);
+  }
+
   // If the type changed, it means we had an incomplete type that was
   // completed by the initializer. For example:
   //   int ary[] = { 1, 3, 5 };
@@ -6588,6 +6691,21 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
 
     if (VDecl->hasAttr<BlocksAttr>())
       checkRetainCycles(VDecl, Init);
+
+    // It is safe to assign a weak reference into a strong variable.
+    // Although this code can still have problems:
+    //   id x = self.weakProp;
+    //   id y = self.weakProp;
+    // we do not warn to warn spuriously when 'x' and 'y' are on separate
+    // paths through the function. This should be revisited if
+    // -Wrepeated-use-of-weak is made flow-sensitive.
+    if (VDecl->getType().getObjCLifetime() == Qualifiers::OCL_Strong) {
+      DiagnosticsEngine::Level Level =
+        Diags.getDiagnosticLevel(diag::warn_arc_repeated_use_of_weak,
+                                 Init->getLocStart());
+      if (Level != DiagnosticsEngine::Ignored)
+        getCurFunction()->markSafeWeakUse(Init);
+    }
   }
 
   Init = MaybeCreateExprWithCleanups(Init);
@@ -7251,7 +7369,7 @@ void Sema::ActOnDocumentableDecls(Decl **Group, unsigned NumDecls) {
     // the lookahead in the lexer: we've consumed the semicolon and looked
     // ahead through comments.
     for (unsigned i = 0; i != NumDecls; ++i)
-      Context.getCommentForDecl(Group[i]);
+      Context.getCommentForDecl(Group[i], &PP);
   }
 }
 
@@ -7523,6 +7641,9 @@ void Sema::ActOnFinishKNRParamDeclarations(Scope *S, Declarator &D,
         unsigned DiagID; // unused
         DS.SetTypeSpecType(DeclSpec::TST_int, FTI.ArgInfo[i].IdentLoc,
                            PrevSpec, DiagID);
+        // Use the identifier location for the type source range.
+        DS.SetRangeStart(FTI.ArgInfo[i].IdentLoc);
+        DS.SetRangeEnd(FTI.ArgInfo[i].IdentLoc);
         Declarator ParamD(DS, Declarator::KNRTypeListContext);
         ParamD.SetIdentifier(FTI.ArgInfo[i].Ident, FTI.ArgInfo[i].IdentLoc);
         FTI.ArgInfo[i].Param = ActOnParamDeclarator(S, ParamD);
@@ -7837,23 +7958,16 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
       if (Body)
         computeNRVO(Body, getCurFunction());
     }
-    if (getCurFunction()->ObjCShouldCallSuperDealloc) {
+    if (getCurFunction()->ObjCShouldCallSuper) {
       Diag(MD->getLocEnd(), diag::warn_objc_missing_super_call)
         << MD->getSelector().getAsString();
-      getCurFunction()->ObjCShouldCallSuperDealloc = false;
-    }
-    if (getCurFunction()->ObjCShouldCallSuperFinalize) {
-      Diag(MD->getLocEnd(), diag::warn_objc_missing_super_finalize);
-      getCurFunction()->ObjCShouldCallSuperFinalize = false;
+      getCurFunction()->ObjCShouldCallSuper = false;
     }
   } else {
     return 0;
   }
 
-  assert(!getCurFunction()->ObjCShouldCallSuperDealloc &&
-         "This should only be set for ObjC methods, which should have been "
-         "handled in the block above.");
-  assert(!getCurFunction()->ObjCShouldCallSuperFinalize &&
+  assert(!getCurFunction()->ObjCShouldCallSuper &&
          "This should only be set for ObjC methods, which should have been "
          "handled in the block above.");
 
@@ -7989,13 +8103,28 @@ NamedDecl *Sema::ImplicitlyDefineFunction(SourceLocation Loc,
   bool Error = DS.SetTypeSpecType(DeclSpec::TST_int, Loc, Dummy, DiagID);
   (void)Error; // Silence warning.
   assert(!Error && "Error setting up implicit decl!");
+  SourceLocation NoLoc;
   Declarator D(DS, Declarator::BlockContext);
-  D.AddTypeInfo(DeclaratorChunk::getFunction(false, false, false,
-                                             SourceLocation(), 0, 0, 0, true, 
-                                             SourceLocation(), SourceLocation(),
-                                             SourceLocation(), SourceLocation(),
-                                             EST_None, SourceLocation(),
-                                             0, 0, 0, 0, Loc, Loc, D),
+  D.AddTypeInfo(DeclaratorChunk::getFunction(/*HasProto=*/false,
+                                             /*IsAmbiguous=*/false,
+                                             /*RParenLoc=*/NoLoc,
+                                             /*ArgInfo=*/0,
+                                             /*NumArgs=*/0,
+                                             /*EllipsisLoc=*/NoLoc,
+                                             /*RParenLoc=*/NoLoc,
+                                             /*TypeQuals=*/0,
+                                             /*RefQualifierIsLvalueRef=*/true,
+                                             /*RefQualifierLoc=*/NoLoc,
+                                             /*ConstQualifierLoc=*/NoLoc,
+                                             /*VolatileQualifierLoc=*/NoLoc,
+                                             /*MutableLoc=*/NoLoc,
+                                             EST_None,
+                                             /*ESpecLoc=*/NoLoc,
+                                             /*Exceptions=*/0,
+                                             /*ExceptionRanges=*/0,
+                                             /*NumExceptions=*/0,
+                                             /*NoexceptExpr=*/0,
+                                             Loc, Loc, D),
                 DS.getAttributes(),
                 SourceLocation());
   D.SetIdentifier(&II, Loc);

@@ -342,11 +342,6 @@ def MacOSXAPIChecker : Checker<"API">,
   HelpText<"Check for proper uses of various Mac OS X APIs">,
   DescFile<"MacOSXAPIChecker.cpp">;
 
-def OSAtomicChecker : Checker<"AtomicCAS">,
-  InPackage<OSX>,
-  HelpText<"Evaluate calls to OSAtomic functions">,
-  DescFile<"OSAtomicChecker.cpp">;
-
 def MacOSKeychainAPIChecker : Checker<"SecKeychainAPI">,
   InPackage<OSX>,
   HelpText<"Check for proper uses of Secure Keychain APIs">,
@@ -485,6 +480,10 @@ def CallGraphViewer : Checker<"ViewCallGraph">,
 
 def CallGraphDumper : Checker<"DumpCallGraph">,
   HelpText<"Display Call Graph">,
+  DescFile<"DebugCheckers.cpp">;
+
+def ConfigDumper : Checker<"ConfigDumper">,
+  HelpText<"Dump config table">,
   DescFile<"DebugCheckers.cpp">;
 
 def TraversalDumper : Checker<"DumpTraversal">,

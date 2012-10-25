@@ -20,7 +20,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "llvm/Intrinsics.h"
-#include "llvm/Target/TargetData.h"
+#include "llvm/DataLayout.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -356,6 +356,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
                                         "expval");
     return RValue::get(Result);
   }
+  case Builtin::BI__builtin_bswap16:
   case Builtin::BI__builtin_bswap32:
   case Builtin::BI__builtin_bswap64: {
     Value *ArgValue = EmitScalarExpr(E->getArg(0));
@@ -408,7 +409,9 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
   }
   case Builtin::BI__builtin_unreachable: {
     if (CatchUndefined)
-      EmitCheck(Builder.getFalse());
+      EmitCheck(Builder.getFalse(), "builtin_unreachable",
+                EmitCheckSourceLocation(E->getExprLoc()),
+                llvm::ArrayRef<llvm::Value *>());
     else
       Builder.CreateUnreachable();
 
@@ -1318,6 +1321,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
     llvm::StringRef Str = cast<StringLiteral>(AnnotationStrExpr)->getString();
     return RValue::get(EmitAnnotationCall(F, AnnVal, Str, E->getExprLoc()));
   }
+  case Builtin::BI__noop:
+    return RValue::get(0);
   }
 
   // If this is an alias for a lib function (e.g. __builtin_sin), emit
@@ -2032,6 +2037,14 @@ Value *CodeGenFunction::EmitARMBuiltinExpr(unsigned BuiltinID,
     Int = usgn ? Intrinsic::arm_neon_vmullu : Intrinsic::arm_neon_vmulls;
     Int = Type.isPoly() ? (unsigned)Intrinsic::arm_neon_vmullp : Int;
     return EmitNeonCall(CGM.getIntrinsic(Int, Ty), Ops, "vmull");
+  case ARM::BI__builtin_neon_vfma_v:
+  case ARM::BI__builtin_neon_vfmaq_v: {
+    Value *F = CGM.getIntrinsic(Intrinsic::fma, Ty);
+    Ops[0] = Builder.CreateBitCast(Ops[0], Ty);
+    Ops[1] = Builder.CreateBitCast(Ops[1], Ty);
+    Ops[2] = Builder.CreateBitCast(Ops[2], Ty);
+    return Builder.CreateCall3(F, Ops[0], Ops[1], Ops[2]);
+  }
   case ARM::BI__builtin_neon_vpadal_v:
   case ARM::BI__builtin_neon_vpadalq_v: {
     Int = usgn ? Intrinsic::arm_neon_vpadalu : Intrinsic::arm_neon_vpadals;

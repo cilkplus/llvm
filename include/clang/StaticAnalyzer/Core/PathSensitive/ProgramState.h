@@ -40,7 +40,7 @@ class CallEvent;
 class CallEventManager;
 
 typedef ConstraintManager* (*ConstraintManagerCreator)(ProgramStateManager&,
-                                                       SubEngine&);
+                                                       SubEngine*);
 typedef StoreManager* (*StoreManagerCreator)(ProgramStateManager&);
 
 //===----------------------------------------------------------------------===//
@@ -252,8 +252,7 @@ public:
   SVal getLValue(QualType ElementType, SVal Idx, SVal Base) const;
 
   /// Returns the SVal bound to the statement 'S' in the state's environment.
-  SVal getSVal(const Stmt *S, const LocationContext *LCtx,
-               bool useOnlyDirectBindings = false) const;
+  SVal getSVal(const Stmt *S, const LocationContext *LCtx) const;
   
   SVal getSValAsScalarOrLoc(const Stmt *Ex, const LocationContext *LCtx) const;
 
@@ -447,7 +446,7 @@ public:
                  StoreManagerCreator CreateStoreManager,
                  ConstraintManagerCreator CreateConstraintManager,
                  llvm::BumpPtrAllocator& alloc,
-                 SubEngine &subeng);
+                 SubEngine *subeng);
 
   ~ProgramStateManager();
 
@@ -666,11 +665,10 @@ inline SVal ProgramState::getLValue(QualType ElementType, SVal Idx, SVal Base) c
   return UnknownVal();
 }
 
-inline SVal ProgramState::getSVal(const Stmt *Ex, const LocationContext *LCtx,
-                                  bool useOnlyDirectBindings) const{
+inline SVal ProgramState::getSVal(const Stmt *Ex,
+                                  const LocationContext *LCtx) const{
   return Env.getSVal(EnvironmentEntry(Ex, LCtx),
-                     *getStateManager().svalBuilder,
-                     useOnlyDirectBindings);
+                     *getStateManager().svalBuilder);
 }
 
 inline SVal

@@ -2886,19 +2886,13 @@ LValueExprEvaluator::VisitCompoundLiteralExpr(const CompoundLiteralExpr *E) {
 }
 
 bool LValueExprEvaluator::VisitCXXTypeidExpr(const CXXTypeidExpr *E) {
-  if (E->isTypeOperand())
+  if (!E->isPotentiallyEvaluated())
     return Success(E);
-  CXXRecordDecl *RD = E->getExprOperand()->getType()->getAsCXXRecordDecl();
-  // FIXME: The standard says "a typeid expression whose operand is of a
-  // polymorphic class type" is not a constant expression, but it probably
-  // means "a typeid expression whose operand is potentially evaluated".
-  if (RD && RD->isPolymorphic()) {
-    Info.Diag(E, diag::note_constexpr_typeid_polymorphic)
-      << E->getExprOperand()->getType()
-      << E->getExprOperand()->getSourceRange();
-    return false;
-  }
-  return Success(E);
+
+  Info.Diag(E, diag::note_constexpr_typeid_polymorphic)
+    << E->getExprOperand()->getType()
+    << E->getExprOperand()->getSourceRange();
+  return false;
 }
 
 bool LValueExprEvaluator::VisitCXXUuidofExpr(const CXXUuidofExpr *E) {
@@ -4296,6 +4290,16 @@ bool IntExprEvaluator::VisitCallExpr(const CallExpr *E) {
     return Error(E);
   }
 
+  case Builtin::BI__builtin_bswap16:
+  case Builtin::BI__builtin_bswap32:
+  case Builtin::BI__builtin_bswap64: {
+    APSInt Val;
+    if (!EvaluateInteger(E->getArg(0), Val, Info))
+      return false;
+
+    return Success(Val.byteSwap(), E);
+  }
+
   case Builtin::BI__builtin_classify_type:
     return Success(EvaluateBuiltinClassifyType(E), E);
 
@@ -4910,7 +4914,7 @@ bool IntExprEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
           if (!LHSValue.Offset.isZero() || !RHSValue.Offset.isZero())
             return false;
           const Expr *LHSExpr = LHSValue.Base.dyn_cast<const Expr*>();
-          const Expr *RHSExpr = LHSValue.Base.dyn_cast<const Expr*>();
+          const Expr *RHSExpr = RHSValue.Base.dyn_cast<const Expr*>();
           if (!LHSExpr || !RHSExpr)
             return false;
           const AddrLabelExpr *LHSAddrExpr = dyn_cast<AddrLabelExpr>(LHSExpr);
@@ -6187,11 +6191,9 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
       return false;
     Result = Info.CurrentCall->Temporaries[E];
   } else if (E->getType()->isVoidType()) {
-    if (Info.getLangOpts().CPlusPlus0x)
+    if (!Info.getLangOpts().CPlusPlus0x)
       Info.CCEDiag(E, diag::note_constexpr_nonliteral)
         << E->getType();
-    else
-      Info.CCEDiag(E, diag::note_invalid_subexpr_in_const_expr);
     if (!EvaluateVoid(E, Info))
       return false;
   } else if (Info.getLangOpts().CPlusPlus0x) {

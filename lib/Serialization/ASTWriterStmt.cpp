@@ -536,6 +536,7 @@ void ASTStmtWriter::VisitBinaryOperator(BinaryOperator *E) {
   Writer.AddStmt(E->getRHS());
   Record.push_back(E->getOpcode()); // FIXME: stable encoding
   Writer.AddSourceLocation(E->getOperatorLoc(), Record);
+  Record.push_back(E->isFPContractable());
   Code = serialization::EXPR_BINARY_OPERATOR;
 }
 
@@ -1055,6 +1056,7 @@ void ASTStmtWriter::VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
   VisitCallExpr(E);
   Record.push_back(E->getOperator());
   Writer.AddSourceRange(E->Range, Record);
+  Record.push_back(E->isFPContractable());
   Code = serialization::EXPR_CXX_OPERATOR_CALL;
 }
 
@@ -1383,8 +1385,6 @@ void ASTStmtWriter::VisitUnresolvedMemberExpr(UnresolvedMemberExpr *E) {
 void ASTStmtWriter::VisitUnresolvedLookupExpr(UnresolvedLookupExpr *E) {
   VisitOverloadExpr(E);
   Record.push_back(E->requiresADL());
-  if (E->requiresADL())
-    Record.push_back(E->isStdAssociatedNamespace());
   Record.push_back(E->isOverloaded());
   Writer.AddDeclRef(E->getNamingClass(), Record);
   Code = serialization::EXPR_CXX_UNRESOLVED_LOOKUP;

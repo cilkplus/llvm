@@ -869,7 +869,7 @@ getLocationOfByte(unsigned ByteNo, const SourceManager &SM,
 
 /// getOpcodeStr - Turn an Opcode enum value into the punctuation char it
 /// corresponds to, e.g. "sizeof" or "[pre]++".
-const char *UnaryOperator::getOpcodeStr(Opcode Op) {
+StringRef UnaryOperator::getOpcodeStr(Opcode Op) {
   switch (Op) {
   case UO_PostInc: return "++";
   case UO_PostDec: return "--";
@@ -1570,7 +1570,7 @@ CStyleCastExpr *CStyleCastExpr::CreateEmpty(ASTContext &C, unsigned PathSize) {
 
 /// getOpcodeStr - Turn an Opcode enum value into the punctuation char it
 /// corresponds to, e.g. "<<=".
-const char *BinaryOperator::getOpcodeStr(Opcode Op) {
+StringRef BinaryOperator::getOpcodeStr(Opcode Op) {
   switch (Op) {
   case BO_PtrMemD:   return ".*";
   case BO_PtrMemI:   return "->*";
@@ -1949,6 +1949,11 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     }
     return false;
   }
+
+  // If we don't know precisely what we're looking at, let's not warn.
+  case UnresolvedLookupExprClass:
+  case CXXUnresolvedConstructExprClass:
+    return false;
 
   case CXXTemporaryObjectExprClass:
   case CXXConstructExprClass:
@@ -3001,6 +3006,24 @@ const ObjCPropertyRefExpr *Expr::getObjCProperty() const {
   }
 
   return cast<ObjCPropertyRefExpr>(E);
+}
+
+bool Expr::isObjCSelfExpr() const {
+  const Expr *E = IgnoreParenImpCasts();
+
+  const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E);
+  if (!DRE)
+    return false;
+
+  const ImplicitParamDecl *Param = dyn_cast<ImplicitParamDecl>(DRE->getDecl());
+  if (!Param)
+    return false;
+
+  const ObjCMethodDecl *M = dyn_cast<ObjCMethodDecl>(Param->getDeclContext());
+  if (!M)
+    return false;
+
+  return M->getSelfDecl() == Param;
 }
 
 FieldDecl *Expr::getBitField() {

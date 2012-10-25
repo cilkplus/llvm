@@ -59,7 +59,7 @@ FullComment *CommentParserTest::parseString(const char *Source) {
 
   Lexer L(Allocator, Traits, Begin, Source, Source + strlen(Source));
 
-  Sema S(Allocator, SourceMgr, Diags, Traits);
+  Sema S(Allocator, SourceMgr, Diags, Traits, /*PP=*/ NULL);
   Parser P(L, S, Allocator, SourceMgr, Diags, Traits);
   FullComment *FC = P.parseFullComment();
 
@@ -213,7 +213,7 @@ template <typename T>
     return ::testing::AssertionFailure()
         << "ParamCommandComment has no parameter name";
 
-  StringRef ActualParamName = PCC->hasParamName() ? PCC->getParamName() : "";
+  StringRef ActualParamName = PCC->hasParamName() ? PCC->getParamNameAsWritten() : "";
   if (ActualParamName != ParamName)
     return ::testing::AssertionFailure()
         << "ParamCommandComment has parameter name \"" << ActualParamName.str()
@@ -247,7 +247,7 @@ template <typename T>
     return ::testing::AssertionFailure()
         << "TParamCommandComment has no parameter name";
 
-  StringRef ActualParamName = TPCC->hasParamName() ? TPCC->getParamName() : "";
+  StringRef ActualParamName = TPCC->hasParamName() ? TPCC->getParamNameAsWritten() : "";
   if (ActualParamName != ParamName)
     return ::testing::AssertionFailure()
         << "TParamCommandComment has parameter name \"" << ActualParamName.str()

@@ -31,7 +31,9 @@ MacroInfo::MacroInfo(SourceLocation DefLoc)
     IsUsed(false),
     IsAllowRedefinitionsWithoutWarning(false),
     IsWarnIfUnused(false),
-    IsPublic(true) {
+    IsPublic(true),
+    IsHidden(false),
+    IsAmbiguous(false) {
 }
 
 MacroInfo::MacroInfo(const MacroInfo &MI, llvm::BumpPtrAllocator &PPAllocator)
@@ -54,8 +56,22 @@ MacroInfo::MacroInfo(const MacroInfo &MI, llvm::BumpPtrAllocator &PPAllocator)
     IsUsed(MI.IsUsed),
     IsAllowRedefinitionsWithoutWarning(MI.IsAllowRedefinitionsWithoutWarning),
     IsWarnIfUnused(MI.IsWarnIfUnused),
-    IsPublic(MI.IsPublic) {
+    IsPublic(MI.IsPublic),
+    IsHidden(MI.IsHidden),
+    IsAmbiguous(MI.IsAmbiguous) {
   setArgumentList(MI.ArgumentList, MI.NumArguments, PPAllocator);
+}
+
+const MacroInfo *MacroInfo::findDefinitionAtLoc(SourceLocation L,
+                                                SourceManager &SM) const {
+  assert(L.isValid() && "SourceLocation is invalid.");
+  for (const MacroInfo *MI = this; MI; MI = MI->PreviousDefinition) {
+    if (MI->Location.isInvalid() ||  // For macros defined on the command line.
+        SM.isBeforeInTranslationUnit(MI->Location, L))
+      return (MI->UndefLocation.isInvalid() ||
+              SM.isBeforeInTranslationUnit(L, MI->UndefLocation)) ? MI : NULL;
+  }
+  return NULL;
 }
 
 unsigned MacroInfo::getDefinitionLengthSlow(SourceManager &SM) const {

@@ -1316,6 +1316,8 @@ void InitListChecker::CheckStructUnionTypes(const InitializedEntity &Entity,
   // If the record is invalid, some of it's members are invalid. To avoid
   // confusion, we forgo checking the intializer for the entire record.
   if (structDecl->isInvalidDecl()) {
+    // Assume it was supposed to consume a single initializer.
+    ++Index;
     hadError = true;
     return;
   }
@@ -2817,14 +2819,6 @@ static void TryConstructorInitialization(Sema &S,
   assert((!InitListSyntax || (NumArgs == 1 && isa<InitListExpr>(Args[0]))) &&
          "InitListSyntax must come with a single initializer list argument.");
 
-  // Check constructor arguments for self reference.
-  if (DeclaratorDecl *DD = Entity.getDecl())
-    // Parameters arguments are occassionially constructed with itself,
-    // for instance, in recursive functions.  Skip them.
-    if (!isa<ParmVarDecl>(DD))
-      for (unsigned i = 0; i < NumArgs; ++i)
-        S.CheckSelfReference(DD, Args[i]);
-
   // The type we're constructing needs to be complete.
   if (S.RequireCompleteType(Kind.getLocation(), DestType, 0)) {
     Sequence.setIncompleteTypeFailure(DestType);
@@ -3617,8 +3611,8 @@ static void TryValueInitialization(Sema &S,
       //    user-provided or deleted default constructor, then the object is
       //    zero-initialized and, if T has a non-trivial default constructor,
       //    default-initialized;
-      // FIXME: The 'non-union' here is a defect (not yet assigned an issue
-      // number). Update the quotation when the defect is resolved.
+      // The 'non-union' here was removed by DR1502. The 'non-trivial default
+      // constructor' part was removed by DR1507.
       if (NeedZeroInitialization)
         Sequence.AddZeroInitializationStep(Entity.getType());
 
@@ -3706,8 +3700,14 @@ static void TryUserDefinedConversion(Sema &S,
 
     // Try to complete the type we're converting to.
     if (!S.RequireCompleteType(Kind.getLocation(), DestType, 0)) {
-      DeclContext::lookup_iterator Con, ConEnd;
-      for (llvm::tie(Con, ConEnd) = S.LookupConstructors(DestRecordDecl);
+      DeclContext::lookup_iterator ConOrig, ConEndOrig;
+      llvm::tie(ConOrig, ConEndOrig) = S.LookupConstructors(DestRecordDecl);
+      // The container holding the constructors can under certain conditions
+      // be changed while iterating. To be safe we copy the lookup results
+      // to a new container.
+      SmallVector<NamedDecl*, 8> CopyOfCon(ConOrig, ConEndOrig);
+      for (SmallVector<NamedDecl*, 8>::iterator
+             Con = CopyOfCon.begin(), ConEnd = CopyOfCon.end();
            Con != ConEnd; ++Con) {
         NamedDecl *D = *Con;
         DeclAccessPair FoundDecl = DeclAccessPair::make(D, D->getAccess());
