@@ -32,6 +32,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   : CodeGenTypeCache(cgm), CGM(cgm),
     Target(CGM.getContext().getTargetInfo()),
     Builder(cgm.getModule().getContext()),
+    CurSpawnCallExpr(0),
     AutoreleaseResult(false), BlockInfo(0), BlockPointer(0),
     LambdaThisCaptureField(0), NormalCleanupDest(0), NextCleanupDestIndex(1),
     FirstBlockInfo(0), EHResumeBlock(0), ExceptionSlot(0), EHSelectorSlot(0),
@@ -1276,4 +1277,27 @@ llvm::Value *CodeGenFunction::EmitFieldAnnotations(const FieldDecl *D,
   }
 
   return V;
+}
+
+void CodeGenFunction::SetCurSpawnCallExpr(const CilkSpawnExpr *E)
+{
+  Expr *Call = E->getSubExpr();
+
+  // Get the call subexpression that may be nested within the CilkSpawnExpr
+  if (CXXBindTemporaryExpr *Bind = dyn_cast<CXXBindTemporaryExpr>(Call))
+      Call = Bind->getSubExpr();
+  assert(isa<CallExpr>(Call) && "CallExpr expected within CilkSpawnExpr");
+
+  CurSpawnCallExpr = Call;
+}
+
+void CodeGenFunction::EmitCilkSpawnPoint() {
+  llvm::Module &M = CGM.getModule();
+  llvm::LLVMContext &Context = getLLVMContext();
+
+  llvm::Type *VoidTy = llvm::Type::getVoidTy(Context);
+  llvm::FunctionType *FunctionTy = llvm::FunctionType::get(VoidTy, false);
+  llvm::Value *SpawnFunc = M.getOrInsertFunction("__cilk_spawn_point",
+                                                 FunctionTy);
+  Builder.CreateCall(SpawnFunc);
 }

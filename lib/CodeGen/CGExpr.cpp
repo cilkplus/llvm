@@ -2800,8 +2800,10 @@ RValue CodeGenFunction::EmitCallExpr(const CallExpr *E,
   }
 
   llvm::Value *Callee = EmitScalarExpr(E->getCallee());
+
   return EmitCall(E->getCallee()->getType(), Callee, ReturnValue,
-                  E->arg_begin(), E->arg_end(), TargetDecl);
+                  E->arg_begin(), E->arg_end(), TargetDecl,
+                  IsSpawnCallExpr(E));
 }
 
 LValue CodeGenFunction::EmitBinaryOperatorLValue(const BinaryOperator *E) {
@@ -2970,7 +2972,8 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, llvm::Value *Callee,
                                  ReturnValueSlot ReturnValue,
                                  CallExpr::const_arg_iterator ArgBeg,
                                  CallExpr::const_arg_iterator ArgEnd,
-                                 const Decl *TargetDecl) {
+                                 const Decl *TargetDecl,
+                                 bool IsSpawnCall) {
   // Get the actual function type. The callee type will always be a pointer to
   // function type or a block pointer type.
   assert(CalleeType->isFunctionPointerType() &&
@@ -3010,6 +3013,10 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, llvm::Value *Callee,
     Callee = Builder.CreateBitCast(Callee, CalleeTy, "callee.knr.cast");
   }
 
+  // If this call is a Cilk spawn call, also emit a call to the Cilk spawn
+  // dummy function.
+  if (IsSpawnCall)
+    EmitCilkSpawnPoint();
   return EmitCall(FnInfo, Callee, ReturnValue, Args, TargetDecl);
 }
 

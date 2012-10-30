@@ -283,7 +283,11 @@ public:
   }
 
   Value *VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
-    return Visit(E->getSubExpr());
+    CGF.SetCurSpawnCallExpr(E);
+    Value *V = Visit(E->getSubExpr());
+    CGF.ClearCurSpawnCallExpr();
+
+    return V;
   }
 
   Value *VisitStmtExpr(const StmtExpr *E);

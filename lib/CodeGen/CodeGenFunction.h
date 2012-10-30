@@ -590,6 +590,9 @@ public:
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
 
+  /// CurSpawnCallExpr - This is the call expression that is a Cilk spawn point
+  const Expr *CurSpawnCallExpr;
+
   /// BoundsChecking - Emit run-time bounds checks. Higher values mean
   /// potentially higher performance penalties.
   unsigned char BoundsChecking;
@@ -2249,7 +2252,9 @@ public:
                   ReturnValueSlot ReturnValue,
                   CallExpr::const_arg_iterator ArgBeg,
                   CallExpr::const_arg_iterator ArgEnd,
-                  const Decl *TargetDecl = 0);
+                  const Decl *TargetDecl = 0,
+                  bool IsSpawnCall = false);
+
   RValue EmitCallExpr(const CallExpr *E,
                       ReturnValueSlot ReturnValue = ReturnValueSlot());
 
@@ -2529,6 +2534,25 @@ public:
   /// Emit field annotations for the given field & value. Returns the
   /// annotation result.
   llvm::Value *EmitFieldAnnotations(const FieldDecl *D, llvm::Value *V);
+
+  //===--------------------------------------------------------------------===//
+  //                         Cilk Emission
+  //===--------------------------------------------------------------------===//
+
+  /// SetCurSpawnCallExpr - Mark E as a Cilk spawn call. When the call is
+  /// emitted, a call to a dummy function __cilk_spawn_point() is also emitted.
+  void SetCurSpawnCallExpr(const CilkSpawnExpr *E);
+
+  /// ClearCurSpawnCallExpr - Clears the stored Cilk spawn call expression
+  void ClearCurSpawnCallExpr() { CurSpawnCallExpr = 0; }
+
+  /// IsSpawnCallExpr - Returns true if E is the current Cilk spawn call
+  /// expression, false otherwise.
+  bool IsSpawnCallExpr(const Expr *E) const { return E == CurSpawnCallExpr; }
+
+  /// EmitCilkSpawnPoint - Emit a call to a dummy function so that it can
+  /// be replaced later with a Cilk spawn runtime library call.
+  void EmitCilkSpawnPoint();
 
   //===--------------------------------------------------------------------===//
   //                             Internal Helpers
