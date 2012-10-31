@@ -2554,6 +2554,11 @@ public:
   /// be replaced later with a Cilk spawn runtime library call.
   void EmitCilkSpawnPoint();
 
+  /// IsEmittingSpawnCallExpr - Returns true if CGF is emitting a Cilk spawn.
+  bool IsEmittingSpawnCallExpr() const {
+    return CurSpawnCallExpr != 0;
+  }
+
   //===--------------------------------------------------------------------===//
   //                             Internal Helpers
   //===--------------------------------------------------------------------===//
