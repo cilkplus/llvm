@@ -713,8 +713,28 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   llvm::Type *SFTy = StackFrameBuilder::get(CGF.getLLVMContext());
   Value *HelperSF = Builder.CreateAlloca(SFTy);
 
-  // Call the prologue to initialize the stack frame
-  Builder.CreateCall(GetCilkHelperPrologue(CGF), HelperSF);
+  // Find the location to insert the init/detach call for the stack frame
+  Function *SpawnPointMarkerFn
+    = CGF.CGM.getModule().getFunction("__cilk_spawn_point");
+
+  if (!SpawnPointMarkerFn)
+    llvm_unreachable("Couldn't find spawn point marker function");
+
+  assert(SpawnPointMarkerFn->hasOneUse() &&
+         "Multiple uses of spawn pointer marked function");
+
+  CallInst *Call = cast<CallInst>(SpawnPointMarkerFn->use_back());
+
+  // Pass the stack frame
+  Instruction *New
+    = CallInst::Create(GetCilkHelperPrologue(CGF),
+                       ArrayRef<Value*>(HelperSF), "", Call);
+
+  // Replace the call to the marker function with a call to the
+  // stack frame init/detach function
+  Call->replaceAllUsesWith(New);
+  Call->eraseFromParent();
+  SpawnPointMarkerFn->eraseFromParent();
 
   // Add a call to the epilogue right before the function returns
   // We have to do this for all BasicBlocks that have a return statement
