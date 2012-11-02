@@ -664,9 +664,7 @@ void AggExprEmitter::VisitCallExpr(const CallExpr *E) {
 }
 
 void AggExprEmitter::VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
-  CGF.SetCurSpawnCallExpr(E);
   Visit(E->getSubExpr());
-  CGF.ClearCurSpawnCallExpr();
 }
 
 void AggExprEmitter::VisitObjCMessageExpr(ObjCMessageExpr *E) {

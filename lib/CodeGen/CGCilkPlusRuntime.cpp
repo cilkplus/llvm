@@ -668,7 +668,7 @@ CGCilkPlusRuntime::~CGCilkPlusRuntime()
 
 void
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                 const CilkSpawnStmt &E)
+                                 const CilkSpawnStmt &S)
 {
   // Get or initialize the __cilkrts_stack_frame
   Value *SF = GetParentStackFrame(CGF);
@@ -689,9 +689,11 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   }
 
   CGF.EmitBlock(Body);
-
-  CGF.EmitStmt(E.getSubStmt());
-
+  {
+    CGF.SetCurSpawnCallExpr(&S);
+    CGF.EmitStmt(S.getSubStmt());
+    CGF.ClearCurSpawnCallExpr();
+  }
   CGF.EmitBlock(Exit);
 
   // Extract the spawn statement into a spawn helper function

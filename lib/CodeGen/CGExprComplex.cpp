@@ -279,6 +279,10 @@ public:
   ComplexPairTy VisitAtomicExpr(AtomicExpr *E) {
     return CGF.EmitAtomicExpr(E).getComplexVal();
   }
+
+  ComplexPairTy VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    return Visit(E->getSubExpr());
+  }
 };
 }  // end anonymous namespace.
 

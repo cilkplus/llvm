@@ -20,6 +20,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/Intrinsics.h"
@@ -1279,16 +1280,42 @@ llvm::Value *CodeGenFunction::EmitFieldAnnotations(const FieldDecl *D,
   return V;
 }
 
-void CodeGenFunction::SetCurSpawnCallExpr(const CilkSpawnExpr *E)
-{
-  Expr *Call = E->getSubExpr();
+namespace  {
 
-  // Get the call subexpression that may be nested within the CilkSpawnExpr
-  if (CXXBindTemporaryExpr *Bind = dyn_cast<CXXBindTemporaryExpr>(Call))
+class SpawnCallExtractor : public RecursiveASTVisitor<SpawnCallExtractor> {
+private:
+  // The spawn call expression found
+  Expr *Call;
+
+public:
+  SpawnCallExtractor() : Call(0) {}
+
+  bool TraverseCompoundStmt(Stmt *) { return true; }
+  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    Call = E->getSubExpr();
+    // Get the call subexpression that may be nested within the CilkSpawnExpr
+    if (CXXBindTemporaryExpr *Bind = dyn_cast<CXXBindTemporaryExpr>(Call))
       Call = Bind->getSubExpr();
-  assert(isa<CallExpr>(Call) && "CallExpr expected within CilkSpawnExpr");
 
-  CurSpawnCallExpr = Call;
+    return false; // terminate
+  }
+
+  Expr *getSpawnCall() const {
+    return Call;
+  }
+};
+
+} // namespace
+
+void CodeGenFunction::SetCurSpawnCallExpr(const CilkSpawnStmt *S)
+{
+  assert(S && "null CilkSpawnStmt");
+
+  SpawnCallExtractor Extractor;
+  Extractor.TraverseStmt(const_cast<CilkSpawnStmt*>(S));
+
+  CurSpawnCallExpr = Extractor.getSpawnCall();
+  assert(isa<CallExpr>(CurSpawnCallExpr) && "CallExpr expected");
 }
 
 void CodeGenFunction::EmitCilkSpawnPoint() {

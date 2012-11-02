@@ -14,3 +14,12 @@ void test() {
   // CHECK: call i{{[0-9]*}} @foo()
   _Cilk_sync;
 }
+
+void bar(_Complex float);
+
+void test_bar() {
+  _Complex float b = 0.0f;
+  // CHECK: define void @test_bar()
+  // CHECK: call void @bar(<2 x float>
+  _Cilk_spawn bar(b);
+}

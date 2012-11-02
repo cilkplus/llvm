@@ -2539,9 +2539,9 @@ public:
   //                         Cilk Emission
   //===--------------------------------------------------------------------===//
 
-  /// SetCurSpawnCallExpr - Mark E as a Cilk spawn call. When the call is
+  /// SetCurSpawnCallExpr - Find the spawning CallExpr. When the call is
   /// emitted, a call to a dummy function __cilk_spawn_point() is also emitted.
-  void SetCurSpawnCallExpr(const CilkSpawnExpr *E);
+  void SetCurSpawnCallExpr(const CilkSpawnStmt *S);
 
   /// ClearCurSpawnCallExpr - Clears the stored Cilk spawn call expression
   void ClearCurSpawnCallExpr() { CurSpawnCallExpr = 0; }
