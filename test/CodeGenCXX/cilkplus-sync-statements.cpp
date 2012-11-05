@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -fcilkplus -fsyntax-only -verify -fcxx-exceptions -fexceptions -std=c++11 -emit-llvm %s -o - | FileCheck %s
+// expected-no-diagnostics
 
 #define BIG_NUM 30
 int global = 0;
