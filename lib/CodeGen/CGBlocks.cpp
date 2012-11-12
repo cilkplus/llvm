@@ -27,7 +27,8 @@ using namespace CodeGen;
 
 CGBlockInfo::CGBlockInfo(const BlockDecl *block, StringRef name)
   : Name(name), CXXThisIndex(0), CanBeGlobal(false), NeedsCopyDispose(false),
-    HasCXXObject(false), UsesStret(false), StructureType(0), Block(block),
+    HasCXXObject(false), UsesStret(false), HasCapturedVariableLayout(false),
+    StructureType(0), Block(block),
     DominatingIP(0) {
     
   // Skip asm prefix, if any.  'name' is usually taken directly from
@@ -56,7 +57,18 @@ static llvm::Constant *buildDisposeHelper(CodeGenModule &CGM,
   return CodeGenFunction(CGM).GenerateDestroyHelperFunction(blockInfo);
 }
 
-/// Build the block descriptor constant for a block.
+/// buildBlockDescriptor - Build the block descriptor meta-data for a block.
+/// buildBlockDescriptor is accessed from 5th field of the Block_literal
+/// meta-data and contains stationary information about the block literal.
+/// Its definition will have 4 (or optinally 6) words.
+/// struct Block_descriptor {
+///   unsigned long reserved;
+///   unsigned long size;  // size of Block_literal metadata in bytes.
+///   void *copy_func_helper_decl;  // optional copy helper.
+///   void *destroy_func_decl; // optioanl destructor helper.
+///   void *block_method_encoding_address;//@encode for block literal signature.
+///   void *block_layout_info; // encoding of captured block variables.
+/// };
 static llvm::Constant *buildBlockDescriptor(CodeGenModule &CGM,
                                             const CGBlockInfo &blockInfo) {
   ASTContext &C = CGM.getContext();
@@ -92,8 +104,12 @@ static llvm::Constant *buildBlockDescriptor(CodeGenModule &CGM,
                           CGM.GetAddrOfConstantCString(typeAtEncoding), i8p));
   
   // GC layout.
-  if (C.getLangOpts().ObjC1)
-    elements.push_back(CGM.getObjCRuntime().BuildGCBlockLayout(CGM, blockInfo));
+  if (C.getLangOpts().ObjC1) {
+    if (CGM.getLangOpts().getGC() != LangOptions::NonGC)
+      elements.push_back(CGM.getObjCRuntime().BuildGCBlockLayout(CGM, blockInfo));
+    else
+      elements.push_back(CGM.getObjCRuntime().BuildRCBlockLayout(CGM, blockInfo));
+  }
   else
     elements.push_back(llvm::Constant::getNullValue(i8p));
 
@@ -293,7 +309,10 @@ static void computeBlockInfo(CodeGenModule &CGM, CodeGenFunction *CGF,
     info.CanBeGlobal = true;
     return;
   }
-
+  else if (C.getLangOpts().ObjC1 &&
+           CGM.getLangOpts().getGC() == LangOptions::NonGC)
+    info.HasCapturedVariableLayout = true;
+  
   // Collect the layout chunks.
   SmallVector<BlockLayoutChunk, 16> layout;
   layout.reserve(block->capturesCXXThis() +
@@ -652,6 +671,7 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
 
   // Compute the initial on-stack block flags.
   BlockFlags flags = BLOCK_HAS_SIGNATURE;
+  if (blockInfo.HasCapturedVariableLayout) flags |= BLOCK_HAS_EXTENDED_LAYOUT;
   if (blockInfo.NeedsCopyDispose) flags |= BLOCK_HAS_COPY_DISPOSE;
   if (blockInfo.HasCXXObject) flags |= BLOCK_HAS_CXX_OBJ;
   if (blockInfo.UsesStret) flags |= BLOCK_USE_STRET;
@@ -1134,7 +1154,8 @@ CodeGenFunction::GenerateBlockFunction(GlobalDecl GD,
       const VarDecl *variable = ci->getVariable();
       DI->EmitLocation(Builder, variable->getLocation());
 
-      if (CGM.getCodeGenOpts().DebugInfo >= CodeGenOptions::LimitedDebugInfo) {
+      if (CGM.getCodeGenOpts().getDebugInfo()
+            >= CodeGenOptions::LimitedDebugInfo) {
         const CGBlockInfo::Capture &capture = blockInfo.getCapture(variable);
         if (capture.isConstant()) {
           DI->EmitDeclareOfAutoVariable(variable, LocalDeclMap[variable],
@@ -1649,6 +1670,8 @@ generateByrefCopyHelper(CodeGenFunction &CGF,
                                           SC_None,
                                           false, false);
 
+  // Initialize debug info if necessary.
+  CGF.maybeInitializeDebugInfo();
   CGF.StartFunction(FD, R, Fn, FI, args, SourceLocation());
 
   if (byrefInfo.needsCopy()) {
@@ -1719,6 +1742,8 @@ generateByrefDisposeHelper(CodeGenFunction &CGF,
                                           SC_Static,
                                           SC_None,
                                           false, false);
+  // Initialize debug info if necessary.
+  CGF.maybeInitializeDebugInfo();
   CGF.StartFunction(FD, R, Fn, FI, args, SourceLocation());
 
   if (byrefInfo.needsDispose()) {

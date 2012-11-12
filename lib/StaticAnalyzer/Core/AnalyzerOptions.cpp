@@ -102,6 +102,12 @@ bool AnalyzerOptions::shouldPruneNullReturnPaths() {
                           /* Default = */ true);
 }
 
+bool AnalyzerOptions::shouldAvoidSuppressingNullArgumentPaths() {
+  return getBooleanOption(AvoidSuppressingNullArgumentPaths,
+                          "avoid-suppressing-null-argument-paths",
+                          /* Default = */ false);
+}
+
 int AnalyzerOptions::getOptionAsInteger(StringRef Name, int DefaultVal) {
   llvm::SmallString<10> StrBuf;
   llvm::raw_svector_ostream OS(StrBuf);
@@ -119,6 +125,12 @@ unsigned AnalyzerOptions::getAlwaysInlineSize() {
   if (!AlwaysInlineSize.hasValue())
     AlwaysInlineSize = getOptionAsInteger("ipa-always-inline-size", 3);
   return AlwaysInlineSize.getValue();
+}
+
+unsigned AnalyzerOptions::getGraphTrimInterval() {
+  if (!GraphTrimInterval.hasValue())
+    GraphTrimInterval = getOptionAsInteger("graph-trim-interval", 1000);
+  return GraphTrimInterval.getValue();
 }
 
 bool AnalyzerOptions::shouldSynthesizeBodies() {

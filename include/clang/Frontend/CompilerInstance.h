@@ -11,6 +11,7 @@
 #define LLVM_CLANG_FRONTEND_COMPILERINSTANCE_H_
 
 #include "clang/Frontend/CompilerInvocation.h"
+#include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/ModuleLoader.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -495,8 +496,7 @@ public:
   /// releasing the returned DiagnosticsEngine's client eventually.
   ///
   /// \param Opts - The diagnostic options; note that the created text
-  /// diagnostic object contains a reference to these options and its lifetime
-  /// must extend past that of the diagnostic engine.
+  /// diagnostic object contains a reference to these options.
   ///
   /// \param Client If non-NULL, a diagnostic client that will be
   /// attached to (and, then, owned by) the returned DiagnosticsEngine
@@ -507,7 +507,7 @@ public:
   ///
   /// \return The new object on success, or null on failure.
   static IntrusiveRefCntPtr<DiagnosticsEngine>
-  createDiagnostics(const DiagnosticOptions &Opts, int Argc,
+  createDiagnostics(DiagnosticOptions *Opts, int Argc,
                     const char* const *Argv,
                     DiagnosticConsumer *Client = 0,
                     bool ShouldOwnClient = true,
@@ -531,7 +531,6 @@ public:
   /// context.
   void createPCHExternalASTSource(StringRef Path,
                                   bool DisablePCHValidation,
-                                  bool DisableStatCache,
                                   bool AllowPCHWithCompilerErrors,
                                   void *DeserializationListener);
 
@@ -541,7 +540,6 @@ public:
   static ExternalASTSource *
   createPCHExternalASTSource(StringRef Path, const std::string &Sysroot,
                              bool DisablePCHValidation,
-                             bool DisableStatCache,
                              bool AllowPCHWithCompilerErrors,
                              Preprocessor &PP, ASTContext &Context,
                              void *DeserializationListener, bool Preamble);
@@ -633,15 +631,13 @@ public:
   /// as the main file.
   ///
   /// \return True on success.
-  bool InitializeSourceManager(StringRef InputFile,
-         SrcMgr::CharacteristicKind Kind = SrcMgr::C_User);
+  bool InitializeSourceManager(const FrontendInputFile &Input);
 
   /// InitializeSourceManager - Initialize the source manager to set InputFile
   /// as the main file.
   ///
   /// \return True on success.
-  static bool InitializeSourceManager(StringRef InputFile,
-                SrcMgr::CharacteristicKind Kind,
+  static bool InitializeSourceManager(const FrontendInputFile &Input,
                 DiagnosticsEngine &Diags,
                 FileManager &FileMgr,
                 SourceManager &SourceMgr,

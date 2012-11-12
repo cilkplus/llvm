@@ -244,6 +244,10 @@ void CodeGenFunction::SimplifyForwardingBlocks(llvm::BasicBlock *BB) {
   if (!BI || !BI->isUnconditional())
     return;
 
+  // Can only simplify empty blocks.
+  if (BI != BB->begin())
+    return;
+
   BB->replaceAllUsesWith(BI->getSuccessor(0));
   BI->eraseFromParent();
   BB->eraseFromParent();
@@ -1282,6 +1286,10 @@ SimplifyConstraint(const char *Constraint, const TargetInfo &Target,
     case '!':
     case '=': // Will see this and the following in mult-alt constraints.
     case '+':
+      break;
+    case '#': // Ignore the rest of the constraint alternative.
+      while (Constraint[1] && Constraint[1] != ',')
+	Constraint++;
       break;
     case ',':
       Result += "|";

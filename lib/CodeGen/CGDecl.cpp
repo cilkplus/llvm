@@ -121,7 +121,7 @@ void CodeGenFunction::EmitVarDecl(const VarDecl &D) {
     // uniqued.  We can't do this in C, though, because there's no
     // standard way to agree on which variables are the same (i.e.
     // there's no mangling).
-    if (getContext().getLangOpts().CPlusPlus)
+    if (getLangOpts().CPlusPlus)
       if (llvm::GlobalValue::isWeakForLinker(CurFn->getLinkage()))
         Linkage = CurFn->getLinkage();
 
@@ -141,7 +141,7 @@ void CodeGenFunction::EmitVarDecl(const VarDecl &D) {
 static std::string GetStaticDeclName(CodeGenFunction &CGF, const VarDecl &D,
                                      const char *Separator) {
   CodeGenModule &CGM = CGF.CGM;
-  if (CGF.getContext().getLangOpts().CPlusPlus) {
+  if (CGF.getLangOpts().CPlusPlus) {
     StringRef Name = CGM.getMangledName(&D);
     return Name.str();
   }
@@ -222,7 +222,7 @@ CodeGenFunction::AddInitializerToStaticVarDecl(const VarDecl &D,
   // If constant emission failed, then this should be a C++ static
   // initializer.
   if (!Init) {
-    if (!getContext().getLangOpts().CPlusPlus)
+    if (!getLangOpts().CPlusPlus)
       CGM.ErrorUnsupported(D.getInit(), "constant l-value expression");
     else if (Builder.GetInsertBlock()) {
       // Since we have a static initializer, this global variable can't
@@ -333,7 +333,7 @@ void CodeGenFunction::EmitStaticVarDecl(const VarDecl &D,
   // Emit global variable debug descriptor for static vars.
   CGDebugInfo *DI = getDebugInfo();
   if (DI &&
-      CGM.getCodeGenOpts().DebugInfo >= CodeGenOptions::LimitedDebugInfo) {
+      CGM.getCodeGenOpts().getDebugInfo() >= CodeGenOptions::LimitedDebugInfo) {
     DI->setLocation(D.getLocation());
     DI->EmitGlobalVariable(var, &D);
   }
@@ -795,7 +795,7 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
   llvm::Value *DeclPtr;
   if (Ty->isConstantSizeType()) {
     if (!Target.useGlobalsForAutomaticVariables()) {
-      bool NRVO = getContext().getLangOpts().ElideConstructors &&
+      bool NRVO = getLangOpts().ElideConstructors &&
                   D.isNRVOVariable();
 
       // If this value is a POD array or struct with a statically
@@ -914,7 +914,8 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
   // Emit debug info for local var declaration.
   if (HaveInsertPoint())
     if (CGDebugInfo *DI = getDebugInfo()) {
-      if (CGM.getCodeGenOpts().DebugInfo >= CodeGenOptions::LimitedDebugInfo) {
+      if (CGM.getCodeGenOpts().getDebugInfo()
+            >= CodeGenOptions::LimitedDebugInfo) {
         DI->setLocation(D.getLocation());
         if (Target.useGlobalsForAutomaticVariables()) {
           DI->EmitGlobalVariable(static_cast<llvm::GlobalVariable *>(DeclPtr),
@@ -1498,8 +1499,8 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
       LocalDeclMap[&D] = Arg;
 
       if (CGDebugInfo *DI = getDebugInfo()) {
-        if (CGM.getCodeGenOpts().DebugInfo >=
-            CodeGenOptions::LimitedDebugInfo) {
+        if (CGM.getCodeGenOpts().getDebugInfo()
+              >= CodeGenOptions::LimitedDebugInfo) {
           DI->setLocation(D.getLocation());
           DI->EmitDeclareOfBlockLiteralArgVariable(*BlockInfo, Arg, Builder);
         }
@@ -1581,7 +1582,8 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
 
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {
-    if (CGM.getCodeGenOpts().DebugInfo >= CodeGenOptions::LimitedDebugInfo) {
+    if (CGM.getCodeGenOpts().getDebugInfo()
+          >= CodeGenOptions::LimitedDebugInfo) {
       DI->EmitDeclareOfArgVariable(&D, DeclPtr, ArgNo, Builder);
     }
   }

@@ -67,7 +67,7 @@ ChainedIncludesSource *ChainedIncludesSource::create(CompilerInstance &CI) {
   assert(!includes.empty() && "No '-chain-include' in options!");
 
   OwningPtr<ChainedIncludesSource> source(new ChainedIncludesSource());
-  InputKind IK = CI.getFrontendOpts().Inputs[0].Kind;
+  InputKind IK = CI.getFrontendOpts().Inputs[0].getKind();
 
   SmallVector<llvm::MemoryBuffer *, 4> serialBufs;
   SmallVector<std::string, 4> serialBufNames;
@@ -86,14 +86,14 @@ ChainedIncludesSource *ChainedIncludesSource::create(CompilerInstance &CI) {
     CInvok->getPreprocessorOpts().Macros.clear();
     
     CInvok->getFrontendOpts().Inputs.clear();
-    CInvok->getFrontendOpts().Inputs.push_back(FrontendInputFile(includes[i],
-                                                                 IK));
+    FrontendInputFile InputFile(includes[i], IK);
+    CInvok->getFrontendOpts().Inputs.push_back(InputFile);
 
     TextDiagnosticPrinter *DiagClient =
-      new TextDiagnosticPrinter(llvm::errs(), DiagnosticOptions());
+      new TextDiagnosticPrinter(llvm::errs(), new DiagnosticOptions());
     IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
     IntrusiveRefCntPtr<DiagnosticsEngine> Diags(
-        new DiagnosticsEngine(DiagID, DiagClient));
+        new DiagnosticsEngine(DiagID, &CI.getDiagnosticOpts(), DiagClient));
 
     OwningPtr<CompilerInstance> Clang(new CompilerInstance());
     Clang->setInvocation(CInvok.take());
@@ -147,7 +147,7 @@ ChainedIncludesSource *ChainedIncludesSource::create(CompilerInstance &CI) {
       Clang->getASTContext().setExternalSource(Reader);
     }
     
-    if (!Clang->InitializeSourceManager(includes[i]))
+    if (!Clang->InitializeSourceManager(InputFile))
       return 0;
 
     ParseAST(Clang->getSema());

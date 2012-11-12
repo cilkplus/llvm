@@ -149,7 +149,6 @@ public:
   unsigned visualizeExplodedGraphWithGraphViz : 1;
   unsigned visualizeExplodedGraphWithUbiGraph : 1;
   unsigned UnoptimizedCFG : 1;
-  unsigned eagerlyTrimExplodedGraph : 1;
   unsigned PrintStats : 1;
   
   /// \brief Do not re-analyze paths leading to exhausted nodes with a different
@@ -187,6 +186,12 @@ private:
 
   /// \sa shouldPruneNullReturnPaths
   llvm::Optional<bool> PruneNullReturnPaths;
+
+  /// \sa shouldAvoidSuppressingNullArgumentPaths
+  llvm::Optional<bool> AvoidSuppressingNullArgumentPaths;
+  
+  /// \sa getGraphTrimInterval
+  llvm::Optional<unsigned> GraphTrimInterval;
 
   /// Interprets an option's string value as a boolean.
   ///
@@ -243,6 +248,17 @@ public:
   /// which accepts the values "true" and "false".
   bool shouldPruneNullReturnPaths();
 
+  /// Returns whether a bug report should \em not be suppressed if its path
+  /// includes a call with a null argument, even if that call has a null return.
+  ///
+  /// This option has no effect when #shouldPruneNullReturnPaths() is false.
+  ///
+  /// This is a counter-heuristic to avoid false negatives.
+  ///
+  /// This is controlled by the 'avoid-suppressing-null-argument-paths' config
+  /// option, which accepts the values "true" and "false".
+  bool shouldAvoidSuppressingNullArgumentPaths();
+
   // Returns the size of the functions (in basic blocks), which should be
   // considered to be small enough to always inline.
   //
@@ -252,6 +268,13 @@ public:
   /// Returns true if the analyzer engine should synthesize fake bodies
   /// for well-known functions.
   bool shouldSynthesizeBodies();
+
+  /// Returns how often nodes in the ExplodedGraph should be recycled to save
+  /// memory.
+  ///
+  /// This is controlled by the 'graph-trim-interval' config option. To disable
+  /// node reclamation, set the option to "0".
+  unsigned getGraphTrimInterval();
 
 public:
   AnalyzerOptions() : CXXMemberInliningMode() {
@@ -269,7 +292,6 @@ public:
     visualizeExplodedGraphWithGraphViz = 0;
     visualizeExplodedGraphWithUbiGraph = 0;
     UnoptimizedCFG = 0;
-    eagerlyTrimExplodedGraph = 0;
     PrintStats = 0;
     NoRetryExhausted = 0;
     // Cap the stack depth at 4 calls (5 stack frames, base + 4 calls).

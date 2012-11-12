@@ -597,8 +597,9 @@ public:
   /// potentially higher performance penalties.
   unsigned char BoundsChecking;
 
-  /// CatchUndefined - Emit run-time checks to catch undefined behaviors.
-  bool CatchUndefined;
+  /// \brief Whether any type-checking sanitizers are enabled. If \c false,
+  /// calls to EmitTypeCheck can be skipped.
+  bool SanitizePerformTypeCheck;
 
   /// In ARC, whether we should autorelease the return value.
   bool AutoreleaseResult;
@@ -910,7 +911,7 @@ public:
   /// themselves).
   void popCatchScope();
 
-  llvm::BasicBlock *getEHResumeBlock();
+  llvm::BasicBlock *getEHResumeBlock(bool isCleanup);
   llvm::BasicBlock *getEHDispatchBlock(EHScopeStack::stable_iterator scope);
 
   /// An object to manage conditionally-evaluated expressions.
@@ -1874,7 +1875,9 @@ public:
     TCK_MemberAccess,
     /// Checking the 'this' pointer for a call to a non-static member function.
     /// Must be an object within its lifetime.
-    TCK_MemberCall
+    TCK_MemberCall,
+    /// Checking the 'this' pointer for a constructor call.
+    TCK_ConstructorCall
   };
 
   /// \brief Emit a check that \p V is the address of storage of the
@@ -2601,11 +2604,17 @@ public:
   /// passing to a runtime sanitizer handler.
   llvm::Constant *EmitCheckSourceLocation(SourceLocation Loc);
 
-  /// \brief Create a basic block that will call the trap intrinsic, and emit a
-  /// conditional branch to it.
+  /// \brief Create a basic block that will call a handler function in a
+  /// sanitizer runtime with the provided arguments, and create a conditional
+  /// branch to it.
   void EmitCheck(llvm::Value *Checked, StringRef CheckName,
                  llvm::ArrayRef<llvm::Constant *> StaticArgs,
-                 llvm::ArrayRef<llvm::Value *> DynamicArgs);
+                 llvm::ArrayRef<llvm::Value *> DynamicArgs,
+                 bool Recoverable = false);
+
+  /// \brief Create a basic block that will call the trap intrinsic, and emit a
+  /// conditional branch to it, for the -ftrapv checks.
+  void EmitTrapvCheck(llvm::Value *Checked);
 
   /// EmitCallArg - Emit a single call argument.
   void EmitCallArg(CallArgList &args, const Expr *E, QualType ArgType);

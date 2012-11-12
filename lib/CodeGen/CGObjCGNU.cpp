@@ -533,7 +533,10 @@ public:
                                              const CGBlockInfo &blockInfo) {
     return NULLPtr;
   }
-  
+  virtual llvm::Constant *BuildRCBlockLayout(CodeGenModule &CGM,
+                                             const CGBlockInfo &blockInfo) {
+    return NULLPtr;
+  }
   virtual llvm::GlobalVariable *GetClassGlobal(const std::string &Name) {
     return 0;
   }
@@ -2067,7 +2070,7 @@ void CGObjCGNU::GenerateClass(const ObjCImplementationDecl *OID) {
     Context.getASTObjCInterfaceLayout(SuperClassDecl).getSize().getQuantity();
   // For non-fragile ivars, set the instance size to 0 - {the size of just this
   // class}.  The runtime will then set this to the correct value on load.
-  if (CGM.getContext().getLangOpts().ObjCRuntime.isNonFragile()) {
+  if (CGM.getLangOpts().ObjCRuntime.isNonFragile()) {
     instanceSize = 0 - (instanceSize - superInstanceSize);
   }
 
@@ -2082,7 +2085,7 @@ void CGObjCGNU::GenerateClass(const ObjCImplementationDecl *OID) {
       // Get the offset
       uint64_t BaseOffset = ComputeIvarBaseOffset(CGM, OID, IVD);
       uint64_t Offset = BaseOffset;
-      if (CGM.getContext().getLangOpts().ObjCRuntime.isNonFragile()) {
+      if (CGM.getLangOpts().ObjCRuntime.isNonFragile()) {
         Offset = BaseOffset - superInstanceSize;
       }
       llvm::Constant *OffsetValue = llvm::ConstantInt::get(IntTy, Offset);
@@ -2544,7 +2547,7 @@ void CGObjCGNU::EmitTryStmt(CodeGenFunction &CGF,
   // Unlike the Apple non-fragile runtimes, which also uses
   // unwind-based zero cost exceptions, the GNU Objective C runtime's
   // EH support isn't a veneer over C++ EH.  Instead, exception
-  // objects are created by __objc_exception_throw and destroyed by
+  // objects are created by objc_exception_throw and destroyed by
   // the personality function; this avoids the need for bracketing
   // catch handlers with calls to __blah_begin_catch/__blah_end_catch
   // (or even _Unwind_DeleteException), but probably doesn't
@@ -2569,7 +2572,9 @@ void CGObjCGNU::EmitThrowStmt(CodeGenFunction &CGF,
     ExceptionAsObject = CGF.ObjCEHValueStack.back();
   }
   ExceptionAsObject = CGF.Builder.CreateBitCast(ExceptionAsObject, IdTy);
-  CGF.EmitCallOrInvoke(ExceptionThrowFn, ExceptionAsObject);
+  llvm::CallSite Throw =
+      CGF.EmitCallOrInvoke(ExceptionThrowFn, ExceptionAsObject);
+  Throw.setDoesNotReturn();
   CGF.Builder.CreateUnreachable();
   CGF.Builder.ClearInsertionPoint();
 }

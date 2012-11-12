@@ -49,6 +49,20 @@ static unsigned getCharWidth(tok::TokenKind kind, const TargetInfo &Target) {
   }
 }
 
+static CharSourceRange MakeCharSourceRange(const LangOptions &Features,
+                                           FullSourceLoc TokLoc,
+                                           const char *TokBegin,
+                                           const char *TokRangeBegin,
+                                           const char *TokRangeEnd) {
+  SourceLocation Begin =
+    Lexer::AdvanceToTokenCharacter(TokLoc, TokRangeBegin - TokBegin,
+                                   TokLoc.getManager(), Features);
+  SourceLocation End =
+    Lexer::AdvanceToTokenCharacter(Begin, TokRangeEnd - TokRangeBegin,
+                                   TokLoc.getManager(), Features);
+  return CharSourceRange::getCharRange(Begin, End);
+}
+
 /// \brief Produce a diagnostic highlighting some portion of a literal.
 ///
 /// Emits the diagnostic \p DiagID, highlighting the range of characters from
@@ -61,11 +75,8 @@ static DiagnosticBuilder Diag(DiagnosticsEngine *Diags,
   SourceLocation Begin =
     Lexer::AdvanceToTokenCharacter(TokLoc, TokRangeBegin - TokBegin,
                                    TokLoc.getManager(), Features);
-  SourceLocation End =
-    Lexer::AdvanceToTokenCharacter(Begin, TokRangeEnd - TokRangeBegin,
-                                   TokLoc.getManager(), Features);
-  return Diags->Report(Begin, DiagID)
-      << CharSourceRange::getCharRange(Begin, End);
+  return Diags->Report(Begin, DiagID) <<
+    MakeCharSourceRange(Features, TokLoc, TokBegin, TokRangeBegin, TokRangeEnd);
 }
 
 /// ProcessCharEscape - Parse a standard C escape sequence, which can occur in
@@ -395,10 +406,10 @@ static void EncodeUCNEscape(const char *ThisTokBegin, const char *&ThisTokBuf,
   // Finally, we write the bytes into ResultBuf.
   ResultBuf += bytesToWrite;
   switch (bytesToWrite) { // note: everything falls through.
-    case 4: *--ResultBuf = (UTF8)((UcnVal | byteMark) & byteMask); UcnVal >>= 6;
-    case 3: *--ResultBuf = (UTF8)((UcnVal | byteMark) & byteMask); UcnVal >>= 6;
-    case 2: *--ResultBuf = (UTF8)((UcnVal | byteMark) & byteMask); UcnVal >>= 6;
-    case 1: *--ResultBuf = (UTF8) (UcnVal | firstByteMark[bytesToWrite]);
+  case 4: *--ResultBuf = (UTF8)((UcnVal | byteMark) & byteMask); UcnVal >>= 6;
+  case 3: *--ResultBuf = (UTF8)((UcnVal | byteMark) & byteMask); UcnVal >>= 6;
+  case 2: *--ResultBuf = (UTF8)((UcnVal | byteMark) & byteMask); UcnVal >>= 6;
+  case 1: *--ResultBuf = (UTF8) (UcnVal | firstByteMark[bytesToWrite]);
   }
   // Update the buffer.
   ResultBuf += bytesToWrite;
@@ -1361,7 +1372,7 @@ void StringLiteralParser::init(const Token *StringToks, unsigned NumStringToks){
   } else if (Diags) {
     // Complain if this string literal has too many characters.
     unsigned MaxChars = Features.CPlusPlus? 65536 : Features.C99 ? 4095 : 509;
-    
+
     if (GetNumStringChars() > MaxChars)
       Diags->Report(StringToks[0].getLocation(),
                     diag::ext_string_too_long)
@@ -1370,6 +1381,15 @@ void StringLiteralParser::init(const Token *StringToks, unsigned NumStringToks){
         << SourceRange(StringToks[0].getLocation(),
                        StringToks[NumStringToks-1].getLocation());
   }
+}
+
+static const char *resyncUTF8(const char *Err, const char *End) {
+  if (Err == End)
+    return End;
+  End = Err + std::min<unsigned>(getNumBytesForUTF8(*Err), End-Err);
+  while (++Err != End && (*Err & 0xC0) == 0x80)
+    ;
+  return Err;
 }
 
 /// \brief This function copies from Fragment, which is a sequence of bytes
@@ -1381,7 +1401,6 @@ bool StringLiteralParser::CopyStringFragment(const Token &Tok,
   const UTF8 *ErrorPtrTmp;
   if (ConvertUTF8toWide(CharByteWidth, Fragment, ResultPtr, ErrorPtrTmp))
     return false;
-  const char *ErrorPtr = reinterpret_cast<const char *>(ErrorPtrTmp);
 
   // If we see bad encoding for unprefixed string literals, warn and
   // simply copy the byte values, for compatibility with gcc and older
@@ -1391,12 +1410,33 @@ bool StringLiteralParser::CopyStringFragment(const Token &Tok,
     memcpy(ResultPtr, Fragment.data(), Fragment.size());
     ResultPtr += Fragment.size();
   }
+
   if (Diags) {
-    Diag(Diags, Features, FullSourceLoc(Tok.getLocation(), SM), TokBegin,
-         ErrorPtr, ErrorPtr + std::min<unsigned>(getNumBytesForUTF8(*ErrorPtr),
-                                                 Fragment.end() - ErrorPtr),
-         NoErrorOnBadEncoding ? diag::warn_bad_string_encoding
-                              : diag::err_bad_string_encoding);
+    const char *ErrorPtr = reinterpret_cast<const char *>(ErrorPtrTmp);
+
+    FullSourceLoc SourceLoc(Tok.getLocation(), SM);
+    const DiagnosticBuilder &Builder =
+      Diag(Diags, Features, SourceLoc, TokBegin,
+           ErrorPtr, resyncUTF8(ErrorPtr, Fragment.end()),
+           NoErrorOnBadEncoding ? diag::warn_bad_string_encoding
+                                : diag::err_bad_string_encoding);
+
+    const char *NextStart = resyncUTF8(ErrorPtr, Fragment.end());
+    StringRef NextFragment(NextStart, Fragment.end()-NextStart);
+
+    // Decode into a dummy buffer.
+    SmallString<512> Dummy;
+    Dummy.reserve(Fragment.size() * CharByteWidth);
+    char *Ptr = Dummy.data();
+
+    while (!Builder.hasMaxRanges() &&
+           !ConvertUTF8toWide(CharByteWidth, NextFragment, Ptr, ErrorPtrTmp)) {
+      const char *ErrorPtr = reinterpret_cast<const char *>(ErrorPtrTmp);
+      NextStart = resyncUTF8(ErrorPtr, Fragment.end());
+      Builder << MakeCharSourceRange(Features, SourceLoc, TokBegin,
+                                     ErrorPtr, NextStart);
+      NextFragment = StringRef(NextStart, Fragment.end()-NextStart);
+    }
   }
   return !NoErrorOnBadEncoding;
 }

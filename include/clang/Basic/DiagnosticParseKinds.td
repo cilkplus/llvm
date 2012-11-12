@@ -24,7 +24,7 @@ def warn_unsupported_msasm : Warning<
 let CategoryName = "Parse Issue" in {
 
 def ext_empty_translation_unit : Extension<
-  "ISO C requires a translation unit to contain at least one declaration.">,
+  "ISO C requires a translation unit to contain at least one declaration">,
   InGroup<DiagGroup<"empty-translation-unit">>;
 def warn_cxx98_compat_top_level_semi : Warning<
   "extra ';' outside of a function is incompatible with C++98">,
@@ -50,7 +50,7 @@ def warn_duplicate_declspec : Warning<"duplicate '%0' declaration specifier">,
 def ext_plain_complex : ExtWarn<
   "plain '_Complex' requires a type specifier; assuming '_Complex double'">;
 def ext_integer_complex : Extension<
-  "complex integer types are an extension">;
+  "complex integer types are a GNU extension">, InGroup<GNU>;
 def ext_thread_before : Extension<"'__thread' before '%0'">;
 
 def ext_empty_struct_union : Extension<
@@ -86,8 +86,11 @@ def err_enumerator_list_missing_comma : Error<
   "missing ',' between enumerators">;
 def err_enumerator_unnamed_no_def : Error<
   "unnamed enumeration must be a definition">;
-def ext_ms_enum_fixed_underlying_type : Extension<
-  "enumeration types with a fixed underlying type are a Microsoft extension">, 
+def ext_cxx11_enum_fixed_underlying_type : Extension<
+  "enumeration types with a fixed underlying type are a C++11 extension">, 
+  InGroup<CXX11>;
+def ext_c_enum_fixed_underlying_type : Extension<
+  "enumeration types with a fixed underlying type are a Microsoft extension">,
   InGroup<Microsoft>;
 def warn_cxx98_compat_enum_fixed_underlying_type : Warning<
   "enumeration types with a fixed underlying type are incompatible with C++98">,
@@ -348,6 +351,8 @@ def ext_c11_static_assert : Extension<
 def warn_cxx98_compat_static_assert : Warning<
   "static_assert declarations are incompatible with C++98">,
   InGroup<CXX98Compat>, DefaultIgnore;
+def err_paren_after_colon_colon : Error<
+  "unexpected parenthesis after '::'">;
 
 /// Objective-C parser diagnostics
 def err_expected_minus_or_plus : Error<
@@ -440,7 +445,8 @@ def err_expected_member_or_base_name : Error<
 def err_expected_lbrace_after_base_specifiers : Error<
   "expected '{' after base class list">;
 def ext_ellipsis_exception_spec : Extension<
-  "exception specification of '...' is a Microsoft extension">;
+  "exception specification of '...' is a Microsoft extension">,
+  InGroup<Microsoft>;
 def err_dynamic_and_noexcept_specification : Error<
   "cannot have both throw() and noexcept() clause on the same function">;
 def warn_cxx98_compat_noexcept_decl : Warning<
@@ -733,6 +739,7 @@ def warn_pragma_unused_expected_punc : Warning<
 def err_pragma_fp_contract_scope : Error<
   "'#pragma fp_contract' should only appear at file scope or at the start of a "
   "compound expression">; 
+
 
 // OpenCL Section 6.8.g
 def err_not_opencl_storage_class_specifier : Error<

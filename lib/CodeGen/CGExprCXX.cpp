@@ -37,8 +37,9 @@ RValue CodeGenFunction::EmitCXXMemberCall(const CXXMethodDecl *MD,
   // C++11 [class.mfct.non-static]p2:
   //   If a non-static member function of a class X is called for an object that
   //   is not of type X, or of a type derived from X, the behavior is undefined.
-  EmitTypeCheck(TCK_MemberCall, CallLoc, This,
-                getContext().getRecordType(MD->getParent()));
+  EmitTypeCheck(isa<CXXConstructorDecl>(MD) ? TCK_ConstructorCall
+                                            : TCK_MemberCall,
+                CallLoc, This, getContext().getRecordType(MD->getParent()));
 
   CallArgList Args;
 
@@ -175,8 +176,9 @@ RValue CodeGenFunction::EmitCXXMemberCallExpr(const CXXMemberCallExpr *CE,
   const CXXMethodDecl *MD = cast<CXXMethodDecl>(ME->getMemberDecl());
 
   CGDebugInfo *DI = getDebugInfo();
-  if (DI && CGM.getCodeGenOpts().DebugInfo == CodeGenOptions::LimitedDebugInfo
-      && !isa<CallExpr>(ME->getBase())) {
+  if (DI &&
+      CGM.getCodeGenOpts().getDebugInfo() == CodeGenOptions::LimitedDebugInfo &&
+      !isa<CallExpr>(ME->getBase())) {
     QualType PQTy = ME->getBase()->IgnoreParenImpCasts()->getType();
     if (const PointerType * PTy = dyn_cast<PointerType>(PQTy)) {
       DI->getOrCreateRecordType(PTy->getPointeeType(), 
@@ -258,16 +260,16 @@ RValue CodeGenFunction::EmitCXXMemberCallExpr(const CXXMemberCallExpr *CE,
   }
 
   // Compute the function type we're calling.
+  const CXXMethodDecl *CalleeDecl = DevirtualizedMethod ? DevirtualizedMethod : MD;
   const CGFunctionInfo *FInfo = 0;
-  if (isa<CXXDestructorDecl>(MD))
-    FInfo = &CGM.getTypes().arrangeCXXDestructor(cast<CXXDestructorDecl>(MD),
+  if (const CXXDestructorDecl *Dtor = dyn_cast<CXXDestructorDecl>(CalleeDecl))
+    FInfo = &CGM.getTypes().arrangeCXXDestructor(Dtor,
                                                  Dtor_Complete);
-  else if (isa<CXXConstructorDecl>(MD))
-    FInfo = &CGM.getTypes().arrangeCXXConstructorDeclaration(
-                                                 cast<CXXConstructorDecl>(MD),
-                                                 Ctor_Complete);
+  else if (const CXXConstructorDecl *Ctor = dyn_cast<CXXConstructorDecl>(CalleeDecl))
+    FInfo = &CGM.getTypes().arrangeCXXConstructorDeclaration(Ctor,
+                                                             Ctor_Complete);
   else
-    FInfo = &CGM.getTypes().arrangeCXXMethodDeclaration(MD);
+    FInfo = &CGM.getTypes().arrangeCXXMethodDeclaration(CalleeDecl);
 
   llvm::Type *Ty = CGM.getTypes().GetFunctionType(*FInfo);
 
@@ -284,7 +286,7 @@ RValue CodeGenFunction::EmitCXXMemberCallExpr(const CXXMemberCallExpr *CE,
     if (UseVirtualCall) {
       Callee = BuildVirtualCall(Dtor, Dtor_Complete, This, Ty);
     } else {
-      if (getContext().getLangOpts().AppleKext &&
+      if (getLangOpts().AppleKext &&
           MD->isVirtual() &&
           ME->hasQualifier())
         Callee = BuildAppleKextVirtualCall(MD, ME->getQualifier(), Ty);
@@ -302,7 +304,7 @@ RValue CodeGenFunction::EmitCXXMemberCallExpr(const CXXMemberCallExpr *CE,
   } else if (UseVirtualCall) {
       Callee = BuildVirtualCall(MD, This, Ty); 
   } else {
-    if (getContext().getLangOpts().AppleKext &&
+    if (getLangOpts().AppleKext &&
         MD->isVirtual() &&
         ME->hasQualifier())
       Callee = BuildAppleKextVirtualCall(MD, ME->getQualifier(), Ty);
@@ -467,7 +469,7 @@ CodeGenFunction::EmitCXXConstructExpr(const CXXConstructExpr *E,
   // Elide the constructor if we're constructing from a temporary.
   // The temporary check is required because Sema sets this on NRVO
   // returns.
-  if (getContext().getLangOpts().ElideConstructors && E->isElidable()) {
+  if (getLangOpts().ElideConstructors && E->isElidable()) {
     assert(getContext().hasSameUnqualifiedType(E->getType(),
                                                E->getArg(0)->getType()));
     if (E->getArg(0)->isTemporaryObject(getContext(), CD->getParent())) {
@@ -1237,8 +1239,7 @@ llvm::Value *CodeGenFunction::EmitCXXNewExpr(const CXXNewExpr *E) {
   llvm::BasicBlock *contBB = 0;
 
   llvm::Value *allocation = RV.getScalarVal();
-  unsigned AS =
-    cast<llvm::PointerType>(allocation->getType())->getAddressSpace();
+  unsigned AS = allocation->getType()->getPointerAddressSpace();
 
   // The null-check means that the initializer is conditionally
   // evaluated.
