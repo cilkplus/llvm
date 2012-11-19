@@ -690,9 +690,9 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
 
   CGF.EmitBlock(Body);
   {
-    CGF.SetCurSpawnCallExpr(&S);
+    CGF.SetEmittingCilkSpawn(true);
     CGF.EmitStmt(S.getSubStmt());
-    CGF.ClearCurSpawnCallExpr();
+    CGF.SetEmittingCilkSpawn(false);
   }
   CGF.EmitBlock(Exit);
 

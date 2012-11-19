@@ -33,7 +33,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   : CodeGenTypeCache(cgm), CGM(cgm),
     Target(CGM.getContext().getTargetInfo()),
     Builder(cgm.getModule().getContext()),
-    CurSpawnCallExpr(0),
+    EmittingCilkSpawn(false),
     SanitizePerformTypeCheck(CGM.getLangOpts().SanitizeNull |
                              CGM.getLangOpts().SanitizeAlignment |
                              CGM.getLangOpts().SanitizeObjectSize |
@@ -1280,44 +1280,6 @@ llvm::Value *CodeGenFunction::EmitFieldAnnotations(const FieldDecl *D,
   }
 
   return V;
-}
-
-namespace  {
-
-class SpawnCallExtractor : public RecursiveASTVisitor<SpawnCallExtractor> {
-private:
-  // The spawn call expression found
-  Expr *Call;
-
-public:
-  SpawnCallExtractor() : Call(0) {}
-
-  bool TraverseCompoundStmt(Stmt *) { return true; }
-  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
-    Call = E->getSubExpr();
-    // Get the call subexpression that may be nested within the CilkSpawnExpr
-    if (CXXBindTemporaryExpr *Bind = dyn_cast<CXXBindTemporaryExpr>(Call))
-      Call = Bind->getSubExpr();
-
-    return false; // terminate
-  }
-
-  Expr *getSpawnCall() const {
-    return Call;
-  }
-};
-
-} // namespace
-
-void CodeGenFunction::SetCurSpawnCallExpr(const CilkSpawnStmt *S)
-{
-  assert(S && "null CilkSpawnStmt");
-
-  SpawnCallExtractor Extractor;
-  Extractor.TraverseStmt(const_cast<CilkSpawnStmt*>(S));
-
-  CurSpawnCallExpr = Extractor.getSpawnCall();
-  assert(isa<CallExpr>(CurSpawnCallExpr) && "CallExpr expected");
 }
 
 void CodeGenFunction::EmitCilkSpawnPoint() {

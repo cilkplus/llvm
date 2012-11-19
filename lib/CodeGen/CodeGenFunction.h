@@ -590,8 +590,8 @@ public:
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
 
-  /// CurSpawnCallExpr - This is the call expression that is a Cilk spawn point
-  const Expr *CurSpawnCallExpr;
+  /// \brief Whether a Cilk spawn statement is being emitted
+  bool EmittingCilkSpawn;
 
   /// BoundsChecking - Emit run-time bounds checks. Higher values mean
   /// potentially higher performance penalties.
@@ -2249,14 +2249,15 @@ public:
                   ReturnValueSlot ReturnValue,
                   const CallArgList &Args,
                   const Decl *TargetDecl = 0,
-                  llvm::Instruction **callOrInvoke = 0);
+                  llvm::Instruction **callOrInvoke = 0,
+                  bool IsCilkSpawnCall = false);
 
   RValue EmitCall(QualType FnType, llvm::Value *Callee,
                   ReturnValueSlot ReturnValue,
                   CallExpr::const_arg_iterator ArgBeg,
                   CallExpr::const_arg_iterator ArgEnd,
                   const Decl *TargetDecl = 0,
-                  bool IsSpawnCall = false);
+                  bool IsCilkSpawnCall = false);
 
   RValue EmitCallExpr(const CallExpr *E,
                       ReturnValueSlot ReturnValue = ReturnValueSlot());
@@ -2286,7 +2287,8 @@ public:
                            llvm::Value *This,
                            llvm::Value *VTT,
                            CallExpr::const_arg_iterator ArgBeg,
-                           CallExpr::const_arg_iterator ArgEnd);
+                           CallExpr::const_arg_iterator ArgEnd,
+                           bool IsCilkSpawnCall = false);
   RValue EmitCXXMemberCallExpr(const CXXMemberCallExpr *E,
                                ReturnValueSlot ReturnValue);
   RValue EmitCXXMemberPointerCallExpr(const CXXMemberCallExpr *E,
@@ -2541,26 +2543,15 @@ public:
   //===--------------------------------------------------------------------===//
   //                         Cilk Emission
   //===--------------------------------------------------------------------===//
-
-  /// SetCurSpawnCallExpr - Find the spawning CallExpr. When the call is
-  /// emitted, a call to a dummy function __cilk_spawn_point() is also emitted.
-  void SetCurSpawnCallExpr(const CilkSpawnStmt *S);
-
-  /// ClearCurSpawnCallExpr - Clears the stored Cilk spawn call expression
-  void ClearCurSpawnCallExpr() { CurSpawnCallExpr = 0; }
-
-  /// IsSpawnCallExpr - Returns true if E is the current Cilk spawn call
-  /// expression, false otherwise.
-  bool IsSpawnCallExpr(const Expr *E) const { return E == CurSpawnCallExpr; }
-
   /// EmitCilkSpawnPoint - Emit a call to a dummy function so that it can
   /// be replaced later with a Cilk spawn runtime library call.
   void EmitCilkSpawnPoint();
 
-  /// IsEmittingSpawnCallExpr - Returns true if CGF is emitting a Cilk spawn.
-  bool IsEmittingSpawnCallExpr() const {
-    return CurSpawnCallExpr != 0;
-  }
+  /// IsEmittingCilkSpawn - Return true if currently emitting a Cilk spawn.
+  bool IsEmittingCilkSpawn() const { return EmittingCilkSpawn; }
+
+  /// SetEmittingCilkSpawn - Set whether a Cilk spawn is being emitted.
+  void SetEmittingCilkSpawn(bool b) { EmittingCilkSpawn = b; }
 
   //===--------------------------------------------------------------------===//
   //                             Internal Helpers

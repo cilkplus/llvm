@@ -1954,7 +1954,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                                  ReturnValueSlot ReturnValue,
                                  const CallArgList &CallArgs,
                                  const Decl *TargetDecl,
-                                 llvm::Instruction **callOrInvoke) {
+                                 llvm::Instruction **callOrInvoke,
+                                 bool IsCilkSpawnCall) {
   // FIXME: We no longer need the types from CallArgs; lift up and simplify.
   SmallVector<llvm::Value*, 16> Args;
 
@@ -2178,6 +2179,11 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   CodeGen::AttributeListType AttributeList;
   CGM.ConstructAttributeList(CallInfo, TargetDecl, AttributeList, CallingConv);
   llvm::AttrListPtr Attrs = llvm::AttrListPtr::get(AttributeList);
+
+  // If this call is a Cilk spawn call, also emit a call to the Cilk spawn
+  // dummy function.
+  if (IsCilkSpawnCall)
+    EmitCilkSpawnPoint();
 
   llvm::BasicBlock *InvokeDest = 0;
   if (!Attrs.getFnAttributes().hasAttribute(llvm::Attributes::NoUnwind))

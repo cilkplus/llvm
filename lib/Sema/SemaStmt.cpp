@@ -271,9 +271,10 @@ public:
   DiagnoseCilkSpawnHelper(Sema &S) : SemaRef(S) { }
 
   bool TraverseCompoundStmt(Stmt *) { return true; }
-  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
-    SemaRef.Diag(E->getSpawnLoc(), SemaRef.PDiag(diag::err_spawn_not_whole_expr)
-                                   << E->getSourceRange());
+  bool VisitCallExpr(CallExpr *E) {
+    if (E->isCilkSpawnCall())
+      SemaRef.Diag(E->getCilkSpawnLoc(), SemaRef.PDiag(diag::err_spawn_not_whole_expr)
+                   << E->getSourceRange());
     return true;
   }
 };
@@ -306,6 +307,9 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     DiagnoseCilkSpawn(FR->getBody());
     break;
   }
+  case Stmt::CXXBindTemporaryExprClass:
+    DiagnoseCilkSpawn(cast<CXXBindTemporaryExpr>(S)->getSubExpr());
+    break;
   case Stmt::ExprWithCleanupsClass:
     DiagnoseCilkSpawn(cast<ExprWithCleanups>(S)->getSubExpr());
     break;
@@ -333,11 +337,18 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
   }
   case Stmt::CXXOperatorCallExprClass: {
     CXXOperatorCallExpr *OC = cast<CXXOperatorCallExpr>(S);
-    if (OC->getOperator() == OO_Equal) {
-      D.TraverseStmt(OC->getArg(0));
-      RHS = OC->getArg(1);
-    } else
-      D.TraverseStmt(OC);
+    if (OC->isCilkSpawnCall()) {
+      for (CallExpr::arg_iterator I = OC->arg_begin(),
+           End = OC->arg_end(); I != End; ++I) {
+        D.TraverseStmt(*I);
+      }
+    } else {
+      if (OC->getOperator() == OO_Equal) {
+        D.TraverseStmt(OC->getArg(0));
+        RHS = OC->getArg(1);
+      } else
+        D.TraverseStmt(OC);
+    }
     break;
   }
   case Stmt::DoStmtClass: {
@@ -381,6 +392,15 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     DiagnoseCilkSpawn(W->getBody());
     break;
   }
+  case Stmt::CXXMemberCallExprClass:
+  case Stmt::CallExprClass: {
+    CallExpr *C = cast<CallExpr>(S);
+    for (CallExpr::arg_iterator I = C->arg_begin(),
+         End = C->arg_end(); I != End; ++I) {
+      D.TraverseStmt(*I);
+    }
+    break;
+  }
   default:
     D.TraverseStmt(S);
     break;
@@ -408,9 +428,13 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
       break;
   }
 
-  if (CilkSpawnExpr *E = dyn_cast<CilkSpawnExpr>(RHS))
-    D.TraverseStmt(E->getSubExpr());
-  else
+  CallExpr *E = dyn_cast<CallExpr>(RHS);
+  if (E && E->isCilkSpawnCall()) {
+    for (CallExpr::arg_iterator I = E->arg_begin(),
+         End = E->arg_end(); I != End; ++I) {
+      D.TraverseStmt(*I);
+    }
+  } else
     D.TraverseStmt(RHS);
 }
 
@@ -2999,14 +3023,16 @@ StmtResult Sema::ActOnMSDependentExistsStmt(SourceLocation KeywordLoc,
 
 namespace {
 class SpawnHelper : public RecursiveASTVisitor<SpawnHelper> {
-  Sema &SemaRef;
   bool HasSpawn;
 public:
-  SpawnHelper(Sema &S) : SemaRef(S), HasSpawn(false) {}
+  SpawnHelper() : HasSpawn(false) {}
   bool TraverseCompoundStmt(Stmt *) { return true; }
-  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
-    HasSpawn = true;
-    return false; // terminate if found
+  bool VisitCallExpr(CallExpr *E) {
+    if (E->isCilkSpawnCall()) {
+      HasSpawn = true;
+      return false; // terminate if found
+    }
+    return true;
   }
 
   bool hasSpawn() const { return HasSpawn; }
@@ -3016,7 +3042,7 @@ Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   if (!S)
     return S;
 
-  SpawnHelper Helper(SemaRef);
+  SpawnHelper Helper;
   Helper.TraverseStmt(S);
   if (!Helper.hasSpawn())
     return S;
@@ -3040,9 +3066,10 @@ static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
   }
   case Stmt::DeclStmtClass:
   case Stmt::BinaryOperatorClass:
-  case Stmt::CilkSpawnExprClass:
-  case Stmt::CXXOperatorCallExprClass:
   case Stmt::ExprWithCleanupsClass:
+  case Stmt::CallExprClass:
+  case Stmt::CXXOperatorCallExprClass:
+  case Stmt::CXXMemberCallExprClass:
     S = tryCreateCilkSpawnStmt(SemaRef, S);
     break;
   case Stmt::DoStmtClass: {

@@ -6359,9 +6359,14 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
   // FIXME: Wrong source location information for the '('.
   SourceLocation FakeLParenLoc
     = ((Expr *)Callee.get())->getSourceRange().getBegin();
-  return getDerived().RebuildCallExpr(Callee.get(), FakeLParenLoc,
-                                      Args,
-                                      E->getRParenLoc());
+
+  ExprResult CE = getDerived().RebuildCallExpr(Callee.get(), FakeLParenLoc,
+                                               Args,
+                                               E->getRParenLoc());
+  if (!E->isCilkSpawnCall())
+    return CE;
+
+  return getDerived().RebuildCilkSpawnExpr(E->getCilkSpawnLoc(), CE.get());
 }
 
 template<typename Derived>
@@ -9284,15 +9289,8 @@ TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
-  // Transform the call.
-  ExprResult Call = getDerived().TransformExpr(E->getSubExpr());
-  if (Call.isInvalid())
-    return ExprError();
-
-  if (!getDerived().AlwaysRebuild() && Call.get() == E->getSubExpr())
-    return Owned(E);
-
-  return getDerived().RebuildCilkSpawnExpr(E->getSpawnLoc(), Call.get());
+  // FIXME: TO REMOVE
+  return Owned(E);
 }
 
 template<typename Derived>

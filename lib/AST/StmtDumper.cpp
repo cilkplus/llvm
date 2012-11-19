@@ -153,6 +153,7 @@ namespace  {
 
     // Exprs
     void VisitExpr(Expr *Node);
+    void VisitCallExpr(CallExpr *Node);
     void VisitCastExpr(CastExpr *Node);
     void VisitDeclRefExpr(DeclRefExpr *Node);
     void VisitPredefinedExpr(PredefinedExpr *Node);
@@ -374,6 +375,12 @@ static void DumpBasePath(raw_ostream &OS, CastExpr *Node) {
   }
     
   OS << ')';
+}
+
+void StmtDumper::VisitCallExpr(CallExpr *Node) {
+  DumpExpr(Node);
+  if (Node->isCilkSpawnCall())
+    OS << " <Spawned>";
 }
 
 void StmtDumper::VisitCastExpr(CastExpr *Node) {

@@ -902,6 +902,8 @@ void StmtPrinter::PrintCallArgs(CallExpr *Call) {
 }
 
 void StmtPrinter::VisitCallExpr(CallExpr *Call) {
+  if (Call->isCilkSpawnCall())
+    OS << "_Cilk_spawn ";
   PrintExpr(Call->getCallee());
   OS << "(";
   PrintCallArgs(Call);

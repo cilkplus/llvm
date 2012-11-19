@@ -12008,18 +12008,19 @@ Sema::BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
   if (CXXOperatorCallExpr *O = dyn_cast<CXXOperatorCallExpr>(InnerE))
     isCall = O->getOperator() == OO_Call;
 
-  if (isa<CilkSpawnExpr>(E)) {
-    Diag(E->getExprLoc(), diag::err_spawn_spawn);
-    return ExprError();
-  }
-
   if (!isCall) {
     Diag(E->getExprLoc(), PDiag(diag::err_not_a_call) << getExprRange(E));
     return ExprError();
   }
 
-  // Set the flag only if a valid CilkSpawnExpr created.
+  CallExpr *Call = cast<CallExpr>(InnerE);
+  if (Call->isCilkSpawnCall()) {
+    Diag(E->getExprLoc(), diag::err_spawn_spawn);
+    return ExprError();
+  }
+
+  Call->setCilkSpawnLoc(SpawnLoc);
   getCurCompoundScope().setHasCilkSpawn();
 
-  return Owned(new (Context) CilkSpawnExpr(SpawnLoc, E));
+  return Owned(E);
 }

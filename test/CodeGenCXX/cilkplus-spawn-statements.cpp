@@ -212,15 +212,17 @@ void test7() {
 // CHECK-CILK7-NEXT-DISABLED: call void @_ZN3FooD1Ev
 
 //-----------------------------------------------------------------------------
+// FIXME: Close Defect 15082
 
-// Make sure lambda variable is handled correctly
-// along with use of temp variable
 void test8() {
   // CHECK-CILK8: define void @_Z5test8v()
   auto test_lambda = [](Foo shouldBeDestructed) {
       return 3;
   };
-  //int d = _Cilk_spawn test_lambda(Foo());
+  int d = _Cilk_spawn test_lambda(Foo());
+  // CHECK-CILK8: call void @__cilk_spawn_helper[[HelperNum:[0-9]*]](
+  // CHECK-CILK8: define {{.*}} void @__cilk_spawn_helper[[HelperNum]](
+  // CHECK-CILK8: call i32 @"_ZZ5test8vENK3$_0clE3Foo"
 }
 
 // Currently we can't handle spawning lambda expressions. Add checks

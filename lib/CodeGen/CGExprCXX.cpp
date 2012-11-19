@@ -30,7 +30,8 @@ RValue CodeGenFunction::EmitCXXMemberCall(const CXXMethodDecl *MD,
                                           llvm::Value *This,
                                           llvm::Value *VTT,
                                           CallExpr::const_arg_iterator ArgBeg,
-                                          CallExpr::const_arg_iterator ArgEnd) {
+                                          CallExpr::const_arg_iterator ArgEnd,
+                                          bool IsCilkSpawnCall) {
   assert(MD->isInstance() &&
          "Trying to emit a member call expr on a static method!");
 
@@ -59,7 +60,8 @@ RValue CodeGenFunction::EmitCXXMemberCall(const CXXMethodDecl *MD,
   EmitCallArgs(Args, FPT, ArgBeg, ArgEnd);
 
   return EmitCall(CGM.getTypes().arrangeCXXMethodCall(Args, FPT, required),
-                  Callee, ReturnValue, Args, MD);
+                  Callee, ReturnValue, Args, MD, /*callOrInvoke=*/0,
+                  IsCilkSpawnCall);
 }
 
 // FIXME: Ideally Expr::IgnoreParenNoopCasts should do this, but it doesn't do
@@ -190,7 +192,8 @@ RValue CodeGenFunction::EmitCXXMemberCallExpr(const CXXMemberCallExpr *CE,
     // The method is static, emit it as we would a regular call.
     llvm::Value *Callee = CGM.GetAddrOfFunction(MD);
     return EmitCall(getContext().getPointerType(MD->getType()), Callee,
-                    ReturnValue, CE->arg_begin(), CE->arg_end());
+                    ReturnValue, CE->arg_begin(), CE->arg_end(),
+                    /*callOrInvoke=*/0, CE->isCilkSpawnCall());
   }
 
   // Compute the object pointer.
@@ -316,7 +319,8 @@ RValue CodeGenFunction::EmitCXXMemberCallExpr(const CXXMemberCallExpr *CE,
   }
 
   return EmitCXXMemberCall(MD, CE->getExprLoc(), Callee, ReturnValue, This,
-                           /*VTT=*/0, CE->arg_begin(), CE->arg_end());
+                           /*VTT=*/0, CE->arg_begin(), CE->arg_end(),
+                           CE->isCilkSpawnCall());
 }
 
 RValue
@@ -366,7 +370,8 @@ CodeGenFunction::EmitCXXMemberPointerCallExpr(const CXXMemberCallExpr *E,
   // And the rest of the call args
   EmitCallArgs(Args, FPT, E->arg_begin(), E->arg_end());
   return EmitCall(CGM.getTypes().arrangeCXXMethodCall(Args, FPT, required), Callee, 
-                  ReturnValue, Args);
+                  ReturnValue, Args, /*TargetDecl=*/0, /*callOrInvoke=*/0,
+                  E->isCilkSpawnCall());
 }
 
 RValue
@@ -388,7 +393,8 @@ CodeGenFunction::EmitCXXOperatorMemberCallExpr(const CXXOperatorCallExpr *E,
 
   llvm::Value *Callee = EmitCXXOperatorMemberCallee(E, MD, This);
   return EmitCXXMemberCall(MD, E->getExprLoc(), Callee, ReturnValue, This,
-                           /*VTT=*/0, E->arg_begin() + 1, E->arg_end());
+                           /*VTT=*/0, E->arg_begin() + 1, E->arg_end(),
+                           E->isCilkSpawnCall());
 }
 
 RValue CodeGenFunction::EmitCUDAKernelCallExpr(const CUDAKernelCallExpr *E,
