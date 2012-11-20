@@ -6,6 +6,7 @@
 // RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK6 %s
 // RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK7 %s
 // RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK8 %s
+// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK9 %s
 
 
 /*
@@ -224,3 +225,23 @@ void test8() {
 
 // Currently we can't handle spawning lambda expressions. Add checks
 // when the correct IR is generated. See Defect 15082
+
+//-----------------------------------------------------------------------------
+namespace scopeinfo_missing_during_instantiation {
+
+  template <typename T>
+  void foo(T &x) { }
+
+  template <typename T>
+  void bar(T &x) {
+    _Cilk_spawn foo(x);
+  }
+  // CHECK-CILK9: define {{.*}} void @_ZN38scopeinfo_missing_during_instantiation3barIiEEvRT_
+  // CHECK-CILK9-NOT: call void @_ZN38scopeinfo_missing_during_instantiation3fooIiEEvRT_
+  // CHECK-CILK9: call void @__cilk_spawn_helper
+  void baz() {
+    int x = 0;
+    bar(x);
+  }
+
+}

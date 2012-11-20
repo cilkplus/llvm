@@ -11993,7 +11993,6 @@ Sema::ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
     return ExprError();
   }
 
-  getCurCompoundScope().setHasCilkSpawn();
   return BuildCilkSpawnExpr(SpawnLoc, E);
 }
 
@@ -12018,6 +12017,9 @@ Sema::BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
     Diag(E->getExprLoc(), PDiag(diag::err_not_a_call) << getExprRange(E));
     return ExprError();
   }
+
+  // Set the flag only if a valid CilkSpawnExpr created.
+  getCurCompoundScope().setHasCilkSpawn();
 
   return Owned(new (Context) CilkSpawnExpr(SpawnLoc, E));
 }
