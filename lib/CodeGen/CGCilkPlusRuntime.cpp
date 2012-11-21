@@ -703,7 +703,8 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   Function *H = CodeExtractor(DT, *R.getNode(), false).extractCodeRegion();
 
   if (!H)
-    llvm_unreachable("Unable to extract spawn helper function");
+    CGF.ErrorUnsupported(&S,
+        "unsupported spawning call; cannot extract into a function");
 
   SetNoInline(H);
   H->setName("__cilk_spawn_helper");
@@ -720,7 +721,8 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     = CGF.CGM.getModule().getFunction("__cilk_spawn_point");
 
   if (!SpawnPointMarkerFn)
-    llvm_unreachable("Couldn't find spawn point marker function");
+    CGF.ErrorUnsupported(&S,
+        "unsupported spawning call; cannot find the spawning point");
 
   assert(SpawnPointMarkerFn->hasOneUse() &&
          "Multiple uses of spawn pointer marked function");

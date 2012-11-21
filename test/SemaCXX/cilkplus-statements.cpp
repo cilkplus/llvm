@@ -392,3 +392,23 @@ void test11() {
 }
 
 }
+
+namespace unsupported_spawn_calls {
+  int foo() {
+    int x = _Cilk_spawn __builtin_ffs(1u); // expected-error {{builtin function cannot be spawned}}
+    return x;
+  }
+
+  void bar() {
+    _Cilk_spawn __builtin_unreachable();  // expected-error {{builtin function cannot be spawned}}
+  }
+
+  constexpr long double operator"" _deg(long double deg)
+  {
+    return deg * 3.141592 / 180;
+  }
+
+  void test_deg(double &x) {
+    x = _Cilk_spawn 90.0_deg; // expected-error {{function cannot be spawned}}
+  }
+}

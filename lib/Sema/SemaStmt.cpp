@@ -274,7 +274,7 @@ public:
   bool VisitCallExpr(CallExpr *E) {
     if (E->isCilkSpawnCall())
       SemaRef.Diag(E->getCilkSpawnLoc(), SemaRef.PDiag(diag::err_spawn_not_whole_expr)
-                   << E->getSourceRange());
+                                         << E->getSourceRange());
     return true;
   }
 };
@@ -395,6 +395,9 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
   case Stmt::CXXMemberCallExprClass:
   case Stmt::CallExprClass: {
     CallExpr *C = cast<CallExpr>(S);
+    if (C->isCilkSpawnCall() && C->isBuiltinCall())
+      Diag(C->getCilkSpawnLoc(), diag::err_cannot_spawn_builtin)
+           << C->getSourceRange();
     for (CallExpr::arg_iterator I = C->arg_begin(),
          End = C->arg_end(); I != End; ++I) {
       D.TraverseStmt(*I);
@@ -430,6 +433,14 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
 
   CallExpr *E = dyn_cast<CallExpr>(RHS);
   if (E && E->isCilkSpawnCall()) {
+    if (E->isBuiltinCall())
+      Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_builtin)
+           << E->getSourceRange();
+
+    if (isa<UserDefinedLiteral>(E) || isa<CUDAKernelCallExpr>(E))
+      Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_function)
+           << E->getSourceRange();
+
     for (CallExpr::arg_iterator I = E->arg_begin(),
          End = E->arg_end(); I != End; ++I) {
       D.TraverseStmt(*I);

@@ -6000,7 +6000,10 @@ def err_spawn_spawn : Error<
   "consecutive _Cilk_spawn tokens not allowed">;
 def err_spawn_not_whole_expr : Error<
   "_Cilk_spawn is not at statement level">;
-
+def err_cannot_spawn_builtin: Error<
+  "builtin function cannot be spawned">;
+def err_cannot_spawn_function: Error<
+  "function cannot be spawned">;
 } // end of sema category
 
 let CategoryName = "Related Result Type Issue" in {
