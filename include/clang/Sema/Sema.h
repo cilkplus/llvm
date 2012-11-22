@@ -2621,8 +2621,8 @@ public:
   void DiagnoseCilkSpawn(Stmt *S);
 
   StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
-  ExprResult ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E);
-  ExprResult BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E);
+  ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
+  ExprResult BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   StmtResult ActOnCilkSpawnStmt(Stmt *S);
 
   const VarDecl *getCopyElisionCandidate(QualType ReturnType, Expr *E,

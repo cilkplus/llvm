@@ -1288,7 +1288,7 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
     SourceLocation SpawnLoc = ConsumeToken();
     Res = ParseCastExpression(false);
     if (Res.isInvalid()) return ExprError();
-    return Actions.ActOnCilkSpawnExpr(SpawnLoc, Res.release());
+    return Actions.ActOnCilkSpawnCall(SpawnLoc, Res.release());
   }
 
   case tok::l_square:

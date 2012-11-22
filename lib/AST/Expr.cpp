@@ -2778,7 +2778,6 @@ bool Expr::HasSideEffects(const ASTContext &Ctx) const {
   case CXXBindTemporaryExprClass:
   case BlockExprClass:
   case CUDAKernelCallExprClass:
-  case CilkSpawnExprClass:
     // These always have a side-effect.
     return true;
 
@@ -4074,15 +4073,3 @@ unsigned AtomicExpr::getNumSubExprs(AtomicOp Op) {
   }
   llvm_unreachable("unknown atomic op");
 }
-
-CilkSpawnExpr::CilkSpawnExpr(SourceLocation SL, Expr *E)
-  : Expr(CilkSpawnExprClass,
-         E->getType(),
-         E->getValueKind(),
-         OK_Ordinary,
-         E->isTypeDependent(),
-         E->isValueDependent(),
-         E->isInstantiationDependent(),
-         E->containsUnexpandedParameterPack()),
-    Call(E),
-    SpawnLoc(SL) {}

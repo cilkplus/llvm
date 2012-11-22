@@ -11985,7 +11985,7 @@ Sema::ActOnObjCBoolLiteral(SourceLocation OpLoc, tok::TokenKind Kind) {
 }
 
 ExprResult
-Sema::ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
+Sema::ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
   assert(FunctionScopes.size() > 0 && "FunctionScopes missing TU scope");
   if (FunctionScopes.size() < 1 ||
       getCurFunction()->CompoundScopes.size() < 1) {
@@ -11993,11 +11993,11 @@ Sema::ActOnCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
     return ExprError();
   }
 
-  return BuildCilkSpawnExpr(SpawnLoc, E);
+  return BuildCilkSpawnCall(SpawnLoc, E);
 }
 
 ExprResult
-Sema::BuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
+Sema::BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
   assert(E && "null expression");
 
   Expr *InnerE = E;

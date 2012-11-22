@@ -1848,11 +1848,6 @@ void StmtPrinter::VisitCilkSyncStmt(CilkSyncStmt *) {
   Indent() << "_Cilk_sync;\n";
 }
 
-void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
-  OS << "_Cilk_spawn ";
-  PrintExpr(Node->getSubExpr());
-}
-
 void StmtPrinter::VisitCilkSpawnStmt(CilkSpawnStmt *Node) {
   PrintStmt(Node->getSubStmt());
 }

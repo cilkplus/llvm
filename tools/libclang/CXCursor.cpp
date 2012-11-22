@@ -488,9 +488,6 @@ CXCursor cxcursor::MakeCXCursor(Stmt *S, Decl *Parent, CXTranslationUnit TU,
     K = CXCursor_CilkSyncStmt;
     break;
 
-  case Stmt::CilkSpawnExprClass:
-    K = CXCursor_CilkSpawnExpr;
-    break;
   case Stmt::CilkSpawnStmtClass:
     K = CXCursor_CilkSpawnStmt;
     break;

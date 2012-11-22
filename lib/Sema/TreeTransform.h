@@ -1506,8 +1506,8 @@ public:
   ///
   /// By default, performs semantic analysis to build the new expression.
   /// Subclasses may override this routine to provide different behavior.
-  ExprResult RebuildCilkSpawnExpr(SourceLocation SpawnLoc, Expr *E) {
-    return getSema().BuildCilkSpawnExpr(SpawnLoc, E);
+  ExprResult RebuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
+    return getSema().BuildCilkSpawnCall(SpawnLoc, E);
   }
 
   /// \brief Build a new member access expression.
@@ -6366,7 +6366,7 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
   if (!E->isCilkSpawnCall())
     return CE;
 
-  return getDerived().RebuildCilkSpawnExpr(E->getCilkSpawnLoc(), CE.get());
+  return getDerived().RebuildCilkSpawnCall(E->getCilkSpawnLoc(), CE.get());
 }
 
 template<typename Derived>
@@ -9284,13 +9284,6 @@ template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
   return Owned(S);
-}
-
-template<typename Derived>
-ExprResult
-TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
-  // FIXME: TO REMOVE
-  return Owned(E);
 }
 
 template<typename Derived>

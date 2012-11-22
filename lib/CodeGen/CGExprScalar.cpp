@@ -282,10 +282,6 @@ public:
     return CGF.EmitCallExpr(E).getScalarVal();
   }
 
-  Value *VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
-    return Visit(E->getSubExpr());
-  }
-
   Value *VisitStmtExpr(const StmtExpr *E);
 
   // Unary Operators.

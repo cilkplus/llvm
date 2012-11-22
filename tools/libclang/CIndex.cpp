@@ -3663,8 +3663,6 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return createCXString("CXXAccessSpecifier");
   case CXCursor_CilkSyncStmt:
     return createCXString("CilkSyncStmt");
-  case CXCursor_CilkSpawnExpr:
-    return createCXString("CilkSpawnExpr");
   case CXCursor_CilkSpawnStmt:
     return createCXString("CilkSpawnStmt");
   case CXCursor_ModuleImportDecl:

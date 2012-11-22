@@ -724,10 +724,6 @@ void StmtProfiler::VisitCilkSyncStmt(const CilkSyncStmt *S) {
   VisitStmt(S);
 }
 
-void StmtProfiler::VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
-  VisitExpr(E);
-}
-
 void StmtProfiler::VisitCilkSpawnStmt(const CilkSpawnStmt *S) {
   VisitStmt(S);
 }

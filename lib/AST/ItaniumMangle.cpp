@@ -2404,7 +2404,6 @@ recurse:
   case Expr::AsTypeExprClass:
   case Expr::PseudoObjectExprClass:
   case Expr::AtomicExprClass:
-  case Expr::CilkSpawnExprClass:
   {
     // As bad as this diagnostic is, it's better than crashing.
     DiagnosticsEngine &Diags = Context.getDiags();

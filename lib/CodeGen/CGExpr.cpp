@@ -710,8 +710,6 @@ LValue CodeGenFunction::EmitLValue(const Expr *E) {
   case Expr::CXXOperatorCallExprClass:
   case Expr::UserDefinedLiteralClass:
     return EmitCallExprLValue(cast<CallExpr>(E));
-  case Expr::CilkSpawnExprClass:
-    return EmitLValue(cast<CilkSpawnExpr>(E)->getSubExpr());
   case Expr::VAArgExprClass:
     return EmitVAArgExprLValue(cast<VAArgExpr>(E));
   case Expr::DeclRefExprClass:

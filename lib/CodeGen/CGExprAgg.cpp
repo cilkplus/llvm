@@ -144,7 +144,6 @@ public:
   // Operators.
   void VisitCastExpr(CastExpr *E);
   void VisitCallExpr(const CallExpr *E);
-  void VisitCilkSpawnExpr(const CilkSpawnExpr *E);
   void VisitStmtExpr(const StmtExpr *E);
   void VisitBinaryOperator(const BinaryOperator *BO);
   void VisitPointerToDataMemberBinaryOperator(const BinaryOperator *BO);
@@ -661,10 +660,6 @@ void AggExprEmitter::VisitCallExpr(const CallExpr *E) {
 
   RValue RV = CGF.EmitCallExpr(E, getReturnValueSlot());
   EmitMoveFromReturnSlot(E, RV);
-}
-
-void AggExprEmitter::VisitCilkSpawnExpr(const CilkSpawnExpr *E) {
-  Visit(E->getSubExpr());
 }
 
 void AggExprEmitter::VisitObjCMessageExpr(ObjCMessageExpr *E) {

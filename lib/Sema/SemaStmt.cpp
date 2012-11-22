@@ -180,9 +180,6 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
   if (DiagnoseUnusedComparison(*this, E))
     return;
 
-  if (const CilkSpawnExpr *EE = dyn_cast<CilkSpawnExpr>(E))
-    return DiagnoseUnusedExprResult(EE->getSubExpr());
-
   E = WarnExpr;
   if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
     if (E->getType()->isVoidType())
@@ -357,9 +354,6 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     DiagnoseCilkSpawn(DS->getBody());
     break;
   }
-  case Stmt::CilkSpawnExprClass:
-    D.TraverseStmt(cast<CilkSpawnExpr>(S)->getSubExpr());
-    break;
   case Stmt::ForStmtClass: {
     ForStmt *F = cast<ForStmt>(S);
     if (F->getInit())

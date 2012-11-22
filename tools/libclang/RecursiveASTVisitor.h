@@ -2132,7 +2132,6 @@ DEF_TRAVERSE_STMT(OpaqueValueExpr, { })
 DEF_TRAVERSE_STMT(CUDAKernelCallExpr, { })
 
 DEF_TRAVERSE_STMT(CilkSyncStmt, { })
-DEF_TRAVERSE_STMT(CilkSpawnExpr, { })
 DEF_TRAVERSE_STMT(CilkSpawnStmt, { })
 
 // These operators (all of them) do not need any action except

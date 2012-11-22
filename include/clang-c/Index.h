@@ -1851,11 +1851,7 @@ enum CXCursorKind {
    */
   CXCursor_ObjCBoolLiteralExpr           = 145,
 
-  /** \brief A spawning expression from the Cilk Plus extensions to C/C++
-    */
-  CXCursor_CilkSpawnExpr                 = 146,
-
-  CXCursor_LastExpr                      = CXCursor_CilkSpawnExpr,
+  CXCursor_LastExpr                      = CXCursor_ObjCBoolLiteralExpr,
 
   /* Statements */
   CXCursor_FirstStmt                     = 200,

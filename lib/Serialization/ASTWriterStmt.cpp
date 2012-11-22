@@ -1537,13 +1537,6 @@ void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
   Code = serialization::STMT_CILKSYNC;
 }
 
-void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
-  VisitExpr(E);
-  Writer.AddSourceLocation(E->getSpawnLoc(), Record);
-  Writer.AddStmt(E->getSubExpr());
-  Code = serialization::EXPR_CILKSPAWN;
-}
-
 void ASTStmtWriter::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
   VisitStmt(S);
   Writer.AddStmt(S->getSubStmt());
