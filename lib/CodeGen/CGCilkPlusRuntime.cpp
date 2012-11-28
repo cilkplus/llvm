@@ -256,11 +256,6 @@ static Value *LoadField(CGBuilderTy &B, Value *Src, int field)
   return B.CreateLoad(GEP(B, Src, field));
 }
 
-void SetNoInline(Function *F)
-{
-  F->addFnAttr(Attributes::NoInline);
-}
-
 /// Emit inline assembly code to save the floating point
 /// state, for x86 Only
 static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF)
@@ -467,6 +462,96 @@ static Function *GetCilkDetachFn(CodeGenFunction &CGF)
   return Fn;
 }
 
+/// Get or create a LLVM function for __cilkrts_detach.
+/// Calls to this function is always inlined, as it saves
+/// the current stack/frame pointer values
+/// It is equivalent to the following C code
+///
+/// void __cilk_sync(struct __cilkrts_stack_frame *sf) {
+///   if (sf->flags & CILK_FRAME_UNSYNCHED) {
+///     sf->parent_pedigree = sf->worker->pedigree;
+///     SAVE_FLOAT_STATE(*sf);
+///     if (!CILK_SETJMP(sf->ctx))
+///       __cilkrts_sync(sf);
+///   }
+///   ++sf->worker->pedigree.rank;
+/// }
+static Function *GetCilkSyncFn(CodeGenFunction &CGF)
+{
+  Function *Fn = 0;
+
+  if (GetOrCreateFunction("__cilk_sync", CGF, Fn))
+    return Fn;
+
+  // If we get here we need to add the function body
+  LLVMContext &Ctx = CGF.getLLVMContext();
+
+  Value *SF = Fn->arg_begin();
+
+  BasicBlock *Entry = BasicBlock::Create(Ctx, "cilk.sync.test", Fn),
+             *SaveState = BasicBlock::Create(Ctx, "cilk.sync.savestate", Fn),
+             *SyncCall = BasicBlock::Create(Ctx, "cilk.sync.runtimecall", Fn),
+             *Exit = BasicBlock::Create(Ctx, "cilk.sync.end", Fn);
+
+  // Entry
+  {
+    CGBuilderTy B(Entry);
+
+    // if (sf->flags & CILK_FRAME_UNSYNCHED)
+    Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
+    Flags = B.CreateAnd(Flags,
+                        ConstantInt::get(Flags->getType(),
+                                         CILK_FRAME_UNSYNCHED));
+    Value *Zero = ConstantInt::get(Flags->getType(), 0);
+    Value *Unsynced = B.CreateICmpEQ(Flags, Zero);
+    B.CreateCondBr(Unsynced, Exit, SaveState);
+  }
+
+  // SaveState
+  {
+    CGBuilderTy B(SaveState);
+
+    // sf.parent_pedigree = sf.worker->pedigree;
+    StoreField(B,
+      LoadField(B, LoadField(B, SF, StackFrameBuilder::worker),
+                WorkerBuilder::pedigree),
+      SF, StackFrameBuilder::parent_pedigree);
+
+    // if (!CILK_SETJMP(sf.ctx))
+    Value *C = EmitCilkSetJmp(B, SF, CGF);
+    C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
+    B.CreateCondBr(C, SyncCall, Exit);
+  }
+
+  // SyncCall
+  {
+    CGBuilderTy B(SyncCall);
+
+    // __cilkrts_sync(&sf);
+    B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
+    B.CreateBr(Exit);
+  }
+
+  // Exit
+  {
+    CGBuilderTy B(Exit);
+
+    // ++sf.worker->pedigree.rank;
+    Value *Rank = LoadField(B, SF, StackFrameBuilder::worker);
+    Rank = GEP(B, Rank, WorkerBuilder::pedigree);
+    Rank = GEP(B, Rank, PedigreeBuilder::rank);
+    B.CreateStore(B.CreateAdd(B.CreateLoad(Rank),
+                  ConstantInt::get(Rank->getType()->getPointerElementType(),
+                                   1)),
+                  Rank);
+    B.CreateRetVoid();
+  }
+
+  Fn->addFnAttr(Attributes::AlwaysInline);
+
+  return Fn;
+}
+
 /// Get or create a LLVM function for __cilk_parent_prologue.
 /// It is equivalent to the following C code
 ///
@@ -649,6 +734,13 @@ static llvm::Value *GetParentStackFrame(CodeGenFunction &CGF)
   {
     CGBuilderTy Builder(CGF.ReturnBlock.getBlock());
     Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
+    
+    // FIXME: By adding a _Cilk_sync call in the Unified Return
+    // Block we should automatically get an implicit sync at the
+    // end of all spawning functions. This needs to be tested more
+    // (e.g. with exceptions, etc...) so we are leaving this
+    // line commented out as a reminder
+    //Builder.CreateCall(GetCilkSyncFn(CGF), SF);
   }
 
   return SF;
@@ -706,7 +798,7 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     CGF.ErrorUnsupported(&S,
         "unsupported spawning call; cannot extract into a function");
 
-  SetNoInline(H);
+  H->addFnAttr(Attributes::NoInline);
   H->setName("__cilk_spawn_helper");
 
   // Add a __cilkrts_stack_frame to the helper
@@ -751,15 +843,7 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   }
 }
 
-/// Emits code equivalent to the following C code
-///
-/// if (sf->flags & CILK_FRAME_UNSYNCHED) {
-///   sf->parent_pedigree = sf->worker->pedigree;
-///   SAVE_FLOAT_STATE(*sf);
-///   if (!CILK_SETJMP(sf->ctx))
-///     __cilkrts_sync(sf);
-/// }
-/// ++sf->worker->pedigree.rank;
+/// Emits a call to the __cilk_sync function
 void
 CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF,
                                 const CilkSyncStmt &S)
@@ -768,68 +852,7 @@ CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF,
   // if it doesn't already exist
   Value *SF = GetParentStackFrame(CGF);
 
-  BasicBlock *Entry = CGF.createBasicBlock("cilk.sync.test"),
-             *SaveState = CGF.createBasicBlock("cilk.sync.savestate"),
-             *SyncCall = CGF.createBasicBlock("cilk.sync.runtimecall"),
-             *Exit = CGF.createBasicBlock("cilk.sync.end");
-
-  // Entry
-  {
-    CGBuilderTy B(Entry);
-
-    // if (sf->flags & CILK_FRAME_UNSYNCHED)
-    Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
-    Flags = B.CreateAnd(Flags,
-                        ConstantInt::get(Flags->getType(),
-                                         CILK_FRAME_UNSYNCHED));
-    Value *Zero = ConstantInt::get(Flags->getType(), 0);
-    Value *Unsynced = B.CreateICmpEQ(Flags, Zero);
-    B.CreateCondBr(Unsynced, Exit, SaveState);
-  }
-
-  // SaveState
-  {
-    CGBuilderTy B(SaveState);
-
-    // sf.parent_pedigree = sf.worker->pedigree;
-    StoreField(B,
-      LoadField(B, LoadField(B, SF, StackFrameBuilder::worker),
-                WorkerBuilder::pedigree),
-      SF, StackFrameBuilder::parent_pedigree);
-
-    // if (!CILK_SETJMP(sf.ctx))
-    Value *C = EmitCilkSetJmp(B, SF, CGF);
-    C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
-    B.CreateCondBr(C, SyncCall, Exit);
-  }
-
-  // SyncCall
-  {
-    CGBuilderTy B(SyncCall);
-
-    // __cilkrts_sync(&sf);
-    B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
-    B.CreateBr(Exit);
-  }
-
-  // Exit
-  {
-    CGBuilderTy B(Exit);
-
-    // ++sf.worker->pedigree.rank;
-    Value *Rank = LoadField(B, SF, StackFrameBuilder::worker);
-    Rank = GEP(B, Rank, WorkerBuilder::pedigree);
-    Rank = GEP(B, Rank, PedigreeBuilder::rank);
-    B.CreateStore(B.CreateAdd(B.CreateLoad(Rank),
-                  ConstantInt::get(Rank->getType()->getPointerElementType(),
-                                   1)),
-                  Rank);
-  }
-
-  CGF.EmitBlock(Entry);
-  CGF.EmitBlock(SaveState);
-  CGF.EmitBlock(SyncCall);
-  CGF.EmitBlock(Exit);
+  CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
 }
 
 CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM)
