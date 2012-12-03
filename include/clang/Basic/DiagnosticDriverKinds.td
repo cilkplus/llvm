@@ -101,6 +101,8 @@ def err_drv_asan_android_requires_pie : Error<
   "AddressSanitizer on Android requires '-pie'">;
 def err_drv_unknown_objc_runtime : Error<
   "unknown or ill-formed Objective-C runtime '%0'">;
+def err_drv_cilk_objc : Error<
+  "Cilk Plus does not support Objective-C">;
 
 def warn_c_kext : Warning<
   "ignoring -fapple-kext which is valid for C++ and Objective-C++ only">;

@@ -41,3 +41,6 @@
 
 // RUN: %clang -fcilkplus %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS4 %s
 // CHECK-OPTIONS4: -fcilkplus
+
+// RUN: %clang -x objective-c -fcilkplus %s 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS5 %s
+// CHECK-OPTIONS5: error: Cilk Plus does not support Objective-C
