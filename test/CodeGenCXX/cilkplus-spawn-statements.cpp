@@ -12,13 +12,13 @@
 /*
  *  A _Cilk_spawn can only appear in 3 places
  *    as the *entire* body of an expression statement
- *      (covered by Test 1, 2, 6, 10)
+ *      (covered by Test 1 and 6)
  *
  *    as the *entire* right hand side of an assignment expression
- *      (covered by Test 4 and 5)
+ *      (covered by Test 3 and 7)
  *
  *    as the entire initializer-clause in a simple declaration
- *      (covered by Test 3, 7, 8, and 9)
+ *      (covered by Test 2, 4, 5, 6, 8)
  *
  *  Thus we have covered all possible cases for _Cilk_spawn
  */
@@ -120,12 +120,12 @@ void test2() {
 // Make sure that "y" is assigned in the child
 void test3() {
   // CHECK-CILK3: define void @_Z5test3v()
-  // CHECK-CILK3: call void @__cilk_spawn_helper[[HelperNum:[0-9]*]](%struct.Foo*{{.*}}, i32*{{.*}})
+  // CHECK-CILK3: call void @__cilk_spawn_helper[[HelperNum:[0-9]*]]
   int y;
   y = _Cilk_spawn f(param1 + param2);
 }
 
-// CHECK-CILK3: define internal void @__cilk_spawn_helper[[HelperNum]](%struct.Foo*{{.*}}, i32*{{.*}}) noinline
+// CHECK-CILK3: define internal void @__cilk_spawn_helper[[HelperNum]]({{.*}}) noinline
 
 // CHECK-CILK3: call void @_ZplRK3FooS1_
 // CHECK-CILK3-NEXT: call void @__cilk_helper_prologue
@@ -143,7 +143,7 @@ void test4() {
   float b = _Cilk_spawn i();
 }
 
-// CHECK-CILK4: define internal void @__cilk_spawn_helper[[HelperNum]](float*{{.*}}) noinline {
+// CHECK-CILK4: define internal void @__cilk_spawn_helper[[HelperNum]]({{.*}}) noinline {
 
 // CHECK-CILK4: call void @__cilk_helper_prologue
 // CHECK-CILK4-NEXT: call {{.*}} @_Z1iv()
@@ -156,11 +156,11 @@ void test4() {
 // is assigned in the child
 void test5() {
   // CHECK-CILK5: define void @_Z5test5v()
-  // CHECK-CILK5: call void @__cilk_spawn_helper[[HelperNum:[0-9]*]](%struct.Bar*{{.*}})
+  // CHECK-CILK5: call void @__cilk_spawn_helper[[HelperNum:[0-9]*]]
   Bar a = _Cilk_spawn g();
 }
 
-// CHECK-CILK5: define internal void @__cilk_spawn_helper[[HelperNum]](%struct.Bar*{{.*}}) noinline
+// CHECK-CILK5: define internal void @__cilk_spawn_helper[[HelperNum]]({{.*}}) noinline
 
 // CHECK-CILK5: call void @__cilk_helper_prologue
 // CHECK-CILK5-NEXT: call {{.*}} @_Z1gv()
@@ -199,34 +199,33 @@ void test7() {
   z[i()] = _Cilk_spawn f(Foo());
 }
 
-// CHECK-CILK7: define internal void @__cilk_spawn_helper[[HelperNum]](%struct.Foo*{{.*}}, [10 x i32]*{{.*}}) noinline
+// CHECK-CILK7: define internal void @__cilk_spawn_helper[[HelperNum]]({{.*}}) noinline
 
-// This is what the IR should be. Re-enable these checks when the correct IR is generated
-// The issue is that the call to i() happens after the spawn point and it should happen
-// before instead. See Defect 14970
-// CHECK-CILK7-DISABLED: call {{.*}} @_Z1iv()
-// CHECK-CILK7-NEXT-DISABLED: call void @_ZN3FooC1Ev
-// CHECK-CILK7-NEXT-DISABLED: call void @__cilk_helper_prologue
-// CHECK-CILK7-NEXT-DISABLED: call {{.*}} @_Z1f3Foo
-// CHECK-CILK7-DISABLED: store
-// CHECK-CILK7-NEXT-DISABLED: call void @_ZN3FooD1Ev
+// CHECK-CILK7: call {{.*}} @_Z1iv()
+// CHECK-CILK7: call void @_ZN3FooC1Ev
+// CHECK-CILK7-NEXT: call void @__cilk_helper_prologue
+// CHECK-CILK7-NEXT: call {{.*}} @_Z1f3Foo
+// CHECK-CILK7: store
+// CHECK-CILK7-NEXT: call void @_ZN3FooD1Ev
 
 //-----------------------------------------------------------------------------
-// FIXME: Close Defect 15082
 
+// Test for handling lambda functions correctly
 void test8() {
   // CHECK-CILK8: define void @_Z5test8v()
   auto test_lambda = [](Foo shouldBeDestructed) {
       return 3;
   };
+
+  // CHECK-CILK8: call void @__cilk_spawn_helper[[HelperNum:[0-9]*]]
   int d = _Cilk_spawn test_lambda(Foo());
-  // CHECK-CILK8: call void @__cilk_spawn_helper[[HelperNum:[0-9]*]](
-  // CHECK-CILK8: define {{.*}} void @__cilk_spawn_helper[[HelperNum]](
-  // CHECK-CILK8: call i32 @"_ZZ5test8vENK3$_0clE3Foo"
 }
 
-// Currently we can't handle spawning lambda expressions. Add checks
-// when the correct IR is generated. See Defect 15082
+// CHECK-CILK8: define internal void @__cilk_spawn_helper[[HelperNum]]({{.*}}) noinline
+// CHECK-CILK8: call void @_ZN3FooC1Ev
+// CHECK-CILK8-NEXT: call void @__cilk_helper_prologue
+// CHECK-CILK8-NEXT: call i32 @"_ZZ5test8vENK3$_0clE3Foo"
+// CHECK-CILK8-NEXT: call void @_ZN3FooD1Ev
 
 //-----------------------------------------------------------------------------
 namespace scopeinfo_missing_during_instantiation {

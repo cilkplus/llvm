@@ -611,9 +611,23 @@ EmitCompoundAssignLValue(const CompoundAssignOperator *E,
   assert(OpInfo.Ty->isAnyComplexType());
   assert(CGF.getContext().hasSameUnqualifiedType(OpInfo.Ty,
                                                  E->getRHS()->getType()));
-  OpInfo.RHS = Visit(E->getRHS());
-  
-  LValue LHS = CGF.EmitLValue(E->getLHS());
+
+  LValue LHS;
+
+  // Cilk Plus needs the LHS evaluated first to handle cases such as
+  // array[f()] = _Cilk_spawn foo();
+  // This evaluation order requirement implies that _Cilk_spawn cannot
+  // spawn Objective C block calls
+  if (CGF.getLangOpts().CilkPlus) {
+    assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
+           "Cilk Plus does not support Objective-C");
+
+    LHS = CGF.EmitLValue(E->getLHS());
+    OpInfo.RHS = Visit(E->getRHS());
+  } else {
+    OpInfo.RHS = Visit(E->getRHS());
+    LHS = CGF.EmitLValue(E->getLHS());
+  }
 
   // Load from the l-value.
   ComplexPairTy LHSComplexPair = EmitLoadOfLValue(LHS);
@@ -659,11 +673,25 @@ LValue ComplexExprEmitter::EmitBinAssignLValue(const BinaryOperator *E,
   TestAndClearIgnoreReal();
   TestAndClearIgnoreImag();
 
-  // Emit the RHS.  __block variables need the RHS evaluated first.
-  Val = Visit(E->getRHS());
+  LValue LHS;
 
-  // Compute the address to store into.
-  LValue LHS = CGF.EmitLValue(E->getLHS());
+  // Cilk Plus needs the LHS evaluated first to handle cases such as
+  // array[f()] = _Cilk_spawn foo();
+  // This evaluation order requirement implies that _Cilk_spawn cannot
+  // spawn Objective C block calls
+  if (CGF.getLangOpts().CilkPlus) {
+    assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
+           "Cilk Plus does not support Objective-C");
+
+    LHS = CGF.EmitLValue(E->getLHS());
+    Val = Visit(E->getRHS());
+  } else {
+    // Emit the RHS.  __block variables need the RHS evaluated first.
+    Val = Visit(E->getRHS());
+
+    // Compute the address to store into.
+    LHS = CGF.EmitLValue(E->getLHS());
+  }
 
   // Store the result value into the LHS lvalue.
   EmitStoreThroughLValue(Val, LHS);

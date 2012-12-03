@@ -2816,8 +2816,24 @@ LValue CodeGenFunction::EmitBinaryOperatorLValue(const BinaryOperator *E) {
       break;
     }
 
-    RValue RV = EmitAnyExpr(E->getRHS());
-    LValue LV = EmitCheckedLValue(E->getLHS(), TCK_Store);
+    LValue LV;
+    RValue RV;
+
+    // Cilk Plus needs the LHS evaluated first to handle cases such as
+    // array[f()] = _Cilk_spawn foo();
+    // This evaluation order requirement implies that _Cilk_spawn cannot
+    // spawn Objective C block calls
+    if (getLangOpts().CilkPlus) {
+      assert(!getLangOpts().ObjC1 && !getLangOpts().ObjC2 &&
+             "Cilk Plus does not support Objective-C");
+
+      LV = EmitCheckedLValue(E->getLHS(), TCK_Store);
+      RV = EmitAnyExpr(E->getRHS());
+    } else {
+      RV = EmitAnyExpr(E->getRHS());
+      LV = EmitCheckedLValue(E->getLHS(), TCK_Store);
+    }
+
     EmitStoreThroughLValue(RV, LV);
     return LV;
   }

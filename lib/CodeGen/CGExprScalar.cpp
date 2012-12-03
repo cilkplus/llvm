@@ -1842,17 +1842,37 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
     Result = llvm::UndefValue::get(CGF.ConvertType(E->getType()));
     return LValue();
   }
-  
-  // Emit the RHS first.  __block variables need to have the rhs evaluated
-  // first, plus this should improve codegen a little.
-  OpInfo.RHS = Visit(E->getRHS());
+
+  LValue LHSLV;
+
+  // Cilk Plus needs the LHS evaluated first to handle cases such as
+  // array[f()] = _Cilk_spawn foo();
+  // This evaluation order requirement implies that _Cilk_spawn cannot
+  // spawn Objective C block calls
+  if (CGF.getLangOpts().CilkPlus) {
+    assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
+           "Cilk Plus does not support Objective-C");
+
+    // Load/convert the LHS.
+    LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
+    OpInfo.LHS = EmitLoadOfLValue(LHSLV);
+
+    OpInfo.RHS = Visit(E->getRHS());
+
+  // Otherwise emit the RHS first. __block variables need to have the rhs
+  // evaluated first, plus this should improve codegen a little.
+  } else {
+    OpInfo.RHS = Visit(E->getRHS());
+
+    // Load/convert the LHS.
+    LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
+    OpInfo.LHS = EmitLoadOfLValue(LHSLV);
+  }
+
   OpInfo.Ty = E->getComputationResultType();
   OpInfo.Opcode = E->getOpcode();
   OpInfo.FPContractable = false;
   OpInfo.E = E;
-  // Load/convert the LHS.
-  LValue LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
-  OpInfo.LHS = EmitLoadOfLValue(LHSLV);
 
   llvm::PHINode *atomicPHI = 0;
   if (LHSTy->isAtomicType()) {
@@ -2601,10 +2621,23 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
   // No reason to do any of these differently.
   case Qualifiers::OCL_None:
   case Qualifiers::OCL_ExplicitNone:
-    // __block variables need to have the rhs evaluated first, plus
-    // this should improve codegen just a little.
-    RHS = Visit(E->getRHS());
-    LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
+
+    // Cilk Plus needs the LHS evaluated first to handle cases such as
+    // array[f()] = _Cilk_spawn foo();
+    // This evaluation order requirement implies that _Cilk_spawn cannot
+    // spawn Objective C block calls
+    if (CGF.getLangOpts().CilkPlus) {
+      assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
+             "Cilk Plus does not support Objective-C");
+
+      LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
+      RHS = Visit(E->getRHS());
+    } else {
+      // __block variables need to have the rhs evaluated first, plus
+      // this should improve codegen just a little.
+      RHS = Visit(E->getRHS());
+      LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
+    }
 
     // Store the value into the LHS.  Bit-fields are handled specially
     // because the result is altered by the store, i.e., [C99 6.5.16p1]
