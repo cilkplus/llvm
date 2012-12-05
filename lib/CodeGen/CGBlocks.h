@@ -14,19 +14,18 @@
 #ifndef CLANG_CODEGEN_CGBLOCKS_H
 #define CLANG_CODEGEN_CGBLOCKS_H
 
+#include "CGBuilder.h"
+#include "CGCall.h"
+#include "CGValue.h"
+#include "CodeGenFunction.h"
 #include "CodeGenTypes.h"
-#include "clang/AST/Type.h"
-#include "llvm/Module.h"
-#include "clang/Basic/TargetInfo.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
-
-#include "CodeGenFunction.h"
-#include "CGBuilder.h"
-#include "CGCall.h"
-#include "CGValue.h"
+#include "clang/AST/Type.h"
+#include "clang/Basic/TargetInfo.h"
+#include "llvm/Module.h"
 
 namespace llvm {
   class Module;
@@ -69,11 +68,12 @@ enum BlockLiteralFlags {
 class BlockFlags {
   uint32_t flags;
 
-  BlockFlags(uint32_t flags) : flags(flags) {}
 public:
+  BlockFlags(uint32_t flags) : flags(flags) {}
   BlockFlags() : flags(0) {}
   BlockFlags(BlockLiteralFlags flag) : flags(flag) {}
-
+  BlockFlags(BlockByrefFlags flag) : flags(flag) {}
+  
   uint32_t getBitMask() const { return flags; }
   bool empty() const { return flags == 0; }
 
@@ -86,6 +86,9 @@ public:
   }
   friend bool operator&(BlockFlags l, BlockFlags r) {
     return (l.flags & r.flags);
+  }
+  bool operator==(BlockFlags r) {
+    return (flags == r.flags);
   }
 };
 inline BlockFlags operator|(BlockLiteralFlags l, BlockLiteralFlags r) {
@@ -208,6 +211,14 @@ public:
   const BlockExpr *BlockExpression;
   CharUnits BlockSize;
   CharUnits BlockAlign;
+  
+  // Offset of the gap caused by block header having a smaller
+  // alignment than the alignment of the block descriptor. This
+  // is the gap offset before the first capturued field.
+  CharUnits BlockHeaderForcedGapOffset;
+  // Gap size caused by aligning first field after block header.
+  // This could be zero if no forced alignment is required.
+  CharUnits BlockHeaderForcedGapSize;
 
   /// An instruction which dominates the full-expression that the
   /// block is inside.

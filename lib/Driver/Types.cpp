@@ -8,10 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Driver/Types.h"
-
 #include "llvm/ADT/StringSwitch.h"
-#include <string.h>
 #include <cassert>
+#include <string.h>
 
 using namespace clang::driver;
 using namespace clang::driver::types;
@@ -71,6 +70,29 @@ bool types::canLipoType(ID Id) {
           Id == TY_LTO_BC);
 }
 
+bool types::isAcceptedByClang(ID Id) {
+  switch (Id) {
+  default:
+    return false;
+
+  case TY_Asm:
+  case TY_C: case TY_PP_C:
+  case TY_CL:
+  case TY_CUDA:
+  case TY_ObjC: case TY_PP_ObjC: case TY_PP_ObjC_Alias:
+  case TY_CXX: case TY_PP_CXX:
+  case TY_ObjCXX: case TY_PP_ObjCXX: case TY_PP_ObjCXX_Alias:
+  case TY_CHeader: case TY_PP_CHeader:
+  case TY_CLHeader:
+  case TY_ObjCHeader: case TY_PP_ObjCHeader:
+  case TY_CXXHeader: case TY_PP_CXXHeader:
+  case TY_ObjCXXHeader: case TY_PP_ObjCXXHeader:
+  case TY_AST:
+  case TY_LLVM_IR: case TY_LLVM_BC:
+    return true;
+  }
+}
+
 bool types::isObjC(ID Id) {
   switch (Id) {
   default:
@@ -90,7 +112,7 @@ bool types::isCXX(ID Id) {
     return false;
 
   case TY_CXX: case TY_PP_CXX:
-  case TY_ObjCXX: case TY_PP_ObjCXX:
+  case TY_ObjCXX: case TY_PP_ObjCXX: case TY_PP_ObjCXX_Alias:
   case TY_CXXHeader: case TY_PP_CXXHeader:
   case TY_ObjCXXHeader: case TY_PP_ObjCXXHeader:
   case TY_CUDA:
@@ -206,7 +228,7 @@ ID types::lookupCXXTypeForCType(ID Id) {
   switch (Id) {
   default:
     return Id;
-    
+
   case types::TY_C:
     return types::TY_CXX;
   case types::TY_PP_C:

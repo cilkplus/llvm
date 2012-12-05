@@ -8,33 +8,30 @@
 //===----------------------------------------------------------------------===//
 
 #include "Tools.h"
-
+#include "InputInfo.h"
+#include "SanitizerArgs.h"
+#include "ToolChains.h"
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Arg.h"
 #include "clang/Driver/ArgList.h"
+#include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
-#include "clang/Driver/Compilation.h"
 #include "clang/Driver/Job.h"
 #include "clang/Driver/Option.h"
 #include "clang/Driver/Options.h"
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Util.h"
-#include "clang/Basic/ObjCRuntime.h"
-
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Process.h"
-#include "llvm/Support/ErrorHandling.h"
-
-#include "InputInfo.h"
-#include "SanitizerArgs.h"
-#include "ToolChains.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace clang::driver;
 using namespace clang::driver::tools;
@@ -471,7 +468,7 @@ static const char *getLLVMArchSuffixForARM(StringRef CPU) {
     .Cases("arm1136j-s",  "arm1136jf-s",  "arm1176jz-s", "v6")
     .Cases("arm1176jzf-s",  "mpcorenovfp",  "mpcore", "v6")
     .Cases("arm1156t2-s",  "arm1156t2f-s", "v6t2")
-    .Cases("cortex-a8", "cortex-a9", "cortex-a15", "v7")
+    .Cases("cortex-a5", "cortex-a8", "cortex-a9", "cortex-a15", "v7")
     .Case("cortex-m3", "v7m")
     .Case("cortex-m4", "v7m")
     .Case("cortex-m0", "v6m")
@@ -610,7 +607,7 @@ static void addFPMathArgs(const Driver &D, const Arg *A, const ArgList &Args,
     CmdArgs.push_back("+neonfp");
     
     if (CPU != "cortex-a8" && CPU != "cortex-a9" && CPU != "cortex-a9-mp" &&
-        CPU != "cortex-a15")
+        CPU != "cortex-a15" && CPU != "cortex-a5")
       D.Diag(diag::err_drv_invalid_feature) << "-mfpmath=neon" << CPU;
     
   } else if (FPMath == "vfp" || FPMath == "vfp2" || FPMath == "vfp3" ||
@@ -989,6 +986,13 @@ void Clang::AddMIPSTargetArgs(const ArgList &Args,
   AddTargetFeature(Args, CmdArgs,
                    options::OPT_mdspr2, options::OPT_mno_dspr2,
                    "dspr2");
+
+  if (Arg *A = Args.getLastArg(options::OPT_mxgot, options::OPT_mno_xgot)) {
+    if (A->getOption().matches(options::OPT_mxgot)) {
+      CmdArgs.push_back("-mllvm");
+      CmdArgs.push_back("-mxgot");
+    }
+  }
 
   if (Arg *A = Args.getLastArg(options::OPT_G)) {
     StringRef v = A->getValue();
@@ -1456,60 +1460,51 @@ static bool UseRelaxAll(Compilation &C, const ArgList &Args) {
 SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args) {
   Kind = 0;
 
-  const Arg *AsanArg, *TsanArg, *UbsanArg;
   for (ArgList::const_iterator I = Args.begin(), E = Args.end(); I != E; ++I) {
-    unsigned Add = 0, Remove = 0;
-    const char *DeprecatedReplacement = 0;
-    if ((*I)->getOption().matches(options::OPT_faddress_sanitizer)) {
-      Add = Address;
-      DeprecatedReplacement = "-fsanitize=address";
-    } else if ((*I)->getOption().matches(options::OPT_fno_address_sanitizer)) {
-      Remove = Address;
-      DeprecatedReplacement = "-fno-sanitize=address";
-    } else if ((*I)->getOption().matches(options::OPT_fthread_sanitizer)) {
-      Add = Thread;
-      DeprecatedReplacement = "-fsanitize=thread";
-    } else if ((*I)->getOption().matches(options::OPT_fno_thread_sanitizer)) {
-      Remove = Thread;
-      DeprecatedReplacement = "-fno-sanitize=thread";
-    } else if ((*I)->getOption().matches(options::OPT_fcatch_undefined_behavior)) {
-      Add = Undefined;
-      DeprecatedReplacement = "-fsanitize=undefined";
-    } else if ((*I)->getOption().matches(options::OPT_fsanitize_EQ)) {
-      Add = parse(D, *I);
-    } else if ((*I)->getOption().matches(options::OPT_fno_sanitize_EQ)) {
-      Remove = parse(D, *I);
-    } else {
+    unsigned Add, Remove;
+    if (!parse(D, Args, *I, Add, Remove, true))
       continue;
-    }
-
     (*I)->claim();
-
     Kind |= Add;
     Kind &= ~Remove;
-
-    if (Add & NeedsAsanRt) AsanArg = *I;
-    if (Add & NeedsTsanRt) TsanArg = *I;
-    if (Add & NeedsUbsanRt) UbsanArg = *I;
-
-    // If this is a deprecated synonym, produce a warning directing users
-    // towards the new spelling.
-    if (DeprecatedReplacement)
-      D.Diag(diag::warn_drv_deprecated_arg)
-        << (*I)->getAsString(Args) << DeprecatedReplacement;
   }
 
   // Only one runtime library can be used at once.
-  // FIXME: Allow Ubsan to be combined with the other two.
   bool NeedsAsan = needsAsanRt();
   bool NeedsTsan = needsTsanRt();
-  bool NeedsUbsan = needsUbsanRt();
-  if (NeedsAsan + NeedsTsan + NeedsUbsan > 1)
+  bool NeedsMsan = needsMsanRt();
+  if (NeedsAsan && NeedsTsan)
     D.Diag(diag::err_drv_argument_not_allowed_with)
-      << describeSanitizeArg(Args, NeedsAsan ? AsanArg : TsanArg,
-                             NeedsAsan ? NeedsAsanRt : NeedsTsanRt)
-      << describeSanitizeArg(Args, NeedsUbsan ? UbsanArg : TsanArg,
-                             NeedsUbsan ? NeedsUbsanRt : NeedsTsanRt);
+      << lastArgumentForKind(D, Args, NeedsAsanRt)
+      << lastArgumentForKind(D, Args, NeedsTsanRt);
+  if (NeedsAsan && NeedsMsan)
+    D.Diag(diag::err_drv_argument_not_allowed_with)
+      << lastArgumentForKind(D, Args, NeedsAsanRt)
+      << lastArgumentForKind(D, Args, NeedsMsanRt);
+  if (NeedsTsan && NeedsMsan)
+    D.Diag(diag::err_drv_argument_not_allowed_with)
+      << lastArgumentForKind(D, Args, NeedsTsanRt)
+      << lastArgumentForKind(D, Args, NeedsMsanRt);
+
+  // If -fsanitize contains extra features of ASan, it should also
+  // explicitly contain -fsanitize=address.
+  if (NeedsAsan && ((Kind & Address) == 0))
+    D.Diag(diag::err_drv_argument_only_allowed_with)
+      << lastArgumentForKind(D, Args, NeedsAsanRt)
+      << "-fsanitize=address";
+
+  // Parse -f(no-)sanitize-blacklist options.
+  if (Arg *BLArg = Args.getLastArg(options::OPT_fsanitize_blacklist,
+                                   options::OPT_fno_sanitize_blacklist)) {
+    if (BLArg->getOption().matches(options::OPT_fsanitize_blacklist)) {
+      std::string BLPath = BLArg->getValue();
+      bool BLExists = false;
+      if (!llvm::sys::fs::exists(BLPath, BLExists) && BLExists)
+        BlacklistFile = BLPath;
+      else
+        D.Diag(diag::err_drv_no_such_file) << BLPath;
+    }
+  }
 }
 
 /// If AddressSanitizer is enabled, add appropriate linker flags (Linux).
@@ -1526,7 +1521,7 @@ static void addAsanRTLinux(const ToolChain &TC, const ArgList &Args,
     llvm::sys::path::append(LibAsan, "lib", "linux",
         (Twine("libclang_rt.asan-") +
             TC.getArchName() + "-android.so"));
-    CmdArgs.push_back(Args.MakeArgString(LibAsan));
+    CmdArgs.insert(CmdArgs.begin(), Args.MakeArgString(LibAsan));
   } else {
     if (!Args.hasArg(options::OPT_shared)) {
       // LibAsan is "libclang_rt.asan-<ArchName>.a" in the Linux library
@@ -1535,7 +1530,17 @@ static void addAsanRTLinux(const ToolChain &TC, const ArgList &Args,
       llvm::sys::path::append(LibAsan, "lib", "linux",
                               (Twine("libclang_rt.asan-") +
                                TC.getArchName() + ".a"));
-      CmdArgs.push_back(Args.MakeArgString(LibAsan));
+      // The ASan runtime needs to come before -lstdc++ (or -lc++, libstdc++.a,
+      // etc.) so that the linker picks ASan's versions of the global 'operator
+      // new' and 'operator delete' symbols. We take the extreme (but simple)
+      // strategy of inserting it at the front of the link command. It also
+      // needs to be forced to end up in the executable, so wrap it in
+      // whole-archive.
+      SmallVector<const char*, 3> PrefixArgs;
+      PrefixArgs.push_back("-whole-archive");
+      PrefixArgs.push_back(Args.MakeArgString(LibAsan));
+      PrefixArgs.push_back("-no-whole-archive");
+      CmdArgs.insert(CmdArgs.begin(), PrefixArgs.begin(), PrefixArgs.end());
       CmdArgs.push_back("-lpthread");
       CmdArgs.push_back("-ldl");
       CmdArgs.push_back("-export-dynamic");
@@ -1548,6 +1553,9 @@ static void addAsanRTLinux(const ToolChain &TC, const ArgList &Args,
 static void addTsanRTLinux(const ToolChain &TC, const ArgList &Args,
                            ArgStringList &CmdArgs) {
   if (!Args.hasArg(options::OPT_shared)) {
+    if (!Args.hasArg(options::OPT_pie))
+      TC.getDriver().Diag(diag::err_drv_argument_only_allowed_with) <<
+        "-fsanitize=thread" << "-pie";
     // LibTsan is "libclang_rt.tsan-<ArchName>.a" in the Linux library
     // resource directory.
     SmallString<128> LibTsan(TC.getDriver().ResourceDir);
@@ -1555,6 +1563,27 @@ static void addTsanRTLinux(const ToolChain &TC, const ArgList &Args,
                             (Twine("libclang_rt.tsan-") +
                              TC.getArchName() + ".a"));
     CmdArgs.push_back(Args.MakeArgString(LibTsan));
+    CmdArgs.push_back("-lpthread");
+    CmdArgs.push_back("-ldl");
+    CmdArgs.push_back("-export-dynamic");
+  }
+}
+
+/// If MemorySanitizer is enabled, add appropriate linker flags (Linux).
+/// This needs to be called before we add the C run-time (malloc, etc).
+static void addMsanRTLinux(const ToolChain &TC, const ArgList &Args,
+                           ArgStringList &CmdArgs) {
+  if (!Args.hasArg(options::OPT_shared)) {
+    if (!Args.hasArg(options::OPT_pie))
+      TC.getDriver().Diag(diag::err_drv_argument_only_allowed_with) <<
+        "-fsanitize=memory" << "-pie";
+    // LibMsan is "libclang_rt.msan-<ArchName>.a" in the Linux library
+    // resource directory.
+    SmallString<128> LibMsan(TC.getDriver().ResourceDir);
+    llvm::sys::path::append(LibMsan, "lib", "linux",
+                            (Twine("libclang_rt.msan-") +
+                             TC.getArchName() + ".a"));
+    CmdArgs.push_back(Args.MakeArgString(LibMsan));
     CmdArgs.push_back("-lpthread");
     CmdArgs.push_back("-ldl");
     CmdArgs.push_back("-export-dynamic");
@@ -1574,6 +1603,7 @@ static void addUbsanRTLinux(const ToolChain &TC, const ArgList &Args,
                              TC.getArchName() + ".a"));
     CmdArgs.push_back(Args.MakeArgString(LibUbsan));
     CmdArgs.push_back("-lpthread");
+    CmdArgs.push_back("-export-dynamic");
   }
 }
 
@@ -1769,30 +1799,46 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   CheckCodeGenerationOptions(D, Args);
 
-  // Perform argument translation for LLVM backend. This
-  // takes some care in reconciling with llvm-gcc. The
-  // issue is that llvm-gcc translates these options based on
-  // the values in cc1, whereas we are processing based on
-  // the driver arguments.
-
-  // This comes from the default translation the driver + cc1
-  // would do to enable flag_pic.
-
-  Arg *LastPICArg = Args.getLastArg(options::OPT_fPIC, options::OPT_fno_PIC,
-                                    options::OPT_fpic, options::OPT_fno_pic,
-                                    options::OPT_fPIE, options::OPT_fno_PIE,
-                                    options::OPT_fpie, options::OPT_fno_pie);
-  bool PICDisabled = false;
-  bool PICEnabled = false;
-  bool PICForPIE = false;
-  if (LastPICArg) {
-    PICForPIE = (LastPICArg->getOption().matches(options::OPT_fPIE) ||
-                 LastPICArg->getOption().matches(options::OPT_fpie));
-    PICEnabled = (PICForPIE ||
-                  LastPICArg->getOption().matches(options::OPT_fPIC) ||
-                  LastPICArg->getOption().matches(options::OPT_fpic));
-    PICDisabled = !PICEnabled;
+  // For the PIC and PIE flag options, this logic is different from the legacy
+  // logic in very old versions of GCC, as that logic was just a bug no one had
+  // ever fixed. This logic is both more rational and consistent with GCC's new
+  // logic now that the bugs are fixed. The last argument relating to either
+  // PIC or PIE wins, and no other argument is used. If the last argument is
+  // any flavor of the '-fno-...' arguments, both PIC and PIE are disabled. Any
+  // PIE option implicitly enables PIC at the same level.
+  bool PIE = false;
+  bool PIC = getToolChain().isPICDefault();
+  bool IsPICLevelTwo = PIC;
+  if (Arg *A = Args.getLastArg(options::OPT_fPIC, options::OPT_fno_PIC,
+                               options::OPT_fpic, options::OPT_fno_pic,
+                               options::OPT_fPIE, options::OPT_fno_PIE,
+                               options::OPT_fpie, options::OPT_fno_pie)) {
+    Option O = A->getOption();
+    if (O.matches(options::OPT_fPIC) || O.matches(options::OPT_fpic) ||
+        O.matches(options::OPT_fPIE) || O.matches(options::OPT_fpie)) {
+      PIE = O.matches(options::OPT_fPIE) || O.matches(options::OPT_fpie);
+      PIC = PIE || O.matches(options::OPT_fPIC) || O.matches(options::OPT_fpic);
+      IsPICLevelTwo = O.matches(options::OPT_fPIE) ||
+                      O.matches(options::OPT_fPIC);
+    } else {
+      PIE = PIC = false;
+    }
   }
+  // Check whether the tool chain trumps the PIC-ness decision. If the PIC-ness
+  // is forced, then neither PIC nor PIE flags will have no effect.
+  if (getToolChain().isPICDefaultForced()) {
+    PIE = false;
+    PIC = getToolChain().isPICDefault();
+    IsPICLevelTwo = PIC;
+  }
+
+  // Inroduce a Darwin-specific hack. If the default is PIC but the flags
+  // specified while enabling PIC enabled level 1 PIC, just force it back to
+  // level 2 PIC instead. This matches the behavior of Darwin GCC (based on my
+  // informal testing).
+  if (PIC && getToolChain().getTriple().isOSDarwin())
+    IsPICLevelTwo |= getToolChain().isPICDefault();
+
   // Note that these flags are trump-cards. Regardless of the order w.r.t. the
   // PIC or PIE options above, if these show up, PIC is disabled.
   llvm::Triple Triple(TripleStr);
@@ -1800,40 +1846,43 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
        Args.hasArg(options::OPT_fapple_kext)) &&
       (Triple.getOS() != llvm::Triple::IOS ||
        Triple.isOSVersionLT(6)))
-    PICDisabled = true;
+    PIC = PIE = false;
   if (Args.hasArg(options::OPT_static))
-    PICDisabled = true;
-  bool DynamicNoPIC = Args.hasArg(options::OPT_mdynamic_no_pic);
+    PIC = PIE = false;
 
-  // Select the relocation model.
-  const char *Model = getToolChain().GetForcedPicModel();
-  if (!Model) {
-    if (DynamicNoPIC)
-      Model = "dynamic-no-pic";
-    else if (PICDisabled)
-      Model = "static";
-    else if (PICEnabled)
-      Model = "pic";
-    else
-      Model = getToolChain().GetDefaultRelocationModel();
-  }
-  StringRef ModelStr = Model ? Model : "";
-  if (Model && ModelStr != "pic") {
+  if (Arg *A = Args.getLastArg(options::OPT_mdynamic_no_pic)) {
+    // This is a very special mode. It trumps the other modes, almost no one
+    // uses it, and it isn't even valid on any OS but Darwin.
+    if (!getToolChain().getTriple().isOSDarwin())
+      D.Diag(diag::err_drv_unsupported_opt_for_target)
+        << A->getSpelling() << getToolChain().getTriple().str();
+
+    // FIXME: Warn when this flag trumps some other PIC or PIE flag.
+
     CmdArgs.push_back("-mrelocation-model");
-    CmdArgs.push_back(Model);
-  }
+    CmdArgs.push_back("dynamic-no-pic");
 
-  // Infer the __PIC__ and __PIE__ values.
-  if (ModelStr == "pic" && PICForPIE) {
-    CmdArgs.push_back("-pie-level");
-    CmdArgs.push_back((LastPICArg &&
-                       LastPICArg->getOption().matches(options::OPT_fPIE)) ?
-                      "2" : "1");
-  } else if (ModelStr == "pic" || ModelStr == "dynamic-no-pic") {
-    CmdArgs.push_back("-pic-level");
-    CmdArgs.push_back(((ModelStr != "dynamic-no-pic" && LastPICArg &&
-                        LastPICArg->getOption().matches(options::OPT_fPIC)) ||
-                       getToolChain().getTriple().isOSDarwin()) ? "2" : "1");
+    // Only a forced PIC mode can cause the actual compile to have PIC defines
+    // etc., no flags are sufficient. This behavior was selected to closely
+    // match that of llvm-gcc and Apple GCC before that.
+    if (getToolChain().isPICDefault() && getToolChain().isPICDefaultForced()) {
+      CmdArgs.push_back("-pic-level");
+      CmdArgs.push_back("2");
+    }
+  } else {
+    // Currently, LLVM only knows about PIC vs. static; the PIE differences are
+    // handled in Clang's IRGen by the -pie-level flag.
+    CmdArgs.push_back("-mrelocation-model");
+    CmdArgs.push_back(PIC ? "pic" : "static");
+
+    if (PIC) {
+      CmdArgs.push_back("-pic-level");
+      CmdArgs.push_back(IsPICLevelTwo ? "2" : "1");
+      if (PIE) {
+        CmdArgs.push_back("-pie-level");
+        CmdArgs.push_back(IsPICLevelTwo ? "2" : "1");
+      }
+    }
   }
 
   if (!Args.hasFlag(options::OPT_fmerge_all_constants,
@@ -2028,7 +2077,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    AsynchronousUnwindTables))
     CmdArgs.push_back("-munwind-tables");
 
-  getToolChain().addClangTargetOptions(CmdArgs);
+  getToolChain().addClangTargetOptions(Args, CmdArgs);
 
   if (Arg *A = Args.getLastArg(options::OPT_flimited_precision_EQ)) {
     CmdArgs.push_back("-mlimit-float-precision");
@@ -2353,14 +2402,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-Wlarge-by-value-copy=64"); // default value
   }
 
-  if (Arg *A = Args.getLastArg(options::OPT_fbounds_checking,
-                               options::OPT_fbounds_checking_EQ)) {
-    if (A->getNumValues()) {
-      StringRef val = A->getValue();
-      CmdArgs.push_back(Args.MakeArgString("-fbounds-checking=" + val));
-    } else
-      CmdArgs.push_back("-fbounds-checking=1");
-  }
 
   if (Args.hasArg(options::OPT_relocatable_pch))
     CmdArgs.push_back("-relocatable-pch");
@@ -2534,7 +2575,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     StringRef alignment = Args.getLastArgValue(options::OPT_mstack_alignment);
     CmdArgs.push_back(Args.MakeArgString("-mstack-alignment=" + alignment));
   }
-  if (Args.hasArg(options::OPT_mstrict_align)) {
+  // -mkernel implies -mstrict-align; don't add the redundant option.
+  if (Args.hasArg(options::OPT_mstrict_align) && !KernelOrKext) {
     CmdArgs.push_back("-backend-option");
     CmdArgs.push_back("-arm-strict-align");
   }
@@ -2716,6 +2758,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fobjc-default-synthesize-properties");
   }
 
+  // -fencode-extended-block-signature=1 is default.
+  if (getToolChain().IsEncodeExtendedBlockSignatureDefault()) {
+    CmdArgs.push_back("-fencode-extended-block-signature");
+  }
+  
   // Allow -fno-objc-arr to trump -fobjc-arr/-fobjc-arc.
   // NOTE: This logic is duplicated in ToolChains.cpp.
   bool ARC = isObjCAutoRefCount(Args);
@@ -4085,10 +4132,11 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
   SanitizerArgs Sanitize(getToolChain().getDriver(), Args);
-  // If we're building a dynamic lib with -fsanitize=address, unresolved
-  // symbols may appear. Mark all of them as dynamic_lookup.
-  // Linking executables is handled in lib/Driver/ToolChains.cpp.
-  if (Sanitize.needsAsanRt()) {
+  // If we're building a dynamic lib with -fsanitize=address, or
+  // -fsanitize=undefined, unresolved symbols may appear. Mark all
+  // of them as dynamic_lookup. Linking executables is handled in
+  // lib/Driver/ToolChains.cpp.
+  if (Sanitize.needsAsanRt() || Sanitize.needsUbsanRt()) {
     if (Args.hasArg(options::OPT_dynamiclib) ||
         Args.hasArg(options::OPT_bundle)) {
       CmdArgs.push_back("-undefined");
@@ -5231,12 +5279,12 @@ void linuxtools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
 static void AddLibgcc(llvm::Triple Triple, const Driver &D,
                       ArgStringList &CmdArgs, const ArgList &Args) {
   bool isAndroid = Triple.getEnvironment() == llvm::Triple::Android;
-  bool StaticLibgcc = isAndroid || Args.hasArg(options::OPT_static) ||
-    Args.hasArg(options::OPT_static_libgcc);
+  bool StaticLibgcc = Args.hasArg(options::OPT_static) ||
+                      Args.hasArg(options::OPT_static_libgcc);
   if (!D.CCCIsCXX)
     CmdArgs.push_back("-lgcc");
 
-  if (StaticLibgcc) {
+  if (StaticLibgcc || isAndroid) {
     if (D.CCCIsCXX)
       CmdArgs.push_back("-lgcc");
   } else {
@@ -5251,6 +5299,14 @@ static void AddLibgcc(llvm::Triple Triple, const Driver &D,
     CmdArgs.push_back("-lgcc_eh");
   else if (!Args.hasArg(options::OPT_shared) && D.CCCIsCXX)
     CmdArgs.push_back("-lgcc");
+
+  // According to Android ABI, we have to link with libdl if we are
+  // linking with non-static libgcc.
+  //
+  // NOTE: This fixes a link error on Android MIPS as well.  The non-static
+  // libgcc for MIPS relies on _Unwind_Find_FDE and dl_iterate_phdr from libdl.
+  if (isAndroid && !StaticLibgcc)
+    CmdArgs.push_back("-ldl");
 }
 
 static bool hasMipsN32ABIArg(const ArgList &Args) {
@@ -5434,9 +5490,15 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
 
   SanitizerArgs Sanitize(D, Args);
 
-  // Call this before we add the C++ ABI library.
+  // Call these before we add the C++ ABI library.
   if (Sanitize.needsUbsanRt())
     addUbsanRTLinux(getToolChain(), Args, CmdArgs);
+  if (Sanitize.needsAsanRt())
+    addAsanRTLinux(getToolChain(), Args, CmdArgs);
+  if (Sanitize.needsTsanRt())
+    addTsanRTLinux(getToolChain(), Args, CmdArgs);
+  if (Sanitize.needsMsanRt())
+    addMsanRTLinux(getToolChain(), Args, CmdArgs);
 
   if (D.CCCIsCXX &&
       !Args.hasArg(options::OPT_nostdlib) &&
@@ -5450,12 +5512,6 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-Bdynamic");
     CmdArgs.push_back("-lm");
   }
-
-  // Call this before we add the C run-time.
-  if (Sanitize.needsAsanRt())
-    addAsanRTLinux(getToolChain(), Args, CmdArgs);
-  if (Sanitize.needsTsanRt())
-    addTsanRTLinux(getToolChain(), Args, CmdArgs);
 
   if (!Args.hasArg(options::OPT_nostdlib)) {
     if (!Args.hasArg(options::OPT_nodefaultlibs)) {

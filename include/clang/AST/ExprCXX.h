@@ -16,8 +16,8 @@
 
 #include "clang/AST/Decl.h"
 #include "clang/AST/Expr.h"
-#include "clang/AST/UnresolvedSet.h"
 #include "clang/AST/TemplateBase.h"
+#include "clang/AST/UnresolvedSet.h"
 #include "clang/Basic/ExpressionTraits.h"
 #include "clang/Basic/Lambda.h"
 #include "clang/Basic/TypeTraits.h"
@@ -30,6 +30,7 @@ class CXXDestructorDecl;
 class CXXMethodDecl;
 class CXXTemporary;
 class TemplateArgumentListInfo;
+class UuidAttr;
 
 //===--------------------------------------------------------------------===//
 // C++ Expressions.
@@ -795,6 +796,8 @@ public:
     return SourceRange();
   }
 
+  SourceLocation getExprLoc() const LLVM_READONLY { return Loc; }
+
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CXXDefaultArgExprClass;
   }
@@ -1111,7 +1114,7 @@ public:
 /// \code
 /// void low_pass_filter(std::vector<double> &values, double cutoff) {
 ///   values.erase(std::remove_if(values.begin(), values.end(),
-//                                [=](double value) { return value > cutoff; });
+///                               [=](double value) { return value > cutoff; });
 /// }
 /// \endcode
 ///

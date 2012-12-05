@@ -11,18 +11,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CodeGenFunction.h"
 #include "CGDebugInfo.h"
 #include "CGCilkPlusRuntime.h"
 #include "CodeGenModule.h"
-#include "CodeGenFunction.h"
 #include "TargetInfo.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/PrettyStackTrace.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/DataLayout.h"
 #include "llvm/InlineAsm.h"
 #include "llvm/Intrinsics.h"
-#include "llvm/DataLayout.h"
 using namespace clang;
 using namespace CodeGen;
 

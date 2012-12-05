@@ -58,6 +58,9 @@ private:
 
   bool shouldVisitTemplateInstantiations() const { return true; }
   bool shouldVisitImplicitCode() const { return true; }
+  // Disables data recursion. We intercept Traverse* methods in the RAV, which
+  // are not triggered during data recursion.
+  bool shouldUseDataRecursionFor(clang::Stmt *S) const { return false; }
 
   template <typename T>
   bool TraverseNode(T *Node, bool (VisitorBase::*traverse)(T*)) {
@@ -183,6 +186,8 @@ public:
   // We assume that the QualType and the contained type are on the same
   // hierarchy level. Thus, we try to match either of them.
   bool TraverseType(QualType TypeNode) {
+    if (TypeNode.isNull())
+      return true;
     ScopedIncrement ScopedDepth(&CurrentDepth);
     // Match the Type.
     if (!match(*TypeNode))
@@ -193,6 +198,8 @@ public:
   // We assume that the TypeLoc, contained QualType and contained Type all are
   // on the same hierarchy level. Thus, we try to match all of them.
   bool TraverseTypeLoc(TypeLoc TypeLocNode) {
+    if (TypeLocNode.isNull())
+      return true;
     ScopedIncrement ScopedDepth(&CurrentDepth);
     // Match the Type.
     if (!match(*TypeLocNode.getType()))
@@ -208,14 +215,19 @@ public:
     return (NNS == NULL) || traverse(*NNS);
   }
   bool TraverseNestedNameSpecifierLoc(NestedNameSpecifierLoc NNS) {
+    if (!NNS)
+      return true;
     ScopedIncrement ScopedDepth(&CurrentDepth);
     if (!match(*NNS.getNestedNameSpecifier()))
       return false;
-    return !NNS || traverse(NNS);
+    return traverse(NNS);
   }
 
   bool shouldVisitTemplateInstantiations() const { return true; }
   bool shouldVisitImplicitCode() const { return true; }
+  // Disables data recursion. We intercept Traverse* methods in the RAV, which
+  // are not triggered during data recursion.
+  bool shouldUseDataRecursionFor(clang::Stmt *S) const { return false; }
 
 private:
   // Used for updating the depth during traversal.
@@ -463,8 +475,14 @@ public:
     return false;
   }
 
+  // Implements ASTMatchFinder::getASTContext.
+  virtual ASTContext &getASTContext() const { return *ActiveASTContext; }
+
   bool shouldVisitTemplateInstantiations() const { return true; }
   bool shouldVisitImplicitCode() const { return true; }
+  // Disables data recursion. We intercept Traverse* methods in the RAV, which
+  // are not triggered during data recursion.
+  bool shouldUseDataRecursionFor(clang::Stmt *S) const { return false; }
 
 private:
   // Implements a BoundNodesTree::Visitor that calls a MatchCallback with
@@ -587,7 +605,12 @@ bool MatchASTVisitor::classIsDerivedFrom(const CXXRecordDecl *Declaration,
       ClassDecl = TypeNode->getAsCXXRecordDecl();
     }
     assert(ClassDecl != NULL);
-    assert(ClassDecl != Declaration);
+    if (ClassDecl == Declaration) {
+      // This can happen for recursive template definitions; if the
+      // current declaration did not match, we can safely return false.
+      assert(TemplateType);
+      return false;
+    }
     if (Base.matches(*ClassDecl, this, Builder))
       return true;
     if (classIsDerivedFrom(ClassDecl, Base, Builder))

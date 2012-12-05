@@ -8,8 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "ASTMatchersTest.h"
-#include "clang/ASTMatchers/ASTMatchers.h"
+#include "clang/AST/PrettyPrinter.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Tooling/Tooling.h"
 #include "gtest/gtest.h"
 
@@ -231,6 +232,17 @@ TEST(DeclarationMatcher, ClassIsDerived) {
       "template <> class Z<void> {};"
       "template <typename T> class Z : public Z<void>, public X {};",
       ZIsDerivedFromX));
+  EXPECT_TRUE(
+      notMatches("template<int> struct X;"
+                 "template<int i> struct X : public X<i-1> {};",
+                 recordDecl(isDerivedFrom(recordDecl(hasName("Some"))))));
+  EXPECT_TRUE(matches(
+      "struct A {};"
+      "template<int> struct X;"
+      "template<int i> struct X : public X<i-1> {};"
+      "template<> struct X<0> : public A {};"
+      "struct B : public X<42> {};",
+      recordDecl(hasName("B"), isDerivedFrom(recordDecl(hasName("A"))))));
 
   // FIXME: Once we have better matchers for template type matching,
   // get rid of the Variable(...) matching and match the right template
@@ -778,6 +790,12 @@ TEST(Matcher, BindsIDForMemoizedResults) {
       new VerifyIdIsBoundTo<Decl>("x", 2)));
 }
 
+TEST(HasDeclaration, HasDeclarationOfEnumType) {
+  EXPECT_TRUE(matches("enum X {}; void y(X *x) { x; }",
+                      expr(hasType(pointsTo(
+                          qualType(hasDeclaration(enumDecl(hasName("X")))))))));
+}
+
 TEST(HasType, TakesQualTypeMatcherAndMatchesExpr) {
   TypeMatcher ClassX = hasDeclaration(recordDecl(hasName("X")));
   EXPECT_TRUE(
@@ -947,6 +965,25 @@ TEST(Matcher, HasOperatorNameForOverloadedOperatorCall) {
               OpCallLessLess));
 }
 
+TEST(Matcher, NestedOverloadedOperatorCalls) {
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+        "class Y { }; "
+        "Y& operator&&(Y& x, Y& y) { return x; }; "
+        "Y a; Y b; Y c; Y d = a && b && c;",
+        operatorCallExpr(hasOverloadedOperatorName("&&")).bind("x"),
+        new VerifyIdIsBoundTo<CXXOperatorCallExpr>("x", 2)));
+  EXPECT_TRUE(matches(
+        "class Y { }; "
+        "Y& operator&&(Y& x, Y& y) { return x; }; "
+        "Y a; Y b; Y c; Y d = a && b && c;",
+        operatorCallExpr(hasParent(operatorCallExpr()))));
+  EXPECT_TRUE(matches(
+        "class Y { }; "
+        "Y& operator&&(Y& x, Y& y) { return x; }; "
+        "Y a; Y b; Y c; Y d = a && b && c;",
+        operatorCallExpr(hasDescendant(operatorCallExpr()))));
+}
+
 TEST(Matcher, ThisPointerType) {
   StatementMatcher MethodOnY =
     memberCallExpr(thisPointerType(recordDecl(hasName("Y"))));
@@ -1003,7 +1040,7 @@ TEST(Matcher, VariableUsage) {
       "}", Reference));
 }
 
-TEST(Matcher, FindsVarDeclInFuncitonParameter) {
+TEST(Matcher, FindsVarDeclInFunctionParameter) {
   EXPECT_TRUE(matches(
       "void f(int i) {}",
       varDecl(hasName("i"))));
@@ -1210,6 +1247,14 @@ TEST(Matcher, ArgumentCount) {
   EXPECT_TRUE(matches("void x(int) { x(0); }", Call1Arg));
   EXPECT_TRUE(matches("class X { void x(int) { x(0); } };", Call1Arg));
   EXPECT_TRUE(notMatches("void x(int, int) { x(0, 0); }", Call1Arg));
+}
+
+TEST(Matcher, ParameterCount) {
+  DeclarationMatcher Function1Arg = functionDecl(parameterCountIs(1));
+  EXPECT_TRUE(matches("void f(int i) {}", Function1Arg));
+  EXPECT_TRUE(matches("class X { void f(int i) {} };", Function1Arg));
+  EXPECT_TRUE(notMatches("void f() {}", Function1Arg));
+  EXPECT_TRUE(notMatches("void f(int i, int j, int k) {}", Function1Arg));
 }
 
 TEST(Matcher, References) {
@@ -2756,6 +2801,22 @@ TEST(ForEachDescendant, BindsOneNode) {
       recordDecl(hasName("C"),
                  forEachDescendant(fieldDecl(hasName("x")).bind("x"))),
       new VerifyIdIsBoundTo<FieldDecl>("x", 1)));
+}
+
+TEST(ForEachDescendant, NestedForEachDescendant) {
+  DeclarationMatcher m = recordDecl(
+      isDefinition(), decl().bind("x"), hasName("C"));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+    "class A { class B { class C {}; }; };",
+    recordDecl(hasName("A"), anyOf(m, forEachDescendant(m))),
+    new VerifyIdIsBoundTo<Decl>("x", "C")));
+
+  // FIXME: This is not really a useful matcher, but the result is still
+  // surprising (currently binds "A").
+  //EXPECT_TRUE(matchAndVerifyResultTrue(
+  //  "class A { class B { class C {}; }; };",
+  //  recordDecl(hasName("A"), allOf(hasDescendant(m), anyOf(m, anything()))),
+  //  new VerifyIdIsBoundTo<Decl>("x", "C")));
 }
 
 TEST(ForEachDescendant, BindsMultipleNodes) {

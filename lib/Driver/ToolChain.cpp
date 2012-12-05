@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Driver/ToolChain.h"
-
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Arg.h"
 #include "clang/Driver/ArgList.h"
@@ -18,7 +18,6 @@
 #include "clang/Driver/Options.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "clang/Basic/ObjCRuntime.h"
 using namespace clang::driver;
 using namespace clang;
 
@@ -197,7 +196,8 @@ void ToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   // Each toolchain should provide the appropriate include flags.
 }
 
-void ToolChain::addClangTargetOptions(ArgStringList &CC1Args) const {
+void ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
+                                      ArgStringList &CC1Args) const {
 }
 
 ToolChain::RuntimeLibType ToolChain::GetRuntimeLibType(

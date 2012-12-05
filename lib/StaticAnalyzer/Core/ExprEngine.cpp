@@ -15,21 +15,21 @@
 
 #define DEBUG_TYPE "ExprEngine"
 
-#include "clang/StaticAnalyzer/Core/CheckerManager.h"
-#include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ExprEngine.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/ParentMap.h"
-#include "clang/AST/StmtObjC.h"
 #include "clang/AST/StmtCXX.h"
+#include "clang/AST/StmtObjC.h"
 #include "clang/Basic/Builtins.h"
-#include "clang/Basic/SourceManager.h"
 #include "clang/Basic/PrettyStackTrace.h"
-#include "llvm/Support/raw_ostream.h"
+#include "clang/Basic/SourceManager.h"
+#include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
+#include "clang/StaticAnalyzer/Core/CheckerManager.h"
+#include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
+#include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "llvm/ADT/ImmutableList.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Support/raw_ostream.h"
 
 #ifndef NDEBUG
 #include "llvm/Support/GraphWriter.h"
@@ -268,22 +268,39 @@ static bool shouldRemoveDeadBindings(AnalysisManager &AMgr,
 
 void ExprEngine::removeDead(ExplodedNode *Pred, ExplodedNodeSet &Out,
                             const Stmt *ReferenceStmt,
-                            const StackFrameContext *LC,
+                            const LocationContext *LC,
                             const Stmt *DiagnosticStmt,
                             ProgramPoint::Kind K) {
   assert((K == ProgramPoint::PreStmtPurgeDeadSymbolsKind ||
-          ReferenceStmt == 0)
+          ReferenceStmt == 0 || isa<ReturnStmt>(ReferenceStmt))
           && "PostStmt is not generally supported by the SymbolReaper yet");
+  assert(LC && "Must pass the current (or expiring) LocationContext");
+
+  if (!DiagnosticStmt) {
+    DiagnosticStmt = ReferenceStmt;
+    assert(DiagnosticStmt && "Required for clearing a LocationContext");
+  }
+
   NumRemoveDeadBindings++;
   CleanedState = Pred->getState();
-  SymbolReaper SymReaper(LC, ReferenceStmt, SymMgr, getStoreManager());
+
+  // LC is the location context being destroyed, but SymbolReaper wants a
+  // location context that is still live. (If this is the top-level stack
+  // frame, this will be null.)
+  if (!ReferenceStmt) {
+    assert(K == ProgramPoint::PostStmtPurgeDeadSymbolsKind &&
+           "Use PostStmtPurgeDeadSymbolsKind for clearing a LocationContext");
+    LC = LC->getParent();
+  }
+
+  const StackFrameContext *SFC = LC ? LC->getCurrentStackFrame() : 0;
+  SymbolReaper SymReaper(SFC, ReferenceStmt, SymMgr, getStoreManager());
 
   getCheckerManager().runCheckersForLiveSymbols(CleanedState, SymReaper);
 
   // Create a state in which dead bindings are removed from the environment
   // and the store. TODO: The function should just return new env and store,
   // not a new state.
-  const StackFrameContext *SFC = LC->getCurrentStackFrame();
   CleanedState = StateMgr.removeDeadBindings(CleanedState, SFC, SymReaper);
 
   // Process any special transfer function for dead symbols.
@@ -345,8 +362,7 @@ void ExprEngine::ProcessStmt(const CFGStmt S,
   EntryNode = Pred;
   ExplodedNodeSet CleanedStates;
   if (shouldRemoveDeadBindings(AMgr, S, Pred, EntryNode->getLocationContext())){
-    removeDead(EntryNode, CleanedStates, currStmt,
-               Pred->getStackFrame(), currStmt);
+    removeDead(EntryNode, CleanedStates, currStmt, Pred->getLocationContext());
   } else
     CleanedStates.Add(EntryNode);
 

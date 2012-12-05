@@ -14,19 +14,19 @@
 #ifndef CLANG_CODEGEN_CODEGENMODULE_H
 #define CLANG_CODEGEN_CODEGENMODULE_H
 
-#include "clang/Basic/ABI.h"
-#include "clang/Basic/LangOptions.h"
+#include "CGVTables.h"
+#include "CodeGenTypes.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/GlobalDecl.h"
 #include "clang/AST/Mangle.h"
-#include "CGVTables.h"
-#include "CodeGenTypes.h"
-#include "llvm/Module.h"
+#include "clang/Basic/ABI.h"
+#include "clang/Basic/LangOptions.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/Module.h"
 #include "llvm/Support/ValueHandle.h"
 
 namespace llvm {
@@ -991,11 +991,11 @@ private:
 
   /// EmitDeferred - Emit any needed decls for which code generation
   /// was deferred.
-  void EmitDeferred(void);
+  void EmitDeferred();
 
   /// EmitLLVMUsed - Emit the llvm.used metadata used to force
   /// references to global which may otherwise be optimized out.
-  void EmitLLVMUsed(void);
+  void EmitLLVMUsed();
 
   void EmitDeclMetadata();
 

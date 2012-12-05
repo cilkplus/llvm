@@ -12,10 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 #include "clang/AST/ASTContext.h"
-#include "clang/AST/DeclVisitor.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/AST/DeclVisitor.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/PrettyPrinter.h"
@@ -51,6 +52,7 @@ namespace {
     void VisitRecordDecl(RecordDecl *D);
     void VisitEnumConstantDecl(EnumConstantDecl *D);
     void VisitFunctionDecl(FunctionDecl *D);
+    void VisitFriendDecl(FriendDecl *D);
     void VisitFieldDecl(FieldDecl *D);
     void VisitVarDecl(VarDecl *D);
     void VisitLabelDecl(LabelDecl *D);
@@ -579,6 +581,30 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
   }
 }
 
+void DeclPrinter::VisitFriendDecl(FriendDecl *D) {
+  if (TypeSourceInfo *TSI = D->getFriendType()) {
+    if (CXXRecordDecl *FriendD = TSI->getType()->getAsCXXRecordDecl()) {
+      Out << "friend ";
+      VisitCXXRecordDecl(FriendD);
+    }
+  }
+  else if (FunctionDecl *FD =
+      dyn_cast<FunctionDecl>(D->getFriendDecl())) {
+    Out << "friend ";
+    VisitFunctionDecl(FD);
+  }
+  else if (FunctionTemplateDecl *FTD =
+           dyn_cast<FunctionTemplateDecl>(D->getFriendDecl())) {
+    Out << "friend ";
+    VisitFunctionTemplateDecl(FTD);
+  }
+  else if (ClassTemplateDecl *CTD =
+           dyn_cast<ClassTemplateDecl>(D->getFriendDecl())) {
+    Out << "friend ";
+    VisitClassTemplateDecl(CTD);
+  }
+}
+
 void DeclPrinter::VisitFieldDecl(FieldDecl *D) {
   if (!Policy.SuppressSpecifiers && D->isMutable())
     Out << "mutable ";
@@ -892,7 +918,17 @@ void DeclPrinter::VisitObjCImplementationDecl(ObjCImplementationDecl *OID) {
     Out << "@implementation " << I << " : " << *SID;
   else
     Out << "@implementation " << I;
-  Out << "\n";
+  
+  if (OID->ivar_size() > 0) {
+    Out << "{\n";
+    Indentation += Policy.Indentation;
+    for (ObjCImplementationDecl::ivar_iterator I = OID->ivar_begin(),
+         E = OID->ivar_end(); I != E; ++I) {
+      Indent() << I->getType().getAsString(Policy) << ' ' << **I << ";\n";
+    }
+    Indentation -= Policy.Indentation;
+    Out << "}\n";
+  }
   VisitDeclContext(OID, false);
   Out << "@end";
 }
@@ -959,6 +995,17 @@ void DeclPrinter::VisitObjCCategoryImplDecl(ObjCCategoryImplDecl *PID) {
 
 void DeclPrinter::VisitObjCCategoryDecl(ObjCCategoryDecl *PID) {
   Out << "@interface " << *PID->getClassInterface() << '(' << *PID << ")\n";
+  if (PID->ivar_size() > 0) {
+    Out << "{\n";
+    Indentation += Policy.Indentation;
+    for (ObjCCategoryDecl::ivar_iterator I = PID->ivar_begin(),
+         E = PID->ivar_end(); I != E; ++I) {
+      Indent() << I->getType().getAsString(Policy) << ' ' << **I << ";\n";
+    }
+    Indentation -= Policy.Indentation;
+    Out << "}\n";
+  }
+  
   VisitDeclContext(PID, false);
   Out << "@end";
 

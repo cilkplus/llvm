@@ -8,7 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "ToolChains.h"
-
+#include "SanitizerArgs.h"
+#include "clang/Basic/ObjCRuntime.h"
+#include "clang/Basic/Version.h"
 #include "clang/Driver/Arg.h"
 #include "clang/Driver/ArgList.h"
 #include "clang/Driver/Compilation.h"
@@ -17,25 +19,22 @@
 #include "clang/Driver/OptTable.h"
 #include "clang/Driver/Option.h"
 #include "clang/Driver/Options.h"
-#include "clang/Basic/ObjCRuntime.h"
-#include "clang/Basic/Version.h"
-
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/system_error.h"
 
-#include "SanitizerArgs.h"
+// FIXME: This needs to be listed last until we fix the broken include guards
+// in these files and the LLVM config.h files.
+#include "clang/Config/config.h" // for GCC_INSTALL_PREFIX
 
 #include <cstdlib> // ::getenv
-
-#include "clang/Config/config.h" // for GCC_INSTALL_PREFIX
 
 using namespace clang::driver;
 using namespace clang::driver::toolchains;
@@ -177,6 +176,12 @@ void Generic_ELF::anchor() {}
 Tool &Darwin::SelectTool(const Compilation &C, const JobAction &JA,
                          const ActionList &Inputs) const {
   Action::ActionClass Key = JA.getKind();
+
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple())) {
+    // FIXME: This seems like a hacky way to choose clang frontend.
+    Key = Action::AnalyzeJobClass;
+  }
+
   bool UseIntegratedAs = C.getArgs().hasFlag(options::OPT_integrated_as,
                                              options::OPT_no_integrated_as,
                                              IsIntegratedAssemblerDefault());
@@ -253,16 +258,18 @@ void DarwinClang::AddLinkARCArgs(const ArgList &Args,
 
 void DarwinClang::AddLinkRuntimeLib(const ArgList &Args,
                                     ArgStringList &CmdArgs,
-                                    const char *DarwinStaticLib) const {
+                                    const char *DarwinStaticLib,
+                                    bool AlwaysLink) const {
   llvm::sys::Path P(getDriver().ResourceDir);
   P.appendComponent("lib");
   P.appendComponent("darwin");
   P.appendComponent(DarwinStaticLib);
 
   // For now, allow missing resource libraries to support developers who may
-  // not have compiler-rt checked out or integrated into their build.
+  // not have compiler-rt checked out or integrated into their build (unless
+  // we explicitly force linking with this library).
   bool Exists;
-  if (!llvm::sys::fs::exists(P.str(), Exists) && Exists)
+  if (AlwaysLink || (!llvm::sys::fs::exists(P.str(), Exists) && Exists))
     CmdArgs.push_back(Args.MakeArgString(P.str()));
 }
 
@@ -309,16 +316,33 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
 
   SanitizerArgs Sanitize(getDriver(), Args);
 
+  // Add Ubsan runtime library, if required.
+  if (Sanitize.needsUbsanRt()) {
+    if (Args.hasArg(options::OPT_dynamiclib) ||
+        Args.hasArg(options::OPT_bundle)) {
+      // Assume the binary will provide the Ubsan runtime.
+    } else if (isTargetIPhoneOS()) {
+      getDriver().Diag(diag::err_drv_clang_unsupported_per_platform)
+        << "-fsanitize=undefined";
+    } else {
+      AddLinkRuntimeLib(Args, CmdArgs, "libclang_rt.ubsan_osx.a", true);
+
+      // The Ubsan runtime library requires C++.
+      AddCXXStdlibLibArgs(Args, CmdArgs);
+    }
+  }
+
   // Add ASAN runtime library, if required. Dynamic libraries and bundles
   // should not be linked with the runtime library.
   if (Sanitize.needsAsanRt()) {
     if (Args.hasArg(options::OPT_dynamiclib) ||
-        Args.hasArg(options::OPT_bundle)) return;
-    if (isTargetIPhoneOS()) {
+        Args.hasArg(options::OPT_bundle)) {
+      // Assume the binary will provide the ASan runtime.
+    } else if (isTargetIPhoneOS()) {
       getDriver().Diag(diag::err_drv_clang_unsupported_per_platform)
         << "-fsanitize=address";
     } else {
-      AddLinkRuntimeLib(Args, CmdArgs, "libclang_rt.asan_osx.a");
+      AddLinkRuntimeLib(Args, CmdArgs, "libclang_rt.asan_osx.a", true);
 
       // The ASAN runtime library requires C++ and CoreFoundation.
       AddCXXStdlibLibArgs(Args, CmdArgs);
@@ -861,14 +885,12 @@ bool Darwin::UseSjLjExceptions() const {
           getTriple().getArch() == llvm::Triple::thumb);
 }
 
-const char *Darwin::GetDefaultRelocationModel() const {
-  return "pic";
+bool Darwin::isPICDefault() const {
+  return true;
 }
 
-const char *Darwin::GetForcedPicModel() const {
-  if (getArch() == llvm::Triple::x86_64)
-    return "pic";
-  return 0;
+bool Darwin::isPICDefaultForced() const {
+  return getArch() == llvm::Triple::x86_64;
 }
 
 bool Darwin::SupportsProfiling() const {
@@ -1326,7 +1348,11 @@ Generic_GCC::~Generic_GCC() {
 Tool &Generic_GCC::SelectTool(const Compilation &C,
                               const JobAction &JA,
                               const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
 
   Tool *&T = Tools[Key];
   if (!T) {
@@ -1335,11 +1361,14 @@ Tool &Generic_GCC::SelectTool(const Compilation &C,
     case Action::BindArchClass:
       llvm_unreachable("Invalid tool kind.");
     case Action::PreprocessJobClass:
+      T = new tools::gcc::Preprocess(*this); break;
     case Action::PrecompileJobClass:
+      T = new tools::gcc::Precompile(*this); break;
     case Action::AnalyzeJobClass:
     case Action::MigrateJobClass:
-    case Action::CompileJobClass:
       T = new tools::Clang(*this); break;
+    case Action::CompileJobClass:
+      T = new tools::gcc::Compile(*this); break;
     case Action::AssembleJobClass:
       T = new tools::gcc::Assemble(*this); break;
     case Action::LinkJobClass:
@@ -1363,13 +1392,14 @@ bool Generic_GCC::IsUnwindTablesDefault() const {
   return getArch() == llvm::Triple::x86_64;
 }
 
-const char *Generic_GCC::GetDefaultRelocationModel() const {
-  return "static";
+bool Generic_GCC::isPICDefault() const {
+  return false;
 }
 
-const char *Generic_GCC::GetForcedPicModel() const {
-  return 0;
+bool Generic_GCC::isPICDefaultForced() const {
+  return false;
 }
+
 /// Hexagon Toolchain
 
 Hexagon_TC::Hexagon_TC(const Driver &D, const llvm::Triple& Triple)
@@ -1389,18 +1419,27 @@ Hexagon_TC::~Hexagon_TC() {
 Tool &Hexagon_TC::SelectTool(const Compilation &C,
                              const JobAction &JA,
                              const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  //   if (JA.getKind () == Action::CompileJobClass)
+  //     Key = JA.getKind ();
+  //     else
+
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
+  //   if ((JA.getKind () == Action::CompileJobClass)
+  //     && (JA.getType () != types::TY_LTO_BC)) {
+  //     Key = JA.getKind ();
+  //   }
+
   Tool *&T = Tools[Key];
   if (!T) {
     switch (Key) {
     case Action::InputClass:
     case Action::BindArchClass:
       assert(0 && "Invalid tool kind.");
-    case Action::PreprocessJobClass:
-    case Action::PrecompileJobClass:
     case Action::AnalyzeJobClass:
-    case Action::MigrateJobClass:
-    case Action::CompileJobClass:
       T = new tools::Clang(*this); break;
     case Action::AssembleJobClass:
       T = new tools::hexagon::Assemble(*this); break;
@@ -1414,14 +1453,13 @@ Tool &Hexagon_TC::SelectTool(const Compilation &C,
   return *T;
 }
 
-const char *Hexagon_TC::GetDefaultRelocationModel() const {
-  return "static";
+bool Hexagon_TC::isPICDefault() const {
+  return false;
 }
 
-const char *Hexagon_TC::GetForcedPicModel() const {
-  return 0;
-} // End Hexagon
-
+bool Hexagon_TC::isPICDefaultForced() const {
+  return false;
+}
 
 /// TCEToolChain - A tool chain using the llvm bitcode tools to perform
 /// all subcommands. See http://tce.cs.tut.fi for our peculiar target.
@@ -1446,12 +1484,12 @@ bool TCEToolChain::IsMathErrnoDefault() const {
   return true;
 }
 
-const char *TCEToolChain::GetDefaultRelocationModel() const {
-  return "static";
+bool TCEToolChain::isPICDefault() const {
+  return false;
 }
 
-const char *TCEToolChain::GetForcedPicModel() const {
-  return 0;
+bool TCEToolChain::isPICDefaultForced() const {
+  return false;
 }
 
 Tool &TCEToolChain::SelectTool(const Compilation &C,
@@ -1484,7 +1522,12 @@ OpenBSD::OpenBSD(const Driver &D, const llvm::Triple& Triple, const ArgList &Arg
 
 Tool &OpenBSD::SelectTool(const Compilation &C, const JobAction &JA,
                           const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
+
   bool UseIntegratedAs = C.getArgs().hasFlag(options::OPT_integrated_as,
                                              options::OPT_no_integrated_as,
                                              IsIntegratedAssemblerDefault());
@@ -1519,7 +1562,12 @@ Bitrig::Bitrig(const Driver &D, const llvm::Triple& Triple, const ArgList &Args)
 
 Tool &Bitrig::SelectTool(const Compilation &C, const JobAction &JA,
                          const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
+
   bool UseIntegratedAs = C.getArgs().hasFlag(options::OPT_integrated_as,
                                              options::OPT_no_integrated_as,
                                              IsIntegratedAssemblerDefault());
@@ -1606,7 +1654,12 @@ FreeBSD::FreeBSD(const Driver &D, const llvm::Triple& Triple, const ArgList &Arg
 
 Tool &FreeBSD::SelectTool(const Compilation &C, const JobAction &JA,
                           const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
+
   bool UseIntegratedAs = C.getArgs().hasFlag(options::OPT_integrated_as,
                                              options::OPT_no_integrated_as,
                                              IsIntegratedAssemblerDefault());
@@ -1650,7 +1703,12 @@ NetBSD::NetBSD(const Driver &D, const llvm::Triple& Triple, const ArgList &Args)
 
 Tool &NetBSD::SelectTool(const Compilation &C, const JobAction &JA,
                          const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
+
   bool UseIntegratedAs = C.getArgs().hasFlag(options::OPT_integrated_as,
                                              options::OPT_no_integrated_as,
                                              IsIntegratedAssemblerDefault());
@@ -1685,7 +1743,11 @@ Minix::Minix(const Driver &D, const llvm::Triple& Triple, const ArgList &Args)
 
 Tool &Minix::SelectTool(const Compilation &C, const JobAction &JA,
                         const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
 
   Tool *&T = Tools[Key];
   if (!T) {
@@ -1722,7 +1784,11 @@ AuroraUX::AuroraUX(const Driver &D, const llvm::Triple& Triple,
 
 Tool &AuroraUX::SelectTool(const Compilation &C, const JobAction &JA,
                            const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
 
   Tool *&T = Tools[Key];
   if (!T) {
@@ -1755,7 +1821,11 @@ Solaris::Solaris(const Driver &D, const llvm::Triple& Triple,
 
 Tool &Solaris::SelectTool(const Compilation &C, const JobAction &JA,
                            const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
 
   Tool *&T = Tools[Key];
   if (!T) {
@@ -2128,7 +2198,12 @@ bool Linux::HasNativeLLVMSupport() const {
 
 Tool &Linux::SelectTool(const Compilation &C, const JobAction &JA,
                         const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
+
   bool UseIntegratedAs = C.getArgs().hasFlag(options::OPT_integrated_as,
                                              options::OPT_no_integrated_as,
                                              IsIntegratedAssemblerDefault());
@@ -2152,9 +2227,15 @@ Tool &Linux::SelectTool(const Compilation &C, const JobAction &JA,
   return *T;
 }
 
-void Linux::addClangTargetOptions(ArgStringList &CC1Args) const {
+void Linux::addClangTargetOptions(const ArgList &DriverArgs,
+                                  ArgStringList &CC1Args) const {
   const Generic_GCC::GCCVersion &V = GCCInstallation.getVersion();
-  if (V >= Generic_GCC::GCCVersion::Parse("4.7.0"))
+  bool UseInitArrayDefault
+    = V >= Generic_GCC::GCCVersion::Parse("4.7.0") ||
+      getTriple().getEnvironment() == llvm::Triple::Android;
+  if (DriverArgs.hasFlag(options::OPT_fuse_init_array,
+                         options::OPT_fno_use_init_array,
+                         UseInitArrayDefault))
     CC1Args.push_back("-fuse-init-array");
 }
 
@@ -2346,7 +2427,11 @@ DragonFly::DragonFly(const Driver &D, const llvm::Triple& Triple, const ArgList 
 
 Tool &DragonFly::SelectTool(const Compilation &C, const JobAction &JA,
                             const ActionList &Inputs) const {
-  Action::ActionClass Key = JA.getKind();
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
 
   Tool *&T = Tools[Key];
   if (!T) {

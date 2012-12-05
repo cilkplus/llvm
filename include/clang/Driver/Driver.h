@@ -11,11 +11,9 @@
 #define CLANG_DRIVER_DRIVER_H_
 
 #include "clang/Basic/Diagnostic.h"
-
 #include "clang/Driver/Phases.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
-
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
@@ -178,7 +176,6 @@ public:
   Driver(StringRef _ClangExecutable,
          StringRef _DefaultTargetTriple,
          StringRef _DefaultImageName,
-         bool IsProduction,
          DiagnosticsEngine &_Diags);
   ~Driver();
 
@@ -362,6 +359,11 @@ public:
   ///
   /// GCC goes to extra lengths here to be a bit more robust.
   std::string GetTemporaryPath(StringRef Prefix, const char *Suffix) const;
+
+  /// ShouldUseClangCompiler - Should the clang compiler be used to
+  /// handle this action.
+  bool ShouldUseClangCompiler(const Compilation &C, const JobAction &JA,
+                              const llvm::Triple &ArchName) const;
 
   bool IsUsingLTO(const ArgList &Args) const;
 

@@ -16,6 +16,7 @@
 #include "clang/Analysis/AnalysisContext.h"
 #include "clang/Analysis/CFG.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramState.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
 using namespace ento;
@@ -241,6 +242,10 @@ EnvironmentManager::removeDeadBindings(Environment Env,
       // Mark all symbols in the block expr's value live.
       RSScaner.scan(X);
       continue;
+    } else {
+      SymExpr::symbol_iterator SI = X.symbol_begin(), SE = X.symbol_end();
+      for (; SI != SE; ++SI)
+        SymReaper.maybeDead(*SI);
     }
   }
   
