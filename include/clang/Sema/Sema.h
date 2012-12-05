@@ -180,6 +180,7 @@ namespace sema {
   class FunctionScopeInfo;
   class LambdaScopeInfo;
   class PossiblyUnreachableDiag;
+  class ParallelRegionScopeInfo;
   class TemplateDeductionInfo;
 }
 
@@ -891,6 +892,8 @@ public:
   void PushFunctionScope();
   void PushBlockScope(Scope *BlockScope, BlockDecl *Block);
   void PushLambdaScope(CXXRecordDecl *Lambda, CXXMethodDecl *CallOperator);
+  void PushParallelRegionScope(Scope *RegionScope, FunctionDecl *FD,
+                               RecordDecl *RD);
   void PopFunctionScopeInfo(const sema::AnalysisBasedWarnings::Policy *WP =0,
                             const Decl *D = 0, const BlockExpr *blkExpr = 0);
 
@@ -910,6 +913,9 @@ public:
 
   /// \brief Retrieve the current lambda expression, if any.
   sema::LambdaScopeInfo *getCurLambda();
+
+  /// \brief Retrieve the current parallel region, if any.
+  sema::ParallelRegionScopeInfo *getCurParallelRegion();
 
   /// WeakTopLevelDeclDecls - access to \#pragma weak-generated Decls
   SmallVector<Decl*,2> &WeakTopLevelDecls() { return WeakTopLevelDecl; }

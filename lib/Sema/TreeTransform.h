@@ -9298,6 +9298,12 @@ TreeTransform<Derived>::TransformCilkSpawnStmt(CilkSpawnStmt *S) {
   return Owned(S);
 }
 
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
+  return Owned(S);
+}
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_SEMA_TREETRANSFORM_H

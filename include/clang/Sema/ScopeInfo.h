@@ -80,7 +80,8 @@ protected:
   enum ScopeKind {
     SK_Function,
     SK_Block,
-    SK_Lambda
+    SK_Lambda,
+    SK_ParallelRegion
   };
   
 public:
@@ -317,7 +318,8 @@ public:
 class CapturingScopeInfo : public FunctionScopeInfo {
 public:
   enum ImplicitCaptureStyle {
-    ImpCap_None, ImpCap_LambdaByval, ImpCap_LambdaByref, ImpCap_Block
+    ImpCap_None, ImpCap_LambdaByval, ImpCap_LambdaByref, ImpCap_Block,
+    ImpCap_ParallelRegion
   };
 
   ImplicitCaptureStyle ImpCaptureStyle;
@@ -459,7 +461,8 @@ public:
   }
 
   static bool classof(const FunctionScopeInfo *FSI) { 
-    return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda; 
+    return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda
+                                 || FSI->Kind == SK_ParallelRegion;
   }
 };
 
@@ -487,6 +490,31 @@ public:
 
   static bool classof(const FunctionScopeInfo *FSI) { 
     return FSI->Kind == SK_Block; 
+  }
+};
+
+/// \brief Retains information about a parallel region
+class ParallelRegionScopeInfo : public CapturingScopeInfo {
+public:
+  /// \brief the helper function
+  FunctionDecl *TheFunctionDecl;
+  /// \brief The captured record type
+  RecordDecl *TheRecordDecl;
+  /// \brief This is the enclosing scope of the parallel region.
+  Scope *TheScope;
+
+  ParallelRegionScopeInfo(DiagnosticsEngine &Diag, Scope *S, FunctionDecl *FD,
+                          RecordDecl *RD)
+    : CapturingScopeInfo(Diag, ImpCap_ParallelRegion),
+      TheFunctionDecl(FD), TheRecordDecl(RD), TheScope(S)
+  {
+    Kind = SK_ParallelRegion;
+  }
+
+  virtual ~ParallelRegionScopeInfo();
+
+  static bool classof(const FunctionScopeInfo *FSI) { 
+    return FSI->Kind == SK_ParallelRegion; 
   }
 };
 

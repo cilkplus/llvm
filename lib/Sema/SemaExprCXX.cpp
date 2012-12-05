@@ -700,6 +700,7 @@ void Sema::CheckCXXThisCapture(SourceLocation Loc, bool Explicit) {
       if (CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_LambdaByref ||
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_LambdaByval ||
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_Block ||
+          CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_ParallelRegion ||
           Explicit) {
         // This closure can capture 'this'; continue looking upwards.
         NumClosures++;
@@ -733,6 +734,19 @@ void Sema::CheckCXXThisCapture(SourceLocation Loc, bool Explicit) {
       Lambda->addDecl(Field);
       ThisExpr = new (Context) CXXThisExpr(Loc, ThisTy, /*isImplicit=*/true);
     }
+
+    if (ParallelRegionScopeInfo *RSI
+        = dyn_cast<ParallelRegionScopeInfo>(FunctionScopes[idx])) {
+      RecordDecl *RD = RSI->TheRecordDecl;
+      FieldDecl *Field
+        = FieldDecl::Create(Context, RD, Loc, Loc, 0, ThisTy,
+                            Context.getTrivialTypeSourceInfo(ThisTy, Loc),
+                            0, false, ICIS_NoInit);
+      Field->setImplicit(true);
+      RD->addDecl(Field);
+      ThisExpr = new (Context) CXXThisExpr(Loc, ThisTy, /*isImplicit*/true);
+    }
+
     bool isNested = NumClosures > 1;
     CSI->addThisCapture(isNested, Loc, ThisTy, ThisExpr);
   }

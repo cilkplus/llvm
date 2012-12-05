@@ -2014,7 +2014,9 @@ enum CXCursorKind {
     */
   CXCursor_CilkSpawnStmt                 = 233,
 
-  CXCursor_LastStmt                      = CXCursor_CilkSpawnStmt,
+  CXCursor_CilkSpawnCapturedStmt         = 234,
+
+  CXCursor_LastStmt                      = CXCursor_CilkSpawnCapturedStmt,
 
   /**
    * \brief Cursor that represents the translation unit itself.

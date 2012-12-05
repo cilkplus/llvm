@@ -1269,7 +1269,8 @@ namespace clang {
 
       // Cilk Plus
       STMT_CILKSYNC,
-      STMT_CILKSPAWN
+      STMT_CILKSPAWN,
+      STMT_CILKSPAWN_CAPTURED
     };
 
     /// \brief The kinds of designators that can occur in a

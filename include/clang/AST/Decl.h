@@ -1471,6 +1471,7 @@ private:
   bool HasImplicitReturnZero : 1;
   bool IsLateTemplateParsed : 1;
   bool IsConstexpr : 1;
+  bool IsParallelRegion : 1;
 
   /// \brief End part of this FunctionDecl's source range.
   ///
@@ -1555,7 +1556,9 @@ protected:
       HasWrittenPrototype(true), IsDeleted(false), IsTrivial(false),
       IsDefaulted(false), IsExplicitlyDefaulted(false),
       HasImplicitReturnZero(false), IsLateTemplateParsed(false),
-      IsConstexpr(isConstexprSpecified), EndRangeLoc(NameInfo.getEndLoc()),
+      IsConstexpr(isConstexprSpecified),
+      IsParallelRegion(false),
+      EndRangeLoc(NameInfo.getEndLoc()),
       TemplateOrSpecialization(),
       DNLoc(NameInfo.getInfo()) {}
 
@@ -1732,6 +1735,9 @@ public:
   /// Whether this is a (C++11) constexpr function or constexpr constructor.
   bool isConstexpr() const { return IsConstexpr; }
   void setConstexpr(bool IC);
+
+  bool isParallelRegion() const { return IsParallelRegion; }
+  void setParallelRegion(bool v = true) { IsParallelRegion = v; }
 
   /// \brief Whether this function has been deleted.
   ///

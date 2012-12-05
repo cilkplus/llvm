@@ -594,6 +594,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Expr::MSDependentExistsStmtClass:
     case Expr::CilkSyncStmtClass:
     case Stmt::CilkSpawnStmtClass:
+    case Stmt::CilkSpawnCapturedStmtClass:
       llvm_unreachable("Stmt should not be in analyzer evaluation loop");
 
     case Stmt::ObjCSubscriptRefExprClass:

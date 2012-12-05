@@ -1543,6 +1543,12 @@ void ASTStmtWriter::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
   Code = serialization::STMT_CILKSPAWN;
 }
 
+void ASTStmtWriter::VisitCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
+  VisitStmt(S);
+  Writer.AddStmt(S->getSubStmt());
+  Code = serialization::STMT_CILKSPAWN_CAPTURED;
+}
+
 //===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements.
 //===----------------------------------------------------------------------===//

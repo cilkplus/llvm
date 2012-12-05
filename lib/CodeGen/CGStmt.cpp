@@ -23,6 +23,7 @@
 #include "llvm/DataLayout.h"
 #include "llvm/InlineAsm.h"
 #include "llvm/Intrinsics.h"
+
 using namespace clang;
 using namespace CodeGen;
 
@@ -169,6 +170,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
     break;
   case Stmt::CilkSpawnStmtClass:
     EmitCilkSpawnStmt(cast<CilkSpawnStmt>(*S));
+    break;
+  case Stmt::CilkSpawnCapturedStmtClass:
+    EmitCilkSpawnCapturedStmt(cast<CilkSpawnCapturedStmt>(*S));
     break;
   }
 }
@@ -1702,5 +1706,10 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
 }
 
 void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
+  CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
+}
+
+void
+CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
   CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
 }

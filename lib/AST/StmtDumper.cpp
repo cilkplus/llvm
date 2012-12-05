@@ -140,6 +140,7 @@ namespace  {
     void VisitDeclStmt(DeclStmt *Node);
     void VisitLabelStmt(LabelStmt *Node);
     void VisitGotoStmt(GotoStmt *Node);
+    void VisitCapturedStmt(CapturedStmt *Node);
 
     // Exprs
     void VisitExpr(Expr *Node);
@@ -718,6 +719,19 @@ void StmtDumper::VisitObjCSubscriptRefExpr(ObjCSubscriptRefExpr *Node) {
 void StmtDumper::VisitObjCBoolLiteralExpr(ObjCBoolLiteralExpr *Node) {
   DumpExpr(Node);
   OS << " " << (Node->getValue() ? "__objc_yes" : "__objc_no");
+}
+
+void StmtDumper::VisitCapturedStmt(CapturedStmt *Node) {
+  DumpStmt(Node);
+  for (CapturedStmt::capture_iterator I = Node->capture_begin(),
+                                      E = Node->capture_end(); I != E; ++I) {
+    IndentScope Indent(*this);
+    OS << "Capture ";
+    if (I->capturesThis())
+      OS << "this";
+    else
+      DumpDeclRef(I->getCapturedVar());
+  }
 }
 
 //===----------------------------------------------------------------------===//

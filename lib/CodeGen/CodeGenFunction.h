@@ -590,8 +590,67 @@ public:
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
 
+  class CGCilkSpawnInfo {
+  public:
+    explicit CGCilkSpawnInfo(ASTContext &C)
+      : Context(C), ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) { }
+
+    void setThisValue(llvm::Value *V) { ThisValue = V; }
+    llvm::Value *getThisValue() const { return ThisValue; }
+
+    /// \brief Lookup the captured field decl for a variable
+    const FieldDecl *lookup(const VarDecl *VD) const {
+      return CaptureFields.lookup(VD);
+    }
+
+    bool isCXXThisExprCaptured() const { return CXXThisFieldDecl != 0; }
+    FieldDecl *getThisFieldDecl() const { return CXXThisFieldDecl; }
+
+    bool isThisParmVarDecl(const VarDecl *V) const {
+      return V == ThisParmVarDecl;
+    }
+
+    void initCGCilkSpawnInfo(const CilkSpawnCapturedStmt *S) {
+      RecordDecl::field_iterator Field = S->getRecordDecl()->field_begin();
+      for (CapturedStmt::capture_const_iterator I = S->capture_begin(),
+                                                E = S->capture_end();
+                                                I != E; ++I, ++Field) {
+        if (I->capturesThis())
+          CXXThisFieldDecl = *Field;
+        else
+          CaptureFields[I->getCapturedVar()] = *Field;
+      }
+
+      const FunctionDecl *FD = S->getFunctionDecl();
+      assert(FD && (FD->getNumParams() > 0) && "unexpected helper function");
+      ThisParmVarDecl = FD->getParamDecl(0);
+    }
+
+  private:
+    ASTContext &Context;
+
+    /// \brief Keep the map between VarDecl and FieldDecl
+    llvm::SmallDenseMap<const VarDecl *, FieldDecl *> CaptureFields;
+
+    /// \brief The base address of the captured record, passed in as the first
+    /// argument of the parallel region function.
+    llvm::Value *ThisValue;
+
+    /// \brief Captured 'this' type
+    FieldDecl *CXXThisFieldDecl;
+
+    /// \brief The captured record parameter to the helper function
+    const ParmVarDecl *ThisParmVarDecl;
+  };
+
   /// \brief Whether a Cilk spawn statement is being emitted
+  //
+  /// FIXME: This is not used for captured statements; should be removed.
+  ///
   bool EmittingCilkSpawn;
+
+  /// \brief Hold CodeGen info Cilk spawn captured statements
+  CGCilkSpawnInfo *CurCGCilkSpawnInfo;
 
   /// BoundsChecking - Emit run-time bounds checks. Higher values mean
   /// potentially higher performance penalties.
@@ -2045,6 +2104,7 @@ public:
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
   void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
+  void EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S);
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//
@@ -2552,6 +2612,17 @@ public:
 
   /// SetEmittingCilkSpawn - Set whether a Cilk spawn is being emitted.
   void SetEmittingCilkSpawn(bool b) { EmittingCilkSpawn = b; }
+
+  /// \brief Initialize the CilkSpawnCodeGenInfo
+  void SetCurCGCilkSpawnInfo(CGCilkSpawnInfo *Info) {
+    if (CurCGCilkSpawnInfo)
+      delete CurCGCilkSpawnInfo;
+
+    CurCGCilkSpawnInfo = Info;
+  }
+
+  /// \brief Retrieve the current CilkSpawnCodeGenInfo
+  CGCilkSpawnInfo *GetCurCGCilkSpawnInfo() { return CurCGCilkSpawnInfo; }
 
   //===--------------------------------------------------------------------===//
   //                             Internal Helpers

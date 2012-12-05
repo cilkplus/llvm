@@ -496,7 +496,8 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       bool NoError = errors == getDiagnostics().getClient()->getNumErrors();
       if (!Dependent && NoError) {
         StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
-        if (!Spawn.isInvalid() && isa<CilkSpawnStmt>(Spawn.get()))
+        if (!Spawn.isInvalid() && (isa<CilkSpawnStmt>(Spawn.get()) ||
+                                   isa<CilkSpawnCapturedStmt>(Spawn.get())))
           Elts[i] = Spawn.take();
       }
     }
@@ -3027,6 +3028,7 @@ StmtResult Sema::ActOnMSDependentExistsStmt(SourceLocation KeywordLoc,
 }
 
 namespace {
+
 class SpawnHelper : public RecursiveASTVisitor<SpawnHelper> {
   bool HasSpawn;
 public:
@@ -3043,7 +3045,52 @@ public:
   bool hasSpawn() const { return HasSpawn; }
 };
 
-Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
+class CaptureBuilder: public RecursiveASTVisitor<CaptureBuilder> {
+  Sema &S;
+
+public:
+  CaptureBuilder(Sema &S) : S(S) {}
+
+  bool VisitDeclRefExpr(DeclRefExpr *E) {
+    S.MarkDeclRefReferenced(E);
+    return true;
+  }
+
+  bool TraverseLambdaExpr(LambdaExpr *E) {
+    LambdaExpr::capture_init_iterator CI = E->capture_init_begin();
+
+    for (LambdaExpr::capture_iterator C = E->capture_begin(),
+                                   CEnd = E->capture_end();
+                                     C != CEnd; ++C, ++CI) {
+      if (C->capturesVariable()) {
+        // FIXME: This is incorrect, if the lambda captures an array
+        // by value, Defect LE2119.
+        assert(isa<DeclRefExpr>(*CI) && "DeclRefExpr expected");
+        S.MarkDeclRefReferenced(cast<DeclRefExpr>(*CI));
+      } else {
+        assert(C->capturesThis() && "Capturing this expected");
+        assert(isa<CXXThisExpr>(*CI) && "CXXThisExpr expected");
+        S.CheckCXXThisCapture((*CI)->getLocStart(), /*explicit*/false);
+      }
+    }
+    assert(CI == E->capture_init_end() && "out of sync");
+    
+    // Only traverse the captures, and skip the body.
+    return true;
+  }
+
+  /// Skip captured statements
+  bool TraverseCapturedStmt(CapturedStmt *) { return true; }
+
+  bool VisitCXXThisExpr(CXXThisExpr *E) {
+    S.CheckCXXThisCapture(E->getLocStart(), /*explicit*/false);
+    return true;
+  }
+};
+
+} // anonymous namespace
+
+static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   if (!S)
     return S;
 
@@ -3055,7 +3102,129 @@ Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   return new (SemaRef.Context) CilkSpawnStmt(S);
 }
 
-} // anonymous namespace
+static RecordDecl *CreateParallelRegionRecordDecl(Sema &S) {
+  DeclContext *DC = S.CurContext;
+  while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
+    DC = DC->getParent();
+
+  SourceLocation Loc;
+  IdentifierInfo *Id = &S.PP.getIdentifierTable().get("capture");
+  RecordDecl *RD = RecordDecl::Create(S.Context, TTK_Struct, DC, Loc, Loc, Id);
+
+  DC->addDecl(RD);
+  RD->setImplicit();
+  RD->startDefinition();
+  return RD;
+}
+
+/// Helper functions are required to be internal,  not mangling accross
+/// translation units.
+static IdentifierInfo *GetMangledHelperName(Sema &S) {
+  static unsigned count = 0;
+  StringRef name("__cilk_spawn_helperV");
+  return &S.PP.getIdentifierTable().get((name + llvm::Twine(count++)).str());
+}
+
+static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
+                                   CilkSpawnCapturedStmt *Spawn) {
+  ASTContext &Context = S.Context;
+
+  // Create a caputred recored decl and start its definition
+  RecordDecl *RD = CreateParallelRegionRecordDecl(S);
+
+  // The capture helper function returns void and takes a single argument,
+  // a pointer to the captured record.
+  FunctionDecl *FD = 0;
+  {
+    QualType ParamType = Context.getPointerType(Context.getTagDeclType(RD));
+
+    FunctionProtoType::ExtProtoInfo EPI;
+    QualType FunctionTy
+      = Context.getFunctionType(Context.VoidTy, &ParamType, 1, EPI);
+
+    TypeSourceInfo *FunctionTyInfo
+      = Context.getTrivialTypeSourceInfo(FunctionTy);
+
+    IdentifierInfo *II = GetMangledHelperName(S);
+
+    FD = FunctionDecl::Create(Context, S.CurContext, SourceLocation(),
+                              SourceLocation(), II, FunctionTy, FunctionTyInfo,
+                              SC_Static, SC_Static);
+
+    S.CurContext->addDecl(FD);
+
+    IdentifierInfo *ParamII = &S.PP.getIdentifierTable().get("this");
+    ParmVarDecl *Param
+      = ParmVarDecl::Create(Context, FD, SourceLocation(), SourceLocation(),
+                            ParamII, ParamType,
+                            Context.getTrivialTypeSourceInfo(ParamType),
+                            SC_None, SC_None, /* DefaultArg =*/0);
+    FD->setParams(Param);
+    FD->setImplicit(true);
+    FD->setUsed(true);
+    FD->setParallelRegion();
+  }
+
+  // Enter the capturing scope for this parallel region
+  S.PushParallelRegionScope(CurScope, FD, RD);
+
+  if (CurScope)
+    S.PushDeclContext(CurScope, FD);
+  else
+    S.CurContext = FD;
+
+  ParallelRegionScopeInfo *RSI
+    = cast<ParallelRegionScopeInfo>(S.FunctionScopes.back());
+
+  // Scan the statement to find variables to be captured.
+  CaptureBuilder Builder(S);
+  Builder.TraverseStmt(Spawn->getSubStmt());
+
+  // Build the CilkSpawnCapturedStmt
+  SmallVector<CapturedStmt::Capture, 4> Captures;
+  for (unsigned I = 0, N = RSI->Captures.size(); I != N; I++) {
+    CapturingScopeInfo::Capture &Cap = RSI->Captures[I];
+
+    if (Cap.isThisCapture()) {
+      Captures.push_back(CapturedStmt::Capture(CapturedStmt::LCK_This,
+                                               Cap.getCopyExpr()));
+      continue;
+    }
+
+    VarDecl *Var = Cap.getVariable();
+
+    CapturedStmt::CaptureKind Kind
+      = Cap.isCopyCapture() ? CapturedStmt::LCK_ByCopy
+                            : CapturedStmt::LCK_ByRef;
+
+    Captures.push_back(CapturedStmt::Capture(Kind, Cap.getCopyExpr(), Var));
+  }
+
+  Spawn->setCaptures(Context, Captures.begin(), Captures.end());
+  Spawn->setRecordDecl(RD);
+  Spawn->setFunctionDecl(FD);
+
+  FD->setBody(Spawn->getSubStmt());
+  RD->completeDefinition();
+
+  S.PopDeclContext();
+  S.PopFunctionScopeInfo();
+}
+
+static Stmt *tryCreateCilkSpawnCapturedStmt(Sema &SemaRef, Stmt *S) {
+  if (!S)
+    return S;
+
+  SpawnHelper Helper;
+  Helper.TraverseStmt(S);
+  if (!Helper.hasSpawn())
+    return S;
+
+  CilkSpawnCapturedStmt *R = new (SemaRef.Context) CilkSpawnCapturedStmt(S);
+  buildCilkSpawnCaptures(SemaRef, SemaRef.getCurScope(), R);
+
+  return R;
+}
 
 static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
   switch (S->getStmtClass()) {
@@ -3070,12 +3239,17 @@ static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
     break;
   }
   case Stmt::DeclStmtClass:
+    // FIXME: Cannot handle variable declariations with _Cilk_spawn.
+    // Use the code extractor to handle this case, in which exceptions will
+    // be disabled locally.
+    S = tryCreateCilkSpawnStmt(SemaRef, S);
+    break;
   case Stmt::BinaryOperatorClass:
   case Stmt::ExprWithCleanupsClass:
   case Stmt::CallExprClass:
   case Stmt::CXXOperatorCallExprClass:
   case Stmt::CXXMemberCallExprClass:
-    S = tryCreateCilkSpawnStmt(SemaRef, S);
+    S = tryCreateCilkSpawnCapturedStmt(SemaRef, S);
     break;
   case Stmt::DoStmtClass: {
     DoStmt *DS = cast<DoStmt>(S);

@@ -32,6 +32,7 @@ namespace clang {
 
 class CilkSpawnStmt;
 class CilkSyncStmt;
+class CilkSpawnCapturedStmt;
 
 namespace CodeGen {
 
@@ -48,6 +49,10 @@ public:
   virtual ~CGCilkPlusRuntime();
 
   virtual void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &E);
+
+  virtual void EmitCilkSpawn(CodeGenFunction &CGF,
+                             const CilkSpawnCapturedStmt &S);
+
   virtual void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
   //virtual void EmitCilkFor(CodeGenFunction &CGF, const CilkForStmt &S);
 };

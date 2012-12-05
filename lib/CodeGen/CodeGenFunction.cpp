@@ -35,6 +35,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     Target(CGM.getContext().getTargetInfo()),
     Builder(cgm.getModule().getContext()),
     EmittingCilkSpawn(false),
+    CurCGCilkSpawnInfo(0),
     SanitizePerformTypeCheck(CGM.getLangOpts().SanitizeNull |
                              CGM.getLangOpts().SanitizeAlignment |
                              CGM.getLangOpts().SanitizeObjectSize |
@@ -66,6 +67,9 @@ CodeGenFunction::~CodeGenFunction() {
   // something.
   if (FirstBlockInfo)
     destroyBlockInfos(FirstBlockInfo);
+
+  if (CurCGCilkSpawnInfo)
+    delete CurCGCilkSpawnInfo;
 }
 
 
@@ -464,6 +468,17 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
       // fast register allocator would be happier...
       CXXThisValue = CXXABIThisValue;
     }
+  }
+
+  // If CFG is emitting a cilk spawn and 'this' is captured,
+  // load it into CXXThisValue;
+  if (CurCGCilkSpawnInfo && CurCGCilkSpawnInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CurCGCilkSpawnInfo->getThisFieldDecl();
+    QualType TagType = getContext().getTagDeclType(FD->getParent());
+    LValue LV = MakeNaturalAlignAddrLValue(CurCGCilkSpawnInfo->getThisValue(), TagType);
+    LValue ThisLValue = EmitLValueForField(LV, FD);
+
+    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
   }
 
   // If any of the arguments have a variably modified type, make sure to

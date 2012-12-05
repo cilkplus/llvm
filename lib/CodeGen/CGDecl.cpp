@@ -1580,6 +1580,11 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
   assert(DMEntry == 0 && "Decl already exists in localdeclmap!");
   DMEntry = DeclPtr;
 
+  // The captured record (passed as the first parameter) is the base address.
+  if (CurCGCilkSpawnInfo && CurCGCilkSpawnInfo->isThisParmVarDecl(&D)) {
+    CurCGCilkSpawnInfo->setThisValue(Builder.CreateLoad(DeclPtr));
+  }
+
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {
     if (CGM.getCodeGenOpts().getDebugInfo()

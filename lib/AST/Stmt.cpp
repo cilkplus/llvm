@@ -1044,3 +1044,35 @@ SEHFinallyStmt* SEHFinallyStmt::Create(ASTContext &C,
 SourceRange CilkSpawnStmt::getSourceRange() const {
   return SubStmt->getSourceRange();
 }
+
+void CapturedStmt::setCaptures(ASTContext &Context,
+                               const Capture *begin,
+                               const Capture *end) {
+  if (begin == end) {
+    NumCaptures = 0;
+    Captures = 0;
+    return;
+  }
+
+  NumCaptures = end - begin;
+
+  // Avoid new Capture[] because we don't want to provide a default constructor.
+  size_t allocationSize = NumCaptures * sizeof(Capture);
+  void *buffer = Context.Allocate(allocationSize, /*alignment*/sizeof(void*));
+  memcpy(buffer, begin, allocationSize);
+  Captures = static_cast<Capture*>(buffer);
+}
+
+bool CapturedStmt::capturesVariable(const VarDecl *variable) const {
+  for (capture_const_iterator I = capture_begin(),
+                              E = capture_end(); I != E; ++I) {
+    // Only auto vars can be captured, so no redeclaration worries.
+    if (I->capturesThis())
+      continue;
+
+    if (I->getCapturedVar() == variable)
+      return true;
+  }
+
+  return false;
+}

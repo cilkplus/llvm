@@ -1729,6 +1729,17 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
         return EmitLValueForField(LambdaLV, FD);
       }
 
+      if (CurCGCilkSpawnInfo) {
+        if (const FieldDecl *FD = CurCGCilkSpawnInfo->lookup(VD)) {
+          QualType TagType = getContext().getTagDeclType(FD->getParent());
+          LValue LV
+            = MakeNaturalAlignAddrLValue(CurCGCilkSpawnInfo->getThisValue(),
+                                         TagType);
+          
+          return EmitLValueForField(LV, FD);
+        }
+      }
+
       assert(isa<BlockDecl>(CurCodeDecl) && E->refersToEnclosingLocal());
       return MakeAddrLValue(GetAddrOfBlockDecl(VD, isBlockVariable),
                             T, Alignment);

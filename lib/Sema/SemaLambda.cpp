@@ -791,6 +791,8 @@ ExprResult Sema::ActOnLambdaExpr(SourceLocation StartLoc, Stmt *Body,
       CaptureDefault = LCD_ByCopy;
       break;
 
+    case CapturingScopeInfo::ImpCap_ParallelRegion:
+      // fall through
     case CapturingScopeInfo::ImpCap_LambdaByref:
       CaptureDefault = LCD_ByRef;
       break;

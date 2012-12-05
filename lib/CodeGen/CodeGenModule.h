@@ -240,6 +240,11 @@ class CodeGenModule : public CodeGenTypeCache {
   llvm::MDNode *NoObjCARCExceptionsMetadata;
   RREntrypoints *RRData;
 
+  /// \brief A map between function decls to be emitted and its associted
+  /// captured statements.
+  llvm::DenseMap<const FunctionDecl*,
+                 const CilkSpawnCapturedStmt*> CaptureDeclMap;
+
   // WeakRefReferences - A set of references that have only been seen via
   // a weakref so far. This is used to remove the weak of the reference if we ever
   // see a direct reference or a definition.
@@ -401,6 +406,16 @@ public:
   CGCilkPlusRuntime &getCilkPlusRuntime() {
     assert(CilkPlusRuntime != 0);
     return *CilkPlusRuntime;
+  }
+
+  typedef llvm::DenseMap<const FunctionDecl*,
+                         const CilkSpawnCapturedStmt*> CaptureDeclMapTy;
+
+  CaptureDeclMapTy& getCaptureDeclMap() {
+    return CaptureDeclMap;
+  }
+  const CaptureDeclMapTy& getCaptureDeclMap() const {
+    return CaptureDeclMap;
   }
 
   /// getCXXABI() - Return a reference to the configured C++ ABI.

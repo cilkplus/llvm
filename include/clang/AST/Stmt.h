@@ -20,6 +20,7 @@
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/PointerIntPair.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <string>
@@ -33,12 +34,14 @@ namespace clang {
   class Attr;
   class Decl;
   class Expr;
+  class FunctionDecl;
   class IdentifierInfo;
   class LabelDecl;
   class ParmVarDecl;
   class PrinterHelper;
   struct PrintingPolicy;
   class QualType;
+  class RecordDecl;
   class SourceManager;
   class StringLiteral;
   class SwitchStmt;
@@ -1901,6 +1904,150 @@ public:
 
   child_range children() {
     return child_range(&SubStmt, &SubStmt + 1);
+  }
+};
+
+// \brief the base class for capturing a statement into a seperate function
+class CapturedStmt : public Stmt {
+public:
+  enum CaptureKind {
+    LCK_This,
+    LCK_ByCopy,
+    LCK_ByRef
+  };
+
+  enum {
+    /// \brief Flag used by the Capture class to indicate that the given
+    /// capture was implicit.
+    Capture_Implicit = 0x01,
+
+    /// \brief Flag used by the Capture class to indciate that the
+    /// given capture was by-copy.
+    Capture_ByCopy = 0x02
+  };
+
+  /// \brief Describes the capture of either a variable or 'this'.
+  class Capture {
+    llvm::PointerIntPair<VarDecl *, 2> VarAndBits;
+    Expr *CopyExpr;
+  public:
+    /// \brief Create a new capture.
+    ///
+    Capture(CaptureKind Kind, Expr *E, VarDecl *Var = 0)
+      : VarAndBits(Var, 0), CopyExpr(E) {
+       unsigned Bits = Capture_Implicit;
+
+       switch (Kind) {
+       case LCK_This: 
+         assert(Var == 0 && "'this' capture cannot have a variable!");
+         break;
+       case LCK_ByCopy:
+         Bits |= Capture_ByCopy;
+         // Fall through 
+       case LCK_ByRef:
+         assert(Var && "capture must have a variable!");
+         break;
+       }
+       VarAndBits.setInt(Bits);
+    }
+
+    /// \brief Determine the kind of capture.
+    CaptureKind getCaptureKind() const {
+      if (capturesThis())
+        return LCK_This;
+
+      return (VarAndBits.getInt() & Capture_ByCopy)? LCK_ByCopy : LCK_ByRef;
+    }
+
+    /// \brief Determine whether this capture handles the C++ 'this'  pointer.
+    bool capturesThis() const { return VarAndBits.getPointer() == 0; }
+
+    /// \brief Determine whether this capture handles a variable.
+    bool capturesVariable() const { return VarAndBits.getPointer() != 0; }
+
+    /// \brief Retrieve the declaration of the local variable being captured.
+    ///
+    /// This operation is only valid if this capture does not capture 'this'.
+    VarDecl *getCapturedVar() const { 
+      assert(!capturesThis() && "No variable available for 'this' capture");
+      return VarAndBits.getPointer();
+    }
+
+    Expr *getCopyExpr() const { return CopyExpr; }
+  };
+
+protected:
+  FunctionDecl *TheDecl;
+  RecordDecl *TheRecordDecl;
+  Stmt *SubStmt;
+  Capture *Captures;
+  unsigned NumCaptures;
+  
+  CapturedStmt(StmtClass SC, Stmt *S)
+    : Stmt(SC), TheDecl(0), TheRecordDecl(0), SubStmt(S), Captures(0),
+      NumCaptures(0) { }
+
+  CapturedStmt(StmtClass SC, EmptyShell Empty)
+    : Stmt(SC, Empty), TheDecl(0), TheRecordDecl(0), SubStmt(0),
+      NumCaptures(0) { }
+
+public:
+  FunctionDecl *getFunctionDecl() { return TheDecl; }
+  const FunctionDecl *getFunctionDecl() const { return TheDecl; }
+  void setFunctionDecl(FunctionDecl *D) { TheDecl = D; }
+
+  RecordDecl *getRecordDecl() { return TheRecordDecl; }
+  const RecordDecl *getRecordDecl() const { return TheRecordDecl; }
+  void setRecordDecl(RecordDecl *D) { TheRecordDecl = D; }
+
+  Stmt *getSubStmt() { return SubStmt; }
+  const Stmt *getSubStmt() const { return SubStmt; }
+  void setSubStmt(Stmt *S) { SubStmt = S; }
+
+  /// \brief True if this captured region(or its nested regions) captures
+  /// anything of local storage from its enclosing scopes.
+  bool hasCaptures() const { return NumCaptures != 0; }
+
+  /// \brief Returns the number of captured variables.
+  /// Does not include an entry for 'this'.
+  unsigned getNumCaptures() const { return NumCaptures; }
+
+  typedef const Capture *capture_iterator;
+  typedef const Capture *capture_const_iterator;
+  capture_iterator capture_begin() { return Captures; }
+  capture_iterator capture_end() { return Captures + NumCaptures; }
+  capture_const_iterator capture_begin() const { return Captures; }
+  capture_const_iterator capture_end() const { return Captures + NumCaptures; }
+
+  SourceRange getSourceRange() const LLVM_READONLY {
+    return SubStmt->getSourceRange();
+  }
+
+  bool capturesVariable(const VarDecl *var) const;
+  void setCaptures(ASTContext &Context,
+                   const Capture *begin,
+                   const Capture *end);
+
+  static bool classof(const Stmt *T) {
+    // Currently the only subclass is CilkSpawnCapturedStmt
+    return T->getStmtClass() == CilkSpawnCapturedStmtClass;
+  }
+
+  child_range children() {
+    return child_range(&SubStmt, &SubStmt + 1);
+  }
+};
+
+class CilkSpawnCapturedStmt : public CapturedStmt {
+public:
+  explicit CilkSpawnCapturedStmt(Stmt *S)
+    : CapturedStmt(CilkSpawnCapturedStmtClass, S) { }
+
+  explicit CilkSpawnCapturedStmt(EmptyShell Empty)
+    : CapturedStmt(CilkSpawnCapturedStmtClass, Empty) { }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CilkSpawnCapturedStmtClass;
   }
 };
 
