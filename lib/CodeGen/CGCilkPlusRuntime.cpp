@@ -734,6 +734,24 @@ static llvm::Value *GetParentStackFrame(CodeGenFunction &CGF)
   {
     CGBuilderTy Builder(CGF.ReturnBlock.getBlock());
     Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
+
+    // By adding a _Cilk_sync call in the Unified Return
+    // Block we should automatically get an implicit sync at the
+    // end of all spawning functions.
+    //
+    // This will not handle other types of implicit syncs, such as
+    // syncing at the end of a try statement, before a throw
+    // statement, syncing before abnormal exit due to an exception, or
+    // when dealing with _Cilk_for. It only handles the most basic
+    // case of syncing before you exit a spawing function normally
+    //
+    // Destructors are called before the implicit sync, as expected
+    //
+    // It handles the case where a _Cilk_spawn in the last statement
+    // in a function and the implicit sync is the continuation
+    //
+    // The return value is calculated before the implicit sync
+    Builder.CreateCall(GetCilkSyncFn(CGF), SF);
   }
 
   return SF;
