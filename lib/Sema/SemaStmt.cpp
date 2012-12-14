@@ -3062,12 +3062,9 @@ public:
     for (LambdaExpr::capture_iterator C = E->capture_begin(),
                                    CEnd = E->capture_end();
                                      C != CEnd; ++C, ++CI) {
-      if (C->capturesVariable()) {
-        // FIXME: This is incorrect, if the lambda captures an array
-        // by value, Defect LE2119.
-        assert(isa<DeclRefExpr>(*CI) && "DeclRefExpr expected");
-        S.MarkDeclRefReferenced(cast<DeclRefExpr>(*CI));
-      } else {
+      if (C->capturesVariable())
+        S.MarkVariableReferenced((*CI)->getLocStart(), C->getCapturedVar());
+      else {
         assert(C->capturesThis() && "Capturing this expected");
         assert(isa<CXXThisExpr>(*CI) && "CXXThisExpr expected");
         S.CheckCXXThisCapture((*CI)->getLocStart(), /*explicit*/false);

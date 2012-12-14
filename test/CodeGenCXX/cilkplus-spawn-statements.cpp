@@ -9,6 +9,7 @@
 // RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK9 %s
 // RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK10 %s
 // RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK11 %s
+// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK12 %s
 
 /*
  *  A _Cilk_spawn can only appear in 3 places
@@ -294,4 +295,50 @@ namespace scopeinfo_missing_during_instantiation {
     bar(x);
   }
 
+}
+
+namespace capture_array_by_value {
+  template <typename T>
+  void touch(const T *);
+
+  template <typename T>
+  void touch(T);
+
+  template <typename T, unsigned n>
+  void invoke_ptr() {
+    T array[n] = {0, 1, 2, 3, 4, 5};
+    _Cilk_spawn [=]() { touch(array); }();
+  }
+
+  template <typename T, unsigned n>
+  void invoke_val() {
+    T array[n] = {0, 1, 2, 3, 4, 5};
+    _Cilk_spawn [=]() { touch(array[5]); }();
+  }
+
+  template <typename T, unsigned m, unsigned n>
+  void invoke_multi() {
+    T array[m][n] = {0, 1, 2, 3};
+    _Cilk_spawn [=]() { touch(array[1][n - 1]); }();
+  }
+
+  void test() {
+    struct S { int v; };
+
+    invoke_ptr<float, 17>();
+    invoke_ptr<S, 19>();
+
+    invoke_val<float, 21>();
+    invoke_val<S, 23>();
+
+    invoke_multi<float, 3, 5>();
+    invoke_multi<S, 11, 7>();
+
+    // CHECK-CILK12: %struct.capture.{{.*}} = type { [17 x float]* }
+    // CHECK-CILK12: %struct.capture.{{.*}} = type { [19 x %struct.S]* }
+    // CHECK-CILK12: %struct.capture.{{.*}} = type { [21 x float]* }
+    // CHECK-CILK12: %struct.capture.{{.*}} = type { [23 x %struct.S]* }
+    // CHECK-CILK12: %struct.capture.{{.*}} = type { [3 x [5 x float]]* }
+    // CHECK-CILK12: %struct.capture.{{.*}} = type { [11 x [7 x %struct.S]]* }
+  }
 }
