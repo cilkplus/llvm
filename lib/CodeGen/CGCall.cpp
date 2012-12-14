@@ -2212,8 +2212,11 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   // If this call is a Cilk spawn call, also emit a call to the Cilk spawn
   // dummy function.
-  if (IsCilkSpawnCall)
+  if (IsCilkSpawnCall) {
+    assert((IsEmittingCilkSpawn() ||
+            GetCurCGCilkSpawnInfo()) && "dangling spawn call expression");
     EmitCilkSpawnPoint();
+  }
 
   llvm::BasicBlock *InvokeDest = 0;
   if (!Attrs.getFnAttributes().hasAttribute(llvm::Attributes::NoUnwind))

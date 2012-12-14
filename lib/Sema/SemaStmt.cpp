@@ -3268,7 +3268,8 @@ static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
     if (Stmt *Then = cast<IfStmt>(S)->getThen()) {
       BuildCilkSpawnStmt(SemaRef, Then);
       cast<IfStmt>(S)->setThen(Then);
-    } else if (Stmt *Else = cast<IfStmt>(S)->getElse()) {
+    } 
+    if (Stmt *Else = cast<IfStmt>(S)->getElse()) {
       BuildCilkSpawnStmt(SemaRef, Else);
       cast<IfStmt>(S)->setElse(Else);
     }
