@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This provides Cilk Plus code generation. 
+// This provides Cilk Plus code generation.
 //
 //===----------------------------------------------------------------------===//
 
@@ -55,6 +55,8 @@ public:
 
   virtual void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
   //virtual void EmitCilkFor(CodeGenFunction &CGF, const CilkForStmt &S);
+
+  void EmitCilkStackFrame(CodeGenFunction &CGF);
 };
 
 /// Creates an instance of a CilkPlus runtime class.

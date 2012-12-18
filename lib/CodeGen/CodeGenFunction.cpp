@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
+#include "CGCilkPlusRuntime.h"
 #include "CGCUDARuntime.h"
 #include "CGCXXABI.h"
 #include "CGDebugInfo.h"
@@ -126,16 +127,6 @@ void CodeGenFunction::EmitReturnBlock() {
   // For cleanliness, we try to avoid emitting the return block for
   // simple cases.
   llvm::BasicBlock *CurBB = Builder.GetInsertBlock();
-
-  // If the return block is not empty then always emit it.
-  if (!ReturnBlock.getBlock()->empty()) {
-    if (CurBB) {
-      assert(!CurBB->getTerminator() && "Unexpected terminated block.");
-      Builder.CreateBr(ReturnBlock.getBlock());
-    }
-    EmitBlock(ReturnBlock.getBlock());
-    return;
-  }
 
   if (CurBB) {
     assert(!CurBB->getTerminator() && "Unexpected terminated block.");
@@ -442,6 +433,17 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   EmitStartEHSpec(CurCodeDecl);
 
   PrologueCleanupDepth = EHStack.stable_begin();
+
+  // If this function requires a Cilk stack frame, this emits the stack frame
+  // before processing any function parameters, which makes associated cleanups 
+  // happen last.
+  if (getLangOpts().CilkPlus) {
+    const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D);
+    if (FD && FD->hasCilkStackFrame()) {
+      CGM.getCilkPlusRuntime().EmitCilkStackFrame(*this);
+    }
+  }
+
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);
 
   if (D && isa<CXXMethodDecl>(D) && cast<CXXMethodDecl>(D)->isInstance()) {

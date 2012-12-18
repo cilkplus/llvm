@@ -1472,6 +1472,7 @@ private:
   bool IsLateTemplateParsed : 1;
   bool IsConstexpr : 1;
   bool IsParallelRegion : 1;
+  bool HasCilkStackFrame: 1;
 
   /// \brief End part of this FunctionDecl's source range.
   ///
@@ -1558,6 +1559,7 @@ protected:
       HasImplicitReturnZero(false), IsLateTemplateParsed(false),
       IsConstexpr(isConstexprSpecified),
       IsParallelRegion(false),
+      HasCilkStackFrame(false),
       EndRangeLoc(NameInfo.getEndLoc()),
       TemplateOrSpecialization(),
       DNLoc(NameInfo.getInfo()) {}
@@ -1738,6 +1740,10 @@ public:
 
   bool isParallelRegion() const { return IsParallelRegion; }
   void setParallelRegion(bool v = true) { IsParallelRegion = v; }
+
+  /// \brief Whether this function needs to emit a Cilk stack frame.
+  bool hasCilkStackFrame() const { return HasCilkStackFrame; }
+  void setCilkStackFrame(bool v = true) { HasCilkStackFrame = v; }
 
   /// \brief Whether this function has been deleted.
   ///

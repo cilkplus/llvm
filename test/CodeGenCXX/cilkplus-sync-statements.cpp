@@ -100,7 +100,7 @@ void test2() {
 void test3() {
   // CHECK: define void @_Z5test3v()
 
-  // CHECK: call void @_ZN3FooC1Ev(
+  // CHECK: invoke void @_ZN3FooC1Ev(
   // CHECK: call void @_ZN3FooD1Ev
   // CHECK: call void @__cilkrts_sync
 
@@ -125,16 +125,15 @@ int test4() {
   return local;
 }
 
-// Sync without corresponding spawn
-// FIXME: If we implement an optimization that can elide unnecessary
-// syncs then flip this check to make sure that the sync isn't emitted
+// Should elide unnecessary syncs
 void test5() {
-  // CHECK: define void @_Z5test5v()
-  // CHECK: %__cilkrts_sf = alloca %__cilkrts_stack_frame
   global = Fib(BIG_NUM);
-
-  // Make sure explicit call to sync is made
-  // CHECK: call void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
+  // CHECK: define void @_Z5test5v()
+  // CHECK-NOT: alloca %__cilkrts_stack_frame
+  // CHECK: call i32 @_Z3Fibj(
+  // CHECK-NEXT: store i32
+  // CHECK-NOT:  call void @__cilkrts_sync
+  // CHECK-NEXT: ret void
   _Cilk_sync;
 }
 

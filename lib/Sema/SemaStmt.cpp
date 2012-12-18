@@ -488,6 +488,13 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
   // If there are _Cilk_spawn expressions in this compound statement, check
   // whether they are used correctly.
   if (getCurCompoundScope().HasCilkSpawn) {
+    // The function or method that has a spawn should emit a Cilk stack frame.
+    DeclContext *DC = CurContext;
+    while (!DC->isFunctionOrMethod())
+      DC = DC->getParent();
+
+    FunctionDecl::castFromDeclContext(DC)->setCilkStackFrame(true);
+
     assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
     bool Dependent = CurContext->isDependentContext();
     for (unsigned i = 0; i != NumElts; ++i) {

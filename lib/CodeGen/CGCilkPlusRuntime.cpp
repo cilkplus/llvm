@@ -732,57 +732,20 @@ static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF)
   return Fn;
 }
 
-/// Get or initialize a __cilkrts_stack_frame for the spawning function.
-/// If the stack frame needed to be allocated then inserts a calls to
-/// initialize and de-initialize it
-static llvm::Value *GetParentStackFrame(CodeGenFunction &CGF)
-{
-  const char *Name = "__cilkrts_sf";
-  llvm::Value *V = CGF.CurFn->getValueSymbolTable().lookup(Name);
+static const char *stack_frame_name = "__cilkrts_sf";
 
-  // if the variable already exists then return the reference
-  if (V)
-    return V;
+static llvm::Value *LookupStackFrame(CodeGenFunction &CGF) {
+  return CGF.CurFn->getValueSymbolTable().lookup(stack_frame_name);
+}
 
-  // otherwise we have to allocate it
+/// Create the __cilkrts_stack_frame for the spawning function.
+static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
+  assert(!LookupStackFrame(CGF) && "already created the stack frame");
+
   llvm::LLVMContext &Ctx = CGF.getLLVMContext();
-
   llvm::Type *SFTy = StackFrameBuilder::get(Ctx);
   llvm::AllocaInst *SF = CGF.CreateTempAlloca(SFTy);
-  SF->setName(Name);
-
-  // we also need to initialize it by adding the prologue
-  // to the top of the spawning function
-  {
-    CGBuilderTy Builder(CGF.AllocaInsertPt);
-    Builder.CreateCall(GetCilkParentPrologue(CGF), SF);
-  }
-
-  // and destruct it by adding the epilogue function right
-  // before the spawning function returns
-  {
-    CGBuilderTy Builder(CGF.ReturnBlock.getBlock());
-
-    // By adding a _Cilk_sync call in the Unified Return
-    // Block we should automatically get an implicit sync at the
-    // end of all spawning functions.
-    //
-    // This will not handle other types of implicit syncs, such as
-    // syncing at the end of a try statement, before a throw
-    // statement, syncing before abnormal exit due to an exception, or
-    // when dealing with _Cilk_for. It only handles the most basic
-    // case of syncing before you exit a spawing function normally
-    //
-    // Destructors are called before the implicit sync, as expected
-    //
-    // It handles the case where a _Cilk_spawn in the last statement
-    // in a function and the implicit sync is the continuation
-    //
-    // The return value is calculated before the implicit sync
-    Builder.CreateCall(GetCilkSyncFn(CGF), SF);
-
-    Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
-  }
+  SF->setName(stack_frame_name);
 
   return SF;
 }
@@ -806,8 +769,9 @@ void
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
                                  const CilkSpawnStmt &S)
 {
-  // Get or initialize the __cilkrts_stack_frame
-  Value *SF = GetParentStackFrame(CGF);
+  // Get the __cilkrts_stack_frame
+  Value *SF = LookupStackFrame(CGF);
+  assert(SF && "null stack frame unexpected");
 
   BasicBlock *Entry = CGF.createBasicBlock("cilk.spawn.savestate"),
              *Body = CGF.createBasicBlock("cilk.spawn.helpercall"),
@@ -891,8 +855,9 @@ void
 CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
                                  const CilkSpawnCapturedStmt &S)
 {
-  // Get or initialize the __cilkrts_stack_frame
-  Value *SF = GetParentStackFrame(CGF);
+  // Get the __cilkrts_stack_frame
+  Value *SF = LookupStackFrame(CGF);
+  assert(SF && "null stack frame unexpected");
 
   const FunctionDecl *HelperDecl = S.getFunctionDecl();
   assert((HelperDecl->getNumParams() == 1) && "only one argument expected");
@@ -925,7 +890,7 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
 
   // Emit the helper function
   CGM.EmitTopLevelDecl(const_cast<FunctionDecl*>(HelperDecl));
-  llvm::Function *H 
+  llvm::Function *H
     = dyn_cast<llvm::Function>(CGM.GetAddrOfFunction(GlobalDecl(HelperDecl)));
 
   if (!H)
@@ -1015,11 +980,54 @@ void
 CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF,
                                 const CilkSyncStmt &S)
 {
-  // Get the __cilkrts_stackframe, creating it
-  // if it doesn't already exist
-  Value *SF = GetParentStackFrame(CGF);
+  // Elide the sync if there is no stack frame initialized for this function.
+  // This will happen if function only contains _Cilk_sync but no _Cilk_spawn.
+  if (llvm::Value *SF = LookupStackFrame(CGF))
+    CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
+}
 
-  CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
+namespace {
+  enum {
+    ImplicitSyncCleanup = 0x01,
+    ReleaseFrameCleanup = 0x02,
+    ImpSyncAndRelFrameCleanup = ImplicitSyncCleanup | ReleaseFrameCleanup
+  };
+
+  struct CilkSpawnCleanup : EHScopeStack::Cleanup {
+    llvm::Value *SF;
+    unsigned CleanupKind;
+
+    CilkSpawnCleanup(llvm::Value *SF, unsigned K)
+      : SF(SF), CleanupKind(K) {}
+
+    void Emit(CodeGenFunction &CGF, Flags flags) {
+      if (CleanupKind & ImplicitSyncCleanup)
+        CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
+
+      if (CleanupKind & ReleaseFrameCleanup)
+        CGF.Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
+    }
+  };
+}
+
+void CGCilkPlusRuntime::EmitCilkStackFrame(CodeGenFunction &CGF) {
+  llvm::Value *SF = CreateStackFrame(CGF);
+
+  // Need to initialize it by adding the prologue
+  // to the top of the spawning function
+  {
+    assert(CGF.AllocaInsertPt && "not initializied");
+    CGBuilderTy Builder(CGF.AllocaInsertPt);
+    Builder.CreateCall(GetCilkParentPrologue(CGF), SF);
+  }
+
+  // Push cleanups associated to this stack frame initialization.
+  //
+  // Currently we insert an implicit sync followed by releasing the stack frame.
+  // By analyzing the AST, we could elide this implicit sync, if possible.
+  //
+  unsigned Kind = ImpSyncAndRelFrameCleanup;
+  CGF.EHStack.pushCleanup<CilkSpawnCleanup>(NormalAndEHCleanup, SF, Kind);
 }
 
 CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM)
