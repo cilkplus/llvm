@@ -479,6 +479,8 @@ static Function *GetCilkDetachFn(CodeGenFunction &CGF)
 ///     SAVE_FLOAT_STATE(*sf);
 ///     if (!CILK_SETJMP(sf->ctx))
 ///       __cilkrts_sync(sf);
+///     else if (sf->flags & CILK_FRAME_EXCEPTING)
+///       __cilkrts_rethrow(sf);
 ///   }
 ///   ++sf->worker->pedigree.rank;
 /// }
@@ -497,6 +499,8 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF)
   BasicBlock *Entry = BasicBlock::Create(Ctx, "cilk.sync.test", Fn),
              *SaveState = BasicBlock::Create(Ctx, "cilk.sync.savestate", Fn),
              *SyncCall = BasicBlock::Create(Ctx, "cilk.sync.runtimecall", Fn),
+             *Excepting = BasicBlock::Create(Ctx, "cilk.sync.excepting", Fn),
+             *Rethrow = BasicBlock::Create(Ctx, "cilk.sync.rethrow", Fn),
              *Exit = BasicBlock::Create(Ctx, "cilk.sync.end", Fn);
 
   // Entry
@@ -526,7 +530,7 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF)
     // if (!CILK_SETJMP(sf.ctx))
     Value *C = EmitCilkSetJmp(B, SF, CGF);
     C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
-    B.CreateCondBr(C, SyncCall, Exit);
+    B.CreateCondBr(C, SyncCall, Excepting);
   }
 
   // SyncCall
@@ -535,6 +539,25 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF)
 
     // __cilkrts_sync(&sf);
     B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
+    B.CreateBr(Exit);
+  }
+
+  // Excepting
+  {
+    CGBuilderTy B(Excepting);
+    Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
+    Flags = B.CreateAnd(Flags,
+                        ConstantInt::get(Flags->getType(),
+                                         CILK_FRAME_EXCEPTING));
+    Value *Zero = ConstantInt::get(Flags->getType(), 0);
+    Value *C = B.CreateICmpEQ(Flags, Zero);
+    B.CreateCondBr(C, Exit, Rethrow);
+  }
+
+  // Rethrow
+  {
+    CGBuilderTy B(Rethrow);
+    B.CreateCall(CILKRTS_FUNC(rethrow, CGF), SF);
     B.CreateBr(Exit);
   }
 

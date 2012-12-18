@@ -49,7 +49,9 @@ void test1() {
   // CHECK: br i1 {{%[0-9]+}}, label %{{.*}}, label %{{.*}}
 
   // CHECK: call void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
-
+  //
+  // CHECk: call void @__cilkrts_rethrow
+  //
   // Make sure Cilk exits the function properly
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
   // CHECK-NEXT: ret
@@ -84,7 +86,9 @@ void test2() {
 
   // Make sure implicit sync is still added
   // CHECK: call void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
-
+  //
+  // CHECk: call void @__cilkrts_rethrow
+  //
   // Make sure Cilk exits the function properly
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
   // CHECK-NEXT: ret void
