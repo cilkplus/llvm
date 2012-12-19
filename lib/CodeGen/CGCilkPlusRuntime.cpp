@@ -6,11 +6,11 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-//
-// This provides Cilk Plus code generation. The purpose of the runtime is to
-// encapsulate everything for Cilk spawn/sync/for. This includes making calls
-// to the cilkrts library and generating spawn helper functions.
-//
+/// \file
+/// \brief This files implements Cilk Plus code generation. The purpose of the
+/// runtime is to encapsulate everything for Cilk spawn/sync/for. This includes
+/// making calls to the cilkrts library and call to the spawn helper function.
+///
 //===----------------------------------------------------------------------===//
 #include "CGCilkPlusRuntime.h"
 #include "CodeGenFunction.h"
@@ -96,11 +96,10 @@ typedef std::map<llvm::LLVMContext*, llvm::StructType*> TypeBuilderCache;
 
 namespace llvm {
 
-// Specializations of llvm::TypeBuilder for:
-//   __cilkrts_pedigree,
-//   __cilkrts_worker,
-//   __cilkrts_stack_frame
-
+/// Specializations of llvm::TypeBuilder for:
+///   __cilkrts_pedigree,
+///   __cilkrts_worker,
+///   __cilkrts_stack_frame
 template <bool X>
 class TypeBuilder<__cilkrts_pedigree, X> {
 public:
@@ -211,36 +210,7 @@ using namespace clang;
 using namespace CodeGen;
 using namespace llvm;
 
-// The fake runtime can be used to turn Cilk spawn/sync/for statements in the
-// AST into serial code that does not require the cilkrts library. This class
-// is intended to be used mainly for testing everything in Cilk before codegen.
-class CGCilkPlusFakeRuntime : public CGCilkPlusRuntime {
-public:
-  CGCilkPlusFakeRuntime(CodeGenModule &CGM)
-  : CGCilkPlusRuntime(CGM)
-  {}
-
-  ~CGCilkPlusFakeRuntime() {}
-
-  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &S)
-  {
-    CGF.EmitStmt(S.getSubStmt());
-  }
-
-  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnCapturedStmt &S)
-  {
-    CGF.EmitStmt(S.getSubStmt());
-  }
-
-  void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S)
-  {
-    // Nothing to do.
-  }
-
-  //virtual void EmitCilkFor(CodeGenFunction &CGF, const CilkForStmt &S);
-};
-
-// Helper typedefs for cilk struct TypeBuilders.
+/// Helper typedefs for cilk struct TypeBuilders.
 typedef llvm::TypeBuilder<__cilkrts_stack_frame, false> StackFrameBuilder;
 typedef llvm::TypeBuilder<__cilkrts_worker, false> WorkerBuilder;
 typedef llvm::TypeBuilder<__cilkrts_pedigree, false> PedigreeBuilder;
@@ -262,8 +232,8 @@ static Value *LoadField(CGBuilderTy &B, Value *Src, int field)
   return B.CreateLoad(GEP(B, Src, field));
 }
 
-/// Emit inline assembly code to save the floating point
-/// state, for x86 Only
+/// \brief Emit inline assembly code to save the floating point
+/// state, for x86 Only.
 static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF)
 {
   typedef void (AsmPrototype)(uint32_t*, uint16_t*);
@@ -281,10 +251,9 @@ static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF)
   B.CreateCall2(Asm, mxcsrField, fpcsrField);
 }
 
-/// Try to find a function with the given name, creating it if it
-/// doesn't already exists. If the function needed to be created
-/// then return false, signifying that the caller needs to add
-/// the function body
+/// \brief Helper to find a function with the given name, creating it if it
+/// doesn't already exist. If the function needed to be created then return
+/// false, signifying that the caller needs to add the function body.
 static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
                                 Function *&Fn)
 {
@@ -308,10 +277,9 @@ static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
   return false;
 }
 
-/// Return a call to the CILK_SETJMP function
+/// \brief Emit a call to the CILK_SETJMP function.
 static CallInst *EmitCilkSetJmp(CGBuilderTy &B, Value *SF,
-                                CodeGenFunction &CGF)
-{
+                                CodeGenFunction &CGF) {
   LLVMContext &Ctx = CGF.getLLVMContext();
 
   // We always want to save the floating point state too
@@ -345,15 +313,14 @@ static CallInst *EmitCilkSetJmp(CGBuilderTy &B, Value *SF,
   return B.CreateCall(F, Buf);
 }
 
-/// Get or create a LLVM function for __cilkrts_pop_frame.
+/// \brief Get or create a LLVM function for __cilkrts_pop_frame.
 /// It is equivalent to the following C code
 ///
 /// __cilkrts_pop_frame(__cilkrts_stack_frame *sf) {
 ///   sf->worker->current_stack_frame = sf->call_parent;
 ///   sf->call_parent = 0;
 /// }
-static Function *GetCilkPopFrameFn(CodeGenFunction &CGF)
-{
+static Function *GetCilkPopFrameFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilkrts_pop_frame", CGF, Fn))
@@ -383,7 +350,7 @@ static Function *GetCilkPopFrameFn(CodeGenFunction &CGF)
   return Fn;
 }
 
-/// Get or create a LLVM function for __cilkrts_detach.
+/// \brief Get or create a LLVM function for __cilkrts_detach.
 /// It is equivalent to the following C code
 ///
 /// void __cilkrts_detach(struct __cilkrts_stack_frame *sf) {
@@ -401,8 +368,7 @@ static Function *GetCilkPopFrameFn(CodeGenFunction &CGF)
 ///
 ///   sf->flags |= CILK_FRAME_DETACHED;
 /// }
-static Function *GetCilkDetachFn(CodeGenFunction &CGF)
-{
+static Function *GetCilkDetachFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilkrts_detach", CGF, Fn))
@@ -468,7 +434,7 @@ static Function *GetCilkDetachFn(CodeGenFunction &CGF)
   return Fn;
 }
 
-/// Get or create a LLVM function for __cilkrts_detach.
+/// \brief Get or create a LLVM function for __cilkrts_detach.
 /// Calls to this function is always inlined, as it saves
 /// the current stack/frame pointer values
 /// It is equivalent to the following C code
@@ -484,8 +450,7 @@ static Function *GetCilkDetachFn(CodeGenFunction &CGF)
 ///   }
 ///   ++sf->worker->pedigree.rank;
 /// }
-static Function *GetCilkSyncFn(CodeGenFunction &CGF)
-{
+static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilk_sync", CGF, Fn))
@@ -581,14 +546,13 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF)
   return Fn;
 }
 
-/// Get or create a LLVM function for __cilk_parent_prologue.
+/// \brief Get or create a LLVM function for __cilk_parent_prologue.
 /// It is equivalent to the following C code
 ///
-///  void __cilk_parent_prologue(__cilkrts_stack_frame *sf) {
-///    __cilkrts_enter_frame_1(sf);
-///  }
-static Function *GetCilkParentPrologue(CodeGenFunction &CGF)
-{
+/// void __cilk_parent_prologue(__cilkrts_stack_frame *sf) {
+///   __cilkrts_enter_frame_1(sf);
+/// }
+static Function *GetCilkParentPrologue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilk_parent_prologue", CGF, Fn))
@@ -610,16 +574,15 @@ static Function *GetCilkParentPrologue(CodeGenFunction &CGF)
   return Fn;
 }
 
-/// Get or create a LLVM function for __cilk_parent_epilogue.
+/// \brief Get or create a LLVM function for __cilk_parent_epilogue.
 /// It is equivalent to the following C code
 ///
-///  void __cilk_parent_epilogue(__cilkrts_stack_frame *sf) {
-///    __cilkrts_pop_frame(sf);
-///    if (sf->flags != CILK_FRAME_VERSION)
-///      __cilkrts_leave_frame(sf);
-///  }
-static Function *GetCilkParentEpilogue(CodeGenFunction &CGF)
-{
+/// void __cilk_parent_epilogue(__cilkrts_stack_frame *sf) {
+///   __cilkrts_pop_frame(sf);
+///   if (sf->flags != CILK_FRAME_VERSION)
+///     __cilkrts_leave_frame(sf);
+/// }
+static Function *GetCilkParentEpilogue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilk_parent_epilogue", CGF, Fn))
@@ -666,15 +629,14 @@ static Function *GetCilkParentEpilogue(CodeGenFunction &CGF)
   return Fn;
 }
 
-/// Get or create a LLVM function for __cilk_helper_prologue.
+/// \brief Get or create a LLVM function for __cilk_helper_prologue.
 /// It is equivalent to the following C code
 ///
-///  void __cilk_helper_prologue(__cilkrts_stack_frame *sf) {
-///    __cilkrts_enter_frame_fast_1(sf);
-///    __cilkrts_detach(sf);
-///  }
-static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF)
-{
+/// void __cilk_helper_prologue(__cilkrts_stack_frame *sf) {
+///   __cilkrts_enter_frame_fast_1(sf);
+///   __cilkrts_detach(sf);
+/// }
+static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilk_helper_prologue", CGF, Fn))
@@ -699,15 +661,14 @@ static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF)
   return Fn;
 }
 
-/// Get or create a LLVM function for __cilk_helper_epilogue.
+/// \brief Get or create a LLVM function for __cilk_helper_epilogue.
 /// It is equivalent to the following C code
 ///
-///  void __cilk_helper_epilogue(__cilkrts_stack_frame *sf) {
-///    __cilkrts_pop_frame(sf);
-///    __cilkrts_leave_frame(sf);
-///  }
-static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF)
-{
+/// void __cilk_helper_epilogue(__cilkrts_stack_frame *sf) {
+///   __cilkrts_pop_frame(sf);
+///   __cilkrts_leave_frame(sf);
+/// }
+static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilk_helper_epilogue", CGF, Fn))
@@ -738,7 +699,7 @@ static llvm::Value *LookupStackFrame(CodeGenFunction &CGF) {
   return CGF.CurFn->getValueSymbolTable().lookup(stack_frame_name);
 }
 
-/// Create the __cilkrts_stack_frame for the spawning function.
+/// \brief Create the __cilkrts_stack_frame for the spawning function.
 static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
   assert(!LookupStackFrame(CGF) && "already created the stack frame");
 
@@ -753,22 +714,18 @@ static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
 namespace clang {
 namespace CodeGen {
 
-CGCilkPlusRuntime::CGCilkPlusRuntime(CodeGenModule &CGM)
-  : CGM(CGM)
-{
-}
+CGCilkPlusRuntime::CGCilkPlusRuntime(CodeGenModule &CGM) : CGM(CGM) { }
 
-CGCilkPlusRuntime::~CGCilkPlusRuntime()
-{
-}
+CGCilkPlusRuntime::~CGCilkPlusRuntime() { }
 
-// Note: this does codegen for the old CilkSpawnStmt
-// It cannot handle exceptions, and will be removed as
-// soon as captured statements can handle all use cases
-void
-CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                 const CilkSpawnStmt &S)
-{
+/// \brief Emit code the the CilkSpawnStmt.
+///
+/// FIXME: This function creates helper functions using CodeExtractor
+/// which cannot handle exceptions, and should be removed as soon as
+/// captured statements can handle all use cases.
+///
+void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
+                                      const CilkSpawnStmt &S) {
   // Get the __cilkrts_stack_frame
   Value *SF = LookupStackFrame(CGF);
   assert(SF && "null stack frame unexpected");
@@ -851,10 +808,9 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   }
 }
 
-void
-CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                 const CilkSpawnCapturedStmt &S)
-{
+/// \brief Emit code for a CilkSpawnCapturedStmt.
+void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
+                                      const CilkSpawnCapturedStmt &S) {
   // Get the __cilkrts_stack_frame
   Value *SF = LookupStackFrame(CGF);
   assert(SF && "null stack frame unexpected");
@@ -975,11 +931,9 @@ CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   }
 }
 
-/// Emits a call to the __cilk_sync function
-void
-CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF,
-                                const CilkSyncStmt &S)
-{
+/// \brief Emit a call to the __cilk_sync function
+void CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF,
+                                     const CilkSyncStmt &S) {
   // Elide the sync if there is no stack frame initialized for this function.
   // This will happen if function only contains _Cilk_sync but no _Cilk_spawn.
   if (llvm::Value *SF = LookupStackFrame(CGF))
@@ -1010,6 +964,9 @@ namespace {
   };
 }
 
+/// \brief Emit code to create a Cilk stack frame and release it in the end.
+/// This function should be only called once prior to processing function
+/// parameters.
 void CGCilkPlusRuntime::EmitCilkStackFrame(CodeGenFunction &CGF) {
   llvm::Value *SF = CreateStackFrame(CGF);
 
@@ -1030,14 +987,8 @@ void CGCilkPlusRuntime::EmitCilkStackFrame(CodeGenFunction &CGF) {
   CGF.EHStack.pushCleanup<CilkSpawnCleanup>(NormalAndEHCleanup, SF, Kind);
 }
 
-CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM)
-{
+CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM) {
   return new CGCilkPlusRuntime(CGM);
-}
-
-CGCilkPlusRuntime *CreateCilkPlusFakeRuntime(CodeGenModule &CGM)
-{
-  return new CGCilkPlusFakeRuntime(CGM);
 }
 
 } // namespace CodeGen

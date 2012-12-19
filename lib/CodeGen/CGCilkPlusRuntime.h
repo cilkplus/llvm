@@ -1,4 +1,4 @@
-//===----- CGCilkPlusRuntime.h - Interface to CilkPlus Runtimes ---------*- C++ -*-===//
+//===-- CGCilkPlusRuntime.h - Interface to CilkPlus Runtimes ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -6,9 +6,10 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-//
-// This provides Cilk Plus code generation.
-//
+///
+/// \file
+/// \brief This file implements Cilk Plus runtime specific code generation.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef CLANG_CODEGEN_CILKPLUSRUNTIME_H
@@ -31,39 +32,35 @@ namespace llvm {
 namespace clang {
 
 class CilkSpawnStmt;
-class CilkSyncStmt;
 class CilkSpawnCapturedStmt;
+class CilkSyncStmt;
 
 namespace CodeGen {
 
 class CodeGenFunction;
 class CodeGenModule;
 
-/// Implements runtime-specific code generation functions.
+/// \brief Implements Cilk Plus runtime specific code generation functions.
 class CGCilkPlusRuntime {
 private:
   CodeGenModule &CGM;
 
 public:
   CGCilkPlusRuntime(CodeGenModule &CGM);
-  virtual ~CGCilkPlusRuntime();
 
-  virtual void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &E);
+  ~CGCilkPlusRuntime();
 
-  virtual void EmitCilkSpawn(CodeGenFunction &CGF,
-                             const CilkSpawnCapturedStmt &S);
+  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &E);
 
-  virtual void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
-  //virtual void EmitCilkFor(CodeGenFunction &CGF, const CilkForStmt &S);
+  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnCapturedStmt &S);
+
+  void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
 
   void EmitCilkStackFrame(CodeGenFunction &CGF);
 };
 
-/// Creates an instance of a CilkPlus runtime class.
+/// \brief Creates an instance of a Cilk Plus runtime object.
 CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM);
-/// Creates an instance of a fake CilkPlus runtime class
-/// which serializes spawn and sync.
-CGCilkPlusRuntime *CreateCilkPlusFakeRuntime(CodeGenModule &CGM);
 
 } // namespace CodeGen
 } // namespace clang
