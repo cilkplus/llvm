@@ -435,13 +435,14 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   PrologueCleanupDepth = EHStack.stable_begin();
 
   // If this function requires a Cilk stack frame, this emits the stack frame
-  // before processing any function parameters, which makes associated cleanups 
+  // before processing any function parameters, which makes associated cleanups
   // happen last.
   if (getLangOpts().CilkPlus) {
     const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D);
-    if (FD && FD->hasCilkStackFrame()) {
-      CGM.getCilkPlusRuntime().EmitCilkStackFrame(*this);
-    }
+    if (FD && FD->hasCilkStackFrame())
+      CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this);
+    else if (FD && FD->isParallelRegion())
+      CGM.getCilkPlusRuntime().EmitCilkHelperStackFrame(*this);
   }
 
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);

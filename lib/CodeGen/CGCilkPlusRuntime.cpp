@@ -347,6 +347,8 @@ static Function *GetCilkPopFrameFn(CodeGenFunction &CGF) {
 
   B.CreateRetVoid();
 
+  Fn->addFnAttr(Attributes::InlineHint);
+
   return Fn;
 }
 
@@ -430,6 +432,8 @@ static Function *GetCilkDetachFn(CodeGenFunction &CGF) {
   }
 
   B.CreateRetVoid();
+
+  Fn->addFnAttr(Attributes::InlineHint);
 
   return Fn;
 }
@@ -546,6 +550,40 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   return Fn;
 }
 
+/// \brief Get or create a LLVM function to set worker to null value.
+/// It is equivalent to the following C code
+///
+/// This is a utility function to ensure that __cilk_helper_epilogue
+/// skips uninitialized stack frames.
+///
+/// void __cilk_reset_worker(__cilkrts_stack_frame *sf) {
+///   sf->worker = 0;
+/// }
+///
+static Function *GetCilkResetWorkerFn(CodeGenFunction &CGF) {
+  Function *Fn = 0;
+
+  if (GetOrCreateFunction("__cilk_reset_worker", CGF, Fn))
+    return Fn;
+
+  LLVMContext &Ctx = CGF.getLLVMContext();
+  Value *SF = Fn->arg_begin();
+
+  BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", Fn);
+  CGBuilderTy B(Entry);
+
+  // sf->worker = 0;
+  StoreField(B,
+    Constant::getNullValue(TypeBuilder<__cilkrts_worker*, false>::get(Ctx)),
+    SF, StackFrameBuilder::worker);
+
+  B.CreateRetVoid();
+
+  Fn->addFnAttr(Attributes::InlineHint);
+
+  return Fn;
+}
+
 /// \brief Get or create a LLVM function for __cilk_parent_prologue.
 /// It is equivalent to the following C code
 ///
@@ -570,6 +608,8 @@ static Function *GetCilkParentPrologue(CodeGenFunction &CGF) {
   B.CreateCall(CILKRTS_FUNC(enter_frame_1, CGF), SF);
 
   B.CreateRetVoid();
+
+  Fn->addFnAttr(Attributes::InlineHint);
 
   return Fn;
 }
@@ -626,6 +666,8 @@ static Function *GetCilkParentEpilogue(CodeGenFunction &CGF) {
     B.CreateRetVoid();
   }
 
+  Fn->addFnAttr(Attributes::InlineHint);
+
   return Fn;
 }
 
@@ -658,6 +700,8 @@ static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF) {
 
   B.CreateRetVoid();
 
+  Fn->addFnAttr(Attributes::InlineHint);
+
   return Fn;
 }
 
@@ -665,8 +709,10 @@ static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF) {
 /// It is equivalent to the following C code
 ///
 /// void __cilk_helper_epilogue(__cilkrts_stack_frame *sf) {
-///   __cilkrts_pop_frame(sf);
-///   __cilkrts_leave_frame(sf);
+///   if (sf->worker) {
+///     __cilkrts_pop_frame(sf);
+///     __cilkrts_leave_frame(sf);
+///   }
 /// }
 static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF) {
   Function *Fn = 0;
@@ -680,15 +726,38 @@ static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF) {
   Value *SF = Fn->arg_begin();
 
   BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", Fn);
-  CGBuilderTy B(Entry);
+  BasicBlock *Body = BasicBlock::Create(Ctx, "body", Fn);
+  BasicBlock *Exit = BasicBlock::Create(Ctx, "exit", Fn);
 
-  // __cilkrts_pop_frame(sf);
-  B.CreateCall(GetCilkPopFrameFn(CGF), SF);
+  // Entry
+  {
+    CGBuilderTy B(Entry);
 
-  // __cilkrts_leave_frame(sf);
-  B.CreateCall(CILKRTS_FUNC(leave_frame, CGF), SF);
+    // if (sf->worker)
+    Value *C = B.CreateIsNotNull(LoadField(B, SF, StackFrameBuilder::worker));
+    B.CreateCondBr(C, Body, Exit);
+  }
 
-  B.CreateRetVoid();
+  // Body
+  {
+    CGBuilderTy B(Body);
+
+    // __cilkrts_pop_frame(sf);
+    B.CreateCall(GetCilkPopFrameFn(CGF), SF);
+
+    // __cilkrts_leave_frame(sf);
+    B.CreateCall(CILKRTS_FUNC(leave_frame, CGF), SF);
+
+    B.CreateBr(Exit);
+  }
+
+  // Exit
+  {
+    CGBuilderTy B(Exit);
+    B.CreateRetVoid();
+  }
+
+  Fn->addFnAttr(Attributes::InlineHint);
 
   return Fn;
 }
@@ -781,21 +850,30 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     CGF.ErrorUnsupported(&S,
         "unsupported spawning call; cannot find the spawning point");
 
-  assert(SpawnPointMarkerFn->hasOneUse() &&
-         "Multiple uses of spawn pointer marked function");
+  CallInst *SpawnPointCall = 0;
+  for (llvm::Value::use_iterator UI = SpawnPointMarkerFn->use_begin(),
+                                 UE = SpawnPointMarkerFn->use_end();
+                                 UI != UE; ++UI) {
+    assert(isa<CallInst>(*UI) && "should be a call instruction");
+    CallInst *Call = cast<CallInst>(*UI);
+    if (Call->getParent()->getParent() == H) {
+      assert(!SpawnPointCall && "should not call multiple times");
+      SpawnPointCall = Call;
+    }
+  }
+  assert(SpawnPointCall && "should call __cilk_spawn_point");
 
-  CallInst *Call = cast<CallInst>(SpawnPointMarkerFn->use_back());
+  {
+    CGBuilderTy B(SpawnPointCall);
 
-  // Pass the stack frame
-  Instruction *New
-    = CallInst::Create(GetCilkHelperPrologue(CGF),
-                       ArrayRef<Value*>(HelperSF), "", Call);
+    // Initialize the stack frame and detach
+    B.CreateCall(GetCilkHelperPrologue(CGF), HelperSF);
 
-  // Replace the call to the marker function with a call to the
-  // stack frame init/detach function
-  Call->replaceAllUsesWith(New);
-  Call->eraseFromParent();
-  SpawnPointMarkerFn->eraseFromParent();
+    // Cleanup the marker function
+    assert(SpawnPointCall->use_empty() && "should not have any use");
+    SpawnPointCall->eraseFromParent();
+    SpawnPointMarkerFn->eraseFromParent();
+  }
 
   // Add a call to the epilogue right before the function returns
   // We have to do this for all BasicBlocks that have a return statement
@@ -849,12 +927,6 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   llvm::Function *H
     = dyn_cast<llvm::Function>(CGM.GetAddrOfFunction(GlobalDecl(HelperDecl)));
 
-  if (!H)
-    CGF.ErrorUnsupported(&S,
-        "unsupported spawning call; cannot extract into a function");
-
-  H->setLinkage(llvm::Function::InternalLinkage);
-
   BasicBlock *Entry = CGF.createBasicBlock("cilk.spawn.savestate"),
              *Body = CGF.createBasicBlock("cilk.spawn.helpercall"),
              *Exit  = CGF.createBasicBlock("cilk.spawn.continuation");
@@ -880,55 +952,8 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   // The helper function *cannot* be inlined
   H->addFnAttr(Attributes::NoInline);
 
-  // Add a __cilkrts_stack_frame to the helper
-  BasicBlock &BB = H->getEntryBlock();
-  CGBuilderTy Builder(&BB, BB.begin());
-
-  llvm::Type *SFTy = StackFrameBuilder::get(CGF.getLLVMContext());
-  Value *HelperSF = Builder.CreateAlloca(SFTy);
-
-  // Find the location to insert the init/detach call for the stack frame
-  Function *SpawnPointMarkerFn
-    = CGF.CGM.getModule().getFunction("__cilk_spawn_point");
-
-  if (!SpawnPointMarkerFn)
-    CGF.ErrorUnsupported(&S,
-        "unsupported spawning call; cannot find the spawning point");
-
-  CallInst *SpawnPointCall = 0;
-  for (llvm::Value::use_iterator UI = SpawnPointMarkerFn->use_begin(),
-                                 UE = SpawnPointMarkerFn->use_end();
-                                 UI != UE; ++UI) {
-    assert(isa<CallInst>(*UI) && "should be a call instruction");
-    CallInst *Call = cast<CallInst>(*UI);
-    if (Call->getParent()->getParent() == H) {
-      assert(!SpawnPointCall && "should not call multiple times");
-      SpawnPointCall = Call;
-    }
-  }
-  assert(SpawnPointCall && "should call __cilk_spawn_point");
-
-  // Replace the call to the marker function with a call to the
-  // stack frame init/detach function
-  CallInst::Create(GetCilkHelperPrologue(CGF),
-                   ArrayRef<Value*>(HelperSF), "", SpawnPointCall);
-
-  assert(SpawnPointCall->use_empty() && "should not have any use");
-  SpawnPointCall->eraseFromParent();
-
-  // Cleanup if there is no call to the __cilk_spawn_point
-  if (SpawnPointMarkerFn->use_empty())
-      SpawnPointMarkerFn->eraseFromParent();
-
-  // Add a call to the epilogue right before the function returns
-  // We have to do this for all BasicBlocks that have a return statement
-  for (Function::iterator I = H->begin(), E = H->end(); I != E; ++I) {
-    if (!isa<ReturnInst>(I->getTerminator()))
-      continue;
-
-    CGBuilderTy B(&I->getInstList().back());
-    B.CreateCall(GetCilkHelperEpilogue(CGF), HelperSF);
-  }
+  // The helper function should be internal
+  H->setLinkage(Function::InternalLinkage);
 }
 
 /// \brief Emit a call to the __cilk_sync function
@@ -947,11 +972,11 @@ namespace {
     ImpSyncAndRelFrameCleanup = ImplicitSyncCleanup | ReleaseFrameCleanup
   };
 
-  struct CilkSpawnCleanup : EHScopeStack::Cleanup {
+  struct CilkSpawnParentCleanup : EHScopeStack::Cleanup {
     llvm::Value *SF;
     unsigned CleanupKind;
 
-    CilkSpawnCleanup(llvm::Value *SF, unsigned K)
+    CilkSpawnParentCleanup(llvm::Value *SF, unsigned K)
       : SF(SF), CleanupKind(K) {}
 
     void Emit(CodeGenFunction &CGF, Flags flags) {
@@ -962,12 +987,22 @@ namespace {
         CGF.Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
     }
   };
+
+  struct CilkSpawnHelperCleanup : EHScopeStack::Cleanup {
+    llvm::Value *SF;
+
+    explicit CilkSpawnHelperCleanup(llvm::Value *SF) : SF(SF) {}
+
+    void Emit(CodeGenFunction &CGF, Flags flags) {
+      CGF.Builder.CreateCall(GetCilkHelperEpilogue(CGF), SF);
+    }
+  };
 }
 
-/// \brief Emit code to create a Cilk stack frame and release it in the end.
-/// This function should be only called once prior to processing function
-/// parameters.
-void CGCilkPlusRuntime::EmitCilkStackFrame(CodeGenFunction &CGF) {
+/// \brief Emit code to create a Cilk stack frame for the parent function and
+/// release it in the end. This function should be only called once prior to
+/// processing function parameters.
+void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF) {
   llvm::Value *SF = CreateStackFrame(CGF);
 
   // Need to initialize it by adding the prologue
@@ -983,8 +1018,34 @@ void CGCilkPlusRuntime::EmitCilkStackFrame(CodeGenFunction &CGF) {
   // Currently we insert an implicit sync followed by releasing the stack frame.
   // By analyzing the AST, we could elide this implicit sync, if possible.
   //
-  unsigned Kind = ImpSyncAndRelFrameCleanup;
-  CGF.EHStack.pushCleanup<CilkSpawnCleanup>(NormalAndEHCleanup, SF, Kind);
+  unsigned Kind = ImpSyncAndRelFrameCleanup; 
+  CGF.EHStack.pushCleanup<CilkSpawnParentCleanup>(NormalAndEHCleanup, SF, Kind);
+}
+
+/// \brief Emit code to create a Cilk stack frame for the helper function and
+/// release it in the end.
+void CGCilkPlusRuntime::EmitCilkHelperStackFrame(CodeGenFunction &CGF) {
+  llvm::Value *SF = CreateStackFrame(CGF);
+
+  // Initialize the worker to null. If this worker is still null on exit,
+  // then there is no stack frame constructed for spawning and there is no need
+  // to cleanup this stack frame.
+  CGF.Builder.CreateCall(GetCilkResetWorkerFn(CGF), SF);
+
+  // Push cleanups associated to this stack frame initialization.
+  //
+  CGF.EHStack.pushCleanup<CilkSpawnHelperCleanup>(NormalAndEHCleanup, SF);
+}
+
+/// \brief Emit necessary cilk runtime calls prior to call the spawned function.
+/// This include the initialization of the helper stack frame and the detach.
+void CGCilkPlusRuntime::EmitCilkHelperPrologue(CodeGenFunction &CGF) {
+  // Get the __cilkrts_stack_frame
+  Value *SF = LookupStackFrame(CGF);
+  assert(SF && "null stack frame unexpected");
+
+  // Initialize the stack frame and detach
+  CGF.Builder.CreateCall(GetCilkHelperPrologue(CGF), SF);
 }
 
 CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM) {

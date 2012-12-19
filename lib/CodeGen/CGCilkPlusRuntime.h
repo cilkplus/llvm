@@ -56,7 +56,11 @@ public:
 
   void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
 
-  void EmitCilkStackFrame(CodeGenFunction &CGF);
+  void EmitCilkParentStackFrame(CodeGenFunction &CGF);
+
+  void EmitCilkHelperStackFrame(CodeGenFunction &CGF);
+
+  void EmitCilkHelperPrologue(CodeGenFunction &CGF);
 };
 
 /// \brief Creates an instance of a Cilk Plus runtime object.
