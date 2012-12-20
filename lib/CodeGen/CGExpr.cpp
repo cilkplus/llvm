@@ -1680,11 +1680,11 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
         return EmitLValueForField(LambdaLV, FD);
       }
 
-      if (CurCGCilkSpawnInfo) {
-        if (const FieldDecl *FD = CurCGCilkSpawnInfo->lookup(VD)) {
+      if (CurCGCapturedStmtInfo) {
+        if (const FieldDecl *FD = CurCGCapturedStmtInfo->lookup(VD)) {
           QualType TagType = getContext().getTagDeclType(FD->getParent());
           LValue LV
-            = MakeNaturalAlignAddrLValue(CurCGCilkSpawnInfo->getThisValue(),
+            = MakeNaturalAlignAddrLValue(CurCGCapturedStmtInfo->getThisValue(),
                                          TagType);
           
           return EmitLValueForField(LV, FD);

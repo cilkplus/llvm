@@ -895,40 +895,6 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   Value *SF = LookupStackFrame(CGF);
   assert(SF && "null stack frame unexpected");
 
-  const FunctionDecl *HelperDecl = S.getFunctionDecl();
-  assert((HelperDecl->getNumParams() == 1) && "only one argument expected");
-  assert(HelperDecl->hasBody() && "missing function body");
-
-  const RecordDecl *RD = S.getRecordDecl();
-  QualType RecordTy = CGF.getContext().getRecordType(RD);
-
-  // Initialize the captured struct
-  AggValueSlot Slot = CGF.CreateAggTemp(RecordTy, "agg.captured");
-  LValue SlotLV = CGF.MakeAddrLValue(Slot.getAddr(), RecordTy,
-                                     Slot.getAlignment());
-
-  RecordDecl::field_iterator CurField = RD->field_begin();
-  for (CapturedStmt::capture_const_iterator I = S.capture_begin(),
-                                            E = S.capture_end();
-                                            I != E; ++I, ++CurField) {
-    LValue LV = CGF.EmitLValueForFieldInitialization(SlotLV, *CurField);
-    ArrayRef<VarDecl *> ArrayIndexes;
-    CGF.EmitInitializerForField(*CurField, LV, I->getCopyExpr(), ArrayIndexes);
-  }
-
-  // The first argument is the address of captured struct
-  llvm::SmallVector<llvm::Value *, 1> Args;
-  Args.push_back(SlotLV.getAddress());
-
-  CGM.getCaptureDeclMap().insert(
-      std::pair<const FunctionDecl*,
-                const CilkSpawnCapturedStmt*>(HelperDecl, &S));
-
-  // Emit the helper function
-  CGM.EmitTopLevelDecl(const_cast<FunctionDecl*>(HelperDecl));
-  llvm::Function *H
-    = dyn_cast<llvm::Function>(CGM.GetAddrOfFunction(GlobalDecl(HelperDecl)));
-
   BasicBlock *Entry = CGF.createBasicBlock("cilk.spawn.savestate"),
              *Body = CGF.createBasicBlock("cilk.spawn.helpercall"),
              *Exit  = CGF.createBasicBlock("cilk.spawn.continuation");
@@ -947,15 +913,9 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   CGF.EmitBlock(Body);
   {
     // Emit call to the helper function
-    CGF.EmitCallOrInvoke(H, Args);
+    CGF.EmitCapturedStmt(S);
   }
   CGF.EmitBlock(Exit);
-
-  // The helper function *cannot* be inlined
-  H->addFnAttr(Attribute::NoInline);
-
-  // The helper function should be internal
-  H->setLinkage(Function::InternalLinkage);
 }
 
 /// \brief Emit a call to the __cilk_sync function

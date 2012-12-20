@@ -591,9 +591,9 @@ public:
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
 
-  class CGCilkSpawnInfo {
+  class CGCapturedStmtInfo {
   public:
-    explicit CGCilkSpawnInfo(ASTContext &C)
+    explicit CGCapturedStmtInfo(ASTContext &C)
       : Context(C), ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) { }
 
     void setThisValue(llvm::Value *V) { ThisValue = V; }
@@ -611,7 +611,7 @@ public:
       return V == ThisParmVarDecl;
     }
 
-    void initCGCilkSpawnInfo(const CilkSpawnCapturedStmt *S) {
+    void initCGCapturedStmtInfo(const CapturedStmt *S) {
       RecordDecl::field_iterator Field = S->getRecordDecl()->field_begin();
       for (CapturedStmt::capture_const_iterator I = S->capture_begin(),
                                                 E = S->capture_end();
@@ -650,8 +650,8 @@ public:
   ///
   bool EmittingCilkSpawn;
 
-  /// \brief Hold CodeGen info Cilk spawn captured statements
-  CGCilkSpawnInfo *CurCGCilkSpawnInfo;
+  /// \brief Hold CodeGen info for captured statements
+  CGCapturedStmtInfo *CurCGCapturedStmtInfo;
 
   /// \brief Information about implicit syncs used during code generation.
   CGCilkImplicitSyncInfo *CurCGCilkImplicitSyncInfo;
@@ -2104,6 +2104,7 @@ public:
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
   void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   void EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S);
+  void EmitCapturedStmt(const CapturedStmt &S);
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//
@@ -2612,16 +2613,16 @@ public:
   /// SetEmittingCilkSpawn - Set whether a Cilk spawn is being emitted.
   void SetEmittingCilkSpawn(bool b) { EmittingCilkSpawn = b; }
 
-  /// \brief Initialize the CilkSpawnCodeGenInfo
-  void SetCurCGCilkSpawnInfo(CGCilkSpawnInfo *Info) {
-    if (CurCGCilkSpawnInfo)
-      delete CurCGCilkSpawnInfo;
+  /// \brief Initialize the CGCapturedStmtInfo
+  void SetCurCGCapturedStmtInfo(CGCapturedStmtInfo *Info) {
+    if (CurCGCapturedStmtInfo)
+      delete CurCGCapturedStmtInfo;
 
-    CurCGCilkSpawnInfo = Info;
+    CurCGCapturedStmtInfo = Info;
   }
 
-  /// \brief Retrieve the current CilkSpawnCodeGenInfo
-  CGCilkSpawnInfo *GetCurCGCilkSpawnInfo() { return CurCGCilkSpawnInfo; }
+  /// \brief Retrieve the current CGCapturedStmtInfo
+  CGCapturedStmtInfo *GetCurCGCapturedStmtInfo() { return CurCGCapturedStmtInfo; }
 
   //===--------------------------------------------------------------------===//
   //                             Internal Helpers

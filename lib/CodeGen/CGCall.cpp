@@ -1181,15 +1181,15 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       Builder.CreateStore(Zero, ReturnValue);
     }
 
-    // Initialize CurCGCilkSpawnInfo
+    // Initialize CurCGCapturedStmtInfo
     if (FD->isParallelRegion()) {
       typedef CodeGenModule::CaptureDeclMapTy::const_iterator const_iterator;
       const_iterator I = CGM.getCaptureDeclMap().find(FD);
       assert(I != CGM.getCaptureDeclMap().end()
              && "cannot find its associate CapturedStmt");
 
-      CurCGCilkSpawnInfo = new CGCilkSpawnInfo(getContext());
-      CurCGCilkSpawnInfo->initCGCilkSpawnInfo(I->second);
+      CurCGCapturedStmtInfo = new CGCapturedStmtInfo(getContext());
+      CurCGCapturedStmtInfo->initCGCapturedStmtInfo(I->second);
     }
   }
 
@@ -2264,7 +2264,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   //
   if (IsCilkSpawnCall) {
     assert((IsEmittingCilkSpawn() ||
-            GetCurCGCilkSpawnInfo()) && "dangling spawn call expression");
+            GetCurCGCapturedStmtInfo()) && "dangling spawn call expression");
     if (IsEmittingCilkSpawn())
       EmitCilkSpawnPoint();
     else

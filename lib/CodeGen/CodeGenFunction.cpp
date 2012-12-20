@@ -36,7 +36,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     Target(CGM.getContext().getTargetInfo()),
     Builder(cgm.getModule().getContext()),
     EmittingCilkSpawn(false),
-    CurCGCilkSpawnInfo(0),
+    CurCGCapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getLangOpts().SanitizeNull |
                              CGM.getLangOpts().SanitizeAlignment |
@@ -70,11 +70,11 @@ CodeGenFunction::~CodeGenFunction() {
   if (FirstBlockInfo)
     destroyBlockInfos(FirstBlockInfo);
 
-  if (CurCGCilkSpawnInfo)
-    delete CurCGCilkSpawnInfo;
-
   if (CurCGCilkImplicitSyncInfo)
     delete CurCGCilkImplicitSyncInfo;
+
+  if (CurCGCapturedStmtInfo)
+    delete CurCGCapturedStmtInfo;
 }
 
 
@@ -486,12 +486,12 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     }
   }
 
-  // If CFG is emitting a cilk spawn and 'this' is captured,
+  // If CFG is emitting a captured statement and 'this' is captured,
   // load it into CXXThisValue;
-  if (CurCGCilkSpawnInfo && CurCGCilkSpawnInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = CurCGCilkSpawnInfo->getThisFieldDecl();
+  if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CurCGCapturedStmtInfo->getThisFieldDecl();
     QualType TagType = getContext().getTagDeclType(FD->getParent());
-    LValue LV = MakeNaturalAlignAddrLValue(CurCGCilkSpawnInfo->getThisValue(), TagType);
+    LValue LV = MakeNaturalAlignAddrLValue(CurCGCapturedStmtInfo->getThisValue(), TagType);
     LValue ThisLValue = EmitLValueForField(LV, FD);
 
     CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();

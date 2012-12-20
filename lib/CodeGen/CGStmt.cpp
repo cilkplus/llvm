@@ -23,6 +23,8 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/Support/CallSite.h"
+
 using namespace clang;
 using namespace CodeGen;
 
@@ -1711,4 +1713,51 @@ void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
 void
 CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
   CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
+}
+
+void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
+  const FunctionDecl *HelperDecl = S.getFunctionDecl();
+  assert((HelperDecl->getNumParams() == 1) && "only one argument expected");
+  assert(HelperDecl->hasBody() && "missing function body");
+
+  const RecordDecl *RD = S.getRecordDecl();
+  QualType RecordTy = getContext().getRecordType(RD);
+
+  // Initialize the captured struct
+  AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
+  LValue SlotLV = MakeAddrLValue(Slot.getAddr(), RecordTy,
+                                     Slot.getAlignment());
+
+  RecordDecl::field_iterator CurField = RD->field_begin();
+  for (CapturedStmt::capture_const_iterator I = S.capture_begin(),
+                                            E = S.capture_end();
+                                            I != E; ++I, ++CurField) {
+    LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
+    ArrayRef<VarDecl *> ArrayIndexes;
+    EmitInitializerForField(*CurField, LV, I->getCopyExpr(), ArrayIndexes);
+  }
+
+  // The first argument is the address of captured struct
+  llvm::SmallVector<llvm::Value *, 1> Args;
+  Args.push_back(SlotLV.getAddress());
+
+  CGM.getCaptureDeclMap().insert(
+      std::pair<const FunctionDecl*,
+                const CapturedStmt*>(HelperDecl, &S));
+
+  // Emit the helper function
+  CGM.EmitTopLevelDecl(const_cast<FunctionDecl*>(HelperDecl));
+  llvm::Function *H
+    = dyn_cast<llvm::Function>(CGM.GetAddrOfFunction(GlobalDecl(HelperDecl)));
+
+  // The helper function *cannot* be inlined, as
+  // that would defeat the purpose of outlining it
+  // in the first place
+  H->addFnAttr(llvm::Attribute::NoInline);
+
+  // The helper function should be internal
+  H->setLinkage(llvm::Function::InternalLinkage);
+
+  // Emit call to the helper function
+  EmitCallOrInvoke(H, Args);
 }

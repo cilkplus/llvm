@@ -240,10 +240,10 @@ class CodeGenModule : public CodeGenTypeCache {
   llvm::MDNode *NoObjCARCExceptionsMetadata;
   RREntrypoints *RRData;
 
-  /// \brief A map between function decls to be emitted and its associted
+  /// \brief A map between function decls to be emitted and its associated
   /// captured statements.
   llvm::DenseMap<const FunctionDecl*,
-                 const CilkSpawnCapturedStmt*> CaptureDeclMap;
+                 const CapturedStmt*> CaptureDeclMap;
 
   // WeakRefReferences - A set of references that have only been seen via
   // a weakref so far. This is used to remove the weak of the reference if we ever
@@ -409,7 +409,7 @@ public:
   }
 
   typedef llvm::DenseMap<const FunctionDecl*,
-                         const CilkSpawnCapturedStmt*> CaptureDeclMapTy;
+                         const CapturedStmt*> CaptureDeclMapTy;
 
   CaptureDeclMapTy& getCaptureDeclMap() {
     return CaptureDeclMap;

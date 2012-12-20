@@ -1573,8 +1573,8 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
   DMEntry = DeclPtr;
 
   // The captured record (passed as the first parameter) is the base address.
-  if (CurCGCilkSpawnInfo && CurCGCilkSpawnInfo->isThisParmVarDecl(&D)) {
-    CurCGCilkSpawnInfo->setThisValue(Builder.CreateLoad(DeclPtr));
+  if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isThisParmVarDecl(&D)) {
+    CurCGCapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
   }
 
   // Emit debug info for param declaration.
