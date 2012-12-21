@@ -51,7 +51,7 @@ namespace stack_frame_cleanup {
     // CHECK_HELPER_F1: invoke void @_ZN19stack_frame_cleanup1CC1Ev
     //
     // CHECK_HELPER_F1: call void @__cilk_helper_prologue
-    // CHECK_HELPER_F1-NETT: invoke void @_ZN19stack_frame_cleanup2f1INS_1CEEEvT_
+    // CHECK_HELPER_F1-NEXT: invoke void @_ZN19stack_frame_cleanup2f1INS_1CEEEvT_
     //
     // * Normal exit *
     //
