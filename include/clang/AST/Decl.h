@@ -1484,7 +1484,7 @@ private:
   bool IsLateTemplateParsed : 1;
   bool IsConstexpr : 1;
   bool IsParallelRegion : 1;
-  bool HasCilkStackFrame: 1;
+  bool IsSpawning: 1;
 
   /// \brief Indicates if the function was a definition but its body was
   /// skipped.
@@ -1575,7 +1575,7 @@ protected:
       HasImplicitReturnZero(false), IsLateTemplateParsed(false),
       IsConstexpr(isConstexprSpecified),
       IsParallelRegion(false),
-      HasCilkStackFrame(false),
+      IsSpawning(false),
       HasSkippedBody(false),
       EndRangeLoc(NameInfo.getEndLoc()),
       TemplateOrSpecialization(),
@@ -1755,12 +1755,14 @@ public:
   bool isConstexpr() const { return IsConstexpr; }
   void setConstexpr(bool IC) { IsConstexpr = IC; }
 
+  /// \brief Whether this function is for a parallel region. For Cilk Plus,
+  /// the helper function is a parallel region.
   bool isParallelRegion() const { return IsParallelRegion; }
   void setParallelRegion(bool v = true) { IsParallelRegion = v; }
 
-  /// \brief Whether this function needs to emit a Cilk stack frame.
-  bool hasCilkStackFrame() const { return HasCilkStackFrame; }
-  void setCilkStackFrame(bool v = true) { HasCilkStackFrame = v; }
+  /// \brief Whether this function is a Cilk spawning function.
+  bool isSpawning() const { return IsSpawning; }
+  void setSpawning(bool v = true) { IsSpawning = v; }
 
   /// \brief Whether this function has been deleted.
   ///

@@ -493,7 +493,7 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
     while (!DC->isFunctionOrMethod())
       DC = DC->getParent();
 
-    FunctionDecl::castFromDeclContext(DC)->setCilkStackFrame(true);
+    FunctionDecl::castFromDeclContext(DC)->setSpawning(true);
 
     assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
     bool Dependent = CurContext->isDependentContext();
