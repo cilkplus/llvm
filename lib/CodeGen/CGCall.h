@@ -19,7 +19,7 @@
 #include "clang/AST/CanonicalType.h"
 #include "clang/AST/Type.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/Value.h"
+#include "llvm/IR/Value.h"
 
 // FIXME: Restructure so we don't have to expose so much stuff.
 #include "ABIInfo.h"
@@ -134,7 +134,7 @@ namespace CodeGen {
     }
 
     bool allowsOptionalArgs() const { return NumRequired != ~0U; }
-    bool getNumRequiredArgs() const {
+    unsigned getNumRequiredArgs() const {
       assert(allowsOptionalArgs());
       return NumRequired;
     }

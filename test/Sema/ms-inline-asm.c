@@ -1,5 +1,5 @@
 // REQUIRES: x86-64-registered-target
-// RUN: %clang_cc1 %s -triple x86_64-apple-darwin10 -fms-extensions -fenable-experimental-ms-inline-asm -Wno-microsoft -verify -fsyntax-only
+// RUN: %clang_cc1 %s -triple x86_64-apple-darwin10 -fasm-blocks -fenable-experimental-ms-inline-asm -Wno-microsoft -verify -fsyntax-only
 
 void t1(void) { 
  __asm __asm // expected-error {{__asm used with no assembly instructions}}
@@ -31,5 +31,8 @@ void f() {
   __asm {
     mov eax, LENGTH foo // expected-error {{Unsupported directive!}}
   }
-
+  f();
+  __asm {
+    mov eax, TYPE bar // expected-error {{Unable to lookup TYPE of expr!}}
+  }
 }

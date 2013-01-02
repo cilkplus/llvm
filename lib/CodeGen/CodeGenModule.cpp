@@ -38,11 +38,11 @@
 #include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/CallingConv.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Module.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/Mangler.h"
@@ -542,7 +542,7 @@ void CodeGenModule::SetLLVMFunctionAttributes(const Decl *D,
   unsigned CallingConv;
   AttributeListType AttributeList;
   ConstructAttributeList(Info, D, AttributeList, CallingConv);
-  F->setAttributes(llvm::AttrListPtr::get(getLLVMContext(), AttributeList));
+  F->setAttributes(llvm::AttributeSet::get(getLLVMContext(), AttributeList));
   F->setCallingConv(static_cast<llvm::CallingConv::ID>(CallingConv));
 }
 
@@ -572,28 +572,29 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
     F->setHasUWTable();
 
   if (!hasUnwindExceptions(LangOpts))
-    F->addFnAttr(llvm::Attributes::NoUnwind);
+    F->addFnAttr(llvm::Attribute::NoUnwind);
 
   if (D->hasAttr<NakedAttr>()) {
     // Naked implies noinline: we should not be inlining such functions.
-    F->addFnAttr(llvm::Attributes::Naked);
-    F->addFnAttr(llvm::Attributes::NoInline);
+    F->addFnAttr(llvm::Attribute::Naked);
+    F->addFnAttr(llvm::Attribute::NoInline);
   }
 
   if (D->hasAttr<NoInlineAttr>())
-    F->addFnAttr(llvm::Attributes::NoInline);
+    F->addFnAttr(llvm::Attribute::NoInline);
 
   // (noinline wins over always_inline, and we can't specify both in IR)
   if ((D->hasAttr<AlwaysInlineAttr>() || D->hasAttr<ForceInlineAttr>()) &&
-      !F->getFnAttributes().hasAttribute(llvm::Attributes::NoInline))
-    F->addFnAttr(llvm::Attributes::AlwaysInline);
+      !F->getAttributes().hasAttribute(llvm::AttributeSet::FunctionIndex,
+                                       llvm::Attribute::NoInline))
+    F->addFnAttr(llvm::Attribute::AlwaysInline);
 
   // FIXME: Communicate hot and cold attributes to LLVM more directly.
   if (D->hasAttr<ColdAttr>())
-    F->addFnAttr(llvm::Attributes::OptimizeForSize);
+    F->addFnAttr(llvm::Attribute::OptimizeForSize);
 
   if (D->hasAttr<MinSizeAttr>())
-    F->addFnAttr(llvm::Attributes::MinSize);
+    F->addFnAttr(llvm::Attribute::MinSize);
 
   if (isa<CXXConstructorDecl>(D) || isa<CXXDestructorDecl>(D))
     F->setUnnamedAddr(true);
@@ -603,15 +604,15 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
       F->setUnnamedAddr(true);
 
   if (LangOpts.getStackProtector() == LangOptions::SSPOn)
-    F->addFnAttr(llvm::Attributes::StackProtect);
+    F->addFnAttr(llvm::Attribute::StackProtect);
   else if (LangOpts.getStackProtector() == LangOptions::SSPReq)
-    F->addFnAttr(llvm::Attributes::StackProtectReq);
+    F->addFnAttr(llvm::Attribute::StackProtectReq);
   
   if (LangOpts.SanitizeAddress) {
     // When AddressSanitizer is enabled, set AddressSafety attribute
     // unless __attribute__((no_address_safety_analysis)) is used.
     if (!D->hasAttr<NoAddressSafetyAnalysisAttr>())
-      F->addFnAttr(llvm::Attributes::AddressSafety);
+      F->addFnAttr(llvm::Attribute::AddressSafety);
   }
 
   unsigned alignment = D->getMaxAlignment() / Context.getCharWidth();
@@ -1115,7 +1116,7 @@ llvm::Constant *
 CodeGenModule::GetOrCreateLLVMFunction(StringRef MangledName,
                                        llvm::Type *Ty,
                                        GlobalDecl D, bool ForVTable,
-                                       llvm::Attributes ExtraAttrs) {
+                                       llvm::Attribute ExtraAttrs) {
   // Lookup the entry, lazily creating it if necessary.
   llvm::GlobalValue *Entry = GetGlobalValue(MangledName);
   if (Entry) {
@@ -1152,7 +1153,7 @@ CodeGenModule::GetOrCreateLLVMFunction(StringRef MangledName,
   if (D.getDecl())
     SetFunctionAttributes(D, F, IsIncompleteFunction);
   if (ExtraAttrs.hasAttributes())
-    F->addAttribute(llvm::AttrListPtr::FunctionIndex, ExtraAttrs);
+    F->addAttribute(llvm::AttributeSet::FunctionIndex, ExtraAttrs);
 
   // This is the first use or definition of a mangled name.  If there is a
   // deferred decl with this name, remember that we need to emit it at the end
@@ -1223,7 +1224,7 @@ llvm::Constant *CodeGenModule::GetAddrOfFunction(GlobalDecl GD,
 llvm::Constant *
 CodeGenModule::CreateRuntimeFunction(llvm::FunctionType *FTy,
                                      StringRef Name,
-                                     llvm::Attributes ExtraAttrs) {
+                                     llvm::Attribute ExtraAttrs) {
   return GetOrCreateLLVMFunction(Name, FTy, GlobalDecl(), /*ForVTable=*/false,
                                  ExtraAttrs);
 }
@@ -1794,6 +1795,114 @@ CodeGenModule::GetLLVMLinkageVarDefinition(const VarDecl *D,
   return llvm::GlobalVariable::ExternalLinkage;
 }
 
+/// Replace the uses of a function that was declared with a non-proto type.
+/// We want to silently drop extra arguments from call sites
+static void replaceUsesOfNonProtoConstant(llvm::Constant *old,
+                                          llvm::Function *newFn) {
+  // Fast path.
+  if (old->use_empty()) return;
+
+  llvm::Type *newRetTy = newFn->getReturnType();
+  SmallVector<llvm::Value*, 4> newArgs;
+
+  for (llvm::Value::use_iterator ui = old->use_begin(), ue = old->use_end();
+         ui != ue; ) {
+    llvm::Value::use_iterator use = ui++; // Increment before the use is erased.
+    llvm::User *user = *use;
+
+    // Recognize and replace uses of bitcasts.  Most calls to
+    // unprototyped functions will use bitcasts.
+    if (llvm::ConstantExpr *bitcast = dyn_cast<llvm::ConstantExpr>(user)) {
+      if (bitcast->getOpcode() == llvm::Instruction::BitCast)
+        replaceUsesOfNonProtoConstant(bitcast, newFn);
+      continue;
+    }
+
+    // Recognize calls to the function.
+    llvm::CallSite callSite(user);
+    if (!callSite) continue;
+    if (!callSite.isCallee(use)) continue;
+
+    // If the return types don't match exactly, then we can't
+    // transform this call unless it's dead.
+    if (callSite->getType() != newRetTy && !callSite->use_empty())
+      continue;
+
+    // Get the call site's attribute list.
+    llvm::SmallVector<llvm::AttributeWithIndex, 8> newAttrs;
+    llvm::AttributeSet oldAttrs = callSite.getAttributes();
+
+    // Collect any return attributes from the call.
+    llvm::Attribute returnAttrs = oldAttrs.getRetAttributes();
+    if (returnAttrs.hasAttributes())
+      newAttrs.push_back(llvm::AttributeWithIndex::get(
+                                llvm::AttributeSet::ReturnIndex, returnAttrs));
+
+    // If the function was passed too few arguments, don't transform.
+    unsigned newNumArgs = newFn->arg_size();
+    if (callSite.arg_size() < newNumArgs) continue;
+
+    // If extra arguments were passed, we silently drop them.
+    // If any of the types mismatch, we don't transform.
+    unsigned argNo = 0;
+    bool dontTransform = false;
+    for (llvm::Function::arg_iterator ai = newFn->arg_begin(),
+           ae = newFn->arg_end(); ai != ae; ++ai, ++argNo) {
+      if (callSite.getArgument(argNo)->getType() != ai->getType()) {
+        dontTransform = true;
+        break;
+      }
+
+      // Add any parameter attributes.
+      llvm::Attribute pAttrs = oldAttrs.getParamAttributes(argNo + 1);
+      if (pAttrs.hasAttributes())
+        newAttrs.push_back(llvm::AttributeWithIndex::get(argNo + 1, pAttrs));
+    }
+    if (dontTransform)
+      continue;
+
+    llvm::Attribute fnAttrs = oldAttrs.getFnAttributes();
+    if (fnAttrs.hasAttributes())
+      newAttrs.push_back(llvm::
+                       AttributeWithIndex::get(llvm::AttributeSet::FunctionIndex,
+                                               fnAttrs));
+
+    // Okay, we can transform this.  Create the new call instruction and copy
+    // over the required information.
+    newArgs.append(callSite.arg_begin(), callSite.arg_begin() + argNo);
+
+    llvm::CallSite newCall;
+    if (callSite.isCall()) {
+      newCall = llvm::CallInst::Create(newFn, newArgs, "",
+                                       callSite.getInstruction());
+    } else {
+      llvm::InvokeInst *oldInvoke =
+        cast<llvm::InvokeInst>(callSite.getInstruction());
+      newCall = llvm::InvokeInst::Create(newFn,
+                                         oldInvoke->getNormalDest(),
+                                         oldInvoke->getUnwindDest(),
+                                         newArgs, "",
+                                         callSite.getInstruction());
+    }
+    newArgs.clear(); // for the next iteration
+
+    if (!newCall->getType()->isVoidTy())
+      newCall->takeName(callSite.getInstruction());
+    newCall.setAttributes(
+                     llvm::AttributeSet::get(newFn->getContext(), newAttrs));
+    newCall.setCallingConv(callSite.getCallingConv());
+
+    // Finally, remove the old call, replacing any uses with the new one.
+    if (!callSite->use_empty())
+      callSite->replaceAllUsesWith(newCall.getInstruction());
+
+    // Copy debug location attached to CI.
+    if (!callSite->getDebugLoc().isUnknown())
+      newCall->setDebugLoc(callSite->getDebugLoc());
+    callSite->eraseFromParent();
+  }
+}
+
 /// ReplaceUsesOfNonProtoTypeWithRealFunction - This function is called when we
 /// implement a function with no prototype, e.g. "int foo() {}".  If there are
 /// existing call uses of the old function in the module, this adjusts them to
@@ -1806,85 +1915,9 @@ CodeGenModule::GetLLVMLinkageVarDefinition(const VarDecl *D,
 static void ReplaceUsesOfNonProtoTypeWithRealFunction(llvm::GlobalValue *Old,
                                                       llvm::Function *NewFn) {
   // If we're redefining a global as a function, don't transform it.
-  llvm::Function *OldFn = dyn_cast<llvm::Function>(Old);
-  if (OldFn == 0) return;
+  if (!isa<llvm::Function>(Old)) return;
 
-  llvm::Type *NewRetTy = NewFn->getReturnType();
-  SmallVector<llvm::Value*, 4> ArgList;
-
-  for (llvm::Value::use_iterator UI = OldFn->use_begin(), E = OldFn->use_end();
-       UI != E; ) {
-    // TODO: Do invokes ever occur in C code?  If so, we should handle them too.
-    llvm::Value::use_iterator I = UI++; // Increment before the CI is erased.
-    llvm::CallInst *CI = dyn_cast<llvm::CallInst>(*I);
-    if (!CI) continue; // FIXME: when we allow Invoke, just do CallSite CS(*I)
-    llvm::CallSite CS(CI);
-    if (!CI || !CS.isCallee(I)) continue;
-
-    // If the return types don't match exactly, and if the call isn't dead, then
-    // we can't transform this call.
-    if (CI->getType() != NewRetTy && !CI->use_empty())
-      continue;
-
-    // Get the attribute list.
-    llvm::SmallVector<llvm::AttributeWithIndex, 8> AttrVec;
-    llvm::AttrListPtr AttrList = CI->getAttributes();
-
-    // Get any return attributes.
-    llvm::Attributes RAttrs = AttrList.getRetAttributes();
-
-    // Add the return attributes.
-    if (RAttrs.hasAttributes())
-      AttrVec.push_back(llvm::
-                        AttributeWithIndex::get(llvm::AttrListPtr::ReturnIndex,
-                                                RAttrs));
-
-    // If the function was passed too few arguments, don't transform.  If extra
-    // arguments were passed, we silently drop them.  If any of the types
-    // mismatch, we don't transform.
-    unsigned ArgNo = 0;
-    bool DontTransform = false;
-    for (llvm::Function::arg_iterator AI = NewFn->arg_begin(),
-         E = NewFn->arg_end(); AI != E; ++AI, ++ArgNo) {
-      if (CS.arg_size() == ArgNo ||
-          CS.getArgument(ArgNo)->getType() != AI->getType()) {
-        DontTransform = true;
-        break;
-      }
-
-      // Add any parameter attributes.
-      llvm::Attributes PAttrs = AttrList.getParamAttributes(ArgNo + 1);
-      if (PAttrs.hasAttributes())
-        AttrVec.push_back(llvm::AttributeWithIndex::get(ArgNo + 1, PAttrs));
-    }
-    if (DontTransform)
-      continue;
-
-    llvm::Attributes FnAttrs =  AttrList.getFnAttributes();
-    if (FnAttrs.hasAttributes())
-      AttrVec.push_back(llvm::
-                       AttributeWithIndex::get(llvm::AttrListPtr::FunctionIndex,
-                                               FnAttrs));
-
-    // Okay, we can transform this.  Create the new call instruction and copy
-    // over the required information.
-    ArgList.append(CS.arg_begin(), CS.arg_begin() + ArgNo);
-    llvm::CallInst *NewCall = llvm::CallInst::Create(NewFn, ArgList, "", CI);
-    ArgList.clear();
-    if (!NewCall->getType()->isVoidTy())
-      NewCall->takeName(CI);
-    NewCall->setAttributes(llvm::AttrListPtr::get(OldFn->getContext(), AttrVec));
-    NewCall->setCallingConv(CI->getCallingConv());
-
-    // Finally, remove the old call, replacing any uses with the new one.
-    if (!CI->use_empty())
-      CI->replaceAllUsesWith(NewCall);
-
-    // Copy debug location attached to CI.
-    if (!CI->getDebugLoc().isUnknown())
-      NewCall->setDebugLoc(CI->getDebugLoc());
-    CI->eraseFromParent();
-  }
+  replaceUsesOfNonProtoConstant(Old, NewFn);
 }
 
 void CodeGenModule::HandleCXXStaticMemberVarInstantiation(VarDecl *VD) {
@@ -1930,10 +1963,14 @@ void CodeGenModule::EmitGlobalFunctionDefinition(GlobalDecl GD) {
     OldFn->setName(StringRef());
     llvm::Function *NewFn = cast<llvm::Function>(GetAddrOfFunction(GD, Ty));
 
-    // If this is an implementation of a function without a prototype, try to
-    // replace any existing uses of the function (which may be calls) with uses
-    // of the new function
-    if (D->getType()->isFunctionNoProtoType()) {
+    // This might be an implementation of a function without a
+    // prototype, in which case, try to do special replacement of
+    // calls which match the new prototype.  The really key thing here
+    // is that we also potentially drop arguments from the call site
+    // so as to make a direct call, which makes the inliner happier
+    // and suppresses a number of optimizer warnings (!) about
+    // dropping arguments.
+    if (!OldFn->use_empty()) {
       ReplaceUsesOfNonProtoTypeWithRealFunction(OldFn, NewFn);
       OldFn->removeDeadConstantUsers();
     }

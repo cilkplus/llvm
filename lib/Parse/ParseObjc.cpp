@@ -65,7 +65,7 @@ Parser::DeclGroupPtrTy Parser::ParseObjCAtDirectives() {
   case tok::objc_dynamic:
     SingleDecl = ParseObjCPropertyDynamic(AtLoc);
     break;
-  case tok::objc___experimental_modules_import:
+  case tok::objc_import:
     if (getLangOpts().Modules)
       return ParseModuleImport(AtLoc);
       
@@ -1200,12 +1200,8 @@ ParseObjCProtocolReferences(SmallVectorImpl<Decl *> &Protocols,
   }
 
   // Consume the '>'.
-  if (Tok.isNot(tok::greater)) {
-    Diag(Tok, diag::err_expected_greater);
+  if (ParseGreaterThanInTemplateList(EndLoc, /*ConsumeLastToken=*/true))
     return true;
-  }
-
-  EndLoc = ConsumeToken();
 
   // Convert the list of protocols identifiers into a list of protocol decls.
   Actions.FindProtocolDeclaration(WarnOnDeclarations,
@@ -1540,7 +1536,7 @@ Parser::ParseObjCAtImplementationDeclaration(SourceLocation AtLoc) {
     ObjCImplParsingDataRAII ObjCImplParsing(*this, ObjCImpDecl);
     while (!ObjCImplParsing.isFinished() && Tok.isNot(tok::eof)) {
       ParsedAttributesWithRange attrs(AttrFactory);
-      MaybeParseCXX0XAttributes(attrs);
+      MaybeParseCXX11Attributes(attrs);
       MaybeParseMicrosoftAttributes(attrs);
       if (DeclGroupPtrTy DGP = ParseExternalDeclaration(attrs)) {
         DeclGroupRef DG = DGP.get();
@@ -2593,8 +2589,8 @@ ExprResult Parser::ParseObjCStringLiteral(SourceLocation AtLoc) {
     AtStrings.push_back(Lit.release());
   }
 
-  return Owned(Actions.ParseObjCStringLiteral(&AtLocs[0], AtStrings.data(),
-                                              AtStrings.size()));
+  return Actions.ParseObjCStringLiteral(&AtLocs[0], AtStrings.data(),
+                                        AtStrings.size());
 }
 
 /// ParseObjCBooleanLiteral -
@@ -2617,7 +2613,7 @@ ExprResult Parser::ParseObjCCharacterLiteral(SourceLocation AtLoc) {
     return Lit;
   }
   ConsumeToken(); // Consume the literal token.
-  return Owned(Actions.BuildObjCNumericLiteral(AtLoc, Lit.take()));
+  return Actions.BuildObjCNumericLiteral(AtLoc, Lit.take());
 }
 
 /// ParseObjCNumericLiteral -
@@ -2631,7 +2627,7 @@ ExprResult Parser::ParseObjCNumericLiteral(SourceLocation AtLoc) {
     return Lit;
   }
   ConsumeToken(); // Consume the literal token.
-  return Owned(Actions.BuildObjCNumericLiteral(AtLoc, Lit.take()));
+  return Actions.BuildObjCNumericLiteral(AtLoc, Lit.take());
 }
 
 /// ParseObjCBoxedExpr -
@@ -2655,8 +2651,8 @@ Parser::ParseObjCBoxedExpr(SourceLocation AtLoc) {
   // a boxed expression from a literal.
   SourceLocation LPLoc = T.getOpenLocation(), RPLoc = T.getCloseLocation();
   ValueExpr = Actions.ActOnParenExpr(LPLoc, RPLoc, ValueExpr.take());
-  return Owned(Actions.BuildObjCBoxedExpr(SourceRange(AtLoc, RPLoc),
-                                          ValueExpr.take()));
+  return Actions.BuildObjCBoxedExpr(SourceRange(AtLoc, RPLoc),
+                                    ValueExpr.take());
 }
 
 ExprResult Parser::ParseObjCArrayLiteral(SourceLocation AtLoc) {
@@ -2689,7 +2685,7 @@ ExprResult Parser::ParseObjCArrayLiteral(SourceLocation AtLoc) {
   }
   SourceLocation EndLoc = ConsumeBracket(); // location of ']'
   MultiExprArg Args(ElementExprs);
-  return Owned(Actions.BuildObjCArrayLiteral(SourceRange(AtLoc, EndLoc), Args));
+  return Actions.BuildObjCArrayLiteral(SourceRange(AtLoc, EndLoc), Args);
 }
 
 ExprResult Parser::ParseObjCDictionaryLiteral(SourceLocation AtLoc) {
@@ -2745,9 +2741,8 @@ ExprResult Parser::ParseObjCDictionaryLiteral(SourceLocation AtLoc) {
   SourceLocation EndLoc = ConsumeBrace();
   
   // Create the ObjCDictionaryLiteral.
-  return Owned(Actions.BuildObjCDictionaryLiteral(SourceRange(AtLoc, EndLoc),
-                                                  Elements.data(),
-                                                  Elements.size()));
+  return Actions.BuildObjCDictionaryLiteral(SourceRange(AtLoc, EndLoc),
+                                            Elements.data(), Elements.size());
 }
 
 ///    objc-encode-expression:
@@ -2771,9 +2766,8 @@ Parser::ParseObjCEncodeExpression(SourceLocation AtLoc) {
   if (Ty.isInvalid())
     return ExprError();
 
-  return Owned(Actions.ParseObjCEncodeExpression(AtLoc, EncLoc,
-                                                 T.getOpenLocation(), Ty.get(),
-                                                 T.getCloseLocation()));
+  return Actions.ParseObjCEncodeExpression(AtLoc, EncLoc, T.getOpenLocation(),
+                                           Ty.get(), T.getCloseLocation());
 }
 
 ///     objc-protocol-expression
@@ -2796,10 +2790,9 @@ Parser::ParseObjCProtocolExpression(SourceLocation AtLoc) {
 
   T.consumeClose();
 
-  return Owned(Actions.ParseObjCProtocolExpression(protocolId, AtLoc, ProtoLoc,
-                                                   T.getOpenLocation(),
-                                                   ProtoIdLoc,
-                                                   T.getCloseLocation()));
+  return Actions.ParseObjCProtocolExpression(protocolId, AtLoc, ProtoLoc,
+                                             T.getOpenLocation(), ProtoIdLoc,
+                                             T.getCloseLocation());
 }
 
 ///     objc-selector-expression
@@ -2860,9 +2853,9 @@ ExprResult Parser::ParseObjCSelectorExpression(SourceLocation AtLoc) {
   }
   T.consumeClose();
   Selector Sel = PP.getSelectorTable().getSelector(nColons, &KeyIdents[0]);
-  return Owned(Actions.ParseObjCSelectorExpression(Sel, AtLoc, SelectorLoc,
-                                                   T.getOpenLocation(),
-                                                   T.getCloseLocation()));
+  return Actions.ParseObjCSelectorExpression(Sel, AtLoc, SelectorLoc,
+                                             T.getOpenLocation(),
+                                             T.getCloseLocation());
  }
 
 void Parser::ParseLexedObjCMethodDefs(LexedMethod &LM, bool parseMethod) {

@@ -46,6 +46,16 @@ class CallEvent;
 class SimpleCall;
 
 class ExprEngine : public SubEngine {
+public:
+  /// The modes of inlining.
+  enum InliningModes {
+    /// Do not inline any of the callees.
+    Inline_None = 0,
+    /// Inline all callees.
+    Inline_All = 0x1
+  } ;
+
+private:
   AnalysisManager &AMgr;
   
   AnalysisDeclContextManager &AnalysisDeclContexts;
@@ -64,15 +74,6 @@ class ExprEngine : public SubEngine {
   /// svalBuilder - SValBuilder object that creates SVals from expressions.
   SValBuilder &svalBuilder;
 
-  /// EntryNode - The immediate predecessor node.
-  ExplodedNode *EntryNode;
-
-  /// CleanedState - The state for EntryNode "cleaned" of all dead
-  ///  variables and symbols (as determined by a liveness analysis).
-  ProgramStateRef CleanedState;
-
-  /// currStmt - The current block-level statement.
-  const Stmt *currStmt;
   unsigned int currStmtIdx;
   const NodeBuilderContext *currBldrCtx;
   
@@ -92,10 +93,14 @@ class ExprEngine : public SubEngine {
   /// AnalysisConsumer. It can be null.
   SetOfConstDecls *VisitedCallees;
 
+  /// The flag, which specifies the mode of inlining for the engine.
+  InliningModes HowToInline;
+
 public:
   ExprEngine(AnalysisManager &mgr, bool gcEnabled,
              SetOfConstDecls *VisitedCalleesIn,
-             FunctionSummariesTy *FS);
+             FunctionSummariesTy *FS,
+             InliningModes HowToInlineIn);
 
   ~ExprEngine();
 
@@ -257,7 +262,7 @@ public:
   ///  to the store. Used to update checkers that track region values.
   ProgramStateRef 
   processRegionChanges(ProgramStateRef state,
-                       const StoreManager::InvalidatedSymbols *invalidated,
+                       const InvalidatedSymbols *invalidated,
                        ArrayRef<const MemRegion *> ExplicitRegions,
                        ArrayRef<const MemRegion *> Regions,
                        const CallEvent *Call);
@@ -453,6 +458,18 @@ protected:
   void evalBind(ExplodedNodeSet &Dst, const Stmt *StoreE, ExplodedNode *Pred,
                 SVal location, SVal Val, bool atDeclInit = false,
                 const ProgramPoint *PP = 0);
+
+  /// Call PointerEscape callback when a value escapes as a result of bind.
+  ProgramStateRef processPointerEscapedOnBind(ProgramStateRef State,
+                                              SVal Loc, SVal Val);
+  /// Call PointerEscape callback when a value escapes as a result of
+  /// region invalidation.
+  ProgramStateRef processPointerEscapedOnInvalidateRegions(
+                            ProgramStateRef State,
+                            const InvalidatedSymbols *Invalidated,
+                            ArrayRef<const MemRegion *> ExplicitRegions,
+                            ArrayRef<const MemRegion *> Regions,
+                            const CallEvent *Call);
 
 public:
   // FIXME: 'tag' should be removed, and a LocationContext should be used

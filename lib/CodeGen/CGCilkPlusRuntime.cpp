@@ -16,15 +16,15 @@
 #include "CodeGenFunction.h"
 #include "clang/AST/Stmt.h"
 #include "llvm/Analysis/RegionInfo.h"
-#include "llvm/Attributes.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/Function.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/TypeBuilder.h"
+#include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/CodeExtractor.h"
-#include "llvm/TypeBuilder.h"
-#include "llvm/ValueSymbolTable.h"
 
 namespace {
 
@@ -347,7 +347,7 @@ static Function *GetCilkPopFrameFn(CodeGenFunction &CGF) {
 
   B.CreateRetVoid();
 
-  Fn->addFnAttr(Attributes::InlineHint);
+  Fn->addFnAttr(Attribute::InlineHint);
 
   return Fn;
 }
@@ -433,7 +433,7 @@ static Function *GetCilkDetachFn(CodeGenFunction &CGF) {
 
   B.CreateRetVoid();
 
-  Fn->addFnAttr(Attributes::InlineHint);
+  Fn->addFnAttr(Attribute::InlineHint);
 
   return Fn;
 }
@@ -545,7 +545,7 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
     B.CreateRetVoid();
   }
 
-  Fn->addFnAttr(Attributes::AlwaysInline);
+  Fn->addFnAttr(Attribute::AlwaysInline);
 
   return Fn;
 }
@@ -579,7 +579,7 @@ static Function *GetCilkResetWorkerFn(CodeGenFunction &CGF) {
 
   B.CreateRetVoid();
 
-  Fn->addFnAttr(Attributes::InlineHint);
+  Fn->addFnAttr(Attribute::InlineHint);
 
   return Fn;
 }
@@ -609,7 +609,7 @@ static Function *GetCilkParentPrologue(CodeGenFunction &CGF) {
 
   B.CreateRetVoid();
 
-  Fn->addFnAttr(Attributes::InlineHint);
+  Fn->addFnAttr(Attribute::InlineHint);
 
   return Fn;
 }
@@ -666,7 +666,7 @@ static Function *GetCilkParentEpilogue(CodeGenFunction &CGF) {
     B.CreateRetVoid();
   }
 
-  Fn->addFnAttr(Attributes::InlineHint);
+  Fn->addFnAttr(Attribute::InlineHint);
 
   return Fn;
 }
@@ -700,7 +700,7 @@ static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF) {
 
   B.CreateRetVoid();
 
-  Fn->addFnAttr(Attributes::InlineHint);
+  Fn->addFnAttr(Attribute::InlineHint);
 
   return Fn;
 }
@@ -757,7 +757,7 @@ static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF) {
     B.CreateRetVoid();
   }
 
-  Fn->addFnAttr(Attributes::InlineHint);
+  Fn->addFnAttr(Attribute::InlineHint);
 
   return Fn;
 }
@@ -832,7 +832,7 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     CGF.ErrorUnsupported(&S,
         "unsupported spawning call; cannot extract into a function");
 
-  H->addFnAttr(Attributes::NoInline);
+  H->addFnAttr(Attribute::NoInline);
   H->setName("__cilk_spawn_helper");
 
   // Add a __cilkrts_stack_frame to the helper
@@ -950,7 +950,7 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   CGF.EmitBlock(Exit);
 
   // The helper function *cannot* be inlined
-  H->addFnAttr(Attributes::NoInline);
+  H->addFnAttr(Attribute::NoInline);
 
   // The helper function should be internal
   H->setLinkage(Function::InternalLinkage);

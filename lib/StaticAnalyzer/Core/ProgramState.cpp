@@ -144,31 +144,41 @@ ProgramStateRef
 ProgramState::invalidateRegions(ArrayRef<const MemRegion *> Regions,
                                 const Expr *E, unsigned Count,
                                 const LocationContext *LCtx,
-                                StoreManager::InvalidatedSymbols *IS,
+                                bool CausedByPointerEscape,
+                                InvalidatedSymbols *IS,
                                 const CallEvent *Call) const {
   if (!IS) {
-    StoreManager::InvalidatedSymbols invalidated;
+    InvalidatedSymbols invalidated;
     return invalidateRegionsImpl(Regions, E, Count, LCtx,
+                                 CausedByPointerEscape,
                                  invalidated, Call);
   }
-  return invalidateRegionsImpl(Regions, E, Count, LCtx, *IS, Call);
+  return invalidateRegionsImpl(Regions, E, Count, LCtx, CausedByPointerEscape,
+                               *IS, Call);
 }
 
 ProgramStateRef 
 ProgramState::invalidateRegionsImpl(ArrayRef<const MemRegion *> Regions,
                                     const Expr *E, unsigned Count,
                                     const LocationContext *LCtx,
-                                    StoreManager::InvalidatedSymbols &IS,
+                                    bool CausedByPointerEscape,
+                                    InvalidatedSymbols &IS,
                                     const CallEvent *Call) const {
   ProgramStateManager &Mgr = getStateManager();
   SubEngine* Eng = Mgr.getOwningEngine();
  
-  if (Eng && Eng->wantsRegionChangeUpdate(this)) {
+  if (Eng) {
     StoreManager::InvalidatedRegions Invalidated;
     const StoreRef &newStore
       = Mgr.StoreMgr->invalidateRegions(getStore(), Regions, E, Count, LCtx, IS,
                                         Call, &Invalidated);
+
     ProgramStateRef newState = makeWithStore(newStore);
+
+    if (CausedByPointerEscape)
+      newState = Eng->processPointerEscapedOnInvalidateRegions(newState,
+                                               &IS, Regions, Invalidated, Call);
+
     return Eng->processRegionChanges(newState, &IS, Regions, Invalidated, Call);
   }
 
@@ -263,23 +273,6 @@ ProgramStateRef ProgramState::BindExpr(const Stmt *S,
   if (NewEnv == Env)
     return this;
 
-  ProgramState NewSt = *this;
-  NewSt.Env = NewEnv;
-  return getStateManager().getPersistentState(NewSt);
-}
-
-ProgramStateRef 
-ProgramState::bindExprAndLocation(const Stmt *S, const LocationContext *LCtx,
-                                  SVal location,
-                                  SVal V) const {
-  Environment NewEnv =
-    getStateManager().EnvMgr.bindExprAndLocation(Env,
-                                                 EnvironmentEntry(S, LCtx),
-                                                 location, V);
-
-  if (NewEnv == Env)
-    return this;
-  
   ProgramState NewSt = *this;
   NewSt.Env = NewEnv;
   return getStateManager().getPersistentState(NewSt);

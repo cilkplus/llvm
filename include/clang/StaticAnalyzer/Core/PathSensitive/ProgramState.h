@@ -203,12 +203,6 @@ public:
   ProgramStateRef BindExpr(const Stmt *S, const LocationContext *LCtx,
                                SVal V, bool Invalidate = true) const;
 
-  /// Create a new state by binding the value 'V' and location 'locaton' to the
-  /// statement 'S' in the state's environment.
-  ProgramStateRef bindExprAndLocation(const Stmt *S,
-                                          const LocationContext *LCtx,
-                                          SVal location, SVal V) const;
-
   ProgramStateRef bindLoc(Loc location,
                           SVal V,
                           bool notifyChanges = true) const;
@@ -219,14 +213,28 @@ public:
 
   ProgramStateRef killBinding(Loc LV) const;
 
-  /// invalidateRegions - Returns the state with bindings for the given regions
-  ///  cleared from the store. The regions are provided as a continuous array
-  ///  from Begin to End. Optionally invalidates global regions as well.
+  /// \brief Returns the state with bindings for the given regions
+  ///  cleared from the store.
+  ///
+  /// Optionally invalidates global regions as well.
+  ///
+  /// \param Regions the set of regions to be invalidated.
+  /// \param E the expression that caused the invalidation.
+  /// \param BlockCount The number of times the current basic block has been
+  //         visited.
+  /// \param CausedByPointerEscape the flag is set to true when
+  ///        the invalidation is due to escape of a symbol (representing a
+  ///        pointer). For example, due to it being passed as an argument in a
+  ///        call.
+  /// \param IS the set of invalidated symbols.
+  /// \param Call if non-null, the invalidated regions represent parameters to
+  ///        the call and should be considered directly invalidated.
   ProgramStateRef invalidateRegions(ArrayRef<const MemRegion *> Regions,
-                               const Expr *E, unsigned BlockCount,
-                               const LocationContext *LCtx,
-                               StoreManager::InvalidatedSymbols *IS = 0,
-                               const CallEvent *Call = 0) const;
+                                    const Expr *E, unsigned BlockCount,
+                                    const LocationContext *LCtx,
+                                    bool CausedByPointerEscape,
+                                    InvalidatedSymbols *IS = 0,
+                                    const CallEvent *Call = 0) const;
 
   /// enterStackFrame - Returns the state for entry to the given stack frame,
   ///  preserving the current state.
@@ -401,7 +409,8 @@ private:
   invalidateRegionsImpl(ArrayRef<const MemRegion *> Regions,
                         const Expr *E, unsigned BlockCount,
                         const LocationContext *LCtx,
-                        StoreManager::InvalidatedSymbols &IS,
+                        bool ResultsInSymbolEscape,
+                        InvalidatedSymbols &IS,
                         const CallEvent *Call) const;
 };
 

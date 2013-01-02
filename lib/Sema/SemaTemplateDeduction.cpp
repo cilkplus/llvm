@@ -130,8 +130,7 @@ DeduceTemplateArguments(Sema &S,
                         const TemplateArgument *Params, unsigned NumParams,
                         const TemplateArgument *Args, unsigned NumArgs,
                         TemplateDeductionInfo &Info,
-                        SmallVectorImpl<DeducedTemplateArgument> &Deduced,
-                        bool NumberOfArgumentsMustMatch = true);
+                        SmallVectorImpl<DeducedTemplateArgument> &Deduced);
 
 /// \brief If the given expression is of a form that permits the deduction
 /// of a non-type template parameter, return the declaration of that
@@ -482,8 +481,7 @@ DeduceTemplateArguments(Sema &S,
     return DeduceTemplateArguments(S, TemplateParams,
                                    Param->getArgs(), Param->getNumArgs(),
                                    SpecArg->getArgs(), SpecArg->getNumArgs(),
-                                   Info, Deduced,
-                                   /*NumberOfArgumentsMustMatch=*/false);
+                                   Info, Deduced);
   }
 
   // If the argument type is a class template specialization, we
@@ -1749,8 +1747,7 @@ DeduceTemplateArguments(Sema &S,
                         const TemplateArgument *Params, unsigned NumParams,
                         const TemplateArgument *Args, unsigned NumArgs,
                         TemplateDeductionInfo &Info,
-                    SmallVectorImpl<DeducedTemplateArgument> &Deduced,
-                        bool NumberOfArgumentsMustMatch) {
+                        SmallVectorImpl<DeducedTemplateArgument> &Deduced) {
   // C++0x [temp.deduct.type]p9:
   //   If the template argument list of P contains a pack expansion that is not
   //   the last template argument, the entire template argument list is a
@@ -1770,8 +1767,7 @@ DeduceTemplateArguments(Sema &S,
 
       // Check whether we have enough arguments.
       if (!hasTemplateArgumentForDeduction(Args, ArgIdx, NumArgs))
-        return NumberOfArgumentsMustMatch? Sema::TDK_NonDeducedMismatch
-                                         : Sema::TDK_Success;
+        return Sema::TDK_Success;
 
       if (Args[ArgIdx].isPackExpansion()) {
         // FIXME: We follow the logic of C++0x [temp.deduct.type]p22 here,
@@ -1866,11 +1862,6 @@ DeduceTemplateArguments(Sema &S,
                                         NewlyDeducedPacks, Info))
       return Result;
   }
-
-  // If there is an argument remaining, then we had too many arguments.
-  if (NumberOfArgumentsMustMatch &&
-      hasTemplateArgumentForDeduction(Args, ArgIdx, NumArgs))
-    return Sema::TDK_NonDeducedMismatch;
 
   return Sema::TDK_Success;
 }
@@ -2400,7 +2391,7 @@ Sema::SubstituteExplicitTemplateArguments(
     }
       
     CXXThisScopeRAII ThisScope(*this, ThisContext, ThisTypeQuals,
-                               getLangOpts().CPlusPlus0x);
+                               getLangOpts().CPlusPlus11);
     
     ResultType = SubstType(Proto->getResultType(),
                    MultiLevelTemplateArgumentList(*ExplicitArgumentList),
@@ -3767,15 +3758,15 @@ static bool isAtLeastAsSpecializedAs(Sema &S,
     // first argument of the free function, which seems to match
     // existing practice.
     SmallVector<QualType, 4> Args1;
-    unsigned Skip1 = !S.getLangOpts().CPlusPlus0x && IsNonStatic2 && !Method1;
-    if (S.getLangOpts().CPlusPlus0x && IsNonStatic1 && !Method2)
+    unsigned Skip1 = !S.getLangOpts().CPlusPlus11 && IsNonStatic2 && !Method1;
+    if (S.getLangOpts().CPlusPlus11 && IsNonStatic1 && !Method2)
       AddImplicitObjectParameterType(S.Context, Method1, Args1);
     Args1.insert(Args1.end(),
                  Proto1->arg_type_begin() + Skip1, Proto1->arg_type_end());
 
     SmallVector<QualType, 4> Args2;
-    Skip2 = !S.getLangOpts().CPlusPlus0x && IsNonStatic1 && !Method2;
-    if (S.getLangOpts().CPlusPlus0x && IsNonStatic2 && !Method1)
+    Skip2 = !S.getLangOpts().CPlusPlus11 && IsNonStatic1 && !Method2;
+    if (S.getLangOpts().CPlusPlus11 && IsNonStatic2 && !Method1)
       AddImplicitObjectParameterType(S.Context, Method2, Args2);
     Args2.insert(Args2.end(),
                  Proto2->arg_type_begin() + Skip2, Proto2->arg_type_end());
@@ -3844,7 +3835,7 @@ static bool isAtLeastAsSpecializedAs(Sema &S,
     unsigned NumParams = std::min(NumCallArguments,
                                   std::min(Proto1->getNumArgs(),
                                            Proto2->getNumArgs()));
-    if (S.getLangOpts().CPlusPlus0x && IsNonStatic2 && !IsNonStatic1)
+    if (S.getLangOpts().CPlusPlus11 && IsNonStatic2 && !IsNonStatic1)
       ::MarkUsedTemplateParameters(S.Context, Method2->getThisType(S.Context),
                                    false,
                                    TemplateParams->getDepth(), UsedParameters);

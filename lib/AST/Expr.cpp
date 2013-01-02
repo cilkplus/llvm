@@ -278,7 +278,7 @@ static void computeDeclRefDependence(ASTContext &Ctx, NamedDecl *D, QualType T,
   //       -  an entity with reference type and is initialized with an
   //          expression that is value-dependent [C++11]
   if (VarDecl *Var = dyn_cast<VarDecl>(D)) {
-    if ((Ctx.getLangOpts().CPlusPlus0x ?
+    if ((Ctx.getLangOpts().CPlusPlus11 ?
            Var->getType()->isLiteralType() :
            Var->getType()->isIntegralOrEnumerationType()) &&
         (Var->getType().isConstQualified() ||
@@ -445,14 +445,6 @@ DeclRefExpr *DeclRefExpr::CreateEmpty(ASTContext &Context,
   return new (Mem) DeclRefExpr(EmptyShell());
 }
 
-SourceRange DeclRefExpr::getSourceRange() const {
-  SourceRange R = getNameInfo().getSourceRange();
-  if (hasQualifier())
-    R.setBegin(getQualifierLoc().getBeginLoc());
-  if (hasExplicitTemplateArgs())
-    R.setEnd(getRAngleLoc());
-  return R;
-}
 SourceLocation DeclRefExpr::getLocStart() const {
   if (hasQualifier())
     return getQualifierLoc().getBeginLoc();
@@ -510,7 +502,7 @@ std::string PredefinedExpr::ComputeName(IdentType IT, const Decl *CurrentDecl) {
     POut << ")";
 
     if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(FD)) {
-      const FunctionType *FT = cast<FunctionType>(MD->getType().getTypePtr());
+      const FunctionType *FT = MD->getType()->castAs<FunctionType>();
       if (FT->isConst())
         POut << " const";
       if (FT->isVolatile())
@@ -1159,21 +1151,9 @@ QualType CallExpr::getCallReturnType() const {
   return FnType->getResultType();
 }
 
-SourceRange CallExpr::getSourceRange() const {
-  if (isa<CXXOperatorCallExpr>(this))
-    return cast<CXXOperatorCallExpr>(this)->getSourceRange();
-
-  SourceLocation begin = getCallee()->getLocStart();
-  if (begin.isInvalid() && getNumArgs() > 0)
-    begin = getArg(0)->getLocStart();
-  SourceLocation end = getRParenLoc();
-  if (end.isInvalid() && getNumArgs() > 0)
-    end = getArg(getNumArgs() - 1)->getLocEnd();
-  return SourceRange(begin, end);
-}
 SourceLocation CallExpr::getLocStart() const {
   if (isa<CXXOperatorCallExpr>(this))
-    return cast<CXXOperatorCallExpr>(this)->getSourceRange().getBegin();
+    return cast<CXXOperatorCallExpr>(this)->getLocStart();
 
   SourceLocation begin = getCallee()->getLocStart();
   if (begin.isInvalid() && getNumArgs() > 0)
@@ -1182,7 +1162,7 @@ SourceLocation CallExpr::getLocStart() const {
 }
 SourceLocation CallExpr::getLocEnd() const {
   if (isa<CXXOperatorCallExpr>(this))
-    return cast<CXXOperatorCallExpr>(this)->getSourceRange().getEnd();
+    return cast<CXXOperatorCallExpr>(this)->getLocEnd();
 
   SourceLocation end = getRParenLoc();
   if (end.isInvalid() && getNumArgs() > 0)
@@ -1310,9 +1290,6 @@ MemberExpr *MemberExpr::Create(ASTContext &C, Expr *base, bool isarrow,
   return E;
 }
 
-SourceRange MemberExpr::getSourceRange() const {
-  return SourceRange(getLocStart(), getLocEnd());
-}
 SourceLocation MemberExpr::getLocStart() const {
   if (isImplicitAccess()) {
     if (hasQualifier())
@@ -1808,10 +1785,10 @@ bool InitListExpr::isStringLiteralInit() const {
   return isa<StringLiteral>(Init) || isa<ObjCEncodeExpr>(Init);
 }
 
-SourceRange InitListExpr::getSourceRange() const {
+SourceLocation InitListExpr::getLocStart() const {
   if (InitListExpr *SyntacticForm = getSyntacticForm())
-    return SyntacticForm->getSourceRange();
-  SourceLocation Beg = LBraceLoc, End = RBraceLoc;
+    return SyntacticForm->getLocStart();
+  SourceLocation Beg = LBraceLoc;
   if (Beg.isInvalid()) {
     // Find the first non-null initializer.
     for (InitExprsTy::const_iterator I = InitExprs.begin(),
@@ -1823,18 +1800,25 @@ SourceRange InitListExpr::getSourceRange() const {
       }  
     }
   }
+  return Beg;
+}
+
+SourceLocation InitListExpr::getLocEnd() const {
+  if (InitListExpr *SyntacticForm = getSyntacticForm())
+    return SyntacticForm->getLocEnd();
+  SourceLocation End = RBraceLoc;
   if (End.isInvalid()) {
     // Find the first non-null initializer from the end.
     for (InitExprsTy::const_reverse_iterator I = InitExprs.rbegin(),
-                                             E = InitExprs.rend();
-      I != E; ++I) {
+         E = InitExprs.rend();
+         I != E; ++I) {
       if (Stmt *S = *I) {
-        End = S->getSourceRange().getEnd();
+        End = S->getLocEnd();
         break;
-      }  
+      }
     }
   }
-  return SourceRange(Beg, End);
+  return End;
 }
 
 /// getFunctionType - Return the underlying function type for this block.
@@ -3026,9 +3010,9 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
       return Source->isNullPointerConstant(Ctx, NPC);
   }
 
-  // C++0x nullptr_t is always a null pointer constant.
+  // C++11 nullptr_t is always a null pointer constant.
   if (getType()->isNullPtrType())
-    return NPCK_CXX0X_nullptr;
+    return NPCK_CXX11_nullptr;
 
   if (const RecordType *UT = getType()->getAsUnionType())
     if (UT && UT->getDecl()->hasAttr<TransparentUnionAttr>())
@@ -3046,7 +3030,7 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
   // test for the value 0. Don't use the C++11 constant expression semantics
   // for this, for now; once the dust settles on core issue 903, we might only
   // allow a literal 0 here in C++11 mode.
-  if (Ctx.getLangOpts().CPlusPlus0x) {
+  if (Ctx.getLangOpts().CPlusPlus11) {
     if (!isCXX98IntegralConstantExpr(Ctx))
       return NPCK_NotNull;
   } else {
@@ -3684,11 +3668,11 @@ SourceRange DesignatedInitExpr::getDesignatorsSourceRange() const {
   DesignatedInitExpr *DIE = const_cast<DesignatedInitExpr*>(this);
   if (size() == 1)
     return DIE->getDesignator(0)->getSourceRange();
-  return SourceRange(DIE->getDesignator(0)->getStartLocation(),
-                     DIE->getDesignator(size()-1)->getEndLocation());
+  return SourceRange(DIE->getDesignator(0)->getLocStart(),
+                     DIE->getDesignator(size()-1)->getLocEnd());
 }
 
-SourceRange DesignatedInitExpr::getSourceRange() const {
+SourceLocation DesignatedInitExpr::getLocStart() const {
   SourceLocation StartLoc;
   Designator &First =
     *const_cast<DesignatedInitExpr*>(this)->designators_begin();
@@ -3700,7 +3684,11 @@ SourceRange DesignatedInitExpr::getSourceRange() const {
   } else
     StartLoc =
       SourceLocation::getFromRawEncoding(First.ArrayOrRange.LBracketLoc);
-  return SourceRange(StartLoc, getInit()->getSourceRange().getEnd());
+  return StartLoc;
+}
+
+SourceLocation DesignatedInitExpr::getLocEnd() const {
+  return getInit()->getLocEnd();
 }
 
 Expr *DesignatedInitExpr::getArrayIndex(const Designator& D) {

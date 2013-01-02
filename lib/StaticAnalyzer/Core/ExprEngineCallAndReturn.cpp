@@ -33,6 +33,9 @@ STATISTIC(NumOfDynamicDispatchPathSplits,
 STATISTIC(NumInlinedCalls,
   "The # of times we inlined a call");
 
+STATISTIC(NumReachedInlineCountMax,
+  "The # of times we reached inline count maximum");
+
 void ExprEngine::processCallEnter(CallEnter CE, ExplodedNode *Pred) {
   // Get the entry block in the CFG of the callee.
   const StackFrameContext *calleeCtx = CE.getCalleeContext();
@@ -64,6 +67,7 @@ void ExprEngine::processCallEnter(CallEnter CE, ExplodedNode *Pred) {
 static std::pair<const Stmt*,
                  const CFGBlock*> getLastStmt(const ExplodedNode *Node) {
   const Stmt *S = 0;
+  const CFGBlock *Blk = 0;
   const StackFrameContext *SF =
           Node->getLocation().getLocationContext()->getCurrentStackFrame();
 
@@ -91,6 +95,8 @@ static std::pair<const Stmt*,
         } while (!CE || CE->getCalleeContext() != CEE->getCalleeContext());
 
         // Continue searching the graph.
+      } else if (const BlockEdge *BE = dyn_cast<BlockEdge>(&PP)) {
+        Blk = BE->getSrc();
       }
     } else if (const CallEnter *CE = dyn_cast<CallEnter>(&PP)) {
       // If we reached the CallEnter for this function, it has no statements.
@@ -102,24 +108,6 @@ static std::pair<const Stmt*,
       return std::pair<const Stmt*, const CFGBlock*>((Stmt*)0, (CFGBlock*)0);
 
     Node = *Node->pred_begin();
-  }
-
-  const CFGBlock *Blk = 0;
-  if (S) {
-    // Now, get the enclosing basic block.
-    while (Node) {
-      const ProgramPoint &PP = Node->getLocation();
-      if (isa<BlockEdge>(PP) &&
-          (PP.getLocationContext()->getCurrentStackFrame() == SF)) {
-        BlockEdge &EPP = cast<BlockEdge>(PP);
-        Blk = EPP.getDst();
-        break;
-      }
-      if (Node->pred_empty())
-        return std::pair<const Stmt*, const CFGBlock*>(S, (CFGBlock*)0);
-
-      Node = *Node->pred_begin();
-    }
   }
 
   return std::pair<const Stmt*, const CFGBlock*>(S, Blk);
@@ -430,12 +418,12 @@ bool ExprEngine::shouldInlineDecl(const Decl *D, ExplodedNode *Pred) {
   if (getContext().getLangOpts().CPlusPlus) {
     if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
       // Conditionally allow the inlining of template functions.
-      if (!getAnalysisManager().options.mayInlineTemplateFunctions())
+      if (!AMgr.options.mayInlineTemplateFunctions())
         if (FD->getTemplatedKind() != FunctionDecl::TK_NonTemplate)
           return false;
 
       // Conditionally allow the inlining of C++ standard library functions.
-      if (!getAnalysisManager().options.mayInlineCXXStandardLibrary())
+      if (!AMgr.options.mayInlineCXXStandardLibrary())
         if (getContext().getSourceManager().isInSystemHeader(FD->getLocation()))
           if (IsInStdNamespace(FD))
             return false;
@@ -446,6 +434,14 @@ bool ExprEngine::shouldInlineDecl(const Decl *D, ExplodedNode *Pred) {
   // run.  If so, bail out.
   if (!CalleeADC->getAnalysis<RelaxedLiveVariables>())
     return false;
+
+  if (Engine.FunctionSummaries->getNumTimesInlined(D) >
+        AMgr.options.getMaxTimesInlineLarge() &&
+      CalleeCFG->getNumBlockIDs() > 13) {
+    NumReachedInlineCountMax++;
+    return false;
+  }
+  Engine.FunctionSummaries->bumpNumTimesInlined(D);
 
   return true;
 }
@@ -723,7 +719,7 @@ void ExprEngine::defaultEvalCall(NodeBuilder &Bldr, ExplodedNode *Pred,
   ProgramStateRef State = Pred->getState();
   CallEventRef<> Call = CallTemplate.cloneWithState(State);
 
-  if (!getAnalysisManager().shouldInlineCall()) {
+  if (HowToInline == Inline_None) {
     conservativeEvalCall(*Call, Bldr, Pred, State);
     return;
   }

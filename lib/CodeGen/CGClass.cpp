@@ -946,7 +946,7 @@ void CodeGenFunction::EmitDestructorBody(FunctionArgList &Args) {
     // -fapple-kext must inline any call to this dtor into
     // the caller's body.
     if (getLangOpts().AppleKext)
-      CurFn->addFnAttr(llvm::Attributes::AlwaysInline);
+      CurFn->addFnAttr(llvm::Attribute::AlwaysInline);
     break;
   }
 
@@ -1089,8 +1089,6 @@ void CodeGenFunction::EnterDtorCleanups(const CXXDestructorDecl *DD,
 /// constructor for each of several members of an array.
 ///
 /// \param ctor the constructor to call for each element
-/// \param argBegin,argEnd the arguments to evaluate and pass to the
-///   constructor
 /// \param arrayType the type of the array to initialize
 /// \param arrayBegin an arrayType*
 /// \param zeroInitialize true if each element should be
@@ -1116,8 +1114,6 @@ CodeGenFunction::EmitCXXAggrConstructorCall(const CXXConstructorDecl *ctor,
 /// \param ctor the constructor to call for each element
 /// \param numElements the number of elements in the array;
 ///   may be zero
-/// \param argBegin,argEnd the arguments to evaluate and pass to the
-///   constructor
 /// \param arrayBegin a T*, where T is the type constructed by ctor
 /// \param zeroInitialize true if each element should be
 ///   zero-initialized before it is constructed
@@ -1757,7 +1753,7 @@ void CodeGenFunction::EmitForwardingCallToLambda(const CXXRecordDecl *lambda,
   DeclarationName operatorName
     = getContext().DeclarationNames.getCXXOperatorName(OO_Call);
   CXXMethodDecl *callOperator =
-    cast<CXXMethodDecl>(*lambda->lookup(operatorName).first);
+    cast<CXXMethodDecl>(lambda->lookup(operatorName).front());
 
   // Get the address of the call operator.
   const CGFunctionInfo &calleeFnInfo =
@@ -1787,6 +1783,8 @@ void CodeGenFunction::EmitForwardingCallToLambda(const CXXRecordDecl *lambda,
   // If necessary, copy the returned value into the slot.
   if (!resultType->isVoidType() && returnSlot.isNull())
     EmitReturnOfRValue(RV, resultType);
+  else
+    EmitBranchThroughCleanup(ReturnBlock);
 }
 
 void CodeGenFunction::EmitLambdaBlockInvokeBody() {

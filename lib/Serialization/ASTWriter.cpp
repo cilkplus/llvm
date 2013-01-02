@@ -1235,9 +1235,14 @@ void ASTWriter::WriteInputFiles(SourceManager &SourceMgr, StringRef isysroot) {
     if (!Cache->OrigEntry)
       continue;
 
+    uint32_t &InputFileID = InputFileIDs[Cache->OrigEntry];
+    if (InputFileID != 0)
+      continue; // already recorded this file.
+
     // Record this entry's offset.
     InputFileOffsets.push_back(Stream.GetCurrentBitNo());
-    InputFileIDs[Cache->OrigEntry] = InputFileOffsets.size();
+
+    InputFileID = InputFileOffsets.size();
 
     Record.clear();
     Record.push_back(INPUT_FILE);
@@ -2942,7 +2947,7 @@ public:
     clang::io::Emit16(Out, KeyLen);
 
     // 2 bytes for num of decls and 4 for each DeclID.
-    unsigned DataLen = 2 + 4 * (Lookup.second - Lookup.first);
+    unsigned DataLen = 2 + 4 * Lookup.size();
     clang::io::Emit16(Out, DataLen);
 
     return std::make_pair(KeyLen, DataLen);
@@ -2982,9 +2987,10 @@ public:
   void EmitData(raw_ostream& Out, key_type_ref,
                 data_type Lookup, unsigned DataLen) {
     uint64_t Start = Out.tell(); (void)Start;
-    clang::io::Emit16(Out, Lookup.second - Lookup.first);
-    for (; Lookup.first != Lookup.second; ++Lookup.first)
-      clang::io::Emit32(Out, Writer.GetDeclRef(*Lookup.first));
+    clang::io::Emit16(Out, Lookup.size());
+    for (DeclContext::lookup_iterator I = Lookup.begin(), E = Lookup.end();
+         I != E; ++I)
+      clang::io::Emit32(Out, Writer.GetDeclRef(*I));
 
     assert(Out.tell() - Start == DataLen && "Data length is wrong");
   }
@@ -3033,7 +3039,7 @@ uint64_t ASTWriter::WriteDeclContextVisibleBlock(ASTContext &Context,
        D != DEnd; ++D) {
     DeclarationName Name = D->first;
     DeclContext::lookup_result Result = D->second.getLookupResult();
-    if (Result.first != Result.second) {
+    if (!Result.empty()) {
       if (Name.getNameKind() == DeclarationName::CXXConversionFunctionName) {
         // Hash all conversion function names to the same name. The actual
         // type information in conversion function name is not used in the
@@ -3042,7 +3048,7 @@ uint64_t ASTWriter::WriteDeclContextVisibleBlock(ASTContext &Context,
         // functions under a single key.
         if (!ConversionName)
           ConversionName = Name;
-        ConversionDecls.append(Result.first, Result.second);
+        ConversionDecls.append(Result.begin(), Result.end());
         continue;
       }
       
@@ -3101,7 +3107,7 @@ void ASTWriter::WriteDeclContextVisibleUpdate(const DeclContext *DC) {
     DeclContext::lookup_result Result = D->second.getLookupResult();
     // For any name that appears in this table, the results are complete, i.e.
     // they overwrite results from previous PCHs. Merging is always a mess.
-    if (Result.first != Result.second)
+    if (!Result.empty())
       Generator.insert(Name, Result, Trait);
   }
 
@@ -3562,6 +3568,12 @@ void ASTWriter::WriteASTCore(Sema &SemaRef,
   // Write the remaining AST contents.
   RecordData Record;
   Stream.EnterSubblock(AST_BLOCK_ID, 5);
+
+  // This is so that older clang versions, before the introduction
+  // of the control block, can read and reject the newer PCH format.
+  Record.clear();
+  Record.push_back(VERSION_MAJOR);
+  Stream.EmitRecord(METADATA_OLD_FORMAT, Record);
 
   // Create a lexical update block containing all of the declarations in the
   // translation unit that do not come from other AST files.
@@ -4588,6 +4600,13 @@ void ASTWriter::AddCXXDefinitionData(const CXXRecordDecl *D, RecordDataImpl &Rec
   Record.push_back(Data.HasMutableFields);
   Record.push_back(Data.HasOnlyCMembers);
   Record.push_back(Data.HasInClassInitializer);
+  Record.push_back(Data.HasUninitializedReferenceMember);
+  Record.push_back(Data.NeedOverloadResolutionForMoveConstructor);
+  Record.push_back(Data.NeedOverloadResolutionForMoveAssignment);
+  Record.push_back(Data.NeedOverloadResolutionForDestructor);
+  Record.push_back(Data.DefaultedMoveConstructorIsDeleted);
+  Record.push_back(Data.DefaultedMoveAssignmentIsDeleted);
+  Record.push_back(Data.DefaultedDestructorIsDeleted);
   Record.push_back(Data.HasTrivialSpecialMembers);
   Record.push_back(Data.HasIrrelevantDestructor);
   Record.push_back(Data.HasConstexprNonCopyMoveConstructor);

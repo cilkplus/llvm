@@ -279,6 +279,10 @@ private:
   /// \brief Sticky flag set to \c true when an error is emitted.
   bool ErrorOccurred;
 
+  /// \brief Sticky flag set to \c true when an "uncompilable error" occurs.
+  /// I.e. an error that was not upgraded from a warning by -Werror.
+  bool UncompilableErrorOccurred;
+
   /// \brief Sticky flag set to \c true when a fatal error is emitted.
   bool FatalErrorOccurred;
 
@@ -558,6 +562,12 @@ public:
                                   SourceLocation Loc = SourceLocation());
 
   bool hasErrorOccurred() const { return ErrorOccurred; }
+
+  /// \brief Errors that actually prevent compilation, not those that are
+  /// upgraded from a warning by -Werror.
+  bool hasUncompilableErrorOccurred() const {
+    return UncompilableErrorOccurred;
+  }
   bool hasFatalErrorOccurred() const { return FatalErrorOccurred; }
   
   /// \brief Determine whether any kind of unrecoverable error has occurred.
@@ -595,6 +605,12 @@ public:
   void SetArgToStringFn(ArgToStringFnTy Fn, void *Cookie) {
     ArgToStringFn = Fn;
     ArgToStringCookie = Cookie;
+  }
+
+  /// \brief Note that the prior diagnostic was emitted by some other
+  /// \c DiagnosticsEngine, and we may be attaching a note to that diagnostic.
+  void notePriorDiagnosticFrom(const DiagnosticsEngine &Other) {
+    LastDiagLevel = Other.LastDiagLevel;
   }
 
   /// \brief Reset the state of the diagnostic object to its initial 

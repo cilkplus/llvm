@@ -577,20 +577,20 @@ static void checkARCPropertyImpl(Sema &S, SourceLocation propertyImplLoc,
 
   switch (propertyLifetime) {
   case Qualifiers::OCL_Strong:
-    S.Diag(propertyImplLoc, diag::err_arc_strong_property_ownership)
+    S.Diag(ivar->getLocation(), diag::err_arc_strong_property_ownership)
       << property->getDeclName()
       << ivar->getDeclName()
       << ivarLifetime;
     break;
 
   case Qualifiers::OCL_Weak:
-    S.Diag(propertyImplLoc, diag::error_weak_property)
+    S.Diag(ivar->getLocation(), diag::error_weak_property)
       << property->getDeclName()
       << ivar->getDeclName();
     break;
 
   case Qualifiers::OCL_ExplicitNone:
-    S.Diag(propertyImplLoc, diag::err_arc_assign_property_ownership)
+    S.Diag(ivar->getLocation(), diag::err_arc_assign_property_ownership)
       << property->getDeclName()
       << ivar->getDeclName()
       << ((property->getPropertyAttributesAsWritten() 
@@ -606,6 +606,8 @@ static void checkARCPropertyImpl(Sema &S, SourceLocation propertyImplLoc,
   }
 
   S.Diag(property->getLocation(), diag::note_property_declare);
+  if (propertyImplLoc.isValid())
+    S.Diag(propertyImplLoc, diag::note_property_synthesize);
 }
 
 /// setImpliedPropertyAttributeForReadOnlyProperty -
@@ -1571,12 +1573,23 @@ void Sema::DefaultSynthesizeProperties(Scope *S, Decl *D) {
 void Sema::DiagnoseUnimplementedProperties(Scope *S, ObjCImplDecl* IMPDecl,
                                       ObjCContainerDecl *CDecl,
                                       const SelectorSet &InsMap) {
-  ObjCContainerDecl::PropertyMap SuperPropMap;
-  if (ObjCInterfaceDecl *IDecl = dyn_cast<ObjCInterfaceDecl>(CDecl))
-    CollectSuperClassPropertyImplementations(IDecl, SuperPropMap);
+  ObjCContainerDecl::PropertyMap NoNeedToImplPropMap;
+  ObjCInterfaceDecl *IDecl;
+  // Gather properties which need not be implemented in this class
+  // or category.
+  if (!(IDecl = dyn_cast<ObjCInterfaceDecl>(CDecl)))
+    if (ObjCCategoryDecl *C = dyn_cast<ObjCCategoryDecl>(CDecl)) {
+      // For categories, no need to implement properties declared in
+      // its primary class (and its super classes) if property is
+      // declared in one of those containers.
+      if ((IDecl = C->getClassInterface()))
+        IDecl->collectPropertiesToImplement(NoNeedToImplPropMap);
+    }
+  if (IDecl)
+    CollectSuperClassPropertyImplementations(IDecl, NoNeedToImplPropMap);
   
   ObjCContainerDecl::PropertyMap PropMap;
-  CollectImmediateProperties(CDecl, PropMap, SuperPropMap);
+  CollectImmediateProperties(CDecl, PropMap, NoNeedToImplPropMap);
   if (PropMap.empty())
     return;
 

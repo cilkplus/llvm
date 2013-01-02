@@ -14,6 +14,7 @@
 #ifndef LLVM_CLANG_PARSE_PARSER_H
 #define LLVM_CLANG_PARSE_PARSER_H
 
+#include "clang/Basic/OperatorPrecedence.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Lex/CodeCompletionHandler.h"
 #include "clang/Lex/Preprocessor.h"
@@ -43,30 +44,6 @@ namespace clang {
   class InMessageExpressionRAIIObject;
   class PoisonSEHIdentifiersRAIIObject;
   class VersionTuple;
-
-/// PrecedenceLevels - These are precedences for the binary/ternary
-/// operators in the C99 grammar.  These have been named to relate
-/// with the C99 grammar productions.  Low precedences numbers bind
-/// more weakly than high numbers.
-namespace prec {
-  enum Level {
-    Unknown         = 0,    // Not binary operator.
-    Comma           = 1,    // ,
-    Assignment      = 2,    // =, *=, /=, %=, +=, -=, <<=, >>=, &=, ^=, |=
-    Conditional     = 3,    // ?
-    LogicalOr       = 4,    // ||
-    LogicalAnd      = 5,    // &&
-    InclusiveOr     = 6,    // |
-    ExclusiveOr     = 7,    // ^
-    And             = 8,    // &
-    Equality        = 9,    // ==, !=
-    Relational      = 10,   //  >=, <=, >, <
-    Shift           = 11,   // <<, >>
-    Additive        = 12,   // -, +
-    Multiplicative  = 13,   // *, /, %
-    PointerToMember = 14    // .*, ->*
-  };
-}
 
 /// Parser - This implements a parser for the C family of languages.  After
 /// parsing units of the grammar, productions are invoked to handle whatever has
@@ -245,15 +222,6 @@ public:
   typedef Expr *ExprArg;
   typedef llvm::MutableArrayRef<Stmt*> MultiStmtArg;
   typedef Sema::FullExprArg FullExprArg;
-
-  /// Adorns a ExprResult with Actions to make it an ExprResult
-  ExprResult Owned(ExprResult res) {
-    return ExprResult(res);
-  }
-  /// Adorns a StmtResult with Actions to make it an StmtResult
-  StmtResult Owned(StmtResult res) {
-    return StmtResult(res);
-  }
 
   ExprResult ExprError() { return ExprResult(true); }
   StmtResult StmtError() { return StmtResult(true); }
@@ -860,7 +828,7 @@ private:
 
     /// \brief Whether this member function had an associated template
     /// scope. When true, D is a template declaration.
-    /// othewise, it is a member function declaration.
+    /// otherwise, it is a member function declaration.
     bool TemplateScope;
 
     explicit LexedMethod(Parser* P, Decl *MD)
@@ -1844,7 +1812,7 @@ private:
   // an attribute is not allowed.
   bool CheckProhibitedCXX11Attribute() {
     assert(Tok.is(tok::l_square));
-    if (!getLangOpts().CPlusPlus0x || NextToken().isNot(tok::l_square))
+    if (!getLangOpts().CPlusPlus11 || NextToken().isNot(tok::l_square))
       return false;
     return DiagnoseProhibitedCXX11Attribute();
   }
@@ -1888,26 +1856,26 @@ private:
                              SourceLocation ScopeLoc,
                              AttributeList::Syntax Syntax);
 
-  void MaybeParseCXX0XAttributes(Declarator &D) {
-    if (getLangOpts().CPlusPlus0x && isCXX11AttributeSpecifier()) {
+  void MaybeParseCXX11Attributes(Declarator &D) {
+    if (getLangOpts().CPlusPlus11 && isCXX11AttributeSpecifier()) {
       ParsedAttributesWithRange attrs(AttrFactory);
       SourceLocation endLoc;
       ParseCXX11Attributes(attrs, &endLoc);
       D.takeAttributes(attrs, endLoc);
     }
   }
-  void MaybeParseCXX0XAttributes(ParsedAttributes &attrs,
+  void MaybeParseCXX11Attributes(ParsedAttributes &attrs,
                                  SourceLocation *endLoc = 0) {
-    if (getLangOpts().CPlusPlus0x && isCXX11AttributeSpecifier()) {
+    if (getLangOpts().CPlusPlus11 && isCXX11AttributeSpecifier()) {
       ParsedAttributesWithRange attrsWithRange(AttrFactory);
       ParseCXX11Attributes(attrsWithRange, endLoc);
       attrs.takeAllFrom(attrsWithRange);
     }
   }
-  void MaybeParseCXX0XAttributes(ParsedAttributesWithRange &attrs,
+  void MaybeParseCXX11Attributes(ParsedAttributesWithRange &attrs,
                                  SourceLocation *endLoc = 0,
                                  bool OuterMightBeMessageSend = false) {
-    if (getLangOpts().CPlusPlus0x &&
+    if (getLangOpts().CPlusPlus11 &&
         isCXX11AttributeSpecifier(false, OuterMightBeMessageSend))
       ParseCXX11Attributes(attrs, endLoc);
   }
@@ -1970,13 +1938,13 @@ private:
   void ParseAlignmentSpecifier(ParsedAttributes &Attrs,
                                SourceLocation *endLoc = 0);
 
-  VirtSpecifiers::Specifier isCXX0XVirtSpecifier(const Token &Tok) const;
-  VirtSpecifiers::Specifier isCXX0XVirtSpecifier() const {
-    return isCXX0XVirtSpecifier(Tok);
+  VirtSpecifiers::Specifier isCXX11VirtSpecifier(const Token &Tok) const;
+  VirtSpecifiers::Specifier isCXX11VirtSpecifier() const {
+    return isCXX11VirtSpecifier(Tok);
   }
-  void ParseOptionalCXX0XVirtSpecifierSeq(VirtSpecifiers &VS, bool IsInterface);
+  void ParseOptionalCXX11VirtSpecifierSeq(VirtSpecifiers &VS, bool IsInterface);
 
-  bool isCXX0XFinalKeyword() const;
+  bool isCXX11FinalKeyword() const;
 
   /// DeclaratorScopeObj - RAII object used in Parser::ParseDirectDeclarator to
   /// enter a new C++ declarator scope and exit it when the function is
@@ -2019,7 +1987,7 @@ private:
                                DirectDeclParseFunction DirectDeclParser);
 
   void ParseTypeQualifierListOpt(DeclSpec &DS, bool GNUAttributesAllowed = true,
-                                 bool CXX0XAttributesAllowed = true);
+                                 bool CXX11AttributesAllowed = true);
   void ParseDirectDeclarator(Declarator &D);
   void ParseParenDeclarator(Declarator &D);
   void ParseFunctionDeclarator(Declarator &D,
@@ -2166,6 +2134,8 @@ private:
   // C++ 14.3: Template arguments [temp.arg]
   typedef SmallVector<ParsedTemplateArgument, 16> TemplateArgList;
 
+  bool ParseGreaterThanInTemplateList(SourceLocation &RAngleLoc,
+                                      bool ConsumeLastToken);
   bool ParseTemplateIdAfterTemplateName(TemplateTy Template,
                                         SourceLocation TemplateNameLoc,
                                         const CXXScopeSpec &SS,

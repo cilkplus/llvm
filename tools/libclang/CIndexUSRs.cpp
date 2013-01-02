@@ -151,14 +151,8 @@ bool USRGenerator::EmitDeclName(const NamedDecl *D) {
   return startSize == endSize;
 }
 
-static bool InAnonymousNamespace(const Decl *D) {
-  if (const NamespaceDecl *ND = dyn_cast<NamespaceDecl>(D->getDeclContext()))
-    return ND->isAnonymousNamespace();
-  return false;
-}
-
 static inline bool ShouldGenerateLocation(const NamedDecl *D) {
-  return D->getLinkage() != ExternalLinkage && !InAnonymousNamespace(D);
+  return D->getLinkage() != ExternalLinkage;
 }
 
 void USRGenerator::VisitDeclContext(DeclContext *DC) {
@@ -593,6 +587,12 @@ void USRGenerator::VisitType(QualType T) {
 #define PLACEHOLDER_TYPE(Id, SingletonId) case BuiltinType::Id:
 #include "clang/AST/BuiltinTypes.def"
         case BuiltinType::Dependent:
+        case BuiltinType::OCLImage1d:
+        case BuiltinType::OCLImage1dArray:
+        case BuiltinType::OCLImage1dBuffer:
+        case BuiltinType::OCLImage2d:
+        case BuiltinType::OCLImage2dArray:
+        case BuiltinType::OCLImage3d:
           IgnoreResults = true;
           return;
         case BuiltinType::ObjCId:

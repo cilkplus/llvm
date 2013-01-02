@@ -16,7 +16,6 @@
 #include "CIndexDiagnostic.h"
 #include "CXCursor.h"
 #include "CXString.h"
-#include "CXString.h"
 #include "CXTranslationUnit.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
@@ -825,6 +824,12 @@ CXCodeCompleteResults *clang_codeCompleteAt(CXTranslationUnit TU,
   CodeCompleteAtInfo CCAI = { TU, complete_filename, complete_line,
                               complete_column, unsaved_files, num_unsaved_files,
                               options, 0 };
+
+  if (getenv("LIBCLANG_NOTHREADS")) {
+    clang_codeCompleteAt_Impl(&CCAI);
+    return CCAI.result;
+  }
+
   llvm::CrashRecoveryContext CRC;
 
   if (!RunSafely(CRC, clang_codeCompleteAt_Impl, &CCAI)) {

@@ -80,6 +80,13 @@ TEST(NameableDeclaration, REMatchesVariousDecls) {
   EXPECT_TRUE(matches("int aFOObBARc;", Abc));
   EXPECT_TRUE(notMatches("int cab;", Abc));
   EXPECT_TRUE(matches("int cabc;", Abc));
+
+  DeclarationMatcher StartsWithK = namedDecl(matchesName(":k[^:]*$"));
+  EXPECT_TRUE(matches("int k;", StartsWithK));
+  EXPECT_TRUE(matches("int kAbc;", StartsWithK));
+  EXPECT_TRUE(matches("namespace x { int kTest; }", StartsWithK));
+  EXPECT_TRUE(matches("class C { int k; };", StartsWithK));
+  EXPECT_TRUE(notMatches("class C { int ckc; };", StartsWithK));
 }
 
 TEST(DeclarationMatcher, MatchClass) {
@@ -3042,6 +3049,42 @@ TEST(HasParent, MatchesOnlyParent) {
   EXPECT_TRUE(notMatches(
       "void f() { if (true) for (;;) { int x = 42; } }",
       compoundStmt(hasParent(ifStmt()))));
+}
+
+TEST(HasAncestor, MatchesAllAncestors) {
+  EXPECT_TRUE(matches(
+      "template <typename T> struct C { static void f() { 42; } };"
+      "void t() { C<int>::f(); }",
+      integerLiteral(
+          equals(42),
+          allOf(hasAncestor(recordDecl(isTemplateInstantiation())),
+                hasAncestor(recordDecl(unless(isTemplateInstantiation())))))));
+}
+
+TEST(HasParent, MatchesAllParents) {
+  EXPECT_TRUE(matches(
+      "template <typename T> struct C { static void f() { 42; } };"
+      "void t() { C<int>::f(); }",
+      integerLiteral(
+          equals(42),
+          hasParent(compoundStmt(hasParent(functionDecl(
+              hasParent(recordDecl(isTemplateInstantiation())))))))));
+  EXPECT_TRUE(matches(
+      "template <typename T> struct C { static void f() { 42; } };"
+      "void t() { C<int>::f(); }",
+      integerLiteral(
+          equals(42),
+          hasParent(compoundStmt(hasParent(functionDecl(
+              hasParent(recordDecl(unless(isTemplateInstantiation()))))))))));
+  EXPECT_TRUE(matches(
+      "template <typename T> struct C { static void f() { 42; } };"
+      "void t() { C<int>::f(); }",
+      integerLiteral(equals(42),
+                     hasParent(compoundStmt(allOf(
+                         hasParent(functionDecl(
+                             hasParent(recordDecl(isTemplateInstantiation())))),
+                         hasParent(functionDecl(hasParent(recordDecl(
+                             unless(isTemplateInstantiation())))))))))));
 }
 
 TEST(TypeMatching, MatchesTypes) {

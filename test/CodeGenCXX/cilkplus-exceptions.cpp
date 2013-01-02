@@ -38,7 +38,7 @@ namespace stack_frame_cleanup {
     // * Exit due to exception *
     //
     // CHECK_PARENT: call void @__cilk_parent_epilogue
-    // CHECK_PARENT-NEXT: br label %eh.resume
+    // CHECK_PARENT-NEXT: br label
   }
 
   void helper_stack_frame_test() {
@@ -63,9 +63,9 @@ namespace stack_frame_cleanup {
     // * Exit due to exception *
     //
     // CHECK_HELPER_F1: call void @_ZN19stack_frame_cleanup1CD1Ev
-    // CHECK_HELPER_F1-NEXT: br label %ehcleanup
+    // CHECK_HELPER_F1-NEXT: br label
     // CHECK_HELPER_F1: call void @__cilk_helper_epilogue
-    // CHECK_HELPER_F1-NEXT: br label %eh.resume
+    // CHECK_HELPER_F1-NEXT: br label
   }
 
   void helper_check_assignment() {
@@ -74,10 +74,10 @@ namespace stack_frame_cleanup {
 
     // CHECK_HELPER_F2: define {{.*}} @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS_7test_f2IiEEvRT_E7capture
     //
-    // CHECK_HELPER_F2: [[REG:%[0-9]+]] = getelementptr inbounds %struct.capture* %0, i32 0, i32 0
+    // CHECK_HELPER_F2: [[REG:%[0-9]+]] = getelementptr inbounds %struct.capture*
     // CHECK_HELPER_F2-NEXT: load i32** [[REG]]
     // CHECK_HELPER_F2-NEXT: call void @__cilk_helper_prologue
-    // CHECK_HELPER_F2-NEXT: [[RET_REG:%[a-zA-Z][a-zA-Z0-9]*]] = invoke i32 @_ZN19stack_frame_cleanup2f2IiEET_S1_
+    // CHECK_HELPER_F2-NEXT: [[RET_REG:%[0-9]+]] = invoke i32 @_ZN19stack_frame_cleanup2f2IiEET_S1_
     //
     // * Normal exit *
     //

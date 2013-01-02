@@ -21,6 +21,7 @@
 
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Format/Format.h"
 #include "clang/Lex/Lexer.h"
 
 namespace clang {
@@ -76,9 +77,16 @@ public:
   virtual void consumeUnwrappedLine(const UnwrappedLine &Line) = 0;
 };
 
+class FormatTokenSource {
+public:
+  virtual ~FormatTokenSource() {
+  }
+  virtual FormatToken getNextToken() = 0;
+};
+
 class UnwrappedLineParser {
 public:
-  UnwrappedLineParser(Lexer &Lex, SourceManager &SourceMgr,
+  UnwrappedLineParser(const FormatStyle &Style, FormatTokenSource &Tokens,
                       UnwrappedLineConsumer &Callback);
 
   /// Returns true in case of a structural error.
@@ -86,9 +94,9 @@ public:
 
 private:
   bool parseLevel();
-  bool parseBlock();
+  bool parseBlock(unsigned AddLevels = 1);
   void parsePPDirective();
-  void parseComment();
+  void parseComments();
   void parseStatement();
   void parseParens();
   void parseIfThenElse();
@@ -97,27 +105,22 @@ private:
   void parseLabel();
   void parseCaseLabel();
   void parseSwitch();
+  void parseNamespace();
   void parseAccessSpecifier();
   void parseEnum();
   void addUnwrappedLine();
   bool eof() const;
   void nextToken();
-  void parseToken();
-
-  /// Returns the text of \c FormatTok.
-  StringRef tokenText();
 
   UnwrappedLine Line;
   FormatToken FormatTok;
-  bool GreaterStashed;
 
-  Lexer &Lex;
-  SourceManager &SourceMgr;
-  IdentifierTable IdentTable;
+  const FormatStyle &Style;
+  FormatTokenSource &Tokens;
   UnwrappedLineConsumer &Callback;
 };
 
 }  // end namespace format
 }  // end namespace clang
 
-#endif // LLVM_CLANG_FORMAT_UNWRAPPED_LINE_PARSER_H
+#endif  // LLVM_CLANG_FORMAT_UNWRAPPED_LINE_PARSER_H

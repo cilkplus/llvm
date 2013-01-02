@@ -28,12 +28,12 @@
 #include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Instructions.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/FileSystem.h"
 using namespace clang;
@@ -407,6 +407,26 @@ llvm::DIType CGDebugInfo::CreateType(const BuiltinType *BT) {
                                  0);
     return SelTy;
   }
+
+  case BuiltinType::OCLImage1d:
+    return getOrCreateStructPtrType("opencl_image1d_t",
+                                    OCLImage1dDITy);
+  case BuiltinType::OCLImage1dArray:
+    return getOrCreateStructPtrType("opencl_image1d_array_t", 
+                                    OCLImage1dArrayDITy);
+  case BuiltinType::OCLImage1dBuffer:
+    return getOrCreateStructPtrType("opencl_image1d_buffer_t",
+                                    OCLImage1dBufferDITy);
+  case BuiltinType::OCLImage2d:
+    return getOrCreateStructPtrType("opencl_image2d_t",
+                                    OCLImage2dDITy);
+  case BuiltinType::OCLImage2dArray:
+    return getOrCreateStructPtrType("opencl_image2d_array_t",
+                                    OCLImage2dArrayDITy);
+  case BuiltinType::OCLImage3d:
+    return getOrCreateStructPtrType("opencl_image3d_t",
+                                    OCLImage3dDITy);
+
   case BuiltinType::UChar:
   case BuiltinType::Char_U: Encoding = llvm::dwarf::DW_ATE_unsigned_char; break;
   case BuiltinType::Char_S:
@@ -611,6 +631,18 @@ llvm::DIType CGDebugInfo::CreatePointerLikeType(unsigned Tag,
 
   return DBuilder.createPointerType(CreatePointeeType(PointeeTy, Unit),
                                     Size, Align);
+}
+
+llvm::DIType CGDebugInfo::getOrCreateStructPtrType(StringRef Name, llvm::DIType &Cache) {
+    if (Cache.Verify())
+      return Cache;
+    Cache =
+      DBuilder.createForwardDecl(llvm::dwarf::DW_TAG_structure_type,
+                                 Name, TheCU, getOrCreateMainFile(),
+                                 0);
+    unsigned Size = CGM.getContext().getTypeSize(CGM.getContext().VoidPtrTy);
+    Cache = DBuilder.createPointerType(Cache, Size);
+    return Cache;
 }
 
 llvm::DIType CGDebugInfo::CreateType(const BlockPointerType *Ty,
@@ -1199,7 +1231,7 @@ CollectVTableInfo(const CXXRecordDecl *RD, llvm::DIFile Unit,
   unsigned Size = CGM.getContext().getTypeSize(CGM.getContext().VoidPtrTy);
   llvm::DIType VPTR
     = DBuilder.createMemberType(Unit, getVTableName(RD), Unit,
-                                0, Size, 0, 0, 0, 
+                                0, Size, 0, 0, llvm::DIDescriptor::FlagArtificial,
                                 getOrCreateVTablePtrType(Unit));
   EltTys.push_back(VPTR);
 }

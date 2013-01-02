@@ -757,9 +757,10 @@ void ResultBuilder::MaybeAddConstructorResults(Result R) {
   DeclarationName ConstructorName
     = Context.DeclarationNames.getCXXConstructorName(
                                            Context.getCanonicalType(RecordTy));
-  for (DeclContext::lookup_result Ctors = Record->lookup(ConstructorName);
-       Ctors.first != Ctors.second; ++Ctors.first) {
-    R.Declaration = *Ctors.first;
+  DeclContext::lookup_result Ctors = Record->lookup(ConstructorName);
+  for (DeclContext::lookup_iterator I = Ctors.begin(), E = Ctors.end(); I != E;
+       ++I) {
+    R.Declaration = *I;
     R.CursorKind = getCursorKindForDecl(R.Declaration);
     Results.push_back(R);
   }
@@ -1256,7 +1257,7 @@ static void AddTypeSpecifierResults(const LangOptions &LangOpts,
     Builder.AddPlaceholderChunk("name");
     Results.AddResult(Result(Builder.TakeString()));
     
-    if (LangOpts.CPlusPlus0x) {
+    if (LangOpts.CPlusPlus11) {
       Results.AddResult(Result("auto", CCP_Type));
       Results.AddResult(Result("char16_t", CCP_Type));
       Results.AddResult(Result("char32_t", CCP_Type));
@@ -1906,7 +1907,7 @@ static void AddOrdinaryNameResults(Sema::ParserCompletionContext CCC,
      
       // FIXME: Rethrow?
 
-      if (SemaRef.getLangOpts().CPlusPlus0x) {
+      if (SemaRef.getLangOpts().CPlusPlus11) {
         // nullptr
         Builder.AddResultTypeChunk("std::nullptr_t");
         Builder.AddTypedTextChunk("nullptr");
@@ -2930,7 +2931,7 @@ static void AddPrettyFunctionResults(const LangOptions &LangOpts,
   
   Results.AddResult(Result("__PRETTY_FUNCTION__", CCP_Constant));
   Results.AddResult(Result("__FUNCTION__", CCP_Constant));
-  if (LangOpts.C99 || LangOpts.CPlusPlus0x)
+  if (LangOpts.C99 || LangOpts.CPlusPlus11)
     Results.AddResult(Result("__func__", CCP_Constant));
   Results.ExitScope();
 }
@@ -5163,7 +5164,7 @@ void Sema::CodeCompleteObjCMessageReceiver(Scope *S) {
   ResultBuilder Results(*this, CodeCompleter->getAllocator(),
                         CodeCompleter->getCodeCompletionTUInfo(),
                         CodeCompletionContext::CCC_ObjCMessageReceiver,
-                        getLangOpts().CPlusPlus0x
+                        getLangOpts().CPlusPlus11
                           ? &ResultBuilder::IsObjCMessageReceiverOrLambdaCapture
                           : &ResultBuilder::IsObjCMessageReceiver);
   
@@ -5182,7 +5183,7 @@ void Sema::CodeCompleteObjCMessageReceiver(Scope *S) {
         AddSuperSendCompletion(*this, /*NeedSuperKeyword=*/true, 0, 0, Results);
       }
   
-  if (getLangOpts().CPlusPlus0x)
+  if (getLangOpts().CPlusPlus11)
     addThisCompletion(*this, Results);
   
   Results.ExitScope();
