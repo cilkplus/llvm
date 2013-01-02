@@ -2070,13 +2070,13 @@ public:
     : CapturedStmt(CilkSpawnCapturedStmtClass, Empty) { }
 
   SourceLocation getLocStart() const LLVM_READONLY {
-    return getLocStart();
+    return CapturedStmt::getLocStart();
   }
   SourceLocation getLocEnd() const LLVM_READONLY {
-    return getLocEnd();
+    return CapturedStmt::getLocEnd();
   }
   SourceRange getSourceRange() const LLVM_READONLY {
-    return getSourceRange();
+    return CapturedStmt::getSourceRange();
   }
 
   static bool classof(const Stmt *T) {

@@ -74,10 +74,10 @@ namespace stack_frame_cleanup {
 
     // CHECK_HELPER_F2: define {{.*}} @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS_7test_f2IiEEvRT_E7capture
     //
-    // CHECK_HELPER_F2: [[REG:%[0-9]+]] = getelementptr inbounds %struct.capture*
+    // CHECK_HELPER_F2: [[REG:%[a-zA-Z0-9]+]] = getelementptr inbounds %struct.capture*
     // CHECK_HELPER_F2-NEXT: load i32** [[REG]]
     // CHECK_HELPER_F2-NEXT: call void @__cilk_helper_prologue
-    // CHECK_HELPER_F2-NEXT: [[RET_REG:%[0-9]+]] = invoke i32 @_ZN19stack_frame_cleanup2f2IiEET_S1_
+    // CHECK_HELPER_F2-NEXT: [[RET_REG:%[a-zA-Z0-9]+]] = invoke i32 @_ZN19stack_frame_cleanup2f2IiEET_S1_
     //
     // * Normal exit *
     //
