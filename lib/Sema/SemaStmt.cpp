@@ -27,7 +27,6 @@
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Scope.h"
-#include "clang/Sema/ScopeInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -3095,73 +3094,43 @@ public:
 
 } // anonymous namespace
 
-static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
-  if (!S)
-    return S;
-
-  SpawnHelper Helper;
-  Helper.TraverseStmt(S);
-  if (!Helper.hasSpawn())
-    return S;
-
-  return new (SemaRef.Context) CilkSpawnStmt(S);
-}
-
-static RecordDecl *CreateParallelRegionRecordDecl(Sema &S) {
-  DeclContext *DC = S.CurContext;
+RecordDecl*
+Sema::CreateCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
+                                     IdentifierInfo *MangledName)
+{
+  DeclContext *DC = CurContext;
   while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
     DC = DC->getParent();
 
-  SourceLocation Loc;
-  IdentifierInfo *Id = &S.PP.getIdentifierTable().get("capture");
-  RecordDecl *RD = RecordDecl::Create(S.Context, TTK_Struct, DC, Loc, Loc, Id);
+  IdentifierInfo *Id = &PP.getIdentifierTable().get("capture");
+  RecordDecl *RD = RecordDecl::Create(Context, TTK_Struct, DC, Loc, Loc, Id);
 
   DC->addDecl(RD);
   RD->setImplicit();
   RD->startDefinition();
-  return RD;
-}
-
-/// Helper functions are required to be internal,  not mangling accross
-/// translation units.
-static IdentifierInfo *GetMangledHelperName(Sema &S) {
-  static unsigned count = 0;
-  StringRef name("__cilk_spawn_helperV");
-  return &S.PP.getIdentifierTable().get((name + llvm::Twine(count++)).str());
-}
-
-static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
-                                   CilkSpawnCapturedStmt *Spawn) {
-  ASTContext &Context = S.Context;
-
-  // Create a caputred recored decl and start its definition
-  RecordDecl *RD = CreateParallelRegionRecordDecl(S);
 
   // The capture helper function returns void and takes a single argument,
   // a pointer to the captured record.
-  FunctionDecl *FD = 0;
   {
     QualType ParamType = Context.getPointerType(Context.getTagDeclType(RD));
 
     FunctionProtoType::ExtProtoInfo EPI;
-    QualType FunctionTy
-      = Context.getFunctionType(Context.VoidTy, &ParamType, 1, EPI);
+    QualType FunctionTy = Context.getFunctionType(Context.VoidTy,
+                                                  &ParamType, 1, EPI);
 
     TypeSourceInfo *FunctionTyInfo
       = Context.getTrivialTypeSourceInfo(FunctionTy);
 
-    IdentifierInfo *II = GetMangledHelperName(S);
+    FD = FunctionDecl::Create(Context, CurContext, SourceLocation(),
+                              SourceLocation(), MangledName, FunctionTy,
+                              FunctionTyInfo, SC_Static, SC_Static);
 
-    FD = FunctionDecl::Create(Context, S.CurContext, SourceLocation(),
-                              SourceLocation(), II, FunctionTy, FunctionTyInfo,
-                              SC_Static, SC_Static);
+    DC->addDecl(FD);
 
-    S.CurContext->addDecl(FD);
-
-    IdentifierInfo *ParamII = &S.PP.getIdentifierTable().get("this");
+    IdentifierInfo *IdThis = &PP.getIdentifierTable().get("this");
     ParmVarDecl *Param
       = ParmVarDecl::Create(Context, FD, SourceLocation(), SourceLocation(),
-                            ParamII, ParamType,
+                            IdThis, ParamType,
                             Context.getTrivialTypeSourceInfo(ParamType),
                             SC_None, SC_None, /* DefaultArg =*/0);
     FD->setParams(Param);
@@ -3170,25 +3139,16 @@ static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
     FD->setParallelRegion();
   }
 
-  // Enter the capturing scope for this parallel region
-  S.PushParallelRegionScope(CurScope, FD, RD);
+  return RD;
+}
 
-  if (CurScope)
-    S.PushDeclContext(CurScope, FD);
-  else
-    S.CurContext = FD;
+SmallVector<CapturedStmt::Capture, 4>
+Sema::buildCapturedStmtCaptureList(SmallVector<CapturingScopeInfo::Capture, 4>
+                                     &Candidates) {
 
-  ParallelRegionScopeInfo *RSI
-    = cast<ParallelRegionScopeInfo>(S.FunctionScopes.back());
-
-  // Scan the statement to find variables to be captured.
-  CaptureBuilder Builder(S);
-  Builder.TraverseStmt(Spawn->getSubStmt());
-
-  // Build the CilkSpawnCapturedStmt
   SmallVector<CapturedStmt::Capture, 4> Captures;
-  for (unsigned I = 0, N = RSI->Captures.size(); I != N; I++) {
-    CapturingScopeInfo::Capture &Cap = RSI->Captures[I];
+  for (unsigned I = 0, N = Candidates.size(); I != N; I++) {
+    CapturingScopeInfo::Capture &Cap = Candidates[I];
 
     if (Cap.isThisCapture()) {
       Captures.push_back(CapturedStmt::Capture(CapturedStmt::LCK_This,
@@ -3205,7 +3165,43 @@ static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
     Captures.push_back(CapturedStmt::Capture(Kind, Cap.getCopyExpr(), Var));
   }
 
-  Spawn->setCaptures(Context, Captures.begin(), Captures.end());
+  return Captures;
+}
+
+/// Helper functions are required to be internal,  not mangling accross
+/// translation units.
+static IdentifierInfo *GetMangledHelperName(Sema &S) {
+  static unsigned count = 0;
+  StringRef name("__cilk_spawn_helperV");
+  return &S.PP.getIdentifierTable().get((name + llvm::Twine(count++)).str());
+}
+
+static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
+                                   CilkSpawnCapturedStmt *Spawn) {
+  // Create a caputred recored decl and start its definition
+  FunctionDecl *FD = 0;
+  RecordDecl *RD = S.CreateCapturedStmtRecordDecl(FD, SourceLocation(),
+                                                    GetMangledHelperName(S));
+
+  // Enter the capturing scope for this parallel region
+  S.PushParallelRegionScope(CurScope, FD, RD);
+
+  if (CurScope)
+    S.PushDeclContext(CurScope, FD);
+  else
+    S.CurContext = FD;
+
+  // Scan the statement to find variables to be captured.
+  ParallelRegionScopeInfo *RSI
+    = cast<ParallelRegionScopeInfo>(S.FunctionScopes.back());
+
+  CaptureBuilder Builder(S);
+  Builder.TraverseStmt(Spawn->getSubStmt());
+
+  // Build the CilkSpawnCapturedStmt
+  SmallVector<CapturedStmt::Capture, 4> Captures
+      = S.buildCapturedStmtCaptureList(RSI->Captures);
+  Spawn->setCaptures(S.Context, Captures.begin(), Captures.end());
   Spawn->setRecordDecl(RD);
   Spawn->setFunctionDecl(FD);
 
@@ -3214,6 +3210,20 @@ static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
 
   S.PopDeclContext();
   S.PopFunctionScopeInfo();
+}
+
+// FIXME: Delete this function after captured statement implementation of
+// Cilk Spawn is completed.
+static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
+  if (!S)
+    return S;
+
+  SpawnHelper Helper;
+  Helper.TraverseStmt(S);
+  if (!Helper.hasSpawn())
+    return S;
+
+  return new (SemaRef.Context) CilkSpawnStmt(S);
 }
 
 static Stmt *tryCreateCilkSpawnCapturedStmt(Sema &SemaRef, Stmt *S) {

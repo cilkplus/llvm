@@ -37,6 +37,7 @@
 #include "clang/Sema/LocInfoType.h"
 #include "clang/Sema/ObjCMethodList.h"
 #include "clang/Sema/Ownership.h"
+#include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/TypoCorrection.h"
 #include "clang/Sema/Weak.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -2675,6 +2676,13 @@ public:
   ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   ExprResult BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   StmtResult ActOnCilkSpawnStmt(Stmt *S);
+
+  RecordDecl *CreateCapturedStmtRecordDecl(FunctionDecl *&FD,
+                                             SourceLocation Loc,
+                                             IdentifierInfo *MangledName);
+  SmallVector<CapturedStmt::Capture, 4>
+  buildCapturedStmtCaptureList(SmallVector<sema::CapturingScopeInfo::Capture, 4>
+                                 &Candidates);
 
   const VarDecl *getCopyElisionCandidate(QualType ReturnType, Expr *E,
                                          bool AllowFunctionParameters);
