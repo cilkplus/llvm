@@ -70,6 +70,19 @@ public:
     ID.AddInteger(K);
     ID.AddPointer(S);
   }
+
+  void dump(llvm::raw_ostream &OS) const {
+    static const char *Table[] = {
+      "Allocated",
+      "Released",
+      "Relinquished"
+    };
+    OS << Table[(unsigned) K];
+  }
+
+  LLVM_ATTRIBUTE_USED void dump() const {
+    dump(llvm::errs());
+  }
 };
 
 enum ReallocPairKind {
@@ -100,7 +113,7 @@ struct ReallocPair {
   }
 };
 
-typedef std::pair<const Stmt*, const MemRegion*> LeakInfo;
+typedef std::pair<const ExplodedNode*, const MemRegion*> LeakInfo;
 
 class MallocChecker : public Checker<check::DeadSymbols,
                                      check::PointerEscape,
@@ -1026,14 +1039,7 @@ MallocChecker::getAllocationSite(const ExplodedNode *N, SymbolRef Sym,
     N = N->pred_empty() ? NULL : *(N->pred_begin());
   }
 
-  ProgramPoint P = AllocNode->getLocation();
-  const Stmt *AllocationStmt = 0;
-  if (CallExitEnd *Exit = dyn_cast<CallExitEnd>(&P))
-    AllocationStmt = Exit->getCalleeContext()->getCallSite();
-  else if (StmtPoint *SP = dyn_cast<StmtPoint>(&P))
-    AllocationStmt = SP->getStmt();
-
-  return LeakInfo(AllocationStmt, ReferenceRegion);
+  return LeakInfo(AllocNode, ReferenceRegion);
 }
 
 void MallocChecker::reportLeak(SymbolRef Sym, ExplodedNode *N,
@@ -1053,12 +1059,20 @@ void MallocChecker::reportLeak(SymbolRef Sym, ExplodedNode *N,
   // With leaks, we want to unique them by the location where they were
   // allocated, and only report a single path.
   PathDiagnosticLocation LocUsedForUniqueing;
-  const Stmt *AllocStmt = 0;
+  const ExplodedNode *AllocNode = 0;
   const MemRegion *Region = 0;
-  llvm::tie(AllocStmt, Region) = getAllocationSite(N, Sym, C);
-  if (AllocStmt)
-    LocUsedForUniqueing = PathDiagnosticLocation::createBegin(AllocStmt,
-                            C.getSourceManager(), N->getLocationContext());
+  llvm::tie(AllocNode, Region) = getAllocationSite(N, Sym, C);
+  
+  ProgramPoint P = AllocNode->getLocation();
+  const Stmt *AllocationStmt = 0;
+  if (CallExitEnd *Exit = dyn_cast<CallExitEnd>(&P))
+    AllocationStmt = Exit->getCalleeContext()->getCallSite();
+  else if (StmtPoint *SP = dyn_cast<StmtPoint>(&P))
+    AllocationStmt = SP->getStmt();
+  if (AllocationStmt)
+    LocUsedForUniqueing = PathDiagnosticLocation::createBegin(AllocationStmt,
+                                              C.getSourceManager(),
+                                              AllocNode->getLocationContext());
 
   SmallString<200> buf;
   llvm::raw_svector_ostream os(buf);
@@ -1069,7 +1083,9 @@ void MallocChecker::reportLeak(SymbolRef Sym, ExplodedNode *N,
     os << '\'';
   }
 
-  BugReport *R = new BugReport(*BT_Leak, os.str(), N, LocUsedForUniqueing);
+  BugReport *R = new BugReport(*BT_Leak, os.str(), N, 
+                               LocUsedForUniqueing, 
+                               AllocNode->getLocationContext()->getDecl());
   R->markInteresting(Sym);
   R->addVisitor(new MallocBugVisitor(Sym, true));
   C.emitReport(R);
@@ -1487,16 +1503,16 @@ MallocChecker::MallocBugVisitor::VisitNode(const ExplodedNode *N,
 
   // Retrieve the associated statement.
   ProgramPoint ProgLoc = N->getLocation();
-  if (StmtPoint *SP = dyn_cast<StmtPoint>(&ProgLoc))
+  if (StmtPoint *SP = dyn_cast<StmtPoint>(&ProgLoc)) {
     S = SP->getStmt();
-  else if (CallExitEnd *Exit = dyn_cast<CallExitEnd>(&ProgLoc))
+  } else if (CallExitEnd *Exit = dyn_cast<CallExitEnd>(&ProgLoc)) {
     S = Exit->getCalleeContext()->getCallSite();
-  // If an assumption was made on a branch, it should be caught
-  // here by looking at the state transition.
-  else if (BlockEdge *Edge = dyn_cast<BlockEdge>(&ProgLoc)) {
-    const CFGBlock *srcBlk = Edge->getSrc();
-    S = srcBlk->getTerminator();
+  } else if (BlockEdge *Edge = dyn_cast<BlockEdge>(&ProgLoc)) {
+    // If an assumption was made on a branch, it should be caught
+    // here by looking at the state transition.
+    S = Edge->getSrc()->getTerminator();
   }
+
   if (!S)
     return 0;
 
@@ -1561,8 +1577,15 @@ void MallocChecker::printState(raw_ostream &Out, ProgramStateRef State,
 
   RegionStateTy RS = State->get<RegionState>();
 
-  if (!RS.isEmpty())
-    Out << "Has Malloc data" << NL;
+  if (!RS.isEmpty()) {
+    Out << Sep << "MallocChecker:" << NL;
+    for (RegionStateTy::iterator I = RS.begin(), E = RS.end(); I != E; ++I) {
+      I.getKey()->dumpToStream(Out);
+      Out << " : ";
+      I.getData().dump(Out);
+      Out << NL;
+    }
+  }
 }
 
 #define REGISTER_CHECKER(name) \

@@ -6578,6 +6578,11 @@ static bool isScopedEnumerationType(QualType T) {
 static void DiagnoseBadShiftValues(Sema& S, ExprResult &LHS, ExprResult &RHS,
                                    SourceLocation Loc, unsigned Opc,
                                    QualType LHSType) {
+  // OpenCL 6.3j: shift values are effectively % word size of LHS (more defined),
+  // so skip remaining warnings as we don't want to modify values within Sema.
+  if (S.getLangOpts().OpenCL)
+    return;
+
   llvm::APSInt Right;
   // Check right/shifter operand
   if (RHS.get()->isValueDependent() ||
@@ -9711,11 +9716,11 @@ ExprResult Sema::BuildVAArgExpr(SourceLocation BuiltinLoc,
     if (TInfo->getType()->isSpecificBuiltinType(BuiltinType::Float))
       PromoteType = Context.DoubleTy;
     if (!PromoteType.isNull())
-      Diag(TInfo->getTypeLoc().getBeginLoc(),
-          diag::warn_second_parameter_to_va_arg_never_compatible)
-        << TInfo->getType()
-        << PromoteType
-        << TInfo->getTypeLoc().getSourceRange();
+      DiagRuntimeBehavior(TInfo->getTypeLoc().getBeginLoc(), E,
+                  PDiag(diag::warn_second_parameter_to_va_arg_never_compatible)
+                          << TInfo->getType()
+                          << PromoteType
+                          << TInfo->getTypeLoc().getSourceRange());
   }
 
   QualType T = TInfo->getType().getNonLValueExprType(Context);
@@ -10490,7 +10495,17 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func) {
     if (old.isInvalid()) old = Loc;
   }
 
-  Func->setUsed(true);
+  // Normally the must current decl is marked used while processing the use and
+  // any subsequent decls are marked used by decl merging. This fails with
+  // template instantiation since marking can happen at the end of the file
+  // and, because of the two phase lookup, this function is called with at
+  // decl in the middle of a decl chain. We loop to maintain the invariant
+  // that once a decl is used, all decls after it are also used.
+  for (FunctionDecl *F = Func->getMostRecentDecl();; F = F->getPreviousDecl()) {
+    F->setUsed(true);
+    if (F == Func)
+      break;
+  }
 }
 
 static void
@@ -10776,7 +10791,22 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       }
       return true;
     }
-
+    // Prohibit structs with flexible array members too.
+    // We cannot capture what is in the tail end of the struct.
+    if (const RecordType *VTTy = Var->getType()->getAs<RecordType>()) {
+      if (VTTy->getDecl()->hasFlexibleArrayMember()) {
+        if (BuildAndDiagnose) {
+          if (IsBlock)
+            Diag(Loc, diag::err_ref_flexarray_type);
+          else
+            Diag(Loc, diag::err_lambda_capture_flexarray_type)
+              << Var->getDeclName();
+          Diag(Var->getLocation(), diag::note_previous_decl)
+            << Var->getDeclName();
+        }
+        return true;
+      }
+    }
     // Lambdas are not allowed to capture __block variables; they don't
     // support the expected semantics.
     if (IsLambda && HasBlocksAttr) {

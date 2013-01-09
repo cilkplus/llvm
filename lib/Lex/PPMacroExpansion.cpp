@@ -818,6 +818,7 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
            .Case("objc_instancetype", LangOpts.ObjC2)
            .Case("objc_modules", LangOpts.ObjC2 && LangOpts.Modules)
            .Case("objc_nonfragile_abi", LangOpts.ObjCRuntime.isNonFragile())
+           .Case("objc_property_explicit_atomic", true) // Does clang support explicit "atomic" keyword?
            .Case("objc_weak_class", LangOpts.ObjCRuntime.hasWeakClassImport())
            .Case("ownership_holds", true)
            .Case("ownership_returns", true)
@@ -984,8 +985,14 @@ static bool EvaluateHasIncludeCommon(Token &Tok,
     // Save '(' location for possible missing ')' message.
     LParenLoc = Tok.getLocation();
 
-    // Get the file name.
-    PP.getCurrentLexer()->LexIncludeFilename(Tok);
+    if (PP.getCurrentLexer()) {
+      // Get the file name.
+      PP.getCurrentLexer()->LexIncludeFilename(Tok);
+    } else {
+      // We're in a macro, so we can't use LexIncludeFilename; just
+      // grab the next token.
+      PP.Lex(Tok);
+    }
   }
 
   // Reserve a buffer to get the spelling.

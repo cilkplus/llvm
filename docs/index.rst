@@ -3,8 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to Clang's documentation!
-=================================
+.. title:: Welcome to Clang's documentation!
 
 .. toctree::
    :maxdepth: 1
@@ -12,18 +11,20 @@ Welcome to Clang's documentation!
    ReleaseNotes
 
 Using Clang as a Compiler
--------------------------
+=========================
 
 .. toctree::
    :maxdepth: 1
 
    UsersManual
+   LanguageExtensions
    AddressSanitizer
    ThreadSanitizer
    MemorySanitizer
+   FAQ
 
 Using Clang as a Library
-------------------------
+========================
 
 .. toctree::
    :maxdepth: 1
@@ -40,7 +41,7 @@ Using Clang as a Library
    JSONCompilationDatabase
 
 Design Documents
-----------------
+================
 
 .. toctree::
    :maxdepth: 1
@@ -49,18 +50,6 @@ Design Documents
    DriverInternals
    PTHInternals
    PCHInternals
-
-
-Language Extensions and Specs
------------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   LanguageExtensions
-   ObjectiveCLiterals
-   BlockLanguageSpec
-   AutomaticReferenceCounting
 
 
 Indices and tables

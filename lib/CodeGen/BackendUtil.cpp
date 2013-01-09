@@ -31,7 +31,6 @@
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/TargetTransformInfo.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Instrumentation.h"
@@ -59,13 +58,8 @@ private:
     if (!CodeGenPasses) {
       CodeGenPasses = new PassManager();
       CodeGenPasses->add(new DataLayout(TheModule));
-      // Add TargetTransformInfo.
-      if (TM) {
-        TargetTransformInfo *TTI =
-        new TargetTransformInfo(TM->getScalarTargetTransformInfo(),
-                                TM->getVectorTargetTransformInfo());
-        CodeGenPasses->add(TTI);
-      }
+      if (TM)
+        TM->addAnalysisPasses(*CodeGenPasses);
     }
     return CodeGenPasses;
   }
@@ -74,12 +68,8 @@ private:
     if (!PerModulePasses) {
       PerModulePasses = new PassManager();
       PerModulePasses->add(new DataLayout(TheModule));
-      if (TM) {
-        TargetTransformInfo *TTI =
-        new TargetTransformInfo(TM->getScalarTargetTransformInfo(),
-                                TM->getVectorTargetTransformInfo());
-        PerModulePasses->add(TTI);
-      }
+      if (TM)
+        TM->addAnalysisPasses(*PerModulePasses);
     }
     return PerModulePasses;
   }
@@ -88,12 +78,8 @@ private:
     if (!PerFunctionPasses) {
       PerFunctionPasses = new FunctionPassManager(TheModule);
       PerFunctionPasses->add(new DataLayout(TheModule));
-      if (TM) {
-        TargetTransformInfo *TTI =
-        new TargetTransformInfo(TM->getScalarTargetTransformInfo(),
-                                TM->getVectorTargetTransformInfo());
-        PerFunctionPasses->add(TTI);
-      }
+      if (TM)
+        TM->addAnalysisPasses(*PerFunctionPasses);
     }
     return PerFunctionPasses;
   }
@@ -481,9 +467,8 @@ bool EmitAssemblyHelper::AddEmitPasses(BackendAction Action,
     TLI->disableAllFunctions();
   PM->add(TLI);
 
-  // Add TargetTransformInfo.
-  PM->add(new TargetTransformInfo(TM->getScalarTargetTransformInfo(),
-                                  TM->getVectorTargetTransformInfo()));
+  // Add Target specific analysis passes.
+  TM->addAnalysisPasses(*PM);
 
   // Normal mode, emit a .s or .o file by running the code generator. Note,
   // this also adds codegenerator level optimization passes.

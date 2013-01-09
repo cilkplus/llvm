@@ -143,7 +143,6 @@ def MismatchedParameterTypes : DiagGroup<"mismatched-parameter-types">;
 def MismatchedReturnTypes : DiagGroup<"mismatched-return-types">;
 def MismatchedTags : DiagGroup<"mismatched-tags">;
 def MissingFieldInitializers : DiagGroup<"missing-field-initializers">;
-def ModuleBuild : DiagGroup<"module-build">;
 def NullCharacter : DiagGroup<"null-character">;
 def NullDereference : DiagGroup<"null-dereference">;
 def InitializerOverrides : DiagGroup<"initializer-overrides">;
@@ -378,7 +377,6 @@ def Most : DiagGroup<"most", [
     DeleteNonVirtualDtor,
     Format,
     Implicit,
-    IntToPointerCast,
     MismatchedTags,
     MissingBraces,
     MultiChar,

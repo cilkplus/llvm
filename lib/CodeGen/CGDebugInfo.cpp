@@ -813,7 +813,6 @@ void CGDebugInfo::
 CollectRecordFields(const RecordDecl *record, llvm::DIFile tunit,
                     SmallVectorImpl<llvm::Value *> &elements,
                     llvm::DIType RecordTy) {
-  unsigned fieldNo = 0;
   const ASTRecordLayout &layout = CGM.getContext().getASTRecordLayout(record);
   const CXXRecordDecl *CXXDecl = dyn_cast<CXXRecordDecl>(record);
 
@@ -851,12 +850,13 @@ CollectRecordFields(const RecordDecl *record, llvm::DIFile tunit,
         QualType type = f->getType();
         llvm::DIType fieldType
           = createFieldType("this", type, 0, f->getLocation(), f->getAccess(),
-                            layout.getFieldOffset(fieldNo), VUnit, RecordTy);
+                            layout.getFieldOffset(fieldno), VUnit, RecordTy);
 
         elements.push_back(fieldType);
       }
     }
   } else {
+    unsigned fieldNo = 0;
     bool IsMsStruct = record->isMsStruct(CGM.getContext());
     const FieldDecl *LastFD = 0;
     for (RecordDecl::field_iterator I = record->field_begin(),
@@ -904,13 +904,18 @@ CollectRecordFields(const RecordDecl *record, llvm::DIFile tunit,
 llvm::DIType
 CGDebugInfo::getOrCreateMethodType(const CXXMethodDecl *Method,
                                    llvm::DIFile Unit) {
-  llvm::DIType FnTy
-    = getOrCreateType(QualType(Method->getType()->getAs<FunctionProtoType>(),
-                               0),
-                      Unit);
+  const FunctionProtoType *Func = Method->getType()->getAs<FunctionProtoType>();
+  if (Method->isStatic())
+    return getOrCreateType(QualType(Func, 0), Unit);
+  return getOrCreateInstanceMethodType(Method->getThisType(CGM.getContext()),
+                                       Func, Unit);
+}
 
+llvm::DIType CGDebugInfo::getOrCreateInstanceMethodType(
+    QualType ThisPtr, const FunctionProtoType *Func, llvm::DIFile Unit) {
   // Add "this" pointer.
-  llvm::DIArray Args = llvm::DICompositeType(FnTy).getTypeArray();
+  llvm::DIArray Args = llvm::DICompositeType(
+      getOrCreateType(QualType(Func, 0), Unit)).getTypeArray();
   assert (Args.getNumElements() && "Invalid number of arguments!");
 
   SmallVector<llvm::Value *, 16> Elts;
@@ -918,32 +923,28 @@ CGDebugInfo::getOrCreateMethodType(const CXXMethodDecl *Method,
   // First element is always return type. For 'void' functions it is NULL.
   Elts.push_back(Args.getElement(0));
 
-  if (!Method->isStatic()) {
-    // "this" pointer is always first argument.
-    QualType ThisPtr = Method->getThisType(CGM.getContext());
-
-    const CXXRecordDecl *RD = Method->getParent();
-    if (isa<ClassTemplateSpecializationDecl>(RD)) {
-      // Create pointer type directly in this case.
-      const PointerType *ThisPtrTy = cast<PointerType>(ThisPtr);
-      QualType PointeeTy = ThisPtrTy->getPointeeType();
-      unsigned AS = CGM.getContext().getTargetAddressSpace(PointeeTy);
-      uint64_t Size = CGM.getContext().getTargetInfo().getPointerWidth(AS);
-      uint64_t Align = CGM.getContext().getTypeAlign(ThisPtrTy);
-      llvm::DIType PointeeType = getOrCreateType(PointeeTy, Unit);
-      llvm::DIType ThisPtrType = DBuilder.createPointerType(PointeeType, Size, Align);
-      TypeCache[ThisPtr.getAsOpaquePtr()] = ThisPtrType;
-      // TODO: This and the artificial type below are misleading, the
-      // types aren't artificial the argument is, but the current
-      // metadata doesn't represent that.
-      ThisPtrType = DBuilder.createObjectPointerType(ThisPtrType);
-      Elts.push_back(ThisPtrType);
-    } else {
-      llvm::DIType ThisPtrType = getOrCreateType(ThisPtr, Unit);
-      TypeCache[ThisPtr.getAsOpaquePtr()] = ThisPtrType;
-      ThisPtrType = DBuilder.createObjectPointerType(ThisPtrType);
-      Elts.push_back(ThisPtrType);
-    }
+  // "this" pointer is always first argument.
+  const CXXRecordDecl *RD = ThisPtr->getPointeeCXXRecordDecl();
+  if (isa<ClassTemplateSpecializationDecl>(RD)) {
+    // Create pointer type directly in this case.
+    const PointerType *ThisPtrTy = cast<PointerType>(ThisPtr);
+    QualType PointeeTy = ThisPtrTy->getPointeeType();
+    unsigned AS = CGM.getContext().getTargetAddressSpace(PointeeTy);
+    uint64_t Size = CGM.getContext().getTargetInfo().getPointerWidth(AS);
+    uint64_t Align = CGM.getContext().getTypeAlign(ThisPtrTy);
+    llvm::DIType PointeeType = getOrCreateType(PointeeTy, Unit);
+    llvm::DIType ThisPtrType = DBuilder.createPointerType(PointeeType, Size, Align);
+    TypeCache[ThisPtr.getAsOpaquePtr()] = ThisPtrType;
+    // TODO: This and the artificial type below are misleading, the
+    // types aren't artificial the argument is, but the current
+    // metadata doesn't represent that.
+    ThisPtrType = DBuilder.createObjectPointerType(ThisPtrType);
+    Elts.push_back(ThisPtrType);
+  } else {
+    llvm::DIType ThisPtrType = getOrCreateType(ThisPtr, Unit);
+    TypeCache[ThisPtr.getAsOpaquePtr()] = ThisPtrType;
+    ThisPtrType = DBuilder.createObjectPointerType(ThisPtrType);
+    Elts.push_back(ThisPtrType);
   }
 
   // Copy rest of the arguments.
@@ -1589,38 +1590,8 @@ llvm::DIType CGDebugInfo::CreateType(const RValueReferenceType *Ty,
 
 llvm::DIType CGDebugInfo::CreateType(const MemberPointerType *Ty, 
                                      llvm::DIFile U) {
-  QualType PointerDiffTy = CGM.getContext().getPointerDiffType();
-  llvm::DIType PointerDiffDITy = getOrCreateType(PointerDiffTy, U);
-  
-  if (!Ty->getPointeeType()->isFunctionType()) {
-    // We have a data member pointer type.
-    return PointerDiffDITy;
-  }
-  
-  // We have a member function pointer type. Treat it as a struct with two
-  // ptrdiff_t members.
-  std::pair<uint64_t, unsigned> Info = CGM.getContext().getTypeInfo(Ty);
-
-  uint64_t FieldOffset = 0;
-  llvm::Value *ElementTypes[2];
-  
-  // FIXME: This should be a DW_TAG_pointer_to_member type.
-  ElementTypes[0] =
-    DBuilder.createMemberType(U, "ptr", U, 0,
-                              Info.first, Info.second, FieldOffset, 0,
-                              PointerDiffDITy);
-  FieldOffset += Info.first;
-  
-  ElementTypes[1] =
-    DBuilder.createMemberType(U, "ptr", U, 0,
-                              Info.first, Info.second, FieldOffset, 0,
-                              PointerDiffDITy);
-  
-  llvm::DIArray Elements = DBuilder.getOrCreateArray(ElementTypes);
-
-  return DBuilder.createStructType(U, StringRef("test"), 
-                                   U, 0, FieldOffset, 
-                                   0, 0, Elements);
+  return DBuilder.createMemberPointerType(CreatePointeeType(Ty->getPointeeType(), U),
+                                    getOrCreateType(QualType(Ty->getClass(), 0), U));
 }
 
 llvm::DIType CGDebugInfo::CreateType(const AtomicType *Ty, 
@@ -2428,25 +2399,11 @@ void CGDebugInfo::EmitDeclare(const VarDecl *VD, unsigned Tag,
       Call->setDebugLoc(llvm::DebugLoc::get(Line, Column, Scope));
       return;
     }
-    
-    // Create the descriptor for the variable.
-    llvm::DIVariable D =
-      DBuilder.createLocalVariable(Tag, llvm::DIDescriptor(Scope), 
-                                   Name, Unit, Line, Ty, 
-                                   CGM.getLangOpts().Optimize, Flags, ArgNo);
-    
-    // Insert an llvm.dbg.declare into the current block.
-    llvm::Instruction *Call =
-      DBuilder.insertDeclare(Storage, D, Builder.GetInsertBlock());
-    Call->setDebugLoc(llvm::DebugLoc::get(Line, Column, Scope));
-    return;
-  }
-  
-  // If VD is an anonymous union then Storage represents value for
-  // all union fields.
-  if (const RecordType *RT = dyn_cast<RecordType>(VD->getType())) {
+  } else if (const RecordType *RT = dyn_cast<RecordType>(VD->getType())) {
+    // If VD is an anonymous union then Storage represents value for
+    // all union fields.
     const RecordDecl *RD = cast<RecordDecl>(RT->getDecl());
-    if (RD->isUnion()) {
+    if (RD->isUnion() && RD->isAnonymousStructOrUnion()) {
       for (RecordDecl::field_iterator I = RD->field_begin(),
              E = RD->field_end();
            I != E; ++I) {
@@ -2470,8 +2427,20 @@ void CGDebugInfo::EmitDeclare(const VarDecl *VD, unsigned Tag,
           DBuilder.insertDeclare(Storage, D, Builder.GetInsertBlock());
         Call->setDebugLoc(llvm::DebugLoc::get(Line, Column, Scope));
       }
+      return;
     }
   }
+
+  // Create the descriptor for the variable.
+  llvm::DIVariable D =
+    DBuilder.createLocalVariable(Tag, llvm::DIDescriptor(Scope),
+                                 Name, Unit, Line, Ty,
+                                 CGM.getLangOpts().Optimize, Flags, ArgNo);
+
+  // Insert an llvm.dbg.declare into the current block.
+  llvm::Instruction *Call =
+    DBuilder.insertDeclare(Storage, D, Builder.GetInsertBlock());
+  Call->setDebugLoc(llvm::DebugLoc::get(Line, Column, Scope));
 }
 
 void CGDebugInfo::EmitDeclareOfAutoVariable(const VarDecl *VD,

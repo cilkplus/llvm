@@ -1464,6 +1464,24 @@ Scope *Sema::getNonFieldDeclScope(Scope *S) {
   return S;
 }
 
+/// \brief Looks up the declaration of "struct objc_super" and
+/// saves it for later use in building builtin declaration of
+/// objc_msgSendSuper and objc_msgSendSuper_stret. If no such
+/// pre-existing declaration exists no action takes place.
+static void LookupPredefedObjCSuperType(Sema &ThisSema, Scope *S,
+                                        IdentifierInfo *II) {
+  if (!II->isStr("objc_msgSendSuper"))
+    return;
+  ASTContext &Context = ThisSema.Context;
+    
+  LookupResult Result(ThisSema, &Context.Idents.get("objc_super"),
+                      SourceLocation(), Sema::LookupTagName);
+  ThisSema.LookupName(Result, S);
+  if (Result.getResultKind() == LookupResult::Found)
+    if (const TagDecl *TD = Result.getAsSingle<TagDecl>())
+      Context.setObjCSuperType(Context.getTagDeclType(TD));
+}
+
 /// LazilyCreateBuiltin - The specified Builtin-ID was first used at
 /// file scope.  lazily create a decl for it. ForRedeclaration is true
 /// if we're creating this built-in in anticipation of redeclaring the
@@ -1471,6 +1489,8 @@ Scope *Sema::getNonFieldDeclScope(Scope *S) {
 NamedDecl *Sema::LazilyCreateBuiltin(IdentifierInfo *II, unsigned bid,
                                      Scope *S, bool ForRedeclaration,
                                      SourceLocation Loc) {
+  LookupPredefedObjCSuperType(*this, S, II);
+  
   Builtin::ID BID = (Builtin::ID)bid;
 
   ASTContext::GetBuiltinTypeError Error;
@@ -1546,6 +1566,40 @@ NamedDecl *Sema::LazilyCreateBuiltin(IdentifierInfo *II, unsigned bid,
   PushOnScopeChains(New, TUScope);
   CurContext = SavedContext;
   return New;
+}
+
+/// \brief Filter out any previous declarations that the given declaration
+/// should not consider because they are not permitted to conflict, e.g.,
+/// because they come from hidden sub-modules and do not refer to the same
+/// entity.
+static void filterNonConflictingPreviousDecls(ASTContext &context,
+                                              NamedDecl *decl,
+                                              LookupResult &previous){
+  // This is only interesting when modules are enabled.
+  if (!context.getLangOpts().Modules)
+    return;
+
+  // Empty sets are uninteresting.
+  if (previous.empty())
+    return;
+
+  // If this declaration has external
+  bool hasExternalLinkage = (decl->getLinkage() == ExternalLinkage);
+
+  LookupResult::Filter filter = previous.makeFilter();
+  while (filter.hasNext()) {
+    NamedDecl *old = filter.next();
+
+    // Non-hidden declarations are never ignored.
+    if (!old->isHidden())
+      continue;
+
+    // If either has no-external linkage, ignore the old declaration.
+    if (!hasExternalLinkage || old->getLinkage() != ExternalLinkage)
+      filter.erase();
+  }
+
+  filter.done();
 }
 
 bool Sema::isIncompatibleTypedef(TypeDecl *Old, TypedefNameDecl *New) {
@@ -1768,19 +1822,19 @@ DeclHasAttr(const Decl *D, const Attr *A) {
   return false;
 }
 
-bool Sema::mergeDeclAttribute(Decl *D, InheritableAttr *Attr) {
+bool Sema::mergeDeclAttribute(NamedDecl *D, InheritableAttr *Attr) {
   InheritableAttr *NewAttr = NULL;
-  if (AvailabilityAttr *AA = dyn_cast<AvailabilityAttr>(Attr))
+  if (AvailabilityAttr *AA = dyn_cast<AvailabilityAttr>(Attr)) {
     NewAttr = mergeAvailabilityAttr(D, AA->getRange(), AA->getPlatform(),
                                     AA->getIntroduced(), AA->getDeprecated(),
                                     AA->getObsoleted(), AA->getUnavailable(),
                                     AA->getMessage());
-  else if (VisibilityAttr *VA = dyn_cast<VisibilityAttr>(Attr)) {
+    if (NewAttr)
+      D->ClearLVCache();
+  } else if (VisibilityAttr *VA = dyn_cast<VisibilityAttr>(Attr)) {
     NewAttr = mergeVisibilityAttr(D, VA->getRange(), VA->getVisibility());
-    if (NewAttr) {
-      NamedDecl *ND = cast<NamedDecl>(D);
-      ND->ClearLVCache();
-    }
+    if (NewAttr)
+      D->ClearLVCache();
   } else if (DLLImportAttr *ImportA = dyn_cast<DLLImportAttr>(Attr))
     NewAttr = mergeDLLImportAttr(D, ImportA->getRange());
   else if (DLLExportAttr *ExportA = dyn_cast<DLLExportAttr>(Attr))
@@ -1851,7 +1905,7 @@ static void checkNewAttributesAfterDef(Sema &S, Decl *New, const Decl *Old) {
 }
 
 /// mergeDeclAttributes - Copy attributes from the Old decl to the New one.
-void Sema::mergeDeclAttributes(Decl *New, Decl *Old,
+void Sema::mergeDeclAttributes(NamedDecl *New, Decl *Old,
                                bool MergeDeprecation) {
   // attributes declared post-definition are currently ignored
   checkNewAttributesAfterDef(*this, New, Old);
@@ -3638,8 +3692,8 @@ bool Sema::diagnoseQualifiedDeclaration(CXXScopeSpec &SS, DeclContext *DC,
   return false;
 }
 
-Decl *Sema::HandleDeclarator(Scope *S, Declarator &D,
-                             MultiTemplateParamsArg TemplateParamLists) {
+NamedDecl *Sema::HandleDeclarator(Scope *S, Declarator &D,
+                                  MultiTemplateParamsArg TemplateParamLists) {
   // TODO: consider using NameInfo for diagnostic.
   DeclarationNameInfo NameInfo = GetNameForDeclarator(D);
   DeclarationName Name = NameInfo.getName();
@@ -4119,6 +4173,7 @@ Sema::ActOnTypedefNameDecl(Scope *S, DeclContext *DC, TypedefNameDecl *NewTD,
   // in an outer scope, it isn't the same thing.
   FilterLookupForScope(Previous, DC, S, /*ConsiderLinkage*/ false,
                        /*ExplicitInstantiationOrSpecialization=*/false);
+  filterNonConflictingPreviousDecls(Context, NewTD, Previous);
   if (!Previous.empty()) {
     Redeclaration = true;
     MergeTypedefNameDecl(NewTD, Previous);
@@ -4537,8 +4592,6 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   // member, set the visibility of this variable.
   if (NewVD->getLinkage() == ExternalLinkage && !DC->isRecord())
     AddPushedVisibilityAttribute(NewVD);
-  
-  MarkUnusedFileScopedDecl(NewVD);
 
   return NewVD;
 }
@@ -4749,6 +4802,9 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
     if (Pos != LocallyScopedExternalDecls.end())
       Previous.addDecl(Pos->second);
   }
+
+  // Filter out any non-conflicting previous declarations.
+  filterNonConflictingPreviousDecls(Context, NewVD, Previous);
 
   if (T->isVoidType() && !NewVD->hasExternalStorage()) {
     Diag(NewVD->getLocation(), diag::err_typecheck_decl_incomplete_type)
@@ -6100,6 +6156,9 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
       Previous.addDecl(Pos->second);
   }
 
+  // Filter out any non-conflicting previous declarations.
+  filterNonConflictingPreviousDecls(Context, NewFD, Previous);
+
   bool Redeclaration = false;
 
   // Merge or overload the declaration with an existing declaration of
@@ -6255,6 +6314,7 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
     // declaration against the expected type for the builtin. 
     if (unsigned BuiltinID = NewFD->getBuiltinID()) {
       ASTContext::GetBuiltinTypeError Error;
+      LookupPredefedObjCSuperType(*this, S, NewFD->getIdentifier());
       QualType T = Context.GetBuiltinType(BuiltinID, Error);
       if (!T.isNull() && !Context.hasSameType(T, NewFD->getType())) {
         // The type of this function differs from the type of the builtin,
@@ -7344,40 +7404,46 @@ Sema::FinalizeDeclaration(Decl *ThisDecl) {
   // Note that we are no longer parsing the initializer for this declaration.
   ParsingInitForAutoVars.erase(ThisDecl);
 
+  const VarDecl *VD = dyn_cast_or_null<VarDecl>(ThisDecl);
+  if (!VD)
+    return;
+
+  if (VD->isFileVarDecl())
+    MarkUnusedFileScopedDecl(VD);
+
   // Now we have parsed the initializer and can update the table of magic
   // tag values.
-  if (ThisDecl && ThisDecl->hasAttr<TypeTagForDatatypeAttr>()) {
-    const VarDecl *VD = dyn_cast<VarDecl>(ThisDecl);
-    if (VD && VD->getType()->isIntegralOrEnumerationType()) {
-      for (specific_attr_iterator<TypeTagForDatatypeAttr>
-               I = ThisDecl->specific_attr_begin<TypeTagForDatatypeAttr>(),
-               E = ThisDecl->specific_attr_end<TypeTagForDatatypeAttr>();
-           I != E; ++I) {
-        const Expr *MagicValueExpr = VD->getInit();
-        if (!MagicValueExpr) {
-          continue;
-        }
-        llvm::APSInt MagicValueInt;
-        if (!MagicValueExpr->isIntegerConstantExpr(MagicValueInt, Context)) {
-          Diag(I->getRange().getBegin(),
-               diag::err_type_tag_for_datatype_not_ice)
-            << LangOpts.CPlusPlus << MagicValueExpr->getSourceRange();
-          continue;
-        }
-        if (MagicValueInt.getActiveBits() > 64) {
-          Diag(I->getRange().getBegin(),
-               diag::err_type_tag_for_datatype_too_large)
-            << LangOpts.CPlusPlus << MagicValueExpr->getSourceRange();
-          continue;
-        }
-        uint64_t MagicValue = MagicValueInt.getZExtValue();
-        RegisterTypeTagForDatatype(I->getArgumentKind(),
-                                   MagicValue,
-                                   I->getMatchingCType(),
-                                   I->getLayoutCompatible(),
-                                   I->getMustBeNull());
-      }
+  if (!VD->hasAttr<TypeTagForDatatypeAttr>() ||
+      !VD->getType()->isIntegralOrEnumerationType())
+    return;
+
+  for (specific_attr_iterator<TypeTagForDatatypeAttr>
+         I = ThisDecl->specific_attr_begin<TypeTagForDatatypeAttr>(),
+         E = ThisDecl->specific_attr_end<TypeTagForDatatypeAttr>();
+       I != E; ++I) {
+    const Expr *MagicValueExpr = VD->getInit();
+    if (!MagicValueExpr) {
+      continue;
     }
+    llvm::APSInt MagicValueInt;
+    if (!MagicValueExpr->isIntegerConstantExpr(MagicValueInt, Context)) {
+      Diag(I->getRange().getBegin(),
+           diag::err_type_tag_for_datatype_not_ice)
+        << LangOpts.CPlusPlus << MagicValueExpr->getSourceRange();
+      continue;
+    }
+    if (MagicValueInt.getActiveBits() > 64) {
+      Diag(I->getRange().getBegin(),
+           diag::err_type_tag_for_datatype_too_large)
+        << LangOpts.CPlusPlus << MagicValueExpr->getSourceRange();
+      continue;
+    }
+    uint64_t MagicValue = MagicValueInt.getZExtValue();
+    RegisterTypeTagForDatatype(I->getArgumentKind(),
+                               MagicValue,
+                               I->getMatchingCType(),
+                               I->getLayoutCompatible(),
+                               I->getMustBeNull());
   }
 }
 
