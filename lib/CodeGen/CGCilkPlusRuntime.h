@@ -63,7 +63,7 @@ public:
 
   void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnCapturedStmt &S);
 
-  void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
+  void EmitCilkSync(CodeGenFunction &CGF);
 
   void EmitCilkParentStackFrame(CodeGenFunction &CGF,
                                 CilkCleanupKind K = ImpSyncAndRelFrameCleanup);

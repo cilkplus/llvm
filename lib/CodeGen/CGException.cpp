@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
+#include "CGCilkPlusRuntime.h"
 #include "CGCleanup.h"
 #include "CGObjCRuntime.h"
 #include "TargetInfo.h"
@@ -446,6 +447,13 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   ExceptionPtr->setDoesNotThrow();
   
   EmitAnyExprToExn(*this, E->getSubExpr(), ExceptionPtr);
+
+  // Emit an implicit sync if necessary for a spawning function.
+  if (getLangOpts().CilkPlus) {
+    if (CurCGCilkImplicitSyncInfo &&
+        CurCGCilkImplicitSyncInfo->needsImplicitSync(E))
+      CGM.getCilkPlusRuntime().EmitCilkSync(*this);
+  }
 
   // Now throw the exception.
   llvm::Constant *TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, 

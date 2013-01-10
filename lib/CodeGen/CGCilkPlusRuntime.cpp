@@ -959,8 +959,7 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
 }
 
 /// \brief Emit a call to the __cilk_sync function
-void CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF,
-                                     const CilkSyncStmt &S) {
+void CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF) {
   // Elide the sync if there is no stack frame initialized for this function.
   // This will happen if function only contains _Cilk_sync but no _Cilk_spawn.
   if (llvm::Value *SF = LookupStackFrame(CGF))
@@ -1046,7 +1045,7 @@ CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM) {
 }
 
 /// \brief A utility function for finding the enclosing CXXTryStmt if exists.
-/// If this statament is inside a CXXCatchStmt, then its enclosing CXXTryStmt is
+/// If this statement is inside a CXXCatchStmt, then its enclosing CXXTryStmt is
 /// not its parent. E.g.
 /// \code
 /// try {  // try-outer
@@ -1254,7 +1253,7 @@ void CGCilkImplicitSyncInfo::analyze() {
 
 CGCilkImplicitSyncInfo *CreateCilkImplicitSyncInfo(CodeGenFunction &CGF) {
   return new CGCilkImplicitSyncInfo(CGF);
-} 
+}
 
 } // namespace CodeGen
 } // namespace clang

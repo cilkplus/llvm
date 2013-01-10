@@ -180,7 +180,7 @@ bool CodeGenFunction::EmitSimpleStmt(const Stmt *S) {
   switch (S->getStmtClass()) {
   default: return false;
   case Stmt::CilkSyncStmtClass:
-    CGM.getCilkPlusRuntime().EmitCilkSync(*this, cast<CilkSyncStmt>(*S)); break;
+    CGM.getCilkPlusRuntime().EmitCilkSync(*this); break;
   case Stmt::NullStmtClass: break;
   case Stmt::CompoundStmtClass: EmitCompoundStmt(cast<CompoundStmt>(*S)); break;
   case Stmt::DeclStmtClass:     EmitDeclStmt(cast<DeclStmt>(*S));         break;

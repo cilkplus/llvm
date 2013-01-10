@@ -14,22 +14,22 @@ namespace stack_frame_cleanup {
   template <typename T> void f1(T);
   template <typename T> T f2(T);
 
-  template <typename T>
+  template <typename T, int x>
   void test_f1() {
     _Cilk_spawn f1(T());
   }
 
-  template <typename T>
+  template <typename T, int x>
   void test_f2(T &ret) {
     ret = _Cilk_spawn f2(T());
   }
 
   void parent_stack_frame_test() {
-    test_f1<int>();
-    // CHECK_PARENT: define {{.*}} @_ZN19stack_frame_cleanup7test_f1IiEEvv
+    test_f1<int, 23>();
+    // CHECK_PARENT: define {{.*}} @_ZN19stack_frame_cleanup7test_f1IiLi23EEEvv
     // CHECK_PARENT: alloca %__cilkrts_stack_frame
     // CHECK_PARENT-NEXT: call void @__cilk_parent_prologue
-    // CHECK_PARENT: invoke void @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS_7test_f1IiEEvvE7capture(
+    // CHECK_PARENT: invoke void @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i23{{.*}}capture
     //
     // * Normal exit *
     //
@@ -43,8 +43,8 @@ namespace stack_frame_cleanup {
   }
 
   void helper_stack_frame_test() {
-    test_f1<C>();
-    // CHECK_HELPER_F1: define {{.*}} void @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS_7test_f1INS_1CEEEvvE7capture(
+    test_f1<C, 29>();
+    // CHECK_HELPER_F1: define internal void @_ZN19stack_frame_cleanup22__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i29{{.*}}capture
     // CHECK_HELPER_F1: alloca %__cilkrts_stack_frame
     // CHECK_HELPER_F1: call void @__cilk_reset_worker
     //
@@ -71,9 +71,8 @@ namespace stack_frame_cleanup {
 
   void helper_check_assignment() {
     int x = 0;
-    test_f2<int>(x);
-
-    // CHECK_HELPER_F2: define {{.*}} @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS_7test_f2IiEEvRT_E7capture
+    test_f2<int, 37>(x);
+    // CHECK_HELPER_F2: define internal void @_ZN19stack_frame_cleanup22__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i37{{.*}}capture
     //
     // CHECK_HELPER_F2: [[REG:%[a-zA-Z0-9]+]] = getelementptr inbounds %struct.capture
     // CHECK_HELPER_F2-NEXT: load i32** [[REG]]
@@ -162,6 +161,47 @@ void test4() {
   // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test4_anchorEv
   // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_parent_epilogue
   // CHECK_IMPLICIT_SYNC-NEXT: ret void
+}
+
+// Should have an implicit sync before throw
+void test5() {
+  _Cilk_spawn foo();
+  throw 13;
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test5Ev
+  // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
+  // CHECK_IMPLICIT_SYNC: store i32 13
+  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
+  // CHECK_IMPLICIT_SYNC: invoke void @__cxa_throw
+}
+
+// Should have an implicit sync before throw
+void test6() {
+  try {
+    _Cilk_spawn foo();
+    throw 17;
+  } catch (...) {
+    bar();
+  }
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test6Ev
+  // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
+  // CHECK_IMPLICIT_SYNC: store i32 17
+  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
+  // CHECK_IMPLICIT_SYNC: invoke void @__cxa_throw
+}
+
+// No implicit sync before throw
+void test7() {
+  try {
+    _Cilk_spawn foo();
+  } catch (...) {
+    bar();
+  }
+  throw 19;
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test7Ev
+  // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
+  // CHECK_IMPLICIT_SYNC: store i32 19
+  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilkrts_sync
+  // CHECK_IMPLICIT_SYNC: invoke void @__cxa_throw
 }
 
 } // namespace
