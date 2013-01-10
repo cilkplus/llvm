@@ -14,6 +14,8 @@
 //===----------------------------------------------------------------------===//
 #include "CGCilkPlusRuntime.h"
 #include "CodeGenFunction.h"
+#include "clang/AST/ParentMap.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/Stmt.h"
 #include "llvm/Analysis/RegionInfo.h"
 #include "llvm/IR/Attributes.h"
@@ -966,12 +968,6 @@ void CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF,
 }
 
 namespace {
-  enum {
-    ImplicitSyncCleanup = 0x01,
-    ReleaseFrameCleanup = 0x02,
-    ImpSyncAndRelFrameCleanup = ImplicitSyncCleanup | ReleaseFrameCleanup
-  };
-
   struct CilkSpawnParentCleanup : EHScopeStack::Cleanup {
     llvm::Value *SF;
     unsigned CleanupKind;
@@ -980,10 +976,10 @@ namespace {
       : SF(SF), CleanupKind(K) {}
 
     void Emit(CodeGenFunction &CGF, Flags flags) {
-      if (CleanupKind & ImplicitSyncCleanup)
+      if (CleanupKind & CGCilkPlusRuntime::ImplicitSyncCleanup)
         CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
 
-      if (CleanupKind & ReleaseFrameCleanup)
+      if (CleanupKind & CGCilkPlusRuntime::ReleaseFrameCleanup)
         CGF.Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
     }
   };
@@ -1002,7 +998,8 @@ namespace {
 /// \brief Emit code to create a Cilk stack frame for the parent function and
 /// release it in the end. This function should be only called once prior to
 /// processing function parameters.
-void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF) {
+void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF,
+                                                 CilkCleanupKind K) {
   llvm::Value *SF = CreateStackFrame(CGF);
 
   // Need to initialize it by adding the prologue
@@ -1014,11 +1011,7 @@ void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF) {
   }
 
   // Push cleanups associated to this stack frame initialization.
-  //
-  // Currently we insert an implicit sync followed by releasing the stack frame.
-  // By analyzing the AST, we could elide this implicit sync, if possible.
-  //
-  unsigned Kind = ImpSyncAndRelFrameCleanup; 
+  unsigned Kind = K;
   CGF.EHStack.pushCleanup<CilkSpawnParentCleanup>(NormalAndEHCleanup, SF, Kind);
 }
 
@@ -1051,6 +1044,217 @@ void CGCilkPlusRuntime::EmitCilkHelperPrologue(CodeGenFunction &CGF) {
 CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM) {
   return new CGCilkPlusRuntime(CGM);
 }
+
+/// \brief A utility function for finding the enclosing CXXTryStmt if exists.
+/// If this statament is inside a CXXCatchStmt, then its enclosing CXXTryStmt is
+/// not its parent. E.g.
+/// \code
+/// try {  // try-outer
+///   try {   // try-inner
+///     _Cilk_spawn f1();
+///   } catch (...) {
+///     _Cilk_spawn f2();
+///   }
+/// } catch (...) {
+/// }
+/// \endcode
+/// Then spawn 'f1()' finds try-inner, but the spawn 'f2()' will find try-outer.
+///
+static CXXTryStmt *getEnclosingTryBlock(Stmt *S, const Stmt *Top,
+                                        const ParentMap &PMap) {
+  assert(S && "NULL Statement");
+  assert((isa<CilkSpawnCapturedStmt>(S) ||
+          isa<CilkSpawnStmt>(S) ||
+          isa<CXXThrowExpr>(S)) && "unexpected statement");
+
+  while (true) {
+    S = PMap.getParent(S);
+    if (!S || S == Top)
+      return 0;
+
+    if (isa<CXXTryStmt>(S))
+      return cast<CXXTryStmt>(S);
+
+    if (isa<CXXCatchStmt>(S)) {
+      Stmt *P = PMap.getParent(S);
+      assert(isa<CXXTryStmt>(P) && "CXXTryStmt expected");
+      // Skipping its enclosing CXXTryStmt
+      S = PMap.getParent(P);
+    }
+  }
+
+  return 0;
+}
+
+namespace {
+/// \brief Helper class to determine
+///
+/// - if a try block needs an implicit sync on exit,
+/// - if a spawning function needs an implicity sync on exit.
+///
+class TryStmtAnalyzer: public RecursiveASTVisitor<TryStmtAnalyzer> {
+  /// \brief The function body to be analyzed.
+  ///
+  Stmt *Body;
+
+  /// \brief A data structure to query the enclosing try-block.
+  ///
+  ParentMap &PMap;
+
+  /// \brief A set of CXXTryStmt which needs an implicit sync on exit.
+  ///
+  CGCilkImplicitSyncInfo::SyncStmtSetTy &TrySet;
+
+  /// \brief true if this spawning function needs an implicit sync.
+  ///
+  bool NeedsSync;
+
+public:
+  TryStmtAnalyzer(Stmt *Body, ParentMap &PMap,
+                  CGCilkImplicitSyncInfo::SyncStmtSetTy &SyncSet)
+    : Body(Body), PMap(PMap), TrySet(SyncSet), NeedsSync(false) {
+    // Traverse the function body to collect all CXXTryStmt's which needs
+    // an implicit on exit.
+    TraverseStmt(Body);
+  }
+
+  bool TraverseLambdaExpr(LambdaExpr *E) { return true; }
+  bool TraverseBlockExpr(BlockExpr *E) { return true; }
+
+  bool TraverseCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
+    CXXTryStmt *TS = getEnclosingTryBlock(S, Body, PMap);
+
+    // If a spawn statement is not enclosed by any try-block, then
+    // this function needs an implicit sync; otherwise, this try-block
+    // needs an implicit sync.
+    if (!TS)
+      NeedsSync = true;
+    else
+      TrySet.insert(TS);
+
+    return true;
+  }
+
+  // FIXME: Should be removed once CilkSpawnStmt is not in use.
+  bool TraverseCilkSpawnStmt(CilkSpawnStmt *S) {
+    CXXTryStmt *TS = getEnclosingTryBlock(S, Body, PMap);
+
+    // If a spawn statement is not enclosed by any try-block, then
+    // this function needs an implicit sync; otherwise, this try-block
+    // needs an implicit sync.
+    if (!TS)
+      NeedsSync = true;
+    else
+      TrySet.insert(TS);
+
+    return true;
+  }
+
+  bool needsImplicitSync() const { return NeedsSync; }
+};
+
+/// \brief Helper class to determine if an implicit sync is needed for a
+/// CXXThrowExpr.
+class ThrowExprAnalyzer: public RecursiveASTVisitor<ThrowExprAnalyzer> {
+  /// \brief The function body to be analyzed.
+  ///
+  Stmt *Body;
+
+  /// \brief A data structure to query the enclosing try-block.
+  ///
+  ParentMap &PMap;
+
+  /// \brief A set of CXXThrowExpr or CXXTryStmt's which needs an implicit
+  /// sync before or on exit.
+  ///
+  CGCilkImplicitSyncInfo::SyncStmtSetTy &SyncSet;
+
+  /// \brief true if this spawning function needs an implicit sync.
+  ///
+  const bool NeedsSync;
+
+public:
+  ThrowExprAnalyzer(Stmt *Body, ParentMap &PMap,
+                    CGCilkImplicitSyncInfo::SyncStmtSetTy &SyncSet,
+                    bool NeedsSync)
+    : Body(Body), PMap(PMap), SyncSet(SyncSet), NeedsSync(NeedsSync) {
+    TraverseStmt(Body);
+  }
+
+  bool TraverseLambdaExpr(LambdaExpr *E) { return true; }
+  bool TraverseBlockExpr(BlockExpr *E) { return true; }
+  bool VisitCXXThrowExpr(CXXThrowExpr *E) {
+    CXXTryStmt *TS = getEnclosingTryBlock(E, Body, PMap);
+
+    // - If it is inside a spawning try-block, then an implicit sync is needed.
+    //
+    // - If it is inside a non-spawning try-block, then no implicit sync
+    //   is needed.
+    //
+    // - If it is not inside a try-block, then an implicit sync is needed only
+    //   if this function needs an implicit sync.
+    //
+    if ( (TS && SyncSet.count(TS)) || (!TS && NeedsSync) )
+      SyncSet.insert(E);
+
+    return true;
+  }
+};
+} // namespace
+
+/// \brief Analyze the function AST and decide if
+/// - this function needs an implicit sync on exit,
+/// - a try-block needs an implicit sync on exit,
+/// - a throw expression needs an implicit sync prior to throw.
+///
+/// TODO: This analysis does not remove all unnecessary implicit syncs.
+/// For example,
+/// \code
+/// void fib(int n) {
+///   if (n < 2) return n;
+///   int x = _Cilk_spawn fib(n - 1);
+///   int y = fib(n - 2);
+///   _Cilk_sync;
+///   return x + y;
+/// }
+/// \endcode
+/// The implicit sync for this function could be eilded. However, it will
+/// still be kept by the current analysis.
+///
+void CGCilkImplicitSyncInfo::analyze() {
+  assert(CGF.getLangOpts().CilkPlus && "Not compiling a cilk plus program");
+  const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
+
+  // Only analyze a spawning function
+  if (!FD || !FD->isSpawning())
+    return;
+
+  // The following function 'foo' does not need an implicit on exit.
+  //
+  // void foo() {
+  //   try {
+  //     _Cilk_spawn bar();
+  //   } catch (...) {
+  //     return;
+  //   }
+  // }
+  //
+  ParentMap PMap(FD->getBody());
+
+  // Check if the spawning function or a try-block needs an implicit syncs,
+  // and the set of CXXTryStmt's is the analysis results.
+  TryStmtAnalyzer Analyzer(const_cast<Stmt *>(FD->getBody()), PMap, SyncSet);
+  NeedsImplicitSync = Analyzer.needsImplicitSync();
+
+  // Traverse and find all CXXThrowExpr's which needs an implicit sync, and
+  // the results are inserted to `SyncSet`.
+  ThrowExprAnalyzer Analyzer2(const_cast<Stmt *>(FD->getBody()), PMap,
+                              SyncSet, NeedsImplicitSync);
+}
+
+CGCilkImplicitSyncInfo *CreateCilkImplicitSyncInfo(CodeGenFunction &CGF) {
+  return new CGCilkImplicitSyncInfo(CGF);
+} 
 
 } // namespace CodeGen
 } // namespace clang

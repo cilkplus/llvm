@@ -137,6 +137,7 @@ void test5() {
   _Cilk_sync;
 }
 
+void test6_anchor() throw ();
 
 // Should have implicit sync at end of try block
 void test6() {
@@ -146,12 +147,19 @@ void test6() {
   } catch (int except) {
     return;
   }
+
+  test6_anchor();
+  // Elide the function implicit sync
+  //
+  // CHECK: call void @_Z12test6_anchorv() nounwind
+  // CHECK-NOT:  call void @__cilkrts_sync
 }
 
 
 // Should have sync before throw, right after the exception object
 // has been created
 void test7() throw (int) {
+  // CHECK: define void @_Z5test7v()
   global = _Cilk_spawn Fib(BIG_NUM);
   throw BIG_NUM;
 }

@@ -37,6 +37,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     Builder(cgm.getModule().getContext()),
     EmittingCilkSpawn(false),
     CurCGCilkSpawnInfo(0),
+    CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getLangOpts().SanitizeNull |
                              CGM.getLangOpts().SanitizeAlignment |
                              CGM.getLangOpts().SanitizeObjectSize |
@@ -71,6 +72,9 @@ CodeGenFunction::~CodeGenFunction() {
 
   if (CurCGCilkSpawnInfo)
     delete CurCGCilkSpawnInfo;
+
+  if (CurCGCilkImplicitSyncInfo)
+    delete CurCGCilkImplicitSyncInfo;
 }
 
 
@@ -442,9 +446,15 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   // be allocated and partially initialized before processing any parameters.
   if (getLangOpts().CilkPlus) {
     const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D);
-    if (FD && FD->isSpawning())
-      CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this);
-    else if (FD && FD->isParallelRegion())
+    if (FD && FD->isSpawning()) {
+      CurCGCilkImplicitSyncInfo = CreateCilkImplicitSyncInfo(*this);
+      CGCilkPlusRuntime::CilkCleanupKind Kind
+        = CurCGCilkImplicitSyncInfo->needsImplicitSync() ?
+          CGCilkPlusRuntime::ImpSyncAndRelFrameCleanup :
+          CGCilkPlusRuntime::ReleaseFrameCleanup;
+
+      CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this, Kind);
+    } else if (FD && FD->isParallelRegion())
       CGM.getCilkPlusRuntime().EmitCilkHelperStackFrame(*this);
   }
 

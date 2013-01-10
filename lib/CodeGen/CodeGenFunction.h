@@ -74,6 +74,7 @@ namespace CodeGen {
   class CGFunctionInfo;
   class CGRecordLayout;
   class CGBlockInfo;
+  class CGCilkImplicitSyncInfo;
   class CGCXXABI;
   class BlockFlags;
   class BlockFieldFlags;
@@ -651,6 +652,9 @@ public:
 
   /// \brief Hold CodeGen info Cilk spawn captured statements
   CGCilkSpawnInfo *CurCGCilkSpawnInfo;
+
+  /// \brief Information about implicit syncs used during code generation.
+  CGCilkImplicitSyncInfo *CurCGCilkImplicitSyncInfo;
 
   /// BoundsChecking - Emit run-time bounds checks. Higher values mean
   /// potentially higher performance penalties.

@@ -18,6 +18,7 @@
 #include "CGBuilder.h"
 #include "CGCall.h"
 #include "CGValue.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 namespace llvm {
   class Constant;
@@ -34,6 +35,8 @@ namespace clang {
 class CilkSpawnStmt;
 class CilkSpawnCapturedStmt;
 class CilkSyncStmt;
+class CXXThrowExpr;
+class CXXTryStmt;
 
 namespace CodeGen {
 
@@ -46,6 +49,12 @@ private:
   CodeGenModule &CGM;
 
 public:
+  enum CilkCleanupKind {
+    ImplicitSyncCleanup = 0x01,
+    ReleaseFrameCleanup = 0x02,
+    ImpSyncAndRelFrameCleanup = ImplicitSyncCleanup | ReleaseFrameCleanup
+  };
+
   CGCilkPlusRuntime(CodeGenModule &CGM);
 
   ~CGCilkPlusRuntime();
@@ -56,7 +65,8 @@ public:
 
   void EmitCilkSync(CodeGenFunction &CGF, const CilkSyncStmt &S);
 
-  void EmitCilkParentStackFrame(CodeGenFunction &CGF);
+  void EmitCilkParentStackFrame(CodeGenFunction &CGF,
+                                CilkCleanupKind K = ImpSyncAndRelFrameCleanup);
 
   void EmitCilkHelperStackFrame(CodeGenFunction &CGF);
 
@@ -65,6 +75,47 @@ public:
 
 /// \brief Creates an instance of a Cilk Plus runtime object.
 CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM);
+
+/// \brief API to query if an implicit sync is necessary during code generation.
+class CGCilkImplicitSyncInfo {
+public:
+  typedef llvm::SmallPtrSet<const Stmt *, 4> SyncStmtSetTy;
+
+private:
+  CodeGenFunction &CGF;
+
+  /// \brief True if an implicit sync is needed for this spawning function.
+  bool NeedsImplicitSync;
+
+  /// \brief Store CXXTryStmt or CXXThrowExpr which needs an implicit sync.
+  SyncStmtSetTy SyncSet;
+
+public:
+
+  explicit CGCilkImplicitSyncInfo(CodeGenFunction &CGF)
+    : CGF(CGF), NeedsImplicitSync(false) {
+    analyze();
+  }
+
+  /// \brief Checks if an implicit sync is needed for a spawning function.
+  bool needsImplicitSync() const { return NeedsImplicitSync; }
+
+  /// \brief Checks if an implicit sync is needed before throwing
+  bool needsImplicitSync(const CXXThrowExpr *E) const {
+    return SyncSet.count(reinterpret_cast<const Stmt *>(E));
+  }
+
+  /// \brief Checks if an implicit sync is needed for a try block.
+  bool needsImplicitSync(const CXXTryStmt *S) const {
+    return SyncSet.count(reinterpret_cast<const Stmt *>(S));
+  }
+
+private:
+  void analyze();
+};
+
+/// \brief Creates an instance of an implicit sync info for a spawning function.
+CGCilkImplicitSyncInfo *CreateCilkImplicitSyncInfo(CodeGenFunction &CGF);
 
 } // namespace CodeGen
 } // namespace clang

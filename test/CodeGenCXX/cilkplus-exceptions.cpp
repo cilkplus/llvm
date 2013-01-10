@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_PARENT %s
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F1 %s
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F2 %s
+// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_IMPLICIT_SYNC %s
 //
 namespace stack_frame_cleanup {
   extern void touch();
@@ -74,7 +75,7 @@ namespace stack_frame_cleanup {
 
     // CHECK_HELPER_F2: define {{.*}} @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS_7test_f2IiEEvRT_E7capture
     //
-    // CHECK_HELPER_F2: [[REG:%[a-zA-Z0-9]+]] = getelementptr inbounds %struct.capture*
+    // CHECK_HELPER_F2: [[REG:%[a-zA-Z0-9]+]] = getelementptr inbounds %struct.capture
     // CHECK_HELPER_F2-NEXT: load i32** [[REG]]
     // CHECK_HELPER_F2-NEXT: call void @__cilk_helper_prologue
     // CHECK_HELPER_F2-NEXT: [[RET_REG:%[a-zA-Z0-9]+]] = invoke i32 @_ZN19stack_frame_cleanup2f2IiEET_S1_
@@ -86,3 +87,81 @@ namespace stack_frame_cleanup {
     // CHECK_HELPER_F2-NEXT: ret void
   }
 }
+
+namespace implicit_sync_elision_basic {
+
+void foo();
+void bar();
+
+void test1_anchor() throw ();
+
+// No implicit sync for the function
+void test1() {
+  try {
+    _Cilk_spawn foo(); 
+  } catch (...) {
+    bar();
+  }
+
+  test1_anchor();
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test1Ev
+  //
+  // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test1_anchorEv
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_parent_epilogue
+  // CHECK_IMPLICIT_SYNC-NEXT: ret void
+}
+
+void test2_anchor() throw ();
+
+// Should have an implicit sync for the function
+void test2() {
+  try {
+    foo(); 
+  } catch (...) {
+    _Cilk_spawn bar();
+  }
+
+  test2_anchor();
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test2Ev
+  // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test2_anchorEv
+  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
+}
+
+void test3_anchor() throw ();
+
+// Should have an implicit sync for the function
+void test3() {
+  try {
+    _Cilk_spawn foo(); 
+  } catch (...) {
+    _Cilk_spawn bar();
+  }
+  
+  test3_anchor();
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test3Ev
+  // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test3_anchorEv
+  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
+}
+
+void test4_anchor() throw ();
+
+// No implicit sync for the function
+void test4() {
+  try {
+    try {
+      _Cilk_spawn foo();
+    } catch (...) {
+      _Cilk_spawn bar();
+    }
+  } catch (...) {
+    bar();
+  }
+
+  test4_anchor();
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test4Ev
+  // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test4_anchorEv
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_parent_epilogue
+  // CHECK_IMPLICIT_SYNC-NEXT: ret void
+}
+
+} // namespace
