@@ -71,6 +71,8 @@ public:
   void EmitCilkHelperStackFrame(CodeGenFunction &CGF);
 
   void EmitCilkHelperPrologue(CodeGenFunction &CGF);
+
+  void pushCilkImplicitSyncCleanup(CodeGenFunction &CFG);
 };
 
 /// \brief Creates an instance of a Cilk Plus runtime object.

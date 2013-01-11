@@ -29,7 +29,7 @@ namespace stack_frame_cleanup {
     // CHECK_PARENT: define {{.*}} @_ZN19stack_frame_cleanup7test_f1IiLi23EEEvv
     // CHECK_PARENT: alloca %__cilkrts_stack_frame
     // CHECK_PARENT-NEXT: call void @__cilk_parent_prologue
-    // CHECK_PARENT: invoke void @_ZN19stack_frame_cleanup21__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i23{{.*}}capture
+    // CHECK_PARENT: invoke void @_ZN19stack_frame_cleanup{{[0-9]+}}__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i23{{.*}}capture
     //
     // * Normal exit *
     //
@@ -44,7 +44,7 @@ namespace stack_frame_cleanup {
 
   void helper_stack_frame_test() {
     test_f1<C, 29>();
-    // CHECK_HELPER_F1: define internal void @_ZN19stack_frame_cleanup22__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i29{{.*}}capture
+    // CHECK_HELPER_F1: define internal void @_ZN19stack_frame_cleanup{{[0-9]+}}__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i29{{.*}}capture
     // CHECK_HELPER_F1: alloca %__cilkrts_stack_frame
     // CHECK_HELPER_F1: call void @__cilk_reset_worker
     //
@@ -72,7 +72,7 @@ namespace stack_frame_cleanup {
   void helper_check_assignment() {
     int x = 0;
     test_f2<int, 37>(x);
-    // CHECK_HELPER_F2: define internal void @_ZN19stack_frame_cleanup22__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i37{{.*}}capture
+    // CHECK_HELPER_F2: define internal void @_ZN19stack_frame_cleanup{{[0-9]+}}__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i37{{.*}}capture
     //
     // CHECK_HELPER_F2: [[REG:%[a-zA-Z0-9]+]] = getelementptr inbounds %struct.capture
     // CHECK_HELPER_F2-NEXT: load i32** [[REG]]
@@ -202,6 +202,19 @@ void test7() {
   // CHECK_IMPLICIT_SYNC: store i32 19
   // CHECK_IMPLICIT_SYNC-NOT: call void @__cilkrts_sync
   // CHECK_IMPLICIT_SYNC: invoke void @__cxa_throw
+}
+
+// No implicit sync inside try-block
+void test8() {
+  try {
+    foo();
+  } catch (...) {
+    _Cilk_spawn bar();
+  }
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test8Ev
+  // CHECK_IMPLICIT_SYNC: invoke void @_ZN27implicit_sync_elision_basic3fooEv()
+  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilkrts_sync
+  // CHECK_IMPLICIT_SYNC: call i8* @__cxa_begin_catch
 }
 
 } // namespace

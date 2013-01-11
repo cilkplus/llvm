@@ -528,8 +528,8 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   // Rethrow
   {
     CGBuilderTy B(Rethrow);
-    B.CreateCall(CILKRTS_FUNC(rethrow, CGF), SF);
-    B.CreateBr(Exit);
+    B.CreateCall(CILKRTS_FUNC(rethrow, CGF), SF)->setDoesNotReturn();
+    B.CreateUnreachable();
   }
 
   // Exit
@@ -952,6 +952,16 @@ namespace {
       CGF.Builder.CreateCall(GetCilkHelperEpilogue(CGF), SF);
     }
   };
+
+  struct CilkImplicitSyncCleanup : EHScopeStack::Cleanup {
+    llvm::Value *SF;
+
+    explicit CilkImplicitSyncCleanup(llvm::Value *SF) : SF(SF) {}
+
+    void Emit(CodeGenFunction &CGF, Flags flags) {
+      CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
+    }
+  };
 }
 
 /// \brief Emit code to create a Cilk stack frame for the parent function and
@@ -987,6 +997,16 @@ void CGCilkPlusRuntime::EmitCilkHelperStackFrame(CodeGenFunction &CGF) {
   // Push cleanups associated to this stack frame initialization.
   //
   CGF.EHStack.pushCleanup<CilkSpawnHelperCleanup>(NormalAndEHCleanup, SF);
+}
+
+/// \brief Push an implicit sync to the EHStack. A call to __cilk_sync will be
+/// emitted on exit.
+void CGCilkPlusRuntime::pushCilkImplicitSyncCleanup(CodeGenFunction &CGF) {
+  // Get the __cilkrts_stack_frame
+  Value *SF = LookupStackFrame(CGF);
+  assert(SF && "null stack frame unexpected");
+
+  CGF.EHStack.pushCleanup<CilkImplicitSyncCleanup>(NormalAndEHCleanup, SF);
 }
 
 /// \brief Emit necessary cilk runtime calls prior to call the spawned function.

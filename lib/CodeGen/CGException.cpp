@@ -583,7 +583,19 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
-  EmitStmt(S.getTryBlock());
+  {
+    // Entering a new scope before we emit the try block. An implicit sync
+    // will be emitted on exit, if necessary.
+    RunCleanupsScope Scope(*this);
+
+    if (getLangOpts().CilkPlus) {
+      if (CurCGCilkImplicitSyncInfo &&
+          CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
+        CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
+    }
+
+    EmitStmt(S.getTryBlock());
+  }
   ExitCXXTryStmt(S);
 }
 

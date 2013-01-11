@@ -142,8 +142,13 @@ void test6_anchor() throw ();
 // Should have implicit sync at end of try block
 void test6() {
   // CHECK: define void @_Z5test6v()
+  //
+  // normal and exception handling implicit sync
+  //
+  // CHECK: call void @__cilkrts_sync
+  // CHECK: call void @__cilkrts_sync
   try {
-    global = ThrowingFib(BIG_NUM * BIG_NUM);
+    global = _Cilk_spawn ThrowingFib(BIG_NUM * BIG_NUM);
   } catch (int except) {
     return;
   }
@@ -161,5 +166,11 @@ void test6() {
 void test7() throw (int) {
   // CHECK: define void @_Z5test7v()
   global = _Cilk_spawn Fib(BIG_NUM);
+  //
+  // implicit sync before throwing
+  // CHECK: call i8* @__cxa_allocate_exception
+  // CHECK: store i32 30
+  // CHECK: call void @__cilkrts_sync
+  // CHECK: invoke void @__cxa_throw
   throw BIG_NUM;
 }
