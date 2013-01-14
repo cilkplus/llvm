@@ -217,4 +217,24 @@ void test8() {
   // CHECK_IMPLICIT_SYNC: call i8* @__cxa_begin_catch
 }
 
+void test9_anchor() throw ();
+
+// No implicit sync for the outer try
+void test9() {
+  try {
+    foo();
+    try {
+      _Cilk_spawn foo();
+    } catch (...) {
+      bar();
+    }
+    test9_anchor();
+  } catch (...) {
+    _Cilk_spawn bar();
+    bar();
+  }
+  // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test9Ev
+  // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test9_anchorEv
+  // CHECK_IMPLICIT_SYNC-NEXT: br
+}
 } // namespace
