@@ -263,14 +263,18 @@ namespace {
 class DiagnoseCilkSpawnHelper
   : public RecursiveASTVisitor<DiagnoseCilkSpawnHelper> {
   Sema &SemaRef;
+  bool &HasError;
 public:
-  DiagnoseCilkSpawnHelper(Sema &S) : SemaRef(S) { }
+  DiagnoseCilkSpawnHelper(Sema &S, bool &HasError)
+    : SemaRef(S), HasError(HasError) { }
 
   bool TraverseCompoundStmt(CompoundStmt *) { return true; }
   bool VisitCallExpr(CallExpr *E) {
-    if (E->isCilkSpawnCall())
+    if (E->isCilkSpawnCall()) {
       SemaRef.Diag(E->getCilkSpawnLoc(), SemaRef.PDiag(diag::err_spawn_not_whole_expr)
                                          << E->getSourceRange());
+      HasError = true;
+    }
     return true;
   }
 };
@@ -287,30 +291,30 @@ public:
 // compound scopes, but we do need to traverse into loops, ifs, etc. in case of:
 // if (cond) _Cilk_spawn foo();
 //           ^~~~~~~~~~~~~~~~~ not a compound scope
-void Sema::DiagnoseCilkSpawn(Stmt *S) {
-  DiagnoseCilkSpawnHelper D(*this);
+void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
+  DiagnoseCilkSpawnHelper D(*this, HasError);
 
   Expr *RHS = 0;
   switch (S->getStmtClass()) {
   case Stmt::CompoundStmtClass:
     return; // already checked
   case Stmt::CXXCatchStmtClass:
-    DiagnoseCilkSpawn(cast<CXXCatchStmt>(S)->getHandlerBlock());
+    DiagnoseCilkSpawn(cast<CXXCatchStmt>(S)->getHandlerBlock(), HasError);
     break;
   case Stmt::CXXForRangeStmtClass: {
     CXXForRangeStmt *FR = cast<CXXForRangeStmt>(S);
     D.TraverseStmt(FR->getRangeInit());
-    DiagnoseCilkSpawn(FR->getBody());
+    DiagnoseCilkSpawn(FR->getBody(), HasError);
     break;
   }
   case Stmt::CXXBindTemporaryExprClass:
-    DiagnoseCilkSpawn(cast<CXXBindTemporaryExpr>(S)->getSubExpr());
+    DiagnoseCilkSpawn(cast<CXXBindTemporaryExpr>(S)->getSubExpr(), HasError);
     break;
   case Stmt::ExprWithCleanupsClass:
-    DiagnoseCilkSpawn(cast<ExprWithCleanups>(S)->getSubExpr());
+    DiagnoseCilkSpawn(cast<ExprWithCleanups>(S)->getSubExpr(), HasError);
     break;
   case Stmt::CXXTryStmtClass:
-    DiagnoseCilkSpawn(cast<CXXTryStmt>(S)->getTryBlock());
+    DiagnoseCilkSpawn(cast<CXXTryStmt>(S)->getTryBlock(), HasError);
     break;
   case Stmt::DeclStmtClass: {
     DeclStmt *DS = cast<DeclStmt>(S);
@@ -350,7 +354,7 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
   case Stmt::DoStmtClass: {
     DoStmt *DS = cast<DoStmt>(S);
     D.TraverseStmt(DS->getCond());
-    DiagnoseCilkSpawn(DS->getBody());
+    DiagnoseCilkSpawn(DS->getBody(), HasError);
     break;
   }
   case Stmt::ForStmtClass: {
@@ -361,28 +365,28 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
       D.TraverseStmt(F->getCond());
     if (F->getInc())
       D.TraverseStmt(F->getInc());
-    DiagnoseCilkSpawn(F->getBody());
+    DiagnoseCilkSpawn(F->getBody(), HasError);
     break;
   }
   case Stmt::IfStmtClass: {
     IfStmt *I = cast<IfStmt>(S);
     D.TraverseStmt(I->getCond());
-    DiagnoseCilkSpawn(I->getThen());
+    DiagnoseCilkSpawn(I->getThen(), HasError);
     if (I->getElse())
-      DiagnoseCilkSpawn(I->getElse());
+      DiagnoseCilkSpawn(I->getElse(), HasError);
     break;
   }
   case Stmt::LabelStmtClass:
-    DiagnoseCilkSpawn(cast<LabelStmt>(S)->getSubStmt());
+    DiagnoseCilkSpawn(cast<LabelStmt>(S)->getSubStmt(), HasError);
     break;
   case Stmt::CaseStmtClass:
   case Stmt::DefaultStmtClass:
-    DiagnoseCilkSpawn(cast<SwitchCase>(S)->getSubStmt());
+    DiagnoseCilkSpawn(cast<SwitchCase>(S)->getSubStmt(), HasError);
     break;
   case Stmt::WhileStmtClass: {
     WhileStmt *W = cast<WhileStmt>(S);
     D.TraverseStmt(W->getCond());
-    DiagnoseCilkSpawn(W->getBody());
+    DiagnoseCilkSpawn(W->getBody(), HasError);
     break;
   }
   case Stmt::CXXMemberCallExprClass:
@@ -497,10 +501,9 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
     assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
     bool Dependent = CurContext->isDependentContext();
     for (unsigned i = 0; i != NumElts; ++i) {
-      unsigned errors = getDiagnostics().getClient()->getNumErrors();
-      DiagnoseCilkSpawn(Elts[i]);
-      bool NoError = errors == getDiagnostics().getClient()->getNumErrors();
-      if (!Dependent && NoError) {
+      bool HasError = false;
+      DiagnoseCilkSpawn(Elts[i], HasError);
+      if (!Dependent && !HasError) {
         StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
         if (!Spawn.isInvalid() && (isa<CilkSpawnStmt>(Spawn.get()) ||
                                    isa<CilkSpawnCapturedStmt>(Spawn.get())))
