@@ -561,21 +561,6 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result) {
   return false;
 }
 
-/// ParseTranslationUnit:
-///       translation-unit: [C99 6.9]
-///         external-declaration
-///         translation-unit external-declaration
-void Parser::ParseTranslationUnit() {
-  Initialize();
-
-  DeclGroupPtrTy Res;
-  while (!ParseTopLevelDecl(Res))
-    /*parse them all*/;
-
-  ExitScope();
-  assert(getCurScope() == 0 && "Scope imbalance!");
-}
-
 /// ParseExternalDeclaration:
 ///
 ///       external-declaration: [C99 6.9], declaration: [C++ dcl.dcl]
@@ -1845,7 +1830,7 @@ Parser::DeclGroupPtrTy Parser::ParseModuleImport(SourceLocation AtLoc) {
          "Improper start to module import");
   SourceLocation ImportLoc = ConsumeToken();
   
-  llvm::SmallVector<std::pair<IdentifierInfo *, SourceLocation>, 2> Path;
+  SmallVector<std::pair<IdentifierInfo *, SourceLocation>, 2> Path;
   
   // Parse the module path.
   do {

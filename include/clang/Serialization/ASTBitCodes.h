@@ -368,9 +368,9 @@ namespace clang {
       /// \brief Record code for the array of tentative definitions.
       TENTATIVE_DEFINITIONS = 9,
 
-      /// \brief Record code for the array of locally-scoped external
+      /// \brief Record code for the array of locally-scoped extern "C"
       /// declarations.
-      LOCALLY_SCOPED_EXTERNAL_DECLS = 10,
+      LOCALLY_SCOPED_EXTERN_C_DECLS = 10,
 
       /// \brief Record code for the table of offsets into the
       /// Objective-C method pool.
@@ -603,7 +603,9 @@ namespace clang {
       SUBMODULE_REQUIRES = 8,
       /// \brief Specifies a header that has been explicitly excluded
       /// from this submodule.
-      SUBMODULE_EXCLUDED_HEADER = 9
+      SUBMODULE_EXCLUDED_HEADER = 9,
+      /// \brief Specifies a library or framework to link against.
+      SUBMODULE_LINK_LIBRARY = 10
     };
 
     /// \brief Record types used within a comments block.

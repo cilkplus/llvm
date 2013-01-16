@@ -798,7 +798,7 @@ void ASTWriter::WriteBlockInfoBlock() {
   RECORD(STATISTICS);
   RECORD(TENTATIVE_DEFINITIONS);
   RECORD(UNUSED_FILESCOPED_DECLS);
-  RECORD(LOCALLY_SCOPED_EXTERNAL_DECLS);
+  RECORD(LOCALLY_SCOPED_EXTERN_C_DECLS);
   RECORD(SELECTOR_OFFSETS);
   RECORD(METHOD_POOL);
   RECORD(PP_COUNTER_VALUE);
@@ -1021,7 +1021,7 @@ void ASTWriter::WriteControlBlock(Preprocessor &PP, ASTContext &Context,
   // Imports
   if (Chain) {
     serialization::ModuleManager &Mgr = Chain->getModuleManager();
-    llvm::SmallVector<char, 128> ModulePaths;
+    SmallVector<char, 128> ModulePaths;
     Record.clear();
 
     for (ModuleManager::ModuleIterator M = Mgr.begin(), MEnd = Mgr.end();
@@ -1552,7 +1552,7 @@ void ASTWriter::WriteHeaderSearch(const HeaderSearch &HS, StringRef isysroot) {
   
   // Free all of the strings we had to duplicate.
   for (unsigned I = 0, N = SavedStrings.size(); I != N; ++I)
-    free((void*)SavedStrings[I]);
+    free(const_cast<char *>(SavedStrings[I]));
 }
 
 /// \brief Writes the block containing the serialized form of the
@@ -1796,12 +1796,10 @@ void ASTWriter::WritePreprocessor(const Preprocessor &PP, bool IsModule) {
   // Construct the list of macro definitions that need to be serialized.
   SmallVector<std::pair<const IdentifierInfo *, MacroInfo *>, 2> 
     MacrosToEmit;
-  llvm::SmallPtrSet<const IdentifierInfo*, 4> MacroDefinitionsSeen;
   for (Preprocessor::macro_iterator I = PP.macro_begin(Chain == 0),
                                     E = PP.macro_end(Chain == 0);
        I != E; ++I) {
     if (!IsModule || I->second->isPublic()) {
-      MacroDefinitionsSeen.insert(I->first);
       MacrosToEmit.push_back(std::make_pair(I->first, I->second));
     }
   }
@@ -1854,6 +1852,12 @@ void ASTWriter::WritePreprocessor(const Preprocessor &PP, bool IsModule) {
       Record.push_back(inferSubmoduleIDFromLocation(MI->getDefinitionLoc()));
       AddSourceLocation(MI->getDefinitionLoc(), Record);
       AddSourceLocation(MI->getDefinitionEndLoc(), Record);
+      MacroInfo *PrevMI = MI->getPreviousDefinition();
+      // Serialize only the part of the definition chain that is local.
+      // The chain will be synthesized across modules by the ASTReader.
+      if (Chain && PrevMI && PrevMI->isFromAST())
+        PrevMI = 0;
+      addMacroRef(PrevMI, Record);
       AddSourceLocation(MI->getUndefLoc(), Record);
       Record.push_back(MI->isUsed());
       Record.push_back(MI->isPublic());
@@ -2107,6 +2111,12 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob)); // Name
   unsigned ExcludedHeaderAbbrev = Stream.EmitAbbrev(Abbrev);
 
+  Abbrev = new BitCodeAbbrev();
+  Abbrev->Add(BitCodeAbbrevOp(SUBMODULE_LINK_LIBRARY));
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // IsFramework
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob));     // Name
+  unsigned LinkLibraryAbbrev = Stream.EmitAbbrev(Abbrev);
+
   // Write the submodule metadata block.
   RecordData Record;
   Record.push_back(getNumberOfModules(WritingModule));
@@ -2209,7 +2219,16 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
       }
       Stream.EmitRecord(SUBMODULE_EXPORTS, Record);
     }
-    
+
+    // Emit the link libraries.
+    for (unsigned I = 0, N = Mod->LinkLibraries.size(); I != N; ++I) {
+      Record.clear();
+      Record.push_back(SUBMODULE_LINK_LIBRARY);
+      Record.push_back(Mod->LinkLibraries[I].IsFramework);
+      Stream.EmitRecordWithBlob(LinkLibraryAbbrev, Record,
+                                Mod->LinkLibraries[I].Library);
+    }
+
     // Queue up the submodules of this module.
     for (Module::submodule_iterator Sub = Mod->submodule_begin(),
                                  SubEnd = Mod->submodule_end();
@@ -2720,14 +2739,8 @@ public:
     if (isInterestingIdentifier(II, Macro)) {
       DataLen += 2; // 2 bytes for builtin ID
       DataLen += 2; // 2 bytes for flags
-      if (hadMacroDefinition(II, Macro)) {
-        for (MacroInfo *M = Macro; M; M = M->getPreviousDefinition()) {
-          if (Writer.getMacroRef(M) != 0)
-            DataLen += 4;
-        }
-
+      if (hadMacroDefinition(II, Macro))
         DataLen += 4;
-      }
 
       for (IdentifierResolver::iterator D = IdResolver.begin(II),
                                      DEnd = IdResolver.end();
@@ -2772,13 +2785,8 @@ public:
     clang::io::Emit16(Out, Bits);
 
     if (HadMacroDefinition) {
-      // Write all of the macro IDs associated with this identifier.
-      for (MacroInfo *M = Macro; M; M = M->getPreviousDefinition()) {
-        if (MacroID ID = Writer.getMacroRef(M))
-          clang::io::Emit32(Out, ID);
-      }
-
-      clang::io::Emit32(Out, 0);
+      // Write the macro ID associated with this identifier.
+      clang::io::Emit32(Out, Writer.getMacroRef(Macro));
     }
 
     // Emit the declaration IDs in reverse order, because the
@@ -3035,7 +3043,7 @@ uint64_t ASTWriter::WriteDeclContextVisibleBlock(ASTContext &Context,
 
   // Create the on-disk hash table representation.
   DeclarationName ConversionName;
-  llvm::SmallVector<NamedDecl *, 4> ConversionDecls;
+  SmallVector<NamedDecl *, 4> ConversionDecls;
   for (StoredDeclsMap::iterator D = Map->begin(), DEnd = Map->end();
        D != DEnd; ++D) {
     DeclarationName Name = D->first;
@@ -3217,7 +3225,7 @@ void ASTWriter::WriteRedeclarations() {
 }
 
 void ASTWriter::WriteObjCCategories() {
-  llvm::SmallVector<ObjCCategoriesInfo, 2> CategoriesMap;
+  SmallVector<ObjCCategoriesInfo, 2> CategoriesMap;
   RecordData Categories;
   
   for (unsigned I = 0, N = ObjCClassesWithCategories.size(); I != N; ++I) {
@@ -3506,18 +3514,18 @@ void ASTWriter::WriteASTCore(Sema &SemaRef,
     }
   }
 
-  // Build a record containing all of the locally-scoped external
+  // Build a record containing all of the locally-scoped extern "C"
   // declarations in this header file. Generally, this record will be
   // empty.
-  RecordData LocallyScopedExternalDecls;
+  RecordData LocallyScopedExternCDecls;
   // FIXME: This is filling in the AST file in densemap order which is
   // nondeterminstic!
   for (llvm::DenseMap<DeclarationName, NamedDecl *>::iterator
-         TD = SemaRef.LocallyScopedExternalDecls.begin(),
-         TDEnd = SemaRef.LocallyScopedExternalDecls.end();
+         TD = SemaRef.LocallyScopedExternCDecls.begin(),
+         TDEnd = SemaRef.LocallyScopedExternCDecls.end();
        TD != TDEnd; ++TD) {
     if (!TD->second->isFromASTFile())
-      AddDeclRef(TD->second, LocallyScopedExternalDecls);
+      AddDeclRef(TD->second, LocallyScopedExternCDecls);
   }
   
   // Build a record containing all of the ext_vector declarations.
@@ -3749,10 +3757,10 @@ void ASTWriter::WriteASTCore(Sema &SemaRef,
     Stream.EmitRecord(WEAK_UNDECLARED_IDENTIFIERS,
                       WeakUndeclaredIdentifiers);
 
-  // Write the record containing locally-scoped external definitions.
-  if (!LocallyScopedExternalDecls.empty())
-    Stream.EmitRecord(LOCALLY_SCOPED_EXTERNAL_DECLS,
-                      LocallyScopedExternalDecls);
+  // Write the record containing locally-scoped extern "C" definitions.
+  if (!LocallyScopedExternCDecls.empty())
+    Stream.EmitRecord(LOCALLY_SCOPED_EXTERN_C_DECLS,
+                      LocallyScopedExternCDecls);
 
   // Write the record containing ext_vector type names.
   if (!ExtVectorDecls.empty())

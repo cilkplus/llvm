@@ -525,13 +525,9 @@ IdentifierInfo *ASTIdentifierLookupTrait::ReadData(const internal_key_type& k,
   // If this identifier is a macro, deserialize the macro
   // definition.
   if (hadMacroDefinition) {
-    SmallVector<MacroID, 4> MacroIDs;
-    while (uint32_t LocalID = ReadUnalignedLE32(d)) {
-      MacroIDs.push_back(Reader.getGlobalMacroID(F, LocalID));
-      DataLen -= 4;
-    }
     DataLen -= 4;
-    Reader.setIdentifierIsMacro(II, MacroIDs);
+    uint32_t LocalID = ReadUnalignedLE32(d);
+    Reader.addMacroIDForDeserialization(II, Reader.getGlobalMacroID(F,LocalID));
   }
 
   Reader.SetIdentifierInfo(ID, II);
@@ -655,7 +651,8 @@ ASTDeclContextNameLookupTrait::ReadData(internal_key_type,
                                         unsigned DataLen) {
   using namespace clang::io;
   unsigned NumDecls = ReadUnalignedLE16(d);
-  LE32DeclID *Start = (LE32DeclID *)d;
+  LE32DeclID *Start = reinterpret_cast<LE32DeclID *>(
+                        const_cast<unsigned char *>(d));
   return std::make_pair(Start, Start + NumDecls);
 }
 
@@ -1060,8 +1057,7 @@ bool ASTReader::ReadBlockAbbrevs(llvm::BitstreamCursor &Cursor,
   }
 }
 
-void ASTReader::ReadMacroRecord(ModuleFile &F, uint64_t Offset,
-                                MacroInfo *Hint) {
+void ASTReader::ReadMacroRecord(ModuleFile &F, uint64_t Offset) {
   llvm::BitstreamCursor &Stream = F.MacroCursor;
 
   // Keep track of where we are in the stream, then jump back there
@@ -1072,24 +1068,6 @@ void ASTReader::ReadMacroRecord(ModuleFile &F, uint64_t Offset,
   RecordData Record;
   SmallVector<IdentifierInfo*, 16> MacroArgs;
   MacroInfo *Macro = 0;
-
-  // RAII object to add the loaded macro information once we're done
-  // adding tokens.
-  struct AddLoadedMacroInfoRAII {
-    Preprocessor &PP;
-    MacroInfo *Hint;
-    MacroInfo *MI;
-    IdentifierInfo *II;
-
-    AddLoadedMacroInfoRAII(Preprocessor &PP, MacroInfo *Hint)
-      : PP(PP), Hint(Hint), MI(), II() { }
-    ~AddLoadedMacroInfoRAII( ) {
-      if (MI) {
-        // Finally, install the macro.
-        PP.addLoadedMacroInfo(II, MI, Hint);
-      }
-    }
-  } AddLoadedMacroInfo(PP, Hint);
 
   while (true) {
     unsigned Code = Stream.ReadCode();
@@ -1145,6 +1123,8 @@ void ASTReader::ReadMacroRecord(ModuleFile &F, uint64_t Offset,
       SourceLocation Loc = ReadSourceLocation(F, Record, NextIndex);
       MacroInfo *MI = PP.AllocateMacroInfo(Loc);
       MI->setDefinitionEndLoc(ReadSourceLocation(F, Record, NextIndex));
+      MacroInfo *PrevMI = getMacro(getGlobalMacroID(F, Record[NextIndex++]));
+      MI->setPreviousDefinition(PrevMI);
 
       // Record this macro.
       MacrosLoaded[GlobalID - NUM_PREDEF_MACRO_IDS] = MI;
@@ -1228,10 +1208,6 @@ void ASTReader::ReadMacroRecord(ModuleFile &F, uint64_t Offset,
         }
       }
       MI->setHidden(Hidden);
-
-      // Make sure we install the macro once we're done.
-      AddLoadedMacroInfo.MI = MI;
-      AddLoadedMacroInfo.II = II;
 
       // Remember that we saw this macro last so that we add the tokens that
       // form its body to it.
@@ -1340,10 +1316,13 @@ HeaderFileInfoTrait::ReadData(const internal_key_type, const unsigned char *d,
   return HFI;
 }
 
-void ASTReader::setIdentifierIsMacro(IdentifierInfo *II, ArrayRef<MacroID> IDs){
+void ASTReader::addMacroIDForDeserialization(IdentifierInfo *II, MacroID ID){
   II->setHadMacroDefinition(true);
   assert(NumCurrentElementsDeserializing > 0 &&"Missing deserialization guard");
-  PendingMacroIDs[II].append(IDs.begin(), IDs.end());
+  SmallVector<serialization::MacroID, 2> &MacroIDs = PendingMacroIDs[II];
+  assert(std::find(MacroIDs.begin(), MacroIDs.end(), ID) == MacroIDs.end() &&
+         "Already added the macro ID for deserialization");
+  MacroIDs.push_back(ID);
 }
 
 void ASTReader::ReadDefinedMacros() {
@@ -1625,7 +1604,7 @@ void ASTReader::MaybeAddSystemRootToFilename(ModuleFile &M,
 
 ASTReader::ASTReadResult
 ASTReader::ReadControlBlock(ModuleFile &F,
-                            llvm::SmallVectorImpl<ImportedModule> &Loaded,
+                            SmallVectorImpl<ImportedModule> &Loaded,
                             unsigned ClientLoadCapabilities) {
   llvm::BitstreamCursor &Stream = F.Stream;
 
@@ -2119,9 +2098,9 @@ bool ASTReader::ReadASTBlock(ModuleFile &F) {
       }
       break;
 
-    case LOCALLY_SCOPED_EXTERNAL_DECLS:
+    case LOCALLY_SCOPED_EXTERN_C_DECLS:
       for (unsigned I = 0, N = Record.size(); I != N; ++I)
-        LocallyScopedExternalDecls.push_back(getGlobalDeclID(F, Record[I]));
+        LocallyScopedExternCDecls.push_back(getGlobalDeclID(F, Record[I]));
       break;
 
     case SELECTOR_OFFSETS: {
@@ -2601,7 +2580,7 @@ void ASTReader::makeNamesVisible(const HiddenNames &Names) {
 void ASTReader::makeModuleVisible(Module *Mod, 
                                   Module::NameVisibilityKind NameVisibility) {
   llvm::SmallPtrSet<Module *, 4> Visited;
-  llvm::SmallVector<Module *, 4> Stack;
+  SmallVector<Module *, 4> Stack;
   Stack.push_back(Mod);  
   while (!Stack.empty()) {
     Mod = Stack.back();
@@ -2641,7 +2620,7 @@ void ASTReader::makeModuleVisible(Module *Mod,
     // Push any exported modules onto the stack to be marked as visible.
     bool AnyWildcard = false;
     bool UnrestrictedWildcard = false;
-    llvm::SmallVector<Module *, 4> WildcardRestrictions;
+    SmallVector<Module *, 4> WildcardRestrictions;
     for (unsigned I = 0, N = Mod->Exports.size(); I != N; ++I) {
       Module *Exported = Mod->Exports[I].getPointer();
       if (!Mod->Exports[I].getInt()) {
@@ -2704,7 +2683,7 @@ ASTReader::ASTReadResult ASTReader::ReadAST(const std::string &FileName,
   unsigned PreviousGeneration = CurrentGeneration++;
 
   unsigned NumModules = ModuleMgr.size();
-  llvm::SmallVector<ImportedModule, 4> Loaded;
+  SmallVector<ImportedModule, 4> Loaded;
   switch(ASTReadResult ReadResult = ReadASTCore(FileName, Type, ImportLoc,
                                                 /*ImportedBy=*/0, Loaded,
                                                 ClientLoadCapabilities)) {
@@ -2723,8 +2702,8 @@ ASTReader::ASTReadResult ASTReader::ReadAST(const std::string &FileName,
   // Here comes stuff that we only do once the entire chain is loaded.
 
   // Load the AST blocks of all of the modules that we loaded.
-  for (llvm::SmallVectorImpl<ImportedModule>::iterator M = Loaded.begin(),
-                                                  MEnd = Loaded.end();
+  for (SmallVectorImpl<ImportedModule>::iterator M = Loaded.begin(),
+                                              MEnd = Loaded.end();
        M != MEnd; ++M) {
     ModuleFile &F = *M->Mod;
 
@@ -2750,8 +2729,8 @@ ASTReader::ASTReadResult ASTReader::ReadAST(const std::string &FileName,
   }
 
   // Setup the import locations.
-  for (llvm::SmallVectorImpl<ImportedModule>::iterator M = Loaded.begin(),
-                                                    MEnd = Loaded.end();
+  for (SmallVectorImpl<ImportedModule>::iterator M = Loaded.begin(),
+                                              MEnd = Loaded.end();
        M != MEnd; ++M) {
     ModuleFile &F = *M->Mod;
     if (!M->ImportedBy)
@@ -2824,7 +2803,7 @@ ASTReader::ReadASTCore(StringRef FileName,
                        ModuleKind Type,
                        SourceLocation ImportLoc,
                        ModuleFile *ImportedBy,
-                       llvm::SmallVectorImpl<ImportedModule> &Loaded,
+                       SmallVectorImpl<ImportedModule> &Loaded,
                        unsigned ClientLoadCapabilities) {
   ModuleFile *M;
   bool NewModule;
@@ -3412,6 +3391,9 @@ bool ASTReader::ReadSubmoduleBlock(ModuleFile &F) {
         DeserializationListener->ModuleRead(GlobalID, CurrentModule);
       
       SubmodulesLoaded[GlobalIndex] = CurrentModule;
+
+      // Clear out link libraries; the module file has them.
+      CurrentModule->LinkLibraries.clear();
       break;
     }
         
@@ -3599,6 +3581,20 @@ bool ASTReader::ReadSubmoduleBlock(ModuleFile &F) {
                                     Context.getTargetInfo());
       break;
     }
+
+    case SUBMODULE_LINK_LIBRARY:
+      if (First) {
+        Error("missing submodule metadata record at beginning of block");
+        return true;
+      }
+
+      if (!CurrentModule)
+        break;
+
+      CurrentModule->LinkLibraries.push_back(
+         Module::LinkLibrary(StringRef(BlobStart, BlobLen),
+         Record[0]));
+      break;
     }
   }
 }
@@ -4093,7 +4089,7 @@ HeaderFileInfo ASTReader::GetHeaderFileInfo(const FileEntry *FE) {
 
 void ASTReader::ReadPragmaDiagnosticMappings(DiagnosticsEngine &Diag) {
   // FIXME: Make it work properly with modules.
-  llvm::SmallVector<DiagnosticsEngine::DiagState *, 32> DiagStates;
+  SmallVector<DiagnosticsEngine::DiagState *, 32> DiagStates;
   for (ModuleIterator I = ModuleMgr.begin(), E = ModuleMgr.end(); I != E; ++I) {
     ModuleFile &F = *(*I);
     unsigned Idx = 0;
@@ -5325,7 +5321,7 @@ namespace {
   /// declaration context.
   class DeclContextNameLookupVisitor {
     ASTReader &Reader;
-    llvm::SmallVectorImpl<const DeclContext *> &Contexts;
+    SmallVectorImpl<const DeclContext *> &Contexts;
     DeclarationName Name;
     SmallVectorImpl<NamedDecl *> &Decls;
 
@@ -5428,7 +5424,7 @@ namespace {
   /// declaration context.
   class DeclContextAllNamesVisitor {
     ASTReader &Reader;
-    llvm::SmallVectorImpl<const DeclContext *> &Contexts;
+    SmallVectorImpl<const DeclContext *> &Contexts;
     llvm::DenseMap<DeclarationName, SmallVector<NamedDecl *, 8> > &Decls;
     bool VisitAll;
 
@@ -5487,7 +5483,7 @@ namespace {
 void ASTReader::completeVisibleDeclsMap(const DeclContext *DC) {
   if (!DC->hasExternalVisibleStorage())
     return;
-  llvm::DenseMap<DeclarationName, llvm::SmallVector<NamedDecl*, 8> > Decls;
+  llvm::DenseMap<DeclarationName, SmallVector<NamedDecl *, 8> > Decls;
 
   // Compute the declaration contexts we need to look into. Multiple such
   // declaration contexts occur when two declaration contexts from disjoint
@@ -5511,7 +5507,7 @@ void ASTReader::completeVisibleDeclsMap(const DeclContext *DC) {
   ++NumVisibleDeclContextsRead;
 
   for (llvm::DenseMap<DeclarationName,
-                      llvm::SmallVector<NamedDecl*, 8> >::iterator
+                      SmallVector<NamedDecl *, 8> >::iterator
          I = Decls.begin(), E = Decls.end(); I != E; ++I) {
     SetExternalVisibleDeclsForName(DC, I->first, I->second);
   }
@@ -5810,8 +5806,8 @@ namespace clang { namespace serialization {
     ASTReader &Reader;
     Selector Sel;
     unsigned PriorGeneration;
-    llvm::SmallVector<ObjCMethodDecl *, 4> InstanceMethods;
-    llvm::SmallVector<ObjCMethodDecl *, 4> FactoryMethods;
+    SmallVector<ObjCMethodDecl *, 4> InstanceMethods;
+    SmallVector<ObjCMethodDecl *, 4> FactoryMethods;
 
   public:
     ReadMethodPoolVisitor(ASTReader &Reader, Selector Sel, 
@@ -5961,14 +5957,14 @@ void ASTReader::ReadDynamicClasses(SmallVectorImpl<CXXRecordDecl *> &Decls) {
 }
 
 void 
-ASTReader::ReadLocallyScopedExternalDecls(SmallVectorImpl<NamedDecl *> &Decls) {
-  for (unsigned I = 0, N = LocallyScopedExternalDecls.size(); I != N; ++I) {
-    NamedDecl *D 
-      = dyn_cast_or_null<NamedDecl>(GetDecl(LocallyScopedExternalDecls[I]));
+ASTReader::ReadLocallyScopedExternCDecls(SmallVectorImpl<NamedDecl *> &Decls) {
+  for (unsigned I = 0, N = LocallyScopedExternCDecls.size(); I != N; ++I) {
+    NamedDecl *D
+      = dyn_cast_or_null<NamedDecl>(GetDecl(LocallyScopedExternCDecls[I]));
     if (D)
       Decls.push_back(D);
   }
-  LocallyScopedExternalDecls.clear();
+  LocallyScopedExternCDecls.clear();
 }
 
 void ASTReader::ReadReferencedSelectors(
@@ -6140,7 +6136,7 @@ IdentifierID ASTReader::getGlobalIdentifierID(ModuleFile &M, unsigned LocalID) {
   return LocalID + I->second;
 }
 
-MacroInfo *ASTReader::getMacro(MacroID ID, MacroInfo *Hint) {
+MacroInfo *ASTReader::getMacro(MacroID ID) {
   if (ID == 0)
     return 0;
 
@@ -6156,7 +6152,7 @@ MacroInfo *ASTReader::getMacro(MacroID ID, MacroInfo *Hint) {
     assert(I != GlobalMacroMap.end() && "Corrupted global macro map");
     ModuleFile *M = I->second;
     unsigned Index = ID - M->BaseMacroID;
-    ReadMacroRecord(*M, M->MacroOffsets[Index], Hint);
+    ReadMacroRecord(*M, M->MacroOffsets[Index]);
   }
 
   return MacrosLoaded[ID];
@@ -6199,7 +6195,11 @@ Module *ASTReader::getSubmodule(SubmoduleID GlobalID) {
   
   return SubmodulesLoaded[GlobalID - NUM_PREDEF_SUBMODULE_IDS];
 }
-                               
+
+Module *ASTReader::getModule(unsigned ID) {
+  return getSubmodule(ID);
+}
+
 Selector ASTReader::getLocalSelector(ModuleFile &M, unsigned LocalID) {
   return DecodeSelector(getGlobalSelectorID(M, LocalID));
 }
@@ -6851,13 +6851,16 @@ void ASTReader::finishPendingActions() {
     PendingDeclChains.clear();
 
     // Load any pending macro definitions.
+    // Note that new macros may be added while deserializing a macro.
     for (unsigned I = 0; I != PendingMacroIDs.size(); ++I) {
-      // FIXME: std::move here
-      SmallVector<MacroID, 2> GlobalIDs = PendingMacroIDs.begin()[I].second;
-      MacroInfo *Hint = 0;
-      for (unsigned IDIdx = 0, NumIDs = GlobalIDs.size(); IDIdx !=  NumIDs;
-           ++IDIdx) {
-        Hint = getMacro(GlobalIDs[IDIdx], Hint);
+      PendingMacroIDsMap::iterator PMIt = PendingMacroIDs.begin() + I;
+      IdentifierInfo *II = PMIt->first;
+      SmallVector<serialization::MacroID, 2> MacroIDs;
+      MacroIDs.swap(PMIt->second);
+      for (SmallVectorImpl<serialization::MacroID>::iterator
+             MIt = MacroIDs.begin(), ME = MacroIDs.end(); MIt != ME; ++MIt) {
+        MacroInfo *MI = getMacro(*MIt);
+        PP.addLoadedMacroInfo(II, MI);
       }
     }
     PendingMacroIDs.clear();

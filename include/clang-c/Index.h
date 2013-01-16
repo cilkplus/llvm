@@ -342,7 +342,7 @@ CINDEX_LINKAGE CXFile clang_getFile(CXTranslationUnit tu,
  * to map a source location to a particular file, line, and column.
  */
 typedef struct {
-  void *ptr_data[2];
+  const void *ptr_data[2];
   unsigned int_data;
 } CXSourceLocation;
 
@@ -353,7 +353,7 @@ typedef struct {
  * starting and end locations from a source range, respectively.
  */
 typedef struct {
-  void *ptr_data[2];
+  const void *ptr_data[2];
   unsigned begin_int_data;
   unsigned end_int_data;
 } CXSourceRange;
@@ -361,7 +361,7 @@ typedef struct {
 /**
  * \brief Retrieve a NULL (invalid) source location.
  */
-CINDEX_LINKAGE CXSourceLocation clang_getNullLocation();
+CINDEX_LINKAGE CXSourceLocation clang_getNullLocation(void);
 
 /**
  * \brief Determine whether two source locations, which must refer into
@@ -393,7 +393,7 @@ CINDEX_LINKAGE CXSourceLocation clang_getLocationForOffset(CXTranslationUnit tu,
 /**
  * \brief Retrieve a NULL (invalid) source range.
  */
-CINDEX_LINKAGE CXSourceRange clang_getNullRange();
+CINDEX_LINKAGE CXSourceRange clang_getNullRange(void);
 
 /**
  * \brief Retrieve a source range given the beginning and ending source
@@ -2111,7 +2111,7 @@ enum CXCursorKind {
 typedef struct {
   enum CXCursorKind kind;
   int xdata;
-  void *data[3];
+  const void *data[3];
 } CXCursor;
 
 /**
@@ -2369,7 +2369,7 @@ typedef struct CXCursorSetImpl *CXCursorSet;
 /**
  * \brief Creates an empty CXCursorSet.
  */
-CINDEX_LINKAGE CXCursorSet clang_createCXCursorSet();
+CINDEX_LINKAGE CXCursorSet clang_createCXCursorSet(void);
 
 /**
  * \brief Disposes a CXCursorSet and releases its associated memory.
@@ -4875,7 +4875,7 @@ CXString clang_codeCompleteGetObjCSelector(CXCodeCompleteResults *Results);
  * \brief Return a version string, suitable for showing to a user, but not
  *        intended to be parsed (the format is not guaranteed to be stable).
  */
-CINDEX_LINKAGE CXString clang_getClangVersion();
+CINDEX_LINKAGE CXString clang_getClangVersion(void);
 
   
 /**

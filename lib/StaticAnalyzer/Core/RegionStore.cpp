@@ -202,7 +202,7 @@ public:
     return asImmutableMap().getRootWithoutRetain();
   }
 
-  void dump(llvm::raw_ostream &OS, const char *nl) const {
+  void dump(raw_ostream &OS, const char *nl) const {
    for (iterator I = begin(), E = end(); I != E; ++I) {
      const ClusterBindings &Cluster = I.getData();
      for (ClusterBindings::iterator CI = Cluster.begin(), CE = Cluster.end();
@@ -1132,6 +1132,11 @@ SVal RegionStoreManager::getBinding(RegionBindingsConstRef B, Loc L, QualType T)
   //  instead of 'Loc', and have the other Loc cases handled at a higher level.
   const TypedValueRegion *R = cast<TypedValueRegion>(MR);
   QualType RTy = R->getValueType();
+
+  // FIXME: we do not yet model the parts of a complex type, so treat the
+  // whole thing as "unknown".
+  if (RTy->isAnyComplexType())
+    return UnknownVal();
 
   // FIXME: We should eventually handle funny addressing.  e.g.:
   //

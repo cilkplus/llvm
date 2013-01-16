@@ -270,8 +270,18 @@ static void moveAttrFromListToList(AttributeList &attr,
   spliceAttrIntoList(attr, toList);
 }
 
+/// The location of a type attribute.
+enum TypeAttrLocation {
+  /// The attribute is in the decl-specifier-seq.
+  TAL_DeclSpec,
+  /// The attribute is part of a DeclaratorChunk.
+  TAL_DeclChunk,
+  /// The attribute is immediately after the declaration's name.
+  TAL_DeclName
+};
+
 static void processTypeAttrs(TypeProcessingState &state,
-                             QualType &type, bool isDeclSpec,
+                             QualType &type, TypeAttrLocation TAL,
                              AttributeList *attrs);
 
 static bool handleFunctionTypeAttr(TypeProcessingState &state,
@@ -453,6 +463,15 @@ distributeFunctionTypeAttrFromDeclSpec(TypeProcessingState &state,
                                        QualType &declSpecType) {
   state.saveDeclSpecAttrs();
 
+  // C++11 attributes before the decl specifiers actually appertain to
+  // the declarators. Move them straight there. We don't support the
+  // 'put them wherever you like' semantics we allow for GNU attributes.
+  if (attr.isCXX11Attribute()) {
+    moveAttrFromListToList(attr, state.getCurrentAttrListRef(),
+                           state.getDeclarator().getAttrListRef());
+    return;
+  }
+
   // Try to distribute to the innermost.
   if (distributeFunctionTypeAttrToInnermost(state, attr,
                                             state.getCurrentAttrListRef(),
@@ -501,6 +520,11 @@ static void distributeTypeAttrsFromDeclarator(TypeProcessingState &state,
   AttributeList *next;
   do {
     next = attr->getNext();
+
+    // Do not distribute C++11 attributes. They have strict rules for what
+    // they appertain to.
+    if (attr->isCXX11Attribute())
+      continue;
 
     switch (attr->getKind()) {
     OBJC_POINTER_TYPE_ATTRS_CASELIST:
@@ -963,7 +987,7 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
   // list of type attributes to be temporarily saved while the type
   // attributes are pushed around.
   if (AttributeList *attrs = DS.getAttributes().getList())
-    processTypeAttrs(state, Result, true, attrs);
+    processTypeAttrs(state, Result, TAL_DeclSpec, attrs);
 
   // Apply const/volatile/restrict qualifiers to T.
   if (unsigned TypeQuals = DS.getTypeQualifiers()) {
@@ -1859,7 +1883,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
     // "void" instead.
     T = SemaRef.Context.VoidTy;
     if (AttributeList *attrs = D.getDeclSpec().getAttributes().getList())
-      processTypeAttrs(state, T, true, attrs);
+      processTypeAttrs(state, T, TAL_DeclSpec, attrs);
     break;
 
   case UnqualifiedId::IK_ConversionFunctionId:
@@ -1996,6 +2020,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       SemaRef.Diag(OwnedTagDecl->getLocation(),
              diag::err_type_defined_in_alias_template)
         << SemaRef.Context.getTypeDeclType(OwnedTagDecl);
+      D.setInvalidType(true);
       break;
     case Declarator::TypeNameContext:
     case Declarator::TemplateParamContext:
@@ -2006,6 +2031,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       SemaRef.Diag(OwnedTagDecl->getLocation(),
              diag::err_type_defined_in_type_specifier)
         << SemaRef.Context.getTypeDeclType(OwnedTagDecl);
+      D.setInvalidType(true);
       break;
     case Declarator::PrototypeContext:
     case Declarator::ObjCParameterContext:
@@ -2016,6 +2042,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       SemaRef.Diag(OwnedTagDecl->getLocation(),
                    diag::err_type_defined_in_param_type)
         << SemaRef.Context.getTypeDeclType(OwnedTagDecl);
+      D.setInvalidType(true);
       break;
     case Declarator::ConditionContext:
       // C++ 6.4p2:
@@ -2023,6 +2050,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       // a new class or enumeration.
       SemaRef.Diag(OwnedTagDecl->getLocation(),
                    diag::err_type_defined_in_condition);
+      D.setInvalidType(true);
       break;
     }
   }
@@ -2661,7 +2689,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
 
     // See if there are any attributes on this declarator chunk.
     if (AttributeList *attrs = const_cast<AttributeList*>(DeclType.getAttrs()))
-      processTypeAttrs(state, T, false, attrs);
+      processTypeAttrs(state, T, TAL_DeclChunk, attrs);
   }
 
   if (LangOpts.CPlusPlus && T->isFunctionType()) {
@@ -2684,30 +2712,6 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     } else {
       DeclContext *DC = S.computeDeclContext(D.getCXXScopeSpec());
       FreeFunction = (DC && !DC->isRecord());
-    }
-
-    // C++0x [dcl.constexpr]p8: A constexpr specifier for a non-static member
-    // function that is not a constructor declares that function to be const.
-    // FIXME: This should be deferred until we know whether this is a static
-    //        member function (for an out-of-class definition, we don't know
-    //        this until we perform redeclaration lookup).
-    if (D.getDeclSpec().isConstexprSpecified() && !FreeFunction &&
-        D.getDeclSpec().getStorageClassSpec() != DeclSpec::SCS_static &&
-        D.getName().getKind() != UnqualifiedId::IK_ConstructorName &&
-        D.getName().getKind() != UnqualifiedId::IK_ConstructorTemplateId &&
-        !(FnTy->getTypeQuals() & DeclSpec::TQ_const)) {
-      // Rebuild function type adding a 'const' qualifier.
-      FunctionProtoType::ExtProtoInfo EPI = FnTy->getExtProtoInfo();
-      EPI.TypeQuals |= DeclSpec::TQ_const;
-      T = Context.getFunctionType(FnTy->getResultType(),
-                                  FnTy->arg_type_begin(),
-                                  FnTy->getNumArgs(), EPI);
-      // Rebuild any parens around the identifier in the function type.
-      for (unsigned i = 0, e = D.getNumTypeObjects(); i != e; ++i) {
-        if (D.getTypeObject(i).Kind != DeclaratorChunk::Paren)
-          break;
-        T = S.BuildParenType(T);
-      }
     }
 
     // C++11 [dcl.fct]p6 (w/DR1417):
@@ -2773,7 +2777,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
   // Apply any undistributed attributes from the declarator.
   if (!T.isNull())
     if (AttributeList *attrs = D.getAttributes())
-      processTypeAttrs(state, T, false, attrs);
+      processTypeAttrs(state, T, TAL_DeclName, attrs);
 
   // Diagnose any ignored type attributes.
   if (!T.isNull()) state.diagnoseIgnoredTypeAttrs(T);
@@ -4170,7 +4174,7 @@ static void HandleNeonVectorTypeAttr(QualType& CurType,
 }
 
 static void processTypeAttrs(TypeProcessingState &state, QualType &type,
-                             bool isDeclSpec, AttributeList *attrs) {
+                             TypeAttrLocation TAL, AttributeList *attrs) {
   // Scan through and apply attributes to this type where it makes sense.  Some
   // attributes (such as __address_space__, __vector_size__, etc) apply to the
   // type, but others can be present in the type specifiers even though they
@@ -4184,6 +4188,20 @@ static void processTypeAttrs(TypeProcessingState &state, QualType &type,
     // Skip attributes that were marked to be invalid.
     if (attr.isInvalid())
       continue;
+
+    // [[gnu::...]] attributes are treated as declaration attributes, so may
+    // not appertain to a DeclaratorChunk, even if we handle them as type
+    // attributes.
+    // FIXME: All other C++11 type attributes may *only* appertain to a type,
+    // and should only be considered here if they appertain to a
+    // DeclaratorChunk.
+    if (attr.isCXX11Attribute() && TAL == TAL_DeclChunk &&
+        attr.getScopeName() && attr.getScopeName()->isStr("gnu")) {
+      state.getSema().Diag(attr.getLoc(),
+                           diag::warn_cxx11_gnu_attribute_on_type)
+        << attr.getName();
+      continue;
+    }
 
     // If this is an attribute we can handle, do so now,
     // otherwise, add it to the FnAttrs list for rechaining.
@@ -4209,9 +4227,7 @@ static void processTypeAttrs(TypeProcessingState &state, QualType &type,
       attr.setUsedAsTypeAttr();
       break;
     case AttributeList::AT_ExtVectorType:
-      if (state.getDeclarator().getDeclSpec().getStorageClassSpec()
-            != DeclSpec::SCS_typedef)
-        HandleExtVectorTypeAttr(type, attr, state.getSema());
+      HandleExtVectorTypeAttr(type, attr, state.getSema());
       attr.setUsedAsTypeAttr();
       break;
     case AttributeList::AT_NeonVectorType:
@@ -4247,7 +4263,7 @@ static void processTypeAttrs(TypeProcessingState &state, QualType &type,
 
       // Never process function type attributes as part of the
       // declaration-specifiers.
-      if (isDeclSpec)
+      if (TAL == TAL_DeclSpec)
         distributeFunctionTypeAttrFromDeclSpec(state, attr, type);
 
       // Otherwise, handle the possible delays.
@@ -4388,9 +4404,14 @@ bool Sema::RequireCompleteType(SourceLocation Loc, QualType T,
       // repeating the diagnostic.
       // FIXME: Add a Fix-It that imports the corresponding module or includes
       // the header.
-      if (isSFINAEContext() || HiddenDefinitions.insert(Def)) {
-        Diag(Loc, diag::err_module_private_definition) << T;
-        Diag(Def->getLocation(), diag::note_previous_definition);
+      Module *Owner = Def->getOwningModule();
+      Diag(Loc, diag::err_module_private_definition)
+        << T << Owner->getFullModuleName();
+      Diag(Def->getLocation(), diag::note_previous_definition);
+
+      if (!isSFINAEContext()) {
+        // Recover by implicitly importing this module.
+        createImplicitModuleImport(Loc, Owner);
       }
     }
 

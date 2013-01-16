@@ -388,7 +388,7 @@ private:
 
   typedef llvm::MapVector<Decl *, uint64_t,
                           llvm::SmallDenseMap<Decl *, unsigned, 4>,
-                          llvm::SmallVector<std::pair<Decl *, uint64_t>, 4> >
+                          SmallVector<std::pair<Decl *, uint64_t>, 4> >
     PendingBodiesMap;
 
   /// \brief Functions or methods that have bodies that will be attached.
@@ -433,7 +433,7 @@ private:
   GlobalMacroMapType GlobalMacroMap;
 
   typedef llvm::DenseMap<serialization::MacroID,
-            llvm::SmallVector<std::pair<serialization::SubmoduleID,
+            SmallVector<std::pair<serialization::SubmoduleID,
                                         MacroUpdate>, 1> >
     MacroUpdatesMap;
 
@@ -503,8 +503,7 @@ private:
 };
 
   /// \brief A set of hidden declarations.
-  typedef llvm::SmallVector<HiddenName, 2>
-    HiddenNames;
+  typedef SmallVector<HiddenName, 2> HiddenNames;
   
   typedef llvm::DenseMap<Module *, HiddenNames> HiddenNamesMapType;
 
@@ -533,8 +532,7 @@ private:
   
   /// \brief The set of module imports and exports that still need to be 
   /// resolved.
-  llvm::SmallVector<UnresolvedModuleImportExport, 2> 
-    UnresolvedModuleImportExports;
+  SmallVector<UnresolvedModuleImportExport, 2> UnresolvedModuleImportExports;
   
   /// \brief A vector containing selectors that have already been loaded.
   ///
@@ -556,7 +554,7 @@ private:
   llvm::DenseMap<Selector, unsigned> SelectorGeneration;
 
   typedef llvm::MapVector<IdentifierInfo *,
-                          llvm::SmallVector<serialization::MacroID, 2> >
+                          SmallVector<serialization::MacroID, 2> >
     PendingMacroIDsMap;
 
   /// \brief Mapping from identifiers that have a macro history to the global
@@ -638,11 +636,11 @@ private:
   /// \brief Fields containing data that is used for semantic analysis
   //@{
 
-  /// \brief The IDs of all locally scoped external decls in the chain.
+  /// \brief The IDs of all locally scoped extern "C" decls in the chain.
   ///
   /// Sema tracks these to validate that the types are consistent across all
-  /// local external declarations.
-  SmallVector<uint64_t, 16> LocallyScopedExternalDecls;
+  /// local extern "C" declarations.
+  SmallVector<uint64_t, 16> LocallyScopedExternCDecls;
 
   /// \brief The IDs of all dynamic class declarations in the chain.
   ///
@@ -798,7 +796,7 @@ private:
   /// Each element is the global declaration ID of the first declaration in
   /// the chain. Elements in this vector should be unique; use 
   /// PendingDeclChainsKnown to ensure uniqueness.
-  llvm::SmallVector<serialization::DeclID, 16> PendingDeclChains;
+  SmallVector<serialization::DeclID, 16> PendingDeclChains;
 
   /// \brief Keeps track of the elements added to PendingDeclChains.
   llvm::SmallSet<serialization::DeclID, 16> PendingDeclChainsKnown;
@@ -810,9 +808,9 @@ private:
   /// \brief The set of Objective-C class definitions that have already been
   /// loaded, for which we will need to check for categories whenever a new
   /// module is loaded.
-  llvm::SmallVector<ObjCInterfaceDecl *, 16> ObjCClassesLoaded;
+  SmallVector<ObjCInterfaceDecl *, 16> ObjCClassesLoaded;
   
-  typedef llvm::DenseMap<Decl *, llvm::SmallVector<serialization::DeclID, 2> >
+  typedef llvm::DenseMap<Decl *, SmallVector<serialization::DeclID, 2> >
     MergedDeclsMap;
     
   /// \brief A mapping from canonical declarations to the set of additional
@@ -821,7 +819,7 @@ private:
   MergedDeclsMap MergedDecls;
   
   typedef llvm::DenseMap<serialization::GlobalDeclID, 
-                         llvm::SmallVector<serialization::DeclID, 2> >
+                         SmallVector<serialization::DeclID, 2> >
     StoredMergedDeclsMap;
   
   /// \brief A mapping from canonical declaration IDs to the set of additional
@@ -909,10 +907,10 @@ private:
 
   ASTReadResult ReadASTCore(StringRef FileName, ModuleKind Type,
                             SourceLocation ImportLoc, ModuleFile *ImportedBy,
-                            llvm::SmallVectorImpl<ImportedModule> &Loaded,
+                            SmallVectorImpl<ImportedModule> &Loaded,
                             unsigned ClientLoadCapabilities);
   ASTReadResult ReadControlBlock(ModuleFile &F,
-                                 llvm::SmallVectorImpl<ImportedModule> &Loaded,
+                                 SmallVectorImpl<ImportedModule> &Loaded,
                                  unsigned ClientLoadCapabilities);
   bool ReadASTBlock(ModuleFile &F);
   bool ParseLineTable(ModuleFile &F, SmallVectorImpl<uint64_t> &Record);
@@ -1488,7 +1486,7 @@ public:
 
   virtual void ReadDynamicClasses(SmallVectorImpl<CXXRecordDecl *> &Decls);
 
-  virtual void ReadLocallyScopedExternalDecls(
+  virtual void ReadLocallyScopedExternCDecls(
                  SmallVectorImpl<NamedDecl *> &Decls);
 
   virtual void ReadReferencedSelectors(
@@ -1537,7 +1535,7 @@ public:
                                                     unsigned LocalID);
 
   /// \brief Retrieve the macro with the given ID.
-  MacroInfo *getMacro(serialization::MacroID ID, MacroInfo *Hint = 0);
+  MacroInfo *getMacro(serialization::MacroID ID);
 
   /// \brief Retrieve the global macro ID corresponding to the given local
   /// ID within the given module file.
@@ -1558,7 +1556,12 @@ public:
   /// \brief Retrieve the submodule that corresponds to a global submodule ID.
   ///
   Module *getSubmodule(serialization::SubmoduleID GlobalID);
-  
+
+  /// \brief Retrieve the module that corresponds to the given module ID.
+  ///
+  /// Note: overrides method in ExternalASTSource
+  virtual Module *getModule(unsigned ID);
+
   /// \brief Retrieve a selector from the given module with its local ID
   /// number.
   Selector getLocalSelector(ModuleFile &M, unsigned LocalID);
@@ -1690,20 +1693,19 @@ public:
   Expr *ReadSubExpr();
 
   /// \brief Reads the macro record located at the given offset.
-  void ReadMacroRecord(ModuleFile &F, uint64_t Offset, MacroInfo *Hint = 0);
+  void ReadMacroRecord(ModuleFile &F, uint64_t Offset);
 
   /// \brief Determine the global preprocessed entity ID that corresponds to
   /// the given local ID within the given module.
   serialization::PreprocessedEntityID
   getGlobalPreprocessedEntityID(ModuleFile &M, unsigned LocalID) const;
 
-  /// \brief Note that the identifier has a macro history.
+  /// \brief Add the macro ID assosiated with \c II for deserialization.
   ///
   /// \param II The name of the macro.
-  ///
-  /// \param IDs The global macro IDs that are associated with this identifier.
-  void setIdentifierIsMacro(IdentifierInfo *II,
-                            ArrayRef<serialization::MacroID> IDs);
+  /// \param ID The global macro ID that is associated with this identifier.
+  void addMacroIDForDeserialization(IdentifierInfo *II,
+                                    serialization::MacroID ID);
 
   /// \brief Read the set of macros defined by this external macro source.
   virtual void ReadDefinedMacros();

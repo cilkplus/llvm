@@ -21,6 +21,7 @@
 #include "CXTranslationUnit.h"
 #include "CXType.h"
 #include "CursorVisitor.h"
+#include "CLog.h"
 #include "SimpleFormatContext.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/Diagnostic.h"
@@ -46,6 +47,12 @@
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Format.h"
+#include "llvm/Config/config.h"
+
+#if HAVE_PTHREAD_H
+#include <pthread.h>
+#endif
 
 using namespace clang;
 using namespace clang::cxcursor;
@@ -505,7 +512,7 @@ bool CursorVisitor::VisitChildren(CXCursor Cursor) {
   }
 
   if (Cursor.kind == CXCursor_CXXBaseSpecifier) {
-    if (CXXBaseSpecifier *Base = getCursorCXXBaseSpecifier(Cursor)) {
+    if (const CXXBaseSpecifier *Base = getCursorCXXBaseSpecifier(Cursor)) {
       if (TypeSourceInfo *BaseTSInfo = Base->getTypeSourceInfo()) {
         return Visit(BaseTSInfo->getTypeLoc());
       }
@@ -527,7 +534,8 @@ bool CursorVisitor::VisitChildren(CXCursor Cursor) {
   if (Cursor.kind == CXCursor_MacroDefinition &&
       BeginLoc == RegionOfInterest.getEnd()) {
     SourceLocation Loc = AU->mapLocationToPreamble(BeginLoc);
-    MacroInfo *MI = getMacroInfo(cxcursor::getCursorMacroDefinition(Cursor),TU);
+    const MacroInfo *MI =
+        getMacroInfo(cxcursor::getCursorMacroDefinition(Cursor), TU);
     if (MacroDefinition *MacroDef =
           checkForMacroInMacroDefinition(MI, Loc, TU))
       return Visit(cxcursor::MakeMacroExpansionCursor(MacroDef, BeginLoc, TU));
@@ -2385,7 +2393,7 @@ bool CursorVisitor::Visit(Stmt *S) {
 }
 
 namespace {
-typedef llvm::SmallVector<SourceRange, 4> RefNamePieces;
+typedef SmallVector<SourceRange, 4> RefNamePieces;
 RefNamePieces buildPieces(unsigned NameFlags, bool IsMemberRefExpr, 
                           const DeclarationNameInfo &NI, 
                           const SourceRange &QLoc, 
@@ -2681,6 +2689,12 @@ CXTranslationUnit clang_parseTranslationUnit(CXIndex CIdx,
                                             struct CXUnsavedFile *unsaved_files,
                                              unsigned num_unsaved_files,
                                              unsigned options) {
+  LOG_FUNC_SECTION {
+    *Log << source_filename << ": ";
+    for (int i = 0; i != num_command_line_args; ++i)
+      *Log << command_line_args[i] << " ";
+  }
+
   ParseTranslationUnitInfo PTUI = { CIdx, source_filename, command_line_args,
                                     num_command_line_args, unsaved_files,
                                     num_unsaved_files, options, 0 };
@@ -2744,6 +2758,10 @@ static void clang_saveTranslationUnit_Impl(void *UserData) {
 
 int clang_saveTranslationUnit(CXTranslationUnit TU, const char *FileName,
                               unsigned options) {
+  LOG_FUNC_SECTION {
+    *Log << TU << ' ' << FileName;
+  }
+
   if (!TU)
     return CXSaveError_InvalidTU;
 
@@ -2816,6 +2834,8 @@ static void clang_reparseTranslationUnit_Impl(void *UserData) {
   ReparseTranslationUnitInfo *RTUI =
     static_cast<ReparseTranslationUnitInfo*>(UserData);
   CXTranslationUnit TU = RTUI->TU;
+  if (!TU)
+    return;
 
   // Reset the associated diagnostics.
   delete static_cast<CXDiagnosticSetImpl*>(TU->Diagnostics);
@@ -2826,9 +2846,6 @@ static void clang_reparseTranslationUnit_Impl(void *UserData) {
   unsigned options = RTUI->options;
   (void) options;
   RTUI->result = 1;
-
-  if (!TU)
-    return;
 
   CIndexer *CXXIdx = (CIndexer*)TU->CIdx;
   if (CXXIdx->isOptEnabled(CXGlobalOpt_ThreadBackgroundPriorityForEditing))
@@ -2861,6 +2878,10 @@ int clang_reparseTranslationUnit(CXTranslationUnit TU,
                                  unsigned num_unsaved_files,
                                  struct CXUnsavedFile *unsaved_files,
                                  unsigned options) {
+  LOG_FUNC_SECTION {
+    *Log << TU;
+  }
+
   ReparseTranslationUnitInfo RTUI = { TU, num_unsaved_files, unsaved_files,
                                       options, 0 };
 
@@ -3097,58 +3118,57 @@ static CXString getDeclSpelling(Decl *D) {
 
 CXString clang_getCursorSpelling(CXCursor C) {
   if (clang_isTranslationUnit(C.kind))
-    return clang_getTranslationUnitSpelling(
-                            static_cast<CXTranslationUnit>(C.data[2]));
+    return clang_getTranslationUnitSpelling(getCursorTU(C));
 
   if (clang_isReference(C.kind)) {
     switch (C.kind) {
     case CXCursor_ObjCSuperClassRef: {
-      ObjCInterfaceDecl *Super = getCursorObjCSuperClassRef(C).first;
+      const ObjCInterfaceDecl *Super = getCursorObjCSuperClassRef(C).first;
       return createCXString(Super->getIdentifier()->getNameStart());
     }
     case CXCursor_ObjCClassRef: {
-      ObjCInterfaceDecl *Class = getCursorObjCClassRef(C).first;
+      const ObjCInterfaceDecl *Class = getCursorObjCClassRef(C).first;
       return createCXString(Class->getIdentifier()->getNameStart());
     }
     case CXCursor_ObjCProtocolRef: {
-      ObjCProtocolDecl *OID = getCursorObjCProtocolRef(C).first;
+      const ObjCProtocolDecl *OID = getCursorObjCProtocolRef(C).first;
       assert(OID && "getCursorSpelling(): Missing protocol decl");
       return createCXString(OID->getIdentifier()->getNameStart());
     }
     case CXCursor_CXXBaseSpecifier: {
-      CXXBaseSpecifier *B = getCursorCXXBaseSpecifier(C);
+      const CXXBaseSpecifier *B = getCursorCXXBaseSpecifier(C);
       return createCXString(B->getType().getAsString());
     }
     case CXCursor_TypeRef: {
-      TypeDecl *Type = getCursorTypeRef(C).first;
+      const TypeDecl *Type = getCursorTypeRef(C).first;
       assert(Type && "Missing type decl");
 
       return createCXString(getCursorContext(C).getTypeDeclType(Type).
                               getAsString());
     }
     case CXCursor_TemplateRef: {
-      TemplateDecl *Template = getCursorTemplateRef(C).first;
+      const TemplateDecl *Template = getCursorTemplateRef(C).first;
       assert(Template && "Missing template decl");
       
       return createCXString(Template->getNameAsString());
     }
         
     case CXCursor_NamespaceRef: {
-      NamedDecl *NS = getCursorNamespaceRef(C).first;
+      const NamedDecl *NS = getCursorNamespaceRef(C).first;
       assert(NS && "Missing namespace decl");
       
       return createCXString(NS->getNameAsString());
     }
 
     case CXCursor_MemberRef: {
-      FieldDecl *Field = getCursorMemberRef(C).first;
+      const FieldDecl *Field = getCursorMemberRef(C).first;
       assert(Field && "Missing member decl");
       
       return createCXString(Field->getNameAsString());
     }
 
     case CXCursor_LabelRef: {
-      LabelStmt *Label = getCursorLabelRef(C).first;
+      const LabelStmt *Label = getCursorLabelRef(C).first;
       assert(Label && "Missing label");
       
       return createCXString(Label->getName());
@@ -3171,7 +3191,7 @@ CXString clang_getCursorSpelling(CXCursor C) {
     }
         
     case CXCursor_VariableRef: {
-      VarDecl *Var = getCursorVariableRef(C).first;
+      const VarDecl *Var = getCursorVariableRef(C).first;
       assert(Var && "Missing variable decl");
       
       return createCXString(Var->getNameAsString());
@@ -3814,8 +3834,7 @@ CXCursor clang_getCursor(CXTranslationUnit TU, CXSourceLocation Loc) {
   SourceLocation SLoc = cxloc::translateSourceLocation(Loc);
   CXCursor Result = cxcursor::getCursor(TU, SLoc);
 
-  bool Logging = getenv("LIBCLANG_LOGGING");  
-  if (Logging) {
+  LOG_FUNC_SECTION {
     CXFile SearchFile;
     unsigned SearchLine, SearchColumn;
     CXFile ResultFile;
@@ -3824,18 +3843,19 @@ CXCursor clang_getCursor(CXTranslationUnit TU, CXSourceLocation Loc) {
     const char *IsDef = clang_isCursorDefinition(Result)? " (Definition)" : "";
     CXSourceLocation ResultLoc = clang_getCursorLocation(Result);
     
-    clang_getExpansionLocation(Loc, &SearchFile, &SearchLine, &SearchColumn, 0);
-    clang_getExpansionLocation(ResultLoc, &ResultFile, &ResultLine,
+    clang_getFileLocation(Loc, &SearchFile, &SearchLine, &SearchColumn, 0);
+    clang_getFileLocation(ResultLoc, &ResultFile, &ResultLine,
                                &ResultColumn, 0);
     SearchFileName = clang_getFileName(SearchFile);
     ResultFileName = clang_getFileName(ResultFile);
     KindSpelling = clang_getCursorKindSpelling(Result.kind);
     USR = clang_getCursorUSR(Result);
-    fprintf(stderr, "clang_getCursor(%s:%d:%d) = %s(%s:%d:%d):%s%s\n",
-            clang_getCString(SearchFileName), SearchLine, SearchColumn,
-            clang_getCString(KindSpelling),
-            clang_getCString(ResultFileName), ResultLine, ResultColumn,
-            clang_getCString(USR), IsDef);
+    *Log << llvm::format("(%s:%d:%d) = %s",
+                   clang_getCString(SearchFileName), SearchLine, SearchColumn,
+                   clang_getCString(KindSpelling))
+        << llvm::format("(%s:%d:%d):%s%s",
+                     clang_getCString(ResultFileName), ResultLine, ResultColumn,
+                     clang_getCString(USR), IsDef);
     clang_disposeString(SearchFileName);
     clang_disposeString(ResultFileName);
     clang_disposeString(KindSpelling);
@@ -3848,13 +3868,13 @@ CXCursor clang_getCursor(CXTranslationUnit TU, CXSourceLocation Loc) {
                                 = clang_getCursorKindSpelling(Definition.kind);
       CXFile DefinitionFile;
       unsigned DefinitionLine, DefinitionColumn;
-      clang_getExpansionLocation(DefinitionLoc, &DefinitionFile,
+      clang_getFileLocation(DefinitionLoc, &DefinitionFile,
                                  &DefinitionLine, &DefinitionColumn, 0);
       CXString DefinitionFileName = clang_getFileName(DefinitionFile);
-      fprintf(stderr, "  -> %s(%s:%d:%d)\n",
-              clang_getCString(DefinitionKindSpelling),
-              clang_getCString(DefinitionFileName),
-              DefinitionLine, DefinitionColumn);
+      *Log << llvm::format("  -> %s(%s:%d:%d)",
+                     clang_getCString(DefinitionKindSpelling),
+                     clang_getCString(DefinitionFileName),
+                     DefinitionLine, DefinitionColumn);
       clang_disposeString(DefinitionFileName);
       clang_disposeString(DefinitionKindSpelling);
     }
@@ -3888,7 +3908,7 @@ unsigned clang_hashCursor(CXCursor C) {
   if (clang_isExpression(C.kind) || clang_isStatement(C.kind))
     Index = 1;
   
-  return llvm::DenseMapInfo<std::pair<unsigned, void*> >::getHashValue(
+  return llvm::DenseMapInfo<std::pair<unsigned, const void*> >::getHashValue(
                                         std::make_pair(C.kind, C.data[Index]));
 }
 
@@ -3945,50 +3965,51 @@ CXSourceLocation clang_getCursorLocation(CXCursor C) {
   if (clang_isReference(C.kind)) {
     switch (C.kind) {
     case CXCursor_ObjCSuperClassRef: {
-      std::pair<ObjCInterfaceDecl *, SourceLocation> P
+      std::pair<const ObjCInterfaceDecl *, SourceLocation> P
         = getCursorObjCSuperClassRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_ObjCProtocolRef: {
-      std::pair<ObjCProtocolDecl *, SourceLocation> P
+      std::pair<const ObjCProtocolDecl *, SourceLocation> P
         = getCursorObjCProtocolRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_ObjCClassRef: {
-      std::pair<ObjCInterfaceDecl *, SourceLocation> P
+      std::pair<const ObjCInterfaceDecl *, SourceLocation> P
         = getCursorObjCClassRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_TypeRef: {
-      std::pair<TypeDecl *, SourceLocation> P = getCursorTypeRef(C);
+      std::pair<const TypeDecl *, SourceLocation> P = getCursorTypeRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_TemplateRef: {
-      std::pair<TemplateDecl *, SourceLocation> P = getCursorTemplateRef(C);
+      std::pair<const TemplateDecl *, SourceLocation> P =
+          getCursorTemplateRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_NamespaceRef: {
-      std::pair<NamedDecl *, SourceLocation> P = getCursorNamespaceRef(C);
+      std::pair<const NamedDecl *, SourceLocation> P = getCursorNamespaceRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_MemberRef: {
-      std::pair<FieldDecl *, SourceLocation> P = getCursorMemberRef(C);
+      std::pair<const FieldDecl *, SourceLocation> P = getCursorMemberRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_VariableRef: {
-      std::pair<VarDecl *, SourceLocation> P = getCursorVariableRef(C);
+      std::pair<const VarDecl *, SourceLocation> P = getCursorVariableRef(C);
       return cxloc::translateSourceLocation(P.first->getASTContext(), P.second);
     }
 
     case CXCursor_CXXBaseSpecifier: {
-      CXXBaseSpecifier *BaseSpec = getCursorCXXBaseSpecifier(C);
+      const CXXBaseSpecifier *BaseSpec = getCursorCXXBaseSpecifier(C);
       if (!BaseSpec)
         return clang_getNullLocation();
       
@@ -4001,7 +4022,7 @@ CXSourceLocation clang_getCursorLocation(CXCursor C) {
     }
 
     case CXCursor_LabelRef: {
-      std::pair<LabelStmt *, SourceLocation> P = getCursorLabelRef(C);
+      std::pair<const LabelStmt *, SourceLocation> P = getCursorLabelRef(C);
       return cxloc::translateSourceLocation(getCursorContext(C), P.second);
     }
 
@@ -4296,7 +4317,7 @@ CXCursor clang_getCursorReferenced(CXCursor C) {
   }
   
   if (C.kind == CXCursor_MacroExpansion) {
-    if (MacroDefinition *Def = getCursorMacroExpansion(C).getDefinition())
+    if (const MacroDefinition *Def = getCursorMacroExpansion(C).getDefinition())
       return MakeMacroDefinitionCursor(Def, tu);
   }
 
@@ -4308,16 +4329,16 @@ CXCursor clang_getCursorReferenced(CXCursor C) {
       return MakeCXCursor(getCursorObjCSuperClassRef(C).first, tu);
 
     case CXCursor_ObjCProtocolRef: {
-      ObjCProtocolDecl *Prot = getCursorObjCProtocolRef(C).first;
-      if (ObjCProtocolDecl *Def = Prot->getDefinition())
+      const ObjCProtocolDecl *Prot = getCursorObjCProtocolRef(C).first;
+      if (const ObjCProtocolDecl *Def = Prot->getDefinition())
         return MakeCXCursor(Def, tu);
 
       return MakeCXCursor(Prot, tu);
     }
 
     case CXCursor_ObjCClassRef: {
-      ObjCInterfaceDecl *Class = getCursorObjCClassRef(C).first;
-      if (ObjCInterfaceDecl *Def = Class->getDefinition())
+      const ObjCInterfaceDecl *Class = getCursorObjCClassRef(C).first;
+      if (const ObjCInterfaceDecl *Def = Class->getDefinition())
         return MakeCXCursor(Def, tu);
 
       return MakeCXCursor(Class, tu);
@@ -4336,7 +4357,7 @@ CXCursor clang_getCursorReferenced(CXCursor C) {
       return MakeCXCursor(getCursorMemberRef(C).first, tu );
 
     case CXCursor_CXXBaseSpecifier: {
-      CXXBaseSpecifier *B = cxcursor::getCursorCXXBaseSpecifier(C);
+      const CXXBaseSpecifier *B = cxcursor::getCursorCXXBaseSpecifier(C);
       return clang_getTypeDeclaration(cxtype::MakeCXType(B->getType(),
                                                          tu ));
     }
@@ -4446,7 +4467,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::CXXConversion: {
     const FunctionDecl *Def = 0;
     if (cast<FunctionDecl>(D)->getBody(Def))
-      return MakeCXCursor(const_cast<FunctionDecl *>(Def), TU);
+      return MakeCXCursor(Def, TU);
     return clang_getNullCursor();
   }
 
@@ -4856,6 +4877,10 @@ static void getTokens(ASTUnit *CXXUnit, SourceRange Range,
 
 void clang_tokenize(CXTranslationUnit TU, CXSourceRange Range,
                     CXToken **Tokens, unsigned *NumTokens) {
+  LOG_FUNC_SECTION {
+    *Log << TU << ' ' << Range;
+  }
+
   if (Tokens)
     *Tokens = 0;
   if (NumTokens)
@@ -4915,7 +4940,7 @@ class AnnotateTokensWorker {
     SourceRange CursorRange;
     unsigned BeforeChildrenTokenIdx;
   };
-  llvm::SmallVector<PostChildrenInfo, 8> PostChildrenInfos;
+  SmallVector<PostChildrenInfo, 8> PostChildrenInfos;
   
   bool MoreTokens() const { return TokIdx < NumTokens; }
   unsigned NextToken() const { return TokIdx; }
@@ -5528,9 +5553,17 @@ extern "C" {
 void clang_annotateTokens(CXTranslationUnit TU,
                           CXToken *Tokens, unsigned NumTokens,
                           CXCursor *Cursors) {
-
-  if (NumTokens == 0 || !Tokens || !Cursors)
+  if (NumTokens == 0 || !Tokens || !Cursors) {
+    LOG_FUNC_SECTION { *Log << "<null input>"; }
     return;
+  }
+
+  LOG_FUNC_SECTION {
+    *Log << TU << ' ';
+    CXSourceLocation bloc = clang_getTokenLocation(TU, Tokens[0]);
+    CXSourceLocation eloc = clang_getTokenLocation(TU, Tokens[NumTokens-1]);
+    *Log << clang_getRange(bloc, eloc);
+  }
 
   // Any token we don't specifically annotate will have a NULL cursor.
   CXCursor C = clang_getNullCursor();
@@ -5802,7 +5835,7 @@ CXFile clang_getIncludedFile(CXCursor cursor) {
   if (cursor.kind != CXCursor_InclusionDirective)
     return 0;
   
-  InclusionDirective *ID = getCursorInclusionDirective(cursor);
+  const InclusionDirective *ID = getCursorInclusionDirective(cursor);
   return (void *)ID->getFile();
 }
 
@@ -6205,7 +6238,7 @@ MacroInfo *cxindex::getMacroInfo(const IdentifierInfo &II,
 
   ASTUnit *Unit = static_cast<ASTUnit *>(TU->TUData);
   Preprocessor &PP = Unit->getPreprocessor();
-  MacroInfo *MI = PP.getMacroInfoHistory(const_cast<IdentifierInfo*>(&II));
+  MacroInfo *MI = PP.getMacroInfoHistory(&II);
   while (MI) {
     if (MacroDefLoc == MI->getDefinitionLoc())
       return MI;
@@ -6215,8 +6248,8 @@ MacroInfo *cxindex::getMacroInfo(const IdentifierInfo &II,
   return 0;
 }
 
-MacroInfo *cxindex::getMacroInfo(MacroDefinition *MacroDef,
-                                 CXTranslationUnit TU) {
+const MacroInfo *cxindex::getMacroInfo(const MacroDefinition *MacroDef,
+                                       CXTranslationUnit TU) {
   if (!MacroDef || !TU)
     return 0;
   const IdentifierInfo *II = MacroDef->getName();
@@ -6296,3 +6329,88 @@ CXString clang_getClangVersion() {
 
 } // end: extern "C"
 
+Logger &cxindex::Logger::operator<<(CXTranslationUnit TU) {
+  if (TU) {
+    if (ASTUnit *Unit = static_cast<ASTUnit *>(TU->TUData)) {
+      LogOS << '<' << Unit->getMainFileName() << '>';
+      return *this;
+    }
+  }
+
+  LogOS << "<NULL TU>";
+  return *this;
+}
+
+Logger &cxindex::Logger::operator<<(CXSourceLocation Loc) {
+  CXFile File;
+  unsigned Line, Column;
+  clang_getFileLocation(Loc, &File, &Line, &Column, 0);
+  CXString FileName = clang_getFileName(File);
+  *this << llvm::format("(%s:%d:%d)", clang_getCString(FileName), Line, Column);
+  clang_disposeString(FileName);
+  return *this;
+}
+
+Logger &cxindex::Logger::operator<<(CXSourceRange range) {
+  CXSourceLocation BLoc = clang_getRangeStart(range);
+  CXSourceLocation ELoc = clang_getRangeEnd(range);
+
+  CXFile BFile;
+  unsigned BLine, BColumn;
+  clang_getFileLocation(BLoc, &BFile, &BLine, &BColumn, 0);
+
+  CXFile EFile;
+  unsigned ELine, EColumn;
+  clang_getFileLocation(ELoc, &EFile, &ELine, &EColumn, 0);
+
+  CXString BFileName = clang_getFileName(BFile);
+  if (BFile == EFile) {
+    *this << llvm::format("[%s %d:%d-%d:%d]", clang_getCString(BFileName),
+                         BLine, BColumn, ELine, EColumn);
+  } else {
+    CXString EFileName = clang_getFileName(EFile);
+    *this << llvm::format("[%s:%d:%d - ", clang_getCString(BFileName),
+                          BLine, BColumn)
+          << llvm::format("%s:%d:%d]", clang_getCString(EFileName),
+                          ELine, EColumn);
+    clang_disposeString(EFileName);
+  }
+  clang_disposeString(BFileName);
+  return *this;
+}
+
+Logger &cxindex::Logger::operator<<(CXString Str) {
+  *this << clang_getCString(Str);
+  return *this;
+}
+
+Logger &cxindex::Logger::operator<<(const llvm::format_object_base &Fmt) {
+  LogOS << Fmt;
+  return *this;
+}
+
+cxindex::Logger::~Logger() {
+  LogOS.flush();
+
+  llvm::sys::ScopedLock L(EnableMultithreadingMutex);
+
+  static llvm::TimeRecord sBeginTR = llvm::TimeRecord::getCurrentTime();
+
+  raw_ostream &OS = llvm::errs();
+  OS << "[libclang:" << Name << ':';
+
+  // FIXME: Portability.
+#if HAVE_PTHREAD_H && __APPLE__
+  mach_port_t tid = pthread_mach_thread_np(pthread_self());
+  OS << tid << ':';
+#endif
+
+  llvm::TimeRecord TR = llvm::TimeRecord::getCurrentTime();
+  OS << llvm::format("%7.4f] ", TR.getWallTime() - sBeginTR.getWallTime());
+  OS << Msg.str() << '\n';
+
+  if (Trace) {
+    llvm::sys::PrintStackTrace(stderr);
+    OS << "--------------------------------------------------\n";
+  }
+}

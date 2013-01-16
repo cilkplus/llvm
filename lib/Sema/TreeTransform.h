@@ -247,7 +247,7 @@ public:
   /// must be set.
   bool TryExpandParameterPacks(SourceLocation EllipsisLoc,
                                SourceRange PatternRange,
-                             llvm::ArrayRef<UnexpandedParameterPack> Unexpanded,
+                               ArrayRef<UnexpandedParameterPack> Unexpanded,
                                bool &ShouldExpand,
                                bool &RetainExpansion,
                                llvm::Optional<unsigned> &NumExpansions) {
@@ -2568,7 +2568,7 @@ StmtResult TreeTransform<Derived>::TransformStmt(Stmt *S) {
       if (E.isInvalid())
         return StmtError();
 
-      return getSema().ActOnExprStmt(getSema().MakeFullExpr(E.take()));
+      return getSema().ActOnExprStmt(E);
     }
   }
 
@@ -5457,7 +5457,7 @@ TreeTransform<Derived>::TransformForStmt(ForStmt *S) {
   if (Inc.isInvalid())
     return StmtError();
 
-  Sema::FullExprArg FullInc(getSema().MakeFullExpr(Inc.get()));
+  Sema::FullExprArg FullInc(getSema().MakeFullDiscardedValueExpr(Inc.get()));
   if (S->getInc() && !FullInc.get())
     return StmtError();
 
@@ -7607,7 +7607,7 @@ template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformTypeTraitExpr(TypeTraitExpr *E) {
   bool ArgChanged = false;
-  llvm::SmallVector<TypeSourceInfo *, 4> Args;
+  SmallVector<TypeSourceInfo *, 4> Args;
   for (unsigned I = 0, N = E->getNumArgs(); I != N; ++I) {
     TypeSourceInfo *From = E->getArg(I);
     TypeLoc FromTL = From->getTypeLoc();
@@ -7955,8 +7955,8 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
   getDerived().transformedLocalDecl(E->getLambdaClass(), Class);
 
   // Transform lambda parameters.
-  llvm::SmallVector<QualType, 4> ParamTypes;
-  llvm::SmallVector<ParmVarDecl *, 4> Params;
+  SmallVector<QualType, 4> ParamTypes;
+  SmallVector<ParmVarDecl *, 4> Params;
   if (getDerived().TransformFunctionTypeParams(E->getLocStart(),
         E->getCallOperator()->param_begin(),
         E->getCallOperator()->param_size(),
@@ -8448,7 +8448,7 @@ template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformObjCArrayLiteral(ObjCArrayLiteral *E) {
   // Transform each of the elements.
-  llvm::SmallVector<Expr *, 8> Elements;
+  SmallVector<Expr *, 8> Elements;
   bool ArgChanged = false;
   if (getDerived().TransformExprs(E->getElements(), E->getNumElements(),
                                   /*IsCall=*/false, Elements, &ArgChanged))
@@ -8467,7 +8467,7 @@ ExprResult
 TreeTransform<Derived>::TransformObjCDictionaryLiteral(
                                                     ObjCDictionaryLiteral *E) {
   // Transform each of the elements.
-  llvm::SmallVector<ObjCDictionaryElement, 8> Elements;
+  SmallVector<ObjCDictionaryElement, 8> Elements;
   bool ArgChanged = false;
   for (unsigned I = 0, N = E->getNumElements(); I != N; ++I) {
     ObjCDictionaryElement OrigElement = E->getKeyValueElement(I);

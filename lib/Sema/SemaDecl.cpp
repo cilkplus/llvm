@@ -1822,20 +1822,17 @@ DeclHasAttr(const Decl *D, const Attr *A) {
   return false;
 }
 
-bool Sema::mergeDeclAttribute(NamedDecl *D, InheritableAttr *Attr) {
+bool Sema::mergeDeclAttribute(NamedDecl *D, InheritableAttr *Attr,
+                              bool Override) {
   InheritableAttr *NewAttr = NULL;
-  if (AvailabilityAttr *AA = dyn_cast<AvailabilityAttr>(Attr)) {
+  if (AvailabilityAttr *AA = dyn_cast<AvailabilityAttr>(Attr))
     NewAttr = mergeAvailabilityAttr(D, AA->getRange(), AA->getPlatform(),
                                     AA->getIntroduced(), AA->getDeprecated(),
                                     AA->getObsoleted(), AA->getUnavailable(),
-                                    AA->getMessage());
-    if (NewAttr)
-      D->ClearLVCache();
-  } else if (VisibilityAttr *VA = dyn_cast<VisibilityAttr>(Attr)) {
+                                    AA->getMessage(), Override);
+  else if (VisibilityAttr *VA = dyn_cast<VisibilityAttr>(Attr))
     NewAttr = mergeVisibilityAttr(D, VA->getRange(), VA->getVisibility());
-    if (NewAttr)
-      D->ClearLVCache();
-  } else if (DLLImportAttr *ImportA = dyn_cast<DLLImportAttr>(Attr))
+  else if (DLLImportAttr *ImportA = dyn_cast<DLLImportAttr>(Attr))
     NewAttr = mergeDLLImportAttr(D, ImportA->getRange());
   else if (DLLExportAttr *ExportA = dyn_cast<DLLExportAttr>(Attr))
     NewAttr = mergeDLLExportAttr(D, ExportA->getRange());
@@ -1906,7 +1903,7 @@ static void checkNewAttributesAfterDef(Sema &S, Decl *New, const Decl *Old) {
 
 /// mergeDeclAttributes - Copy attributes from the Old decl to the New one.
 void Sema::mergeDeclAttributes(NamedDecl *New, Decl *Old,
-                               bool MergeDeprecation) {
+                               AvailabilityMergeKind AMK) {
   // attributes declared post-definition are currently ignored
   checkNewAttributesAfterDef(*this, New, Old);
 
@@ -1923,14 +1920,25 @@ void Sema::mergeDeclAttributes(NamedDecl *New, Decl *Old,
          i = Old->specific_attr_begin<InheritableAttr>(),
          e = Old->specific_attr_end<InheritableAttr>(); 
        i != e; ++i) {
+    bool Override = false;
     // Ignore deprecated/unavailable/availability attributes if requested.
-    if (!MergeDeprecation &&
-        (isa<DeprecatedAttr>(*i) || 
-         isa<UnavailableAttr>(*i) ||
-         isa<AvailabilityAttr>(*i)))
-      continue;
+    if (isa<DeprecatedAttr>(*i) ||
+        isa<UnavailableAttr>(*i) ||
+        isa<AvailabilityAttr>(*i)) {
+      switch (AMK) {
+      case AMK_None:
+        continue;
 
-    if (mergeDeclAttribute(New, *i))
+      case AMK_Redeclaration:
+        break;
+
+      case AMK_Override:
+        Override = true;
+        break;
+      }
+    }
+
+    if (mergeDeclAttribute(New, *i, Override))
       foundAny = true;
   }
 
@@ -2479,7 +2487,7 @@ void Sema::mergeObjCMethodDecls(ObjCMethodDecl *newMethod,
                                 ObjCMethodDecl *oldMethod) {
 
   // Merge the attributes, including deprecated/unavailable
-  mergeDeclAttributes(newMethod, oldMethod, /* mergeDeprecation */true);
+  mergeDeclAttributes(newMethod, oldMethod, AMK_Override);
 
   // Merge attributes from the parameters.
   ObjCMethodDecl::param_const_iterator oi = oldMethod->param_begin(),
@@ -2489,7 +2497,7 @@ void Sema::mergeObjCMethodDecls(ObjCMethodDecl *newMethod,
        ni != ne && oi != oe; ++ni, ++oi)
     mergeParamDeclAttributes(*ni, *oi, Context);
 
-  CheckObjCMethodOverride(newMethod, oldMethod, true);
+  CheckObjCMethodOverride(newMethod, oldMethod);
 }
 
 /// MergeVarDeclTypes - We parsed a variable 'New' which has the same name and
@@ -3466,7 +3474,7 @@ static QualType getCoreType(QualType Ty) {
 static bool hasSimilarParameters(ASTContext &Context,
                                      FunctionDecl *Declaration,
                                      FunctionDecl *Definition,
-                                     llvm::SmallVectorImpl<unsigned> &Params) {
+                                     SmallVectorImpl<unsigned> &Params) {
   Params.clear();
   if (Declaration->param_size() != Definition->param_size())
     return false;
@@ -4004,7 +4012,7 @@ TryToFixInvalidVariablyModifiedTypeSourceInfo(TypeSourceInfo *TInfo,
   return FixedTInfo;
 }
 
-/// \brief Register the given locally-scoped external C declaration so
+/// \brief Register the given locally-scoped extern "C" declaration so
 /// that it can be found later for redeclarations
 void
 Sema::RegisterLocallyScopedExternCDecl(NamedDecl *ND,
@@ -4013,15 +4021,15 @@ Sema::RegisterLocallyScopedExternCDecl(NamedDecl *ND,
   assert(ND->getLexicalDeclContext()->isFunctionOrMethod() &&
          "Decl is not a locally-scoped decl!");
   // Note that we have a locally-scoped external with this name.
-  LocallyScopedExternalDecls[ND->getDeclName()] = ND;
+  LocallyScopedExternCDecls[ND->getDeclName()] = ND;
 
   if (!Previous.isSingleResult())
     return;
 
   NamedDecl *PrevDecl = Previous.getFoundDecl();
 
-  // If there was a previous declaration of this variable, it may be
-  // in our identifier chain. Update the identifier chain with the new
+  // If there was a previous declaration of this entity, it may be in
+  // our identifier chain. Update the identifier chain with the new
   // declaration.
   if (S && IdResolver.ReplaceDecl(PrevDecl, ND)) {
     // The previous declaration was found on the identifer resolver
@@ -4045,20 +4053,20 @@ Sema::RegisterLocallyScopedExternCDecl(NamedDecl *ND,
 }
 
 llvm::DenseMap<DeclarationName, NamedDecl *>::iterator
-Sema::findLocallyScopedExternalDecl(DeclarationName Name) {
+Sema::findLocallyScopedExternCDecl(DeclarationName Name) {
   if (ExternalSource) {
     // Load locally-scoped external decls from the external source.
     SmallVector<NamedDecl *, 4> Decls;
-    ExternalSource->ReadLocallyScopedExternalDecls(Decls);
+    ExternalSource->ReadLocallyScopedExternCDecls(Decls);
     for (unsigned I = 0, N = Decls.size(); I != N; ++I) {
       llvm::DenseMap<DeclarationName, NamedDecl *>::iterator Pos
-        = LocallyScopedExternalDecls.find(Decls[I]->getDeclName());
-      if (Pos == LocallyScopedExternalDecls.end())
-        LocallyScopedExternalDecls[Decls[I]->getDeclName()] = Decls[I];
+        = LocallyScopedExternCDecls.find(Decls[I]->getDeclName());
+      if (Pos == LocallyScopedExternCDecls.end())
+        LocallyScopedExternCDecls[Decls[I]->getDeclName()] = Decls[I];
     }
   }
   
-  return LocallyScopedExternalDecls.find(Name);
+  return LocallyScopedExternCDecls.find(Name);
 }
 
 /// \brief Diagnose function specifiers on a declaration of an identifier that
@@ -4691,6 +4699,14 @@ void Sema::CheckShadow(Scope *S, VarDecl *D) {
   CheckShadow(S, D, R);
 }
 
+template<typename T>
+static bool mayConflictWithNonVisibleExternC(const T *ND) {
+  VarDecl::StorageClass SC = ND->getStorageClass();
+  if (ND->hasCLanguageLinkage() && (SC == SC_Extern || SC == SC_PrivateExtern))
+    return true;
+  return ND->getDeclContext()->isTranslationUnit();
+}
+
 /// \brief Perform semantic checking on a newly-created variable
 /// declaration.
 ///
@@ -4793,13 +4809,12 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
     NewVD->setTypeSourceInfo(FixedTInfo);
   }
 
-  if (Previous.empty() && NewVD->isExternC()) {
-    // Since we did not find anything by this name and we're declaring
-    // an extern "C" variable, look for a non-visible extern "C"
-    // declaration with the same name.
+  if (Previous.empty() && mayConflictWithNonVisibleExternC(NewVD)) {
+    // Since we did not find anything by this name, look for a non-visible
+    // extern "C" declaration with the same name.
     llvm::DenseMap<DeclarationName, NamedDecl *>::iterator Pos
-      = findLocallyScopedExternalDecl(NewVD->getDeclName());
-    if (Pos != LocallyScopedExternalDecls.end())
+      = findLocallyScopedExternCDecl(NewVD->getDeclName());
+    if (Pos != LocallyScopedExternCDecls.end())
       Previous.addDecl(Pos->second);
   }
 
@@ -4969,7 +4984,7 @@ class DifferentNameValidatorCCC : public CorrectionCandidateCallback {
     if (candidate.getEditDistance() == 0)
       return false;
 
-    llvm::SmallVector<unsigned, 1> MismatchedParams;
+    SmallVector<unsigned, 1> MismatchedParams;
     for (TypoCorrection::const_decl_iterator CDecl = candidate.begin(),
                                           CDeclEnd = candidate.end();
          CDecl != CDeclEnd; ++CDecl) {
@@ -5015,8 +5030,8 @@ static NamedDecl* DiagnoseInvalidRedeclaration(
   DeclContext *NewDC = NewFD->getDeclContext();
   LookupResult Prev(SemaRef, Name, NewFD->getLocation(),
                     Sema::LookupOrdinaryName, Sema::ForRedeclaration);
-  llvm::SmallVector<unsigned, 1> MismatchedParams;
-  llvm::SmallVector<std::pair<FunctionDecl*, unsigned>, 1> NearMatches;
+  SmallVector<unsigned, 1> MismatchedParams;
+  SmallVector<std::pair<FunctionDecl *, unsigned>, 1> NearMatches;
   TypoCorrection Correction;
   bool isFriendDecl = (SemaRef.getLangOpts().CPlusPlus &&
                        ExtraArgs.D.getDeclSpec().isFriendSpecified());
@@ -5120,7 +5135,7 @@ static NamedDecl* DiagnoseInvalidRedeclaration(
   if (CXXMethodDecl *NewMD = dyn_cast<CXXMethodDecl>(NewFD))
     NewFDisConst = NewMD->isConst();
 
-  for (llvm::SmallVector<std::pair<FunctionDecl*, unsigned>, 1>::iterator
+  for (SmallVector<std::pair<FunctionDecl *, unsigned>, 1>::iterator
        NearMatch = NearMatches.begin(), NearMatchEnd = NearMatches.end();
        NearMatch != NearMatchEnd; ++NearMatch) {
     FunctionDecl *FD = NearMatch->first;
@@ -5595,11 +5610,11 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     }
 
     if (isConstexpr) {
-      // C++0x [dcl.constexpr]p2: constexpr functions and constexpr constructors
+      // C++11 [dcl.constexpr]p2: constexpr functions and constexpr constructors
       // are implicitly inline.
       NewFD->setImplicitlyInline();
 
-      // C++0x [dcl.constexpr]p3: functions declared constexpr are required to
+      // C++11 [dcl.constexpr]p3: functions declared constexpr are required to
       // be either constructors or to return a literal type. Therefore,
       // destructors cannot be declared constexpr.
       if (isa<CXXDestructorDecl>(NewFD))
@@ -6146,13 +6161,12 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
          && "Variably modified return types are not handled here");
 
   // Check for a previous declaration of this name.
-  if (Previous.empty() && NewFD->isExternC()) {
-    // Since we did not find anything by this name and we're declaring
-    // an extern "C" function, look for a non-visible extern "C"
-    // declaration with the same name.
+  if (Previous.empty() && mayConflictWithNonVisibleExternC(NewFD)) {
+    // Since we did not find anything by this name, look for a non-visible
+    // extern "C" declaration with the same name.
     llvm::DenseMap<DeclarationName, NamedDecl *>::iterator Pos
-      = findLocallyScopedExternalDecl(NewFD->getDeclName());
-    if (Pos != LocallyScopedExternalDecls.end())
+      = findLocallyScopedExternCDecl(NewFD->getDeclName());
+    if (Pos != LocallyScopedExternCDecls.end())
       Previous.addDecl(Pos->second);
   }
 
@@ -6160,6 +6174,7 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
   filterNonConflictingPreviousDecls(Context, NewFD, Previous);
 
   bool Redeclaration = false;
+  NamedDecl *OldDecl = 0;
 
   // Merge or overload the declaration with an existing declaration of
   // the same name, if appropriate.
@@ -6168,8 +6183,6 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
     // a declaration that requires merging. If it's an overload,
     // there's no more work to do here; we'll just add the new
     // function to the scope.
-
-    NamedDecl *OldDecl = 0;
     if (!AllowOverloadingOfFunction(Previous, Context)) {
       Redeclaration = true;
       OldDecl = Previous.getFoundDecl();
@@ -6206,43 +6219,68 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
                                                         Context));
       }
     }
+  }
 
-    if (Redeclaration) {
-      // NewFD and OldDecl represent declarations that need to be
-      // merged.
-      if (MergeFunctionDecl(NewFD, OldDecl, S)) {
-        NewFD->setInvalidDecl();
-        return Redeclaration;
+  // C++11 [dcl.constexpr]p8:
+  //   A constexpr specifier for a non-static member function that is not
+  //   a constructor declares that member function to be const.
+  //
+  // This needs to be delayed until we know whether this is an out-of-line
+  // definition of a static member function.
+  CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(NewFD);
+  if (MD && MD->isConstexpr() && !MD->isStatic() &&
+      !isa<CXXConstructorDecl>(MD) &&
+      (MD->getTypeQualifiers() & Qualifiers::Const) == 0) {
+    CXXMethodDecl *OldMD = dyn_cast_or_null<CXXMethodDecl>(OldDecl);
+    if (FunctionTemplateDecl *OldTD =
+          dyn_cast_or_null<FunctionTemplateDecl>(OldDecl))
+      OldMD = dyn_cast<CXXMethodDecl>(OldTD->getTemplatedDecl());
+    if (!OldMD || !OldMD->isStatic()) {
+      const FunctionProtoType *FPT =
+        MD->getType()->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.TypeQuals |= Qualifiers::Const;
+      MD->setType(Context.getFunctionType(FPT->getResultType(),
+                                          FPT->arg_type_begin(),
+                                          FPT->getNumArgs(), EPI));
+    }
+  }
+
+  if (Redeclaration) {
+    // NewFD and OldDecl represent declarations that need to be
+    // merged.
+    if (MergeFunctionDecl(NewFD, OldDecl, S)) {
+      NewFD->setInvalidDecl();
+      return Redeclaration;
+    }
+
+    Previous.clear();
+    Previous.addDecl(OldDecl);
+
+    if (FunctionTemplateDecl *OldTemplateDecl
+                                  = dyn_cast<FunctionTemplateDecl>(OldDecl)) {
+      NewFD->setPreviousDeclaration(OldTemplateDecl->getTemplatedDecl());
+      FunctionTemplateDecl *NewTemplateDecl
+        = NewFD->getDescribedFunctionTemplate();
+      assert(NewTemplateDecl && "Template/non-template mismatch");
+      if (CXXMethodDecl *Method 
+            = dyn_cast<CXXMethodDecl>(NewTemplateDecl->getTemplatedDecl())) {
+        Method->setAccess(OldTemplateDecl->getAccess());
+        NewTemplateDecl->setAccess(OldTemplateDecl->getAccess());
       }
-
-      Previous.clear();
-      Previous.addDecl(OldDecl);
-
-      if (FunctionTemplateDecl *OldTemplateDecl
-                                    = dyn_cast<FunctionTemplateDecl>(OldDecl)) {
-        NewFD->setPreviousDeclaration(OldTemplateDecl->getTemplatedDecl());
-        FunctionTemplateDecl *NewTemplateDecl
-          = NewFD->getDescribedFunctionTemplate();
-        assert(NewTemplateDecl && "Template/non-template mismatch");
-        if (CXXMethodDecl *Method 
-              = dyn_cast<CXXMethodDecl>(NewTemplateDecl->getTemplatedDecl())) {
-          Method->setAccess(OldTemplateDecl->getAccess());
-          NewTemplateDecl->setAccess(OldTemplateDecl->getAccess());
-        }
-        
-        // If this is an explicit specialization of a member that is a function
-        // template, mark it as a member specialization.
-        if (IsExplicitSpecialization && 
-            NewTemplateDecl->getInstantiatedFromMemberTemplate()) {
-          NewTemplateDecl->setMemberSpecialization();
-          assert(OldTemplateDecl->isMemberSpecialization());
-        }
-        
-      } else {
-        if (isa<CXXMethodDecl>(NewFD)) // Set access for out-of-line definitions
-          NewFD->setAccess(OldDecl->getAccess());
-        NewFD->setPreviousDeclaration(cast<FunctionDecl>(OldDecl));
+      
+      // If this is an explicit specialization of a member that is a function
+      // template, mark it as a member specialization.
+      if (IsExplicitSpecialization && 
+          NewTemplateDecl->getInstantiatedFromMemberTemplate()) {
+        NewTemplateDecl->setMemberSpecialization();
+        assert(OldTemplateDecl->isMemberSpecialization());
       }
+      
+    } else {
+      if (isa<CXXMethodDecl>(NewFD)) // Set access for out-of-line definitions
+        NewFD->setAccess(OldDecl->getAccess());
+      NewFD->setPreviousDeclaration(cast<FunctionDecl>(OldDecl));
     }
   }
 
@@ -6689,7 +6727,7 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     }
     VDecl->setTypeSourceInfo(DeducedType);
     VDecl->setType(DeducedType->getType());
-    VDecl->ClearLVCache();
+    VDecl->ClearLinkageCache();
     
     // In ARC, infer lifetime.
     if (getLangOpts().ObjCAutoRefCount && inferObjCARCLifetime(VDecl))
@@ -6847,9 +6885,6 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
   if (!VDecl->isInvalidDecl() && (DclT != SavT))
     VDecl->setType(DclT);
 
-  // Check any implicit conversions within the expression.
-  CheckImplicitConversions(Init, VDecl->getLocation());
-
   if (!VDecl->isInvalidDecl()) {
     checkUnsafeAssigns(VDecl->getLocation(), VDecl->getType(), Init);
 
@@ -6872,7 +6907,24 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     }
   }
 
-  Init = MaybeCreateExprWithCleanups(Init);
+  // The initialization is usually a full-expression.
+  //
+  // FIXME: If this is a braced initialization of an aggregate, it is not
+  // an expression, and each individual field initializer is a separate
+  // full-expression. For instance, in:
+  //
+  //   struct Temp { ~Temp(); };
+  //   struct S { S(Temp); };
+  //   struct T { S a, b; } t = { Temp(), Temp() }
+  //
+  // we should destroy the first Temp before constructing the second.
+  ExprResult Result = ActOnFinishFullExpr(Init, VDecl->getLocation());
+  if (Result.isInvalid()) {
+    VDecl->setInvalidDecl();
+    return;
+  }
+  Init = Result.take();
+
   // Attach the initializer to the decl.
   VDecl->setInit(Init);
 
@@ -7369,7 +7421,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
         << Init->getSourceRange();
 
     if (var->isConstexpr()) {
-      llvm::SmallVector<PartialDiagnosticAt, 8> Notes;
+      SmallVector<PartialDiagnosticAt, 8> Notes;
       if (!var->evaluateValue(Notes) || !var->isInitICE()) {
         SourceLocation DiagLoc = var->getLocation();
         // If the note doesn't add any useful information other than a source
@@ -8291,8 +8343,8 @@ NamedDecl *Sema::ImplicitlyDefineFunction(SourceLocation Loc,
   // this name as a function or variable. If so, use that
   // (non-visible) declaration, and complain about it.
   llvm::DenseMap<DeclarationName, NamedDecl *>::iterator Pos
-    = findLocallyScopedExternalDecl(&II);
-  if (Pos != LocallyScopedExternalDecls.end()) {
+    = findLocallyScopedExternCDecl(&II);
+  if (Pos != LocallyScopedExternCDecls.end()) {
     Diag(Loc, diag::warn_use_out_of_scope_declaration) << Pos->second;
     Diag(Pos->second->getLocation(), diag::note_previous_declaration);
     return Pos->second;
@@ -10805,8 +10857,8 @@ static void CheckForDuplicateEnumValues(Sema &S, Decl **Elements,
   if (Enum->getNumPositiveBits() > 63 || Enum->getNumNegativeBits() > 64)
     return;
 
-  typedef llvm::SmallVector<EnumConstantDecl*, 3> ECDVector;
-  typedef llvm::SmallVector<ECDVector*, 3> DuplicatesVector;
+  typedef SmallVector<EnumConstantDecl *, 3> ECDVector;
+  typedef SmallVector<ECDVector *, 3> DuplicatesVector;
 
   typedef llvm::PointerUnion<EnumConstantDecl*, ECDVector*> DeclOrVector;
   typedef llvm::DenseMap<DupKey, DeclOrVector, DenseMapInfoDupKey>
@@ -11147,7 +11199,7 @@ DeclResult Sema::ActOnModuleImport(SourceLocation AtLoc,
   if (!Mod)
     return true;
   
-  llvm::SmallVector<SourceLocation, 2> IdentifierLocs;
+  SmallVector<SourceLocation, 2> IdentifierLocs;
   Module *ModCheck = Mod;
   for (unsigned I = 0, N = Path.size(); I != N; ++I) {
     // If we've run out of module parents, just drop the remaining identifiers.
@@ -11165,6 +11217,18 @@ DeclResult Sema::ActOnModuleImport(SourceLocation AtLoc,
                                           Mod, IdentifierLocs);
   Context.getTranslationUnitDecl()->addDecl(Import);
   return Import;
+}
+
+void Sema::createImplicitModuleImport(SourceLocation Loc, Module *Mod) {
+  // Create the implicit import declaration.
+  TranslationUnitDecl *TU = getASTContext().getTranslationUnitDecl();
+  ImportDecl *ImportD = ImportDecl::CreateImplicit(getASTContext(), TU,
+                                                   Loc, Mod, Loc);
+  TU->addDecl(ImportD);
+  Consumer.HandleImplicitImportDecl(ImportD);
+
+  // Make the module visible.
+  PP.getModuleLoader().makeModuleVisible(Mod, Module::AllVisible);
 }
 
 void Sema::ActOnPragmaRedefineExtname(IdentifierInfo* Name,

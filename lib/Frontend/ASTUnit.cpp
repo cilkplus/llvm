@@ -155,7 +155,7 @@ static void removeOnDiskEntry(const ASTUnit *AU) {
   }
 }
 
-static void setPreambleFile(const ASTUnit *AU, llvm::StringRef preambleFile) {
+static void setPreambleFile(const ASTUnit *AU, StringRef preambleFile) {
   getOnDiskData(AU).PreambleFile = preambleFile;
 }
 
@@ -1689,7 +1689,21 @@ void ASTUnit::transferASTDataFromCompilerInstance(CompilerInstance &CI) {
 }
 
 StringRef ASTUnit::getMainFileName() const {
-  return Invocation->getFrontendOpts().Inputs[0].getFile();
+  if (Invocation && !Invocation->getFrontendOpts().Inputs.empty()) {
+    const FrontendInputFile &Input = Invocation->getFrontendOpts().Inputs[0];
+    if (Input.isFile())
+      return Input.getFile();
+    else
+      return Input.getBuffer()->getBufferIdentifier();
+  }
+
+  if (SourceMgr) {
+    if (const FileEntry *
+          FE = SourceMgr->getFileEntryForID(SourceMgr->getMainFileID()))
+      return FE->getName();
+  }
+
+  return StringRef();
 }
 
 ASTUnit *ASTUnit::create(CompilerInvocation *CI,

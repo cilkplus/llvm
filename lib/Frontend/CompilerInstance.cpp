@@ -982,7 +982,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
       compileModule(*this, ModuleNameLoc, Module, ModuleFileName);
       ModuleFile = FileMgr->getFile(ModuleFileName);
 
-      if (!ModuleFile)
+      if (!ModuleFile && getPreprocessorOpts().FailedModules)
         getPreprocessorOpts().FailedModules->addFailed(ModuleName);
     }
 
@@ -1057,7 +1057,8 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
           ModuleManager->ReadAST(ModuleFileName,
                                  serialization::MK_Module, ImportLoc,
                                  ASTReader::ARR_None) != ASTReader::Success) {
-        getPreprocessorOpts().FailedModules->addFailed(ModuleName);
+        if (getPreprocessorOpts().FailedModules)
+          getPreprocessorOpts().FailedModules->addFailed(ModuleName);
         KnownModules[Path[0].first] = 0;
         return ModuleLoadResult();
       }
@@ -1107,7 +1108,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
       
       if (!Sub) {
         // Attempt to perform typo correction to find a module name that works.
-        llvm::SmallVector<StringRef, 2> Best;
+        SmallVector<StringRef, 2> Best;
         unsigned BestEditDistance = (std::numeric_limits<unsigned>::max)();
         
         for (clang::Module::submodule_iterator J = Module->submodule_begin(), 
@@ -1200,3 +1201,9 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
   LastModuleImportResult = ModuleLoadResult(Module, false);
   return LastModuleImportResult;
 }
+
+void CompilerInstance::makeModuleVisible(Module *Mod,
+                                         Module::NameVisibilityKind Visibility){
+  ModuleManager->makeModuleVisible(Mod, Visibility);
+}
+

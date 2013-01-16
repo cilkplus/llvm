@@ -24,9 +24,12 @@
 #include "clang/Format/Format.h"
 #include "clang/Lex/Lexer.h"
 
-#include <vector>
+#include <list>
 
 namespace clang {
+
+class DiagnosticsEngine;
+
 namespace format {
 
 /// \brief A wrapper around a \c Token storing information about the
@@ -73,11 +76,6 @@ struct FormatToken {
   /// This happens for example when a preprocessor directive ended directly
   /// before the token.
   bool MustBreakBefore;
-
-  // FIXME: We currently assume that there is exactly one token in this vector
-  // except for the very last token that does not have any children.
-  /// \brief All tokens that logically follow this token.
-  std::vector<FormatToken> Children;
 };
 
 /// \brief An unwrapped line is a sequence of \c Token, that we would like to
@@ -90,8 +88,9 @@ struct UnwrappedLine {
   UnwrappedLine() : Level(0), InPPDirective(false) {
   }
 
-  /// \brief The \c Token comprising this \c UnwrappedLine.
-  FormatToken RootToken;
+  // FIXME: Don't use std::list here.
+  /// \brief The \c Tokens comprising this \c UnwrappedLine.
+  std::list<FormatToken> Tokens;
 
   /// \brief The indent level of the \c UnwrappedLine.
   unsigned Level;
@@ -116,7 +115,8 @@ public:
 
 class UnwrappedLineParser {
 public:
-  UnwrappedLineParser(const FormatStyle &Style, FormatTokenSource &Tokens,
+  UnwrappedLineParser(clang::DiagnosticsEngine &Diag, const FormatStyle &Style,
+                      FormatTokenSource &Tokens,
                       UnwrappedLineConsumer &Callback);
 
   /// Returns true in case of a structural error.
@@ -131,6 +131,7 @@ private:
   void parsePPUnknown();
   void parseComments();
   void parseStructuralElement();
+  void parseBracedList();
   void parseParens();
   void parseIfThenElse();
   void parseForOrWhileLoop();
@@ -141,7 +142,11 @@ private:
   void parseNamespace();
   void parseAccessSpecifier();
   void parseEnum();
-  void parseStructOrClass();
+  void parseRecord();
+  void parseObjCProtocolList();
+  void parseObjCUntilAtEnd();
+  void parseObjCInterfaceOrImplementation();
+  void parseObjCProtocol();
   void addUnwrappedLine();
   bool eof() const;
   void nextToken();
@@ -150,15 +155,16 @@ private:
   // FIXME: We are constantly running into bugs where Line.Level is incorrectly
   // subtracted from beyond 0. Introduce a method to subtract from Line.Level
   // and use that everywhere in the Parser.
-  llvm::OwningPtr<UnwrappedLine> Line;
-  bool RootTokenInitialized;
-  FormatToken *LastInCurrentLine;
+  OwningPtr<UnwrappedLine> Line;
   FormatToken FormatTok;
   bool MustBreakBeforeNextToken;
 
+  clang::DiagnosticsEngine &Diag;
   const FormatStyle &Style;
   FormatTokenSource *Tokens;
   UnwrappedLineConsumer &Callback;
+
+  friend class ScopedLineState;
 };
 
 } // end namespace format

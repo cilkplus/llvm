@@ -413,7 +413,16 @@ comments::FullComment *ASTContext::getCommentForDecl(
   if (!RC) {
     if (isa<ObjCMethodDecl>(D) || isa<FunctionDecl>(D)) {
       SmallVector<const NamedDecl*, 8> Overridden;
-      if (const ObjCMethodDecl *OMD = dyn_cast<ObjCMethodDecl>(D))
+      const ObjCMethodDecl *OMD = dyn_cast<ObjCMethodDecl>(D);
+      if (OMD && OMD->isPropertyAccessor()) {
+        if (const ObjCPropertyDecl *PDecl = OMD->findPropertyDecl()) {
+          if (comments::FullComment *FC = getCommentForDecl(PDecl, PP)) {
+            comments::FullComment *CFC = cloneFullComment(FC, D);
+            return CFC;
+          }
+        }
+      }
+      if (OMD)
         addRedeclaredMethods(OMD, Overridden);
       getOverriddenMethods(dyn_cast<NamedDecl>(D), Overridden);
       for (unsigned i = 0, e = Overridden.size(); i < e; i++) {
@@ -949,7 +958,6 @@ ASTContext::setInstantiatedFromStaticDataMember(VarDecl *Inst, VarDecl *Tmpl,
          "Already noted what static data member was instantiated from");
   InstantiatedFromStaticDataMember[Inst] 
     = new (*this) MemberSpecializationInfo(Tmpl, TSK, PointOfInstantiation);
-  Inst->ClearLVCache();
 }
 
 FunctionDecl *ASTContext::getClassScopeSpecializationPattern(
@@ -4870,6 +4878,7 @@ static char getObjCEncodingForPrimitiveKind(const ASTContext *C,
 #include "clang/AST/BuiltinTypes.def"
       llvm_unreachable("invalid builtin type for @encode");
     }
+    llvm_unreachable("invalid BuiltinType::Kind value");
 }
 
 static char ObjCEncodingForEnumType(const ASTContext *C, const EnumType *ET) {

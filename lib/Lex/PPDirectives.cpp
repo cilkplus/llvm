@@ -1426,7 +1426,7 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
     // Compute the module access path corresponding to this module.
     // FIXME: Should we have a second loadModule() overload to avoid this
     // extra lookup step?
-    llvm::SmallVector<std::pair<IdentifierInfo *, SourceLocation>, 2> Path;
+    SmallVector<std::pair<IdentifierInfo *, SourceLocation>, 2> Path;
     for (Module *Mod = SuggestedModule; Mod; Mod = Mod->Parent)
       Path.push_back(std::make_pair(getIdentifierInfo(Mod->Name),
                                     FilenameTok.getLocation()));
@@ -1967,15 +1967,16 @@ void Preprocessor::HandleUndefDirective(Token &UndefTok) {
   // Okay, we finally have a valid identifier to undef.
   MacroInfo *MI = getMacroInfo(MacroNameTok.getIdentifierInfo());
 
+  // If the callbacks want to know, tell them about the macro #undef.
+  // Note: no matter if the macro was defined or not.
+  if (Callbacks)
+    Callbacks->MacroUndefined(MacroNameTok, MI);
+
   // If the macro is not defined, this is a noop undef, just return.
   if (MI == 0) return;
 
   if (!MI->isUsed() && MI->isWarnIfUnused())
     Diag(MI->getDefinitionLoc(), diag::pp_macro_not_used);
-
-  // If the callbacks want to know, tell them about the macro #undef.
-  if (Callbacks)
-    Callbacks->MacroUndefined(MacroNameTok, MI);
 
   if (MI->isWarnIfUnused())
     WarnUnusedMacroLocs.erase(MI->getDefinitionLoc());

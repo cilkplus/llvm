@@ -23,7 +23,9 @@
 #include "clang/AST/Mangle.h"
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/LangOptions.h"
+#include "clang/Basic/Module.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/Module.h"
@@ -66,6 +68,7 @@ namespace clang {
   class AnnotateAttr;
   class CXXDestructorDecl;
   class MangleBuffer;
+  class Module;
 
 namespace CodeGen {
 
@@ -319,6 +322,9 @@ class CodeGenModule : public CodeGenTypeCache {
   /// CXXGlobalDtors - Global destructor functions and arguments that need to
   /// run on termination.
   std::vector<std::pair<llvm::WeakVH,llvm::Constant*> > CXXGlobalDtors;
+
+  /// \brief The complete set of modules that has been imported.
+  llvm::SetVector<clang::Module *> ImportedModules;
 
   /// @name Cache for Objective-C runtime types
   /// @{
@@ -883,7 +889,7 @@ public:
   void EmitGlobalAnnotations();
 
   /// Emit an annotation string.
-  llvm::Constant *EmitAnnotationString(llvm::StringRef Str);
+  llvm::Constant *EmitAnnotationString(StringRef Str);
 
   /// Emit the annotation's translation unit.
   llvm::Constant *EmitAnnotationUnit(SourceLocation Loc);
@@ -1011,6 +1017,9 @@ private:
   /// EmitLLVMUsed - Emit the llvm.used metadata used to force
   /// references to global which may otherwise be optimized out.
   void EmitLLVMUsed();
+
+  /// \brief Emit the link options introduced by imported modules.
+  void EmitModuleLinkOptions();
 
   void EmitDeclMetadata();
 

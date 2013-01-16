@@ -104,12 +104,16 @@ class ModuleMap {
 
     /// \brief The names of modules that cannot be inferred within this
     /// directory.
-    llvm::SmallVector<std::string, 2> ExcludedModules;
+    SmallVector<std::string, 2> ExcludedModules;
   };
 
   /// \brief A mapping from directories to information about inferring
   /// framework modules from within those directories.
   llvm::DenseMap<const DirectoryEntry *, InferredDirectory> InferredDirectories;
+
+  /// \brief Describes whether we haved parsed a particular file as a module
+  /// map.
+  llvm::DenseMap<const FileEntry *, bool> ParsedModuleMap;
 
   friend class ModuleMapParser;
   

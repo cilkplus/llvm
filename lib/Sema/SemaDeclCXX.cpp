@@ -883,7 +883,7 @@ bool Sema::CheckConstexprFunctionBody(const FunctionDecl *Dcl, Stmt *Body) {
   // - its function-body shall be [...] a compound-statement that contains only
   CompoundStmt *CompBody = cast<CompoundStmt>(Body);
 
-  llvm::SmallVector<SourceLocation, 4> ReturnStmts;
+  SmallVector<SourceLocation, 4> ReturnStmts;
   for (CompoundStmt::body_iterator BodyIt = CompBody->body_begin(),
          BodyEnd = CompBody->body_end(); BodyIt != BodyEnd; ++BodyIt) {
     switch ((*BodyIt)->getStmtClass()) {
@@ -993,7 +993,7 @@ bool Sema::CheckConstexprFunctionBody(const FunctionDecl *Dcl, Stmt *Body) {
   // C++11 [dcl.constexpr]p4:
   //   - every constructor involved in initializing non-static data members and
   //     base class sub-objects shall be a constexpr constructor.
-  llvm::SmallVector<PartialDiagnosticAt, 8> Diags;
+  SmallVector<PartialDiagnosticAt, 8> Diags;
   if (!Expr::isPotentialConstantExpr(Dcl, Diags)) {
     Diag(Dcl->getLocation(), diag::ext_constexpr_function_never_constant_expr)
       << isa<CXXConstructorDecl>(Dcl);
@@ -1949,14 +1949,12 @@ Sema::ActOnCXXInClassMemberInitializer(Decl *D, SourceLocation InitLoc,
       FD->setInvalidDecl();
       return;
     }
-
-    CheckImplicitConversions(Init.get(), InitLoc);
   }
 
-  // C++0x [class.base.init]p7:
+  // C++11 [class.base.init]p7:
   //   The initialization of each base and member constitutes a
   //   full-expression.
-  Init = MaybeCreateExprWithCleanups(Init);
+  Init = ActOnFinishFullExpr(Init.take(), InitLoc);
   if (Init.isInvalid()) {
     FD->setInvalidDecl();
     return;
@@ -2371,13 +2369,10 @@ Sema::BuildMemberInitializer(ValueDecl *Member, Expr *Init,
     if (MemberInit.isInvalid())
       return true;
 
-    CheckImplicitConversions(MemberInit.get(),
-                             InitRange.getBegin());
-
-    // C++0x [class.base.init]p7:
+    // C++11 [class.base.init]p7:
     //   The initialization of each base and member constitutes a
     //   full-expression.
-    MemberInit = MaybeCreateExprWithCleanups(MemberInit);
+    MemberInit = ActOnFinishFullExpr(MemberInit.get(), InitRange.getBegin());
     if (MemberInit.isInvalid())
       return true;
 
@@ -2432,12 +2427,11 @@ Sema::BuildDelegatingInitializer(TypeSourceInfo *TInfo, Expr *Init,
   assert(cast<CXXConstructExpr>(DelegationInit.get())->getConstructor() &&
          "Delegating constructor with no target?");
 
-  CheckImplicitConversions(DelegationInit.get(), InitRange.getBegin());
-
-  // C++0x [class.base.init]p7:
+  // C++11 [class.base.init]p7:
   //   The initialization of each base and member constitutes a
   //   full-expression.
-  DelegationInit = MaybeCreateExprWithCleanups(DelegationInit);
+  DelegationInit = ActOnFinishFullExpr(DelegationInit.get(),
+                                       InitRange.getBegin());
   if (DelegationInit.isInvalid())
     return true;
 
@@ -2566,12 +2560,10 @@ Sema::BuildBaseInitializer(QualType BaseType, TypeSourceInfo *BaseTInfo,
   if (BaseInit.isInvalid())
     return true;
 
-  CheckImplicitConversions(BaseInit.get(), InitRange.getBegin());
-
-  // C++0x [class.base.init]p7:
-  //   The initialization of each base and member constitutes a 
+  // C++11 [class.base.init]p7:
+  //   The initialization of each base and member constitutes a
   //   full-expression.
-  BaseInit = MaybeCreateExprWithCleanups(BaseInit);
+  BaseInit = ActOnFinishFullExpr(BaseInit.get(), InitRange.getBegin());
   if (BaseInit.isInvalid())
     return true;
 
@@ -8097,7 +8089,7 @@ buildSingleCopyAssignRecursively(Sema &S, SourceLocation Loc, QualType T,
 
     // Convert to an expression-statement, and clean up any produced
     // temporaries.
-    return S.ActOnExprStmt(S.MakeFullExpr(Call.take(), Loc));
+    return S.ActOnExprStmt(Call);
   }
 
   //     - if the subobject is of scalar type, the built-in assignment
@@ -8107,7 +8099,7 @@ buildSingleCopyAssignRecursively(Sema &S, SourceLocation Loc, QualType T,
     ExprResult Assignment = S.CreateBuiltinBinOp(Loc, BO_Assign, To, From);
     if (Assignment.isInvalid())
       return StmtError();
-    return S.ActOnExprStmt(S.MakeFullExpr(Assignment.take(), Loc));
+    return S.ActOnExprStmt(Assignment);
   }
 
   //     - if the subobject is an array, each element is assigned, in the
@@ -8184,7 +8176,7 @@ buildSingleCopyAssignRecursively(Sema &S, SourceLocation Loc, QualType T,
   // Construct the loop that copies all elements of this array.
   return S.ActOnForStmt(Loc, Loc, InitStmt, 
                         S.MakeFullExpr(Comparison),
-                        0, S.MakeFullExpr(Increment),
+                        0, S.MakeFullDiscardedValueExpr(Increment),
                         Loc, Copy.take());
 }
 
@@ -9614,7 +9606,9 @@ Sema::CompleteConstructorCall(CXXConstructorDecl *Constructor,
 
   DiagnoseSentinelCalls(Constructor, Loc, AllArgs.data(), AllArgs.size());
 
-  CheckConstructorCall(Constructor, AllArgs.data(), AllArgs.size(),
+  CheckConstructorCall(Constructor,
+                       llvm::makeArrayRef<const Expr *>(AllArgs.data(),
+                                                        AllArgs.size()),
                        Proto, Loc);
 
   return Invalid;
@@ -10257,7 +10251,7 @@ Decl *Sema::BuildStaticAssertDeclaration(SourceLocation StaticAssertLoc,
       Failed = true;
 
     if (!Failed && !Cond) {
-      llvm::SmallString<256> MsgBuffer;
+      SmallString<256> MsgBuffer;
       llvm::raw_svector_ostream Msg(MsgBuffer);
       AssertMessage->printPretty(Msg, 0, getPrintingPolicy());
       Diag(StaticAssertLoc, diag::err_static_assert_failed)
@@ -11651,7 +11645,7 @@ Sema::checkExceptionSpecification(ExceptionSpecificationType EST,
                                   ArrayRef<ParsedType> DynamicExceptions,
                                   ArrayRef<SourceRange> DynamicExceptionRanges,
                                   Expr *NoexceptExpr,
-                                  llvm::SmallVectorImpl<QualType> &Exceptions,
+                                  SmallVectorImpl<QualType> &Exceptions,
                                   FunctionProtoType::ExtProtoInfo &EPI) {
   Exceptions.clear();
   EPI.ExceptionSpecType = EST;

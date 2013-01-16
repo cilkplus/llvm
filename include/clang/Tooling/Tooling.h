@@ -155,7 +155,7 @@ class ToolInvocation {
                      const clang::driver::ArgStringList &CC1Args);
 
   std::vector<std::string> CommandLine;
-  llvm::OwningPtr<FrontendAction> ToolAction;
+  OwningPtr<FrontendAction> ToolAction;
   FileManager *Files;
   // Maps <file name> -> <file content>.
   llvm::StringMap<StringRef> MappedFileContents;
@@ -179,6 +179,8 @@ class ClangTool {
   ClangTool(const CompilationDatabase &Compilations,
             ArrayRef<std::string> SourcePaths);
 
+  virtual ~ClangTool() {}
+
   /// \brief Map a virtual file to be used while running the tool.
   ///
   /// \param FilePath The path at which the content will be mapped.
@@ -195,7 +197,7 @@ class ClangTool {
   /// \param ActionFactory Factory generating the frontend actions. The function
   /// takes ownership of this parameter. A new action is generated for every
   /// processed translation unit.
-  int run(FrontendActionFactory *ActionFactory);
+  virtual int run(FrontendActionFactory *ActionFactory);
 
   /// \brief Returns the file manager used in the tool.
   ///
@@ -210,7 +212,7 @@ class ClangTool {
   // Contains a list of pairs (<file name>, <file content>).
   std::vector< std::pair<StringRef, StringRef> > MappedFileContents;
 
-  llvm::OwningPtr<ArgumentsAdjuster> ArgsAdjuster;
+  OwningPtr<ArgumentsAdjuster> ArgsAdjuster;
 };
 
 template <typename T>
@@ -244,7 +246,7 @@ inline FrontendActionFactory *newFrontendActionFactory(
         : ConsumerFactory(ConsumerFactory), EndCallback(EndCallback) {}
 
       clang::ASTConsumer *CreateASTConsumer(clang::CompilerInstance &,
-                                            llvm::StringRef) {
+                                            StringRef) {
         return ConsumerFactory->newASTConsumer();
       }
 

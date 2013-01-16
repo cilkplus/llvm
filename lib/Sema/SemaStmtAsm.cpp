@@ -388,7 +388,7 @@ static StringRef getSpelling(Sema &SemaRef, Token AsmTok) {
 static bool buildMSAsmString(Sema &SemaRef,
                              SourceLocation AsmLoc,
                              ArrayRef<Token> AsmToks,
-                             llvm::SmallVectorImpl<unsigned> &TokOffsets,
+                             SmallVectorImpl<unsigned> &TokOffsets,
                              std::string &AsmString) {
   assert (!AsmToks.empty() && "Didn't expect an empty AsmToks!");
 
@@ -437,9 +437,11 @@ public:
     : SemaRef(Ref), AsmLoc(Loc), AsmToks(Toks), TokOffsets(Offsets) { }
   ~MCAsmParserSemaCallbackImpl() {}
 
-  void *LookupInlineAsmIdentifier(StringRef Name, void *SrcLoc, unsigned &Size){
+  void *LookupInlineAsmIdentifier(StringRef Name, void *SrcLoc, unsigned &Size,
+                                  bool &IsVarDecl){
     SourceLocation Loc = SourceLocation::getFromPtrEncoding(SrcLoc);
-    NamedDecl *OpDecl = SemaRef.LookupInlineAsmIdentifier(Name, Loc, Size);
+    NamedDecl *OpDecl = SemaRef.LookupInlineAsmIdentifier(Name, Loc, Size,
+                                                          IsVarDecl);
     return static_cast<void *>(OpDecl);
   }
 
@@ -482,8 +484,9 @@ public:
 }
 
 NamedDecl *Sema::LookupInlineAsmIdentifier(StringRef Name, SourceLocation Loc,
-                                           unsigned &Size) {
+                                           unsigned &Size, bool &IsVarDecl) {
   Size = 0;
+  IsVarDecl = false;
   LookupResult Result(*this, &Context.Idents.get(Name), Loc,
                       Sema::LookupOrdinaryName);
 
@@ -500,9 +503,10 @@ NamedDecl *Sema::LookupInlineAsmIdentifier(StringRef Name, SourceLocation Loc,
 
   NamedDecl *ND = Result.getFoundDecl();
   if (isa<VarDecl>(ND) || isa<FunctionDecl>(ND)) {
-    if (VarDecl *Var = dyn_cast<VarDecl>(ND))
+    if (VarDecl *Var = dyn_cast<VarDecl>(ND)) {
       Size = Context.getTypeInfo(Var->getType()).first;
-
+      IsVarDecl = true;
+    }
     return ND;
   }
 
@@ -574,7 +578,7 @@ StmtResult Sema::ActOnMSAsmStmt(SourceLocation AsmLoc, SourceLocation LBraceLoc,
   }
 
   std::string AsmString;
-  llvm::SmallVector<unsigned, 8> TokOffsets;
+  SmallVector<unsigned, 8> TokOffsets;
   if (buildMSAsmString(*this, AsmLoc, AsmToks, TokOffsets, AsmString))
     return StmtError();
 
@@ -652,7 +656,7 @@ StmtResult Sema::ActOnMSAsmStmt(SourceLocation AsmLoc, SourceLocation LBraceLoc,
     if (OpExpr.isInvalid())
       return StmtError();
 
-    // Need offset of variable.
+    // Need address of variable.
     if (OpDecls[i].second)
       OpExpr = BuildUnaryOp(getCurScope(), AsmLoc, clang::UO_AddrOf,
                             OpExpr.take());

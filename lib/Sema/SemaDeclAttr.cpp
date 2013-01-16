@@ -912,47 +912,16 @@ static void handleLocksExcludedAttr(Sema &S, Decl *D,
 
 static void handleExtVectorTypeAttr(Sema &S, Scope *scope, Decl *D,
                                     const AttributeList &Attr) {
-  TypedefNameDecl *tDecl = dyn_cast<TypedefNameDecl>(D);
-  if (tDecl == 0) {
+  TypedefNameDecl *TD = dyn_cast<TypedefNameDecl>(D);
+  if (TD == 0) {
+    // __attribute__((ext_vector_type(N))) can only be applied to typedefs
+    // and type-ids.
     S.Diag(Attr.getLoc(), diag::err_typecheck_ext_vector_not_typedef);
     return;
   }
 
-  QualType curType = tDecl->getUnderlyingType();
-
-  Expr *sizeExpr;
-
-  // Special case where the argument is a template id.
-  if (Attr.getParameterName()) {
-    CXXScopeSpec SS;
-    SourceLocation TemplateKWLoc;
-    UnqualifiedId id;
-    id.setIdentifier(Attr.getParameterName(), Attr.getLoc());
-
-    ExprResult Size = S.ActOnIdExpression(scope, SS, TemplateKWLoc, id,
-                                          false, false);
-    if (Size.isInvalid())
-      return;
-
-    sizeExpr = Size.get();
-  } else {
-    // check the attribute arguments.
-    if (!checkAttributeNumArgs(S, Attr, 1))
-      return;
-
-    sizeExpr = Attr.getArg(0);
-  }
-
-  // Instantiate/Install the vector type, and let Sema build the type for us.
-  // This will run the reguired checks.
-  QualType T = S.BuildExtVectorType(curType, sizeExpr, Attr.getLoc());
-  if (!T.isNull()) {
-    // FIXME: preserve the old source info.
-    tDecl->setTypeSourceInfo(S.Context.getTrivialTypeSourceInfo(T));
-
-    // Remember this typedef decl, we will need it later for diagnostics.
-    S.ExtVectorDecls.push_back(tDecl);
-  }
+  // Remember this typedef decl, we will need it later for diagnostics.
+  S.ExtVectorDecls.push_back(TD);
 }
 
 static void handlePackedAttr(Sema &S, Decl *D, const AttributeList &Attr) {
@@ -2032,18 +2001,36 @@ static bool checkAvailabilityAttr(Sema &S, SourceRange Range,
   return false;
 }
 
+/// \brief Check whether the two versions match.
+///
+/// If either version tuple is empty, then they are assumed to match. If
+/// \p BeforeIsOkay is true, then \p X can be less than or equal to \p Y.
+static bool versionsMatch(const VersionTuple &X, const VersionTuple &Y,
+                          bool BeforeIsOkay) {
+  if (X.empty() || Y.empty())
+    return true;
+
+  if (X == Y)
+    return true;
+
+  if (BeforeIsOkay && X < Y)
+    return true;
+
+  return false;
+}
+
 AvailabilityAttr *Sema::mergeAvailabilityAttr(NamedDecl *D, SourceRange Range,
                                               IdentifierInfo *Platform,
                                               VersionTuple Introduced,
                                               VersionTuple Deprecated,
                                               VersionTuple Obsoleted,
                                               bool IsUnavailable,
-                                              StringRef Message) {
+                                              StringRef Message,
+                                              bool Override) {
   VersionTuple MergedIntroduced = Introduced;
   VersionTuple MergedDeprecated = Deprecated;
   VersionTuple MergedObsoleted = Obsoleted;
   bool FoundAny = false;
-  bool DroppedAny = false;
 
   if (D->hasAttrs()) {
     AttrVec &Attrs = D->getAttrs();
@@ -2065,20 +2052,48 @@ AvailabilityAttr *Sema::mergeAvailabilityAttr(NamedDecl *D, SourceRange Range,
       VersionTuple OldDeprecated = OldAA->getDeprecated();
       VersionTuple OldObsoleted = OldAA->getObsoleted();
       bool OldIsUnavailable = OldAA->getUnavailable();
-      StringRef OldMessage = OldAA->getMessage();
 
-      if ((!OldIntroduced.empty() && !Introduced.empty() &&
-           OldIntroduced != Introduced) ||
-          (!OldDeprecated.empty() && !Deprecated.empty() &&
-           OldDeprecated != Deprecated) ||
-          (!OldObsoleted.empty() && !Obsoleted.empty() &&
-           OldObsoleted != Obsoleted) ||
-          (OldIsUnavailable != IsUnavailable) ||
-          (OldMessage != Message)) {
-        Diag(OldAA->getLocation(), diag::warn_mismatched_availability);
-        Diag(Range.getBegin(), diag::note_previous_attribute);
+      if (!versionsMatch(OldIntroduced, Introduced, Override) ||
+          !versionsMatch(Deprecated, OldDeprecated, Override) ||
+          !versionsMatch(Obsoleted, OldObsoleted, Override) ||
+          !(OldIsUnavailable == IsUnavailable ||
+            (Override && !OldIsUnavailable && IsUnavailable))) {
+        if (Override) {
+          int Which = -1;
+          VersionTuple FirstVersion;
+          VersionTuple SecondVersion;
+          if (!versionsMatch(OldIntroduced, Introduced, Override)) {
+            Which = 0;
+            FirstVersion = OldIntroduced;
+            SecondVersion = Introduced;
+          } else if (!versionsMatch(Deprecated, OldDeprecated, Override)) {
+            Which = 1;
+            FirstVersion = Deprecated;
+            SecondVersion = OldDeprecated;
+          } else if (!versionsMatch(Obsoleted, OldObsoleted, Override)) {
+            Which = 2;
+            FirstVersion = Obsoleted;
+            SecondVersion = OldObsoleted;
+          }
+
+          if (Which == -1) {
+            Diag(OldAA->getLocation(),
+                 diag::warn_mismatched_availability_override_unavail)
+              << AvailabilityAttr::getPrettyPlatformName(Platform->getName());
+          } else {
+            Diag(OldAA->getLocation(),
+                 diag::warn_mismatched_availability_override)
+              << Which
+              << AvailabilityAttr::getPrettyPlatformName(Platform->getName())
+              << FirstVersion.getAsString() << SecondVersion.getAsString();
+          }
+          Diag(Range.getBegin(), diag::note_overridden_method);
+        } else {
+          Diag(OldAA->getLocation(), diag::warn_mismatched_availability);
+          Diag(Range.getBegin(), diag::note_previous_attribute);
+        }
+
         Attrs.erase(Attrs.begin() + i);
-        DroppedAny = true;
         --e;
         continue;
       }
@@ -2098,7 +2113,6 @@ AvailabilityAttr *Sema::mergeAvailabilityAttr(NamedDecl *D, SourceRange Range,
                                 MergedIntroduced2, MergedDeprecated2,
                                 MergedObsoleted2)) {
         Attrs.erase(Attrs.begin() + i);
-        DroppedAny = true;
         --e;
         continue;
       }
@@ -2109,9 +2123,6 @@ AvailabilityAttr *Sema::mergeAvailabilityAttr(NamedDecl *D, SourceRange Range,
       ++i;
     }
   }
-
-  if (DroppedAny)
-    D->ClearLVCache();
 
   if (FoundAny &&
       MergedIntroduced == Introduced &&
@@ -2158,11 +2169,10 @@ static void handleAvailabilityAttr(Sema &S, Decl *D,
                                                       Introduced.Version,
                                                       Deprecated.Version,
                                                       Obsoleted.Version,
-                                                      IsUnavailable, Str);
-  if (NewAttr) {
+                                                      IsUnavailable, Str,
+                                                      /*Override=*/false);
+  if (NewAttr)
     D->addAttr(NewAttr);
-    ND->ClearLVCache();
-  }
 }
 
 VisibilityAttr *Sema::mergeVisibilityAttr(Decl *D, SourceRange Range,
@@ -2179,8 +2189,6 @@ VisibilityAttr *Sema::mergeVisibilityAttr(Decl *D, SourceRange Range,
     Diag(ExistingAttr->getLocation(), diag::err_mismatched_visibility);
     Diag(Range.getBegin(), diag::note_previous_attribute);
     D->dropAttr<VisibilityAttr>();
-    NamedDecl *ND = cast<NamedDecl>(D);
-    ND->ClearLVCache();
   }
   return ::new (Context) VisibilityAttr(Range, Context, Vis);
 }
@@ -2224,11 +2232,8 @@ static void handleVisibilityAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   }
 
   VisibilityAttr *NewAttr = S.mergeVisibilityAttr(D, Attr.getRange(), type);
-  if (NewAttr) {
+  if (NewAttr)
     D->addAttr(NewAttr);
-    NamedDecl *ND = cast<NamedDecl>(D);
-    ND->ClearLVCache();
-  }
 }
 
 static void handleObjCMethodFamilyAttr(Sema &S, Decl *decl,
