@@ -2,6 +2,7 @@
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F1 %s
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F2 %s
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_IMPLICIT_SYNC %s
+// RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_SYNC_JUMP %s
 //
 namespace stack_frame_cleanup {
   extern void touch();
@@ -84,6 +85,83 @@ namespace stack_frame_cleanup {
     // CHECK_HELPER_F2: store i32 [[RET_REG]]
     // CHECK_HELPER_F2-NEXT: call void @__cilk_helper_epilogue
     // CHECK_HELPER_F2-NEXT: ret void
+  }
+
+  void foo();
+  bool a;
+
+  void test3() {
+    try {
+      _Cilk_spawn foo();
+      if (a) {
+        goto out;
+      }
+    } catch (...) {
+    }
+out: return;
+    // CHECK_SYNC_JUMP: define void @_ZN19stack_frame_cleanup{{[0-9]+}}test3Ev
+    //
+    // * Exit due to exception *
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    //
+    // * All normal exits *
+    // All normal exits go through a single cleanup block, which uses a switch
+    // to determine which path to continue after the cleanup.
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    // CHECK_SYNC_JUMP-NOT: br
+    // CHECK_SYNC_JUMP: switch i32 %cleanup.dest
+  }
+
+  void test4() {
+    for (;;) {
+      try {
+        _Cilk_spawn foo();
+        if (a) {
+          break;
+        }
+      } catch (...) {
+      }
+    }
+    // CHECK_SYNC_JUMP: define void @_ZN19stack_frame_cleanup{{[0-9]+}}test4Ev
+    //
+    // * Exit due to exception *
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    //
+    // * All normal exits *
+    // All normal exits go through a single cleanup block, which uses a switch
+    // to determine which path to continue after the cleanup.
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    // CHECK_SYNC_JUMP-NOT: br
+    // CHECK_SYNC_JUMP: switch i32 %cleanup.dest
+  }
+
+  void test5() {
+    for (;;) {
+      try {
+        _Cilk_spawn foo();
+        if (a) {
+          continue;
+        }
+      } catch (...) {
+      }
+    }
+    // CHECK_SYNC_JUMP: define void @_ZN19stack_frame_cleanup{{[0-9]+}}test5Ev
+    //
+    // * Exit due to exception *
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    //
+    // * All normal exits *
+    // All normal exits go through a single cleanup block, which uses a switch
+    // to determine which path to continue after the cleanup.
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    // CHECK_SYNC_JUMP-NOT: br
+    // CHECK_SYNC_JUMP: switch i32 %cleanup.dest
   }
 }
 
