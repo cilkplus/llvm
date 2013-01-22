@@ -80,6 +80,8 @@ typedef void (__cilkrts_leave_frame)(__cilkrts_stack_frame *sf);
 typedef void (__cilkrts_sync)(__cilkrts_stack_frame *sf);
 typedef void (__cilkrts_return_exception)(__cilkrts_stack_frame *sf);
 typedef void (__cilkrts_rethrow)(__cilkrts_stack_frame *sf);
+typedef void (__cilkrts_detach)(__cilkrts_stack_frame *sf);
+typedef void (__cilkrts_pop_frame)(__cilkrts_stack_frame *sf);
 typedef __cilkrts_worker *(__cilkrts_get_tls_worker)();
 typedef __cilkrts_worker *(__cilkrts_get_tls_worker_fast)();
 typedef __cilkrts_worker *(__cilkrts_bind_thread_1)();
@@ -88,11 +90,22 @@ typedef void (__cilkrts_cilk_for_32)(__cilk_abi_f32_t body, void *data,
 typedef void (__cilkrts_cilk_for_64)(__cilk_abi_f64_t body, void *data,
                                      cilk64_t count, int grain);
 
-#define CILKRTS_FUNC(name, CGF) \
-   CGF.CGM.CreateRuntimeFunction(llvm::TypeBuilder<__cilkrts_##name, \
-                                 false>::get(CGF.getLLVMContext()), \
-                                 "__cilkrts_"#name)
 } // namespace
+
+#define CILKRTS_FUNC(name, CGF) Get__cilkrts_##name(CGF)
+
+#define DEFAULT_GET_CILKRTS_FUNC(name) \
+static llvm::Function *Get__cilkrts_##name(clang::CodeGen::CodeGenFunction &CGF) { \
+   return llvm::cast<llvm::Function>(CGF.CGM.CreateRuntimeFunction( \
+      llvm::TypeBuilder<__cilkrts_##name, false>::get(CGF.getLLVMContext()), \
+      "__cilkrts_"#name)); \
+}
+
+DEFAULT_GET_CILKRTS_FUNC(sync)
+DEFAULT_GET_CILKRTS_FUNC(rethrow)
+DEFAULT_GET_CILKRTS_FUNC(leave_frame)
+DEFAULT_GET_CILKRTS_FUNC(get_tls_worker)
+DEFAULT_GET_CILKRTS_FUNC(bind_thread_1)
 
 typedef std::map<llvm::LLVMContext*, llvm::StructType*> TypeBuilderCache;
 
@@ -257,7 +270,8 @@ static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF)
 /// doesn't already exist. If the function needed to be created then return
 /// false, signifying that the caller needs to add the function body.
 static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
-                                Function *&Fn)
+                                Function *&Fn, Function::LinkageTypes Linkage =
+                                               Function::InternalLinkage)
 {
   llvm::Module &Module = CGF.CGM.getModule();
   LLVMContext &Ctx = CGF.getLLVMContext();
@@ -272,7 +286,7 @@ static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
   // Otherwise we have to create it
   typedef void (cilk_function)(__cilkrts_stack_frame*);
   llvm::FunctionType *FTy = TypeBuilder<cilk_function, false>::get(Ctx);
-  Fn = Function::Create(FTy, GlobalValue::InternalLinkage, FnName, &Module);
+  Fn = Function::Create(FTy, Linkage, FnName, &Module);
 
   // and let the caller know that the function is incomplete
   // and the body still needs to be added
@@ -322,7 +336,7 @@ static CallInst *EmitCilkSetJmp(CGBuilderTy &B, Value *SF,
 ///   sf->worker->current_stack_frame = sf->call_parent;
 ///   sf->call_parent = 0;
 /// }
-static Function *GetCilkPopFrameFn(CodeGenFunction &CGF) {
+static Function *Get__cilkrts_pop_frame(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilkrts_pop_frame", CGF, Fn))
@@ -372,7 +386,7 @@ static Function *GetCilkPopFrameFn(CodeGenFunction &CGF) {
 ///
 ///   sf->flags |= CILK_FRAME_DETACHED;
 /// }
-static Function *GetCilkDetachFn(CodeGenFunction &CGF) {
+static Function *Get__cilkrts_detach(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
   if (GetOrCreateFunction("__cilkrts_detach", CGF, Fn))
@@ -440,7 +454,7 @@ static Function *GetCilkDetachFn(CodeGenFunction &CGF) {
   return Fn;
 }
 
-/// \brief Get or create a LLVM function for __cilkrts_detach.
+/// \brief Get or create a LLVM function for __cilk_sync.
 /// Calls to this function is always inlined, as it saves
 /// the current stack/frame pointer values
 /// It is equivalent to the following C code
@@ -586,6 +600,138 @@ static Function *GetCilkResetWorkerFn(CodeGenFunction &CGF) {
   return Fn;
 }
 
+/// \brief Get or create a LLVM function for __cilkrts_enter_frame.
+/// It is equivalent to the following C code
+///
+/// void __cilkrts_enter_frame_1(struct __cilkrts_stack_frame *sf)
+/// {
+///     struct __cilkrts_worker *w = __cilkrts_get_tls_worker();
+///     if (w == 0) { /* slow path, rare */
+///         w = __cilkrts_bind_thread_1();
+///         sf->flags = CILK_FRAME_LAST | CILK_FRAME_VERSION;
+///     } else {
+///         sf->flags = CILK_FRAME_VERSION;
+///     }
+///     sf->call_parent = w->current_stack_frame;
+///     sf->worker = w;
+///     /* sf->except_data is only valid when CILK_FRAME_EXCEPTING is set */
+///     w->current_stack_frame = sf;
+/// }
+static Function *Get__cilkrts_enter_frame_1(CodeGenFunction &CGF) {
+  Function *Fn = 0;
+
+  if (GetOrCreateFunction("__cilkrts_enter_frame_1", CGF, Fn,
+                          Function::AvailableExternallyLinkage))
+    return Fn;
+
+  LLVMContext &Ctx = CGF.getLLVMContext();
+  Value *SF = Fn->arg_begin();
+
+  BasicBlock *Entry = BasicBlock::Create(Ctx, "", Fn);
+  BasicBlock *SlowPath = BasicBlock::Create(Ctx, "", Fn);
+  BasicBlock *FastPath = BasicBlock::Create(Ctx, "", Fn);
+  BasicBlock *Cont = BasicBlock::Create(Ctx, "", Fn);
+
+  llvm::PointerType *WorkerPtrTy = TypeBuilder<__cilkrts_worker*, false>::get(Ctx);
+  StructType *SFTy = StackFrameBuilder::get(Ctx);
+
+  // Block  (Entry)
+  CallInst *W = 0;
+  {
+    CGBuilderTy B(Entry);
+    W = B.CreateCall(CILKRTS_FUNC(get_tls_worker, CGF));
+    Value *Cond = B.CreateICmpEQ(W, ConstantPointerNull::get(WorkerPtrTy));
+    B.CreateCondBr(Cond, SlowPath, FastPath);
+  }
+  // Block  (SlowPath)
+  CallInst *Wslow = 0;
+  {
+    CGBuilderTy B(SlowPath);
+    Wslow = B.CreateCall(CILKRTS_FUNC(bind_thread_1, CGF));
+    llvm::Type *Ty = SFTy->getElementType(StackFrameBuilder::flags);
+    StoreField(B,
+      ConstantInt::get(Ty, CILK_FRAME_LAST | CILK_FRAME_VERSION),
+      SF, StackFrameBuilder::flags);
+    B.CreateBr(Cont);
+  }
+  // Block  (FastPath)
+  {
+    CGBuilderTy B(FastPath);
+    llvm::Type *Ty = SFTy->getElementType(StackFrameBuilder::flags);
+    StoreField(B,
+      ConstantInt::get(Ty, CILK_FRAME_VERSION),
+      SF, StackFrameBuilder::flags);
+    B.CreateBr(Cont);
+  }
+  // Block  (Cont)
+  {
+    CGBuilderTy B(Cont);
+    Value *Wfast = W;
+    PHINode *W  = B.CreatePHI(WorkerPtrTy, 2);
+    W->addIncoming(Wslow, SlowPath);
+    W->addIncoming(Wfast, FastPath);
+
+    StoreField(B,
+      LoadField(B, W, WorkerBuilder::current_stack_frame),
+      SF, StackFrameBuilder::call_parent);
+
+    StoreField(B, W, SF, StackFrameBuilder::worker);
+    StoreField(B, SF, W, WorkerBuilder::current_stack_frame);
+
+    B.CreateRetVoid();
+  }
+
+  Fn->addFnAttr(Attribute::InlineHint);
+
+  return Fn;
+}
+
+/// \brief Get or create a LLVM function for __cilkrts_enter_frame_fast.
+/// It is equivalent to the following C code
+///
+/// void __cilkrts_enter_frame_fast_1(struct __cilkrts_stack_frame *sf)
+/// {
+///     struct __cilkrts_worker *w = __cilkrts_get_tls_worker();
+///     sf->flags = CILK_FRAME_VERSION;
+///     sf->call_parent = w->current_stack_frame;
+///     sf->worker = w;
+///     /* sf->except_data is only valid when CILK_FRAME_EXCEPTING is set */
+///     w->current_stack_frame = sf;
+/// }
+static Function *Get__cilkrts_enter_frame_fast_1(CodeGenFunction &CGF) {
+  Function *Fn = 0;
+
+  if (GetOrCreateFunction("__cilkrts_enter_frame_fast_1", CGF, Fn,
+                          Function::AvailableExternallyLinkage))
+    return Fn;
+
+  LLVMContext &Ctx = CGF.getLLVMContext();
+  Value *SF = Fn->arg_begin();
+
+  BasicBlock *Entry = BasicBlock::Create(Ctx, "", Fn);
+
+  CGBuilderTy B(Entry);
+  Value *W = B.CreateCall(CILKRTS_FUNC(get_tls_worker, CGF));
+  StructType *SFTy = StackFrameBuilder::get(Ctx);
+  llvm::Type *Ty = SFTy->getElementType(StackFrameBuilder::flags);
+
+  StoreField(B,
+    ConstantInt::get(Ty, CILK_FRAME_VERSION),
+    SF, StackFrameBuilder::flags);
+  StoreField(B,
+    LoadField(B, W, WorkerBuilder::current_stack_frame),
+    SF, StackFrameBuilder::call_parent);
+  StoreField(B, W, SF, StackFrameBuilder::worker);
+  StoreField(B, SF, W, WorkerBuilder::current_stack_frame);
+
+  B.CreateRetVoid();
+
+  Fn->addFnAttr(Attribute::InlineHint);
+
+  return Fn;
+}
+
+
 /// \brief Get or create a LLVM function for __cilk_parent_prologue.
 /// It is equivalent to the following C code
 ///
@@ -644,7 +790,7 @@ static Function *GetCilkParentEpilogue(CodeGenFunction &CGF) {
     CGBuilderTy B(Entry);
 
     // __cilkrts_pop_frame(sf)
-    B.CreateCall(GetCilkPopFrameFn(CGF), SF);
+    B.CreateCall(CILKRTS_FUNC(pop_frame, CGF), SF);
 
     // if (sf->flags != CILK_FRAME_VERSION)
     Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
@@ -698,7 +844,7 @@ static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF) {
   B.CreateCall(CILKRTS_FUNC(enter_frame_fast_1, CGF), SF);
 
   // __cilkrts_detach(sf);
-  B.CreateCall(GetCilkDetachFn(CGF), SF);
+  B.CreateCall(CILKRTS_FUNC(detach, CGF), SF);
 
   B.CreateRetVoid();
 
@@ -745,7 +891,7 @@ static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF) {
     CGBuilderTy B(Body);
 
     // __cilkrts_pop_frame(sf);
-    B.CreateCall(GetCilkPopFrameFn(CGF), SF);
+    B.CreateCall(CILKRTS_FUNC(pop_frame, CGF), SF);
 
     // __cilkrts_leave_frame(sf);
     B.CreateCall(CILKRTS_FUNC(leave_frame, CGF), SF);
