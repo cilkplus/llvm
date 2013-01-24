@@ -8,4 +8,15 @@ void test() {
   // CHECK-NOT: call void @__cilkrts_pop_frame
   // CHECK-NOT: call void @__cilkrts_detach
   // CHECK-NOT: call void @__cilk_sync
+  // CHECK: ret void
+}
+
+void test_notify_intrinsics() {
+  __notify_intrinsic(0, 0);
+  __notify_zc_intrinsic(0, 0);
+  // FIXME: above intrinsics not implemented (LE-2437)
+  //
+  // CHECK: define void @test_notify_intrinsics
+  // CHECK-NEXT: entry:
+  // CHECK-NEXT: ret void
 }

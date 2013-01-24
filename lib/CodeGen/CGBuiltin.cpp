@@ -1410,6 +1410,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
     CarryOutStore->setAlignment(CarryOutPtr.second);
     return RValue::get(Sum2);
   }
+  case Builtin::BI__notify_intrinsic:
+  case Builtin::BI__notify_zc_intrinsic:
+    // FIXME: not implemented yet.
+    return RValue::get(0);
   case Builtin::BI__noop:
     return RValue::get(0);
   }

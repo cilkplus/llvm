@@ -935,5 +935,9 @@ BUILTIN(__builtin_subc, "UiUiCUiCUiCUi*", "n")
 BUILTIN(__builtin_subcl, "ULiULiCULiCULiCULi*", "n")
 BUILTIN(__builtin_subcll, "ULLiULLiCULLiCULLiCULLi*", "n")
 
+// Notify intrinsics
+BUILTIN(__notify_intrinsic, "vcC*vCD*", "n")
+BUILTIN(__notify_zc_intrinsic, "vcC*vCD*", "n")
+
 #undef BUILTIN
 #undef LIBBUILTIN
