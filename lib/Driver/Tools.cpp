@@ -2478,8 +2478,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (Args.hasArg(options::OPT_fcilkplus))
     if (getToolChain().getTriple().getOS() != llvm::Triple::Linux &&
-        getToolChain().getTriple().getOS() != llvm::Triple::UnknownOS)
-      D.Diag(diag::err_drv_cilk_non_linux);
+        getToolChain().getTriple().getOS() != llvm::Triple::UnknownOS &&
+        !getToolChain().getTriple().isMacOSX())
+      D.Diag(diag::err_drv_cilk_unsupported);
 
   SanitizerArgs Sanitize(D, Args);
   Sanitize.addArgs(Args, CmdArgs);

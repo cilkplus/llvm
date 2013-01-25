@@ -107,8 +107,8 @@ def err_drv_unknown_objc_runtime : Error<
   "unknown or ill-formed Objective-C runtime '%0'">;
 def err_drv_cilk_objc : Error<
   "Cilk Plus does not support Objective-C">;
-def err_drv_cilk_non_linux : Error<
-  "Cilk Plus not yet supported on non-Linux OS">;
+def err_drv_cilk_unsupported: Error<
+  "Cilk Plus not yet supported for this target">;
 
 def warn_c_kext : Warning<
   "ignoring -fapple-kext which is valid for C++ and Objective-C++ only">;
