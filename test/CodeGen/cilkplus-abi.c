@@ -17,6 +17,7 @@ void test_notify_intrinsics() {
   // FIXME: above intrinsics not implemented (LE-2437)
   //
   // CHECK: define void @test_notify_intrinsics
-  // CHECK-NEXT: entry:
-  // CHECK-NEXT: ret void
+  // CHECK-NOT: call
+  // CHECK-NOT: br
+  // CHECK: ret void
 }
