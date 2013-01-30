@@ -194,7 +194,7 @@ configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.common.configured.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.common.configured)
 
-configure_lit_site_cfg(
-  ${CMAKE_CURRENT_SOURCE_DIR}/lit.common.unit.configured.in
-  ${CMAKE_CURRENT_BINARY_DIR}/lit.common.unit.configured)
-
+if(CMAKE_SYSTEM_NAME MATCHES "(Linux)|(Darwin)" AND CAN_TARGET_x86_64)
+  # Currently Cilk Plus Runtime is only supported on Linux and OS X
+  add_subdirectory(cilk)
+endif()
