@@ -30,6 +30,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ValueHandle.h"
+#include "llvm/Transforms/Utils/BlackList.h"
 
 namespace llvm {
   class Module;
@@ -210,7 +211,7 @@ struct ARCEntrypoints {
   /// a call will be immediately retain.
   llvm::InlineAsm *retainAutoreleasedReturnValueMarker;
 };
-  
+
 /// CodeGenModule - This class organizes the cross-function state that is used
 /// while generating LLVM code.
 class CodeGenModule : public CodeGenTypeCache {
@@ -263,6 +264,9 @@ class CodeGenModule : public CodeGenTypeCache {
   /// that *are* actually referenced.  These get code generated when the module
   /// is done.
   std::vector<GlobalDecl> DeferredDeclsToEmit;
+
+  /// DeferredVTables - A queue of (optional) vtables to consider emitting.
+  std::vector<const CXXRecordDecl*> DeferredVTables;
 
   /// LLVMUsed - List of global values which are required to be
   /// present in the object file; bitcast to i8*. This is used for
@@ -372,8 +376,12 @@ class CodeGenModule : public CodeGenTypeCache {
   struct {
     int GlobalUniqueCount;
   } Block;
-  
+
   GlobalDecl initializedGlobalDecl;
+
+  llvm::BlackList SanitizerBlacklist;
+
+  const SanitizerOptions &SanOpts;
 
   /// @}
 public:
@@ -740,8 +748,8 @@ public:
   /// type and name.
   llvm::Constant *CreateRuntimeFunction(llvm::FunctionType *Ty,
                                         StringRef Name,
-                                        llvm::Attribute ExtraAttrs =
-                                          llvm::Attribute());
+                                        llvm::AttributeSet ExtraAttrs =
+                                          llvm::AttributeSet());
   /// CreateRuntimeVariable - Create a new runtime global variable with the
   /// specified type and name.
   llvm::Constant *CreateRuntimeVariable(llvm::Type *Ty,
@@ -883,8 +891,6 @@ public:
   GetLLVMLinkageVarDefinition(const VarDecl *D,
                               llvm::GlobalVariable *GV);
   
-  std::vector<const CXXRecordDecl*> DeferredVTables;
-
   /// Emit all the global annotations.
   void EmitGlobalAnnotations();
 
@@ -912,6 +918,16 @@ public:
   /// annotations are emitted during finalization of the LLVM code.
   void AddGlobalAnnotations(const ValueDecl *D, llvm::GlobalValue *GV);
 
+  const llvm::BlackList &getSanitizerBlacklist() const {
+    return SanitizerBlacklist;
+  }
+
+  const SanitizerOptions &getSanOpts() const { return SanOpts; }
+
+  void addDeferredVTable(const CXXRecordDecl *RD) {
+    DeferredVTables.push_back(RD);
+  }
+
 private:
   llvm::GlobalValue *GetGlobalValue(StringRef Ref);
 
@@ -919,8 +935,8 @@ private:
                                           llvm::Type *Ty,
                                           GlobalDecl D,
                                           bool ForVTable,
-                                          llvm::Attribute ExtraAttrs =
-                                            llvm::Attribute());
+                                          llvm::AttributeSet ExtraAttrs =
+                                            llvm::AttributeSet());
   llvm::Constant *GetOrCreateLLVMGlobal(StringRef MangledName,
                                         llvm::PointerType *PTy,
                                         const VarDecl *D,
@@ -1013,6 +1029,10 @@ private:
   /// EmitDeferred - Emit any needed decls for which code generation
   /// was deferred.
   void EmitDeferred();
+
+  /// EmitDeferredVTables - Emit any vtables which we deferred and
+  /// still have a use for.
+  void EmitDeferredVTables();
 
   /// EmitLLVMUsed - Emit the llvm.used metadata used to force
   /// references to global which may otherwise be optimized out.

@@ -81,15 +81,6 @@ def analyzer_inline_max_stack_depth : Separate<["-"], "analyzer-inline-max-stack
 def analyzer_inline_max_stack_depth_EQ : Joined<["-"], "analyzer-inline-max-stack-depth=">, 
   Alias<analyzer_inline_max_stack_depth>;
   
-def analyzer_inline_max_function_size : Separate<["-"], "analyzer-inline-max-function-size">,
-  HelpText<"Bound on the number of basic blocks in an inlined function (200 by default)">;
-def analyzer_inline_max_function_size_EQ : Joined<["-"], "analyzer-inline-max-function-size=">, 
-  Alias<analyzer_inline_max_function_size>;
-
-def analyzer_ipa : Separate<["-"], "analyzer-ipa">,
-  HelpText<"Specify the inter-procedural analysis mode">;
-def analyzer_ipa_EQ : Joined<["-"], "analyzer-ipa=">, Alias<analyzer_ipa>;
-  
 def analyzer_inlining_mode : Separate<["-"], "analyzer-inlining-mode">,
   HelpText<"Specify the function selection heuristic used during inlining">;
 def analyzer_inlining_mode_EQ : Joined<["-"], "analyzer-inlining-mode=">, Alias<analyzer_inlining_mode>;
@@ -97,8 +88,6 @@ def analyzer_inlining_mode_EQ : Joined<["-"], "analyzer-inlining-mode=">, Alias<
 def analyzer_disable_retry_exhausted : Flag<["-"], "analyzer-disable-retry-exhausted">,
   HelpText<"Do not re-analyze paths leading to exhausted nodes with a different strategy (may decrease code coverage)">;
   
-def analyzer_max_nodes : Separate<["-"], "analyzer-max-nodes">,
-  HelpText<"The maximum number of nodes the analyzer can generate (150000 default, 0 = no limit)">;
 def analyzer_max_loop : Separate<["-"], "analyzer-max-loop">,
   HelpText<"The maximum number of times the analyzer will go through a loop">;
 def analyzer_stats : Flag<["-"], "analyzer-stats">,
@@ -215,9 +204,6 @@ def header_include_file : Separate<["-"], "header-include-file">,
 // Diagnostic Options
 //===----------------------------------------------------------------------===//
 
-def dump_build_information : Separate<["-"], "dump-build-information">,
-  MetaVarName<"<filename>">,
-  HelpText<"output a dump of some build information to a file">;
 def diagnostic_log_file : Separate<["-"], "diagnostic-log-file">,
   HelpText<"Filename (or -) to log diagnostics to">;
 def diagnostic_serialized_file : Separate<["-"], "serialize-diagnostic-file">,
@@ -292,6 +278,8 @@ def ast_dump_filter : Separate<["-"], "ast-dump-filter">,
   HelpText<"Use with -ast-dump or -ast-print to dump/print only AST declaration"
            " nodes having a certain substring in a qualified name. Use"
            " -ast-list to list all filterable declaration node names.">;
+def fno_modules_global_index : Flag<["-"], "fno-modules-global-index">,
+  HelpText<"Do not automatically generate or update the global module index">;
 
 let Group = Action_Group in {
 

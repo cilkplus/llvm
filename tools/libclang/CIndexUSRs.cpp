@@ -593,6 +593,7 @@ void USRGenerator::VisitType(QualType T) {
         case BuiltinType::OCLImage2d:
         case BuiltinType::OCLImage2dArray:
         case BuiltinType::OCLImage3d:
+        case BuiltinType::OCLEvent:
           IgnoreResults = true;
           return;
         case BuiltinType::ObjCId:
@@ -820,22 +821,22 @@ CXString clang_getCursorUSR(CXCursor C) {
   const CXCursorKind &K = clang_getCursorKind(C);
 
   if (clang_isDeclaration(K)) {
-    Decl *D = cxcursor::getCursorDecl(C);
+    const Decl *D = cxcursor::getCursorDecl(C);
     if (!D)
-      return createCXString("");
+      return cxstring::createEmpty();
 
     CXTranslationUnit TU = cxcursor::getCursorTU(C);
     if (!TU)
-      return createCXString("");
+      return cxstring::createEmpty();
 
     CXStringBuf *buf = cxstring::getCXStringBuf(TU);
     if (!buf)
-      return createCXString("");
+      return cxstring::createEmpty();
 
     bool Ignore = cxcursor::getDeclCursorUSR(D, buf->Data);
     if (Ignore) {
-      disposeCXStringBuf(buf);
-      return createCXString("");
+      buf->dispose();
+      return cxstring::createEmpty();
     }
 
     // Return the C-string, but don't make a copy since it is already in
@@ -847,11 +848,11 @@ CXString clang_getCursorUSR(CXCursor C) {
   if (K == CXCursor_MacroDefinition) {
     CXTranslationUnit TU = cxcursor::getCursorTU(C);
     if (!TU)
-      return createCXString("");
+      return cxstring::createEmpty();
 
     CXStringBuf *buf = cxstring::getCXStringBuf(TU);
     if (!buf)
-      return createCXString("");
+      return cxstring::createEmpty();
 
     {
       USRGenerator UG(&cxcursor::getCursorASTUnit(C)->getASTContext(),
@@ -863,7 +864,7 @@ CXString clang_getCursorUSR(CXCursor C) {
     return createCXString(buf);
   }
 
-  return createCXString("");
+  return cxstring::createEmpty();
 }
 
 CXString clang_constructUSR_ObjCIvar(const char *name, CXString classUSR) {

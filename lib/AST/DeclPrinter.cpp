@@ -83,7 +83,7 @@ namespace {
     void VisitUsingShadowDecl(UsingShadowDecl *D);
 
     void PrintTemplateParameters(const TemplateParameterList *Params,
-                                 const TemplateArgumentList *Args);
+                                 const TemplateArgumentList *Args = 0);
     void prettyPrintAttributes(Decl *D);
   };
 }
@@ -580,6 +580,9 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
 
 void DeclPrinter::VisitFriendDecl(FriendDecl *D) {
   if (TypeSourceInfo *TSI = D->getFriendType()) {
+    unsigned NumTPLists = D->getFriendTypeNumTemplateParameterLists();
+    for (unsigned i = 0; i < NumTPLists; ++i)
+      PrintTemplateParameters(D->getFriendTypeTemplateParameterList(i));
     Out << "friend ";
     Out << " " << TSI->getType().getAsString(Policy);
   }
@@ -646,9 +649,13 @@ void DeclPrinter::VisitVarDecl(VarDecl *D) {
   Expr *Init = D->getInit();
   if (!Policy.SuppressInitializers && Init) {
     bool ImplicitInit = false;
-    if (CXXConstructExpr *Construct = dyn_cast<CXXConstructExpr>(Init))
-      ImplicitInit = D->getInitStyle() == VarDecl::CallInit &&
-          Construct->getNumArgs() == 0 && !Construct->isListInitialization();
+    if (CXXConstructExpr *Construct = dyn_cast<CXXConstructExpr>(Init)) {
+      if (D->getInitStyle() == VarDecl::CallInit &&
+          !Construct->isListInitialization()) {
+        ImplicitInit = Construct->getNumArgs() == 0 ||
+          Construct->getArg(0)->isDefaultArgument();
+      }
+    }
     if (!ImplicitInit) {
       if ((D->getInitStyle() == VarDecl::CallInit) && !isa<ParenListExpr>(Init))
         Out << "(";
@@ -767,8 +774,8 @@ void DeclPrinter::VisitLinkageSpecDecl(LinkageSpecDecl *D) {
     Visit(*D->decls_begin());
 }
 
-void DeclPrinter::PrintTemplateParameters(
-    const TemplateParameterList *Params, const TemplateArgumentList *Args = 0) {
+void DeclPrinter::PrintTemplateParameters(const TemplateParameterList *Params,
+                                          const TemplateArgumentList *Args) {
   assert(Params);
   assert(!Args || Params->size() == Args->size());
 

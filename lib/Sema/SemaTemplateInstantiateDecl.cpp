@@ -79,16 +79,16 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
           ExprResult Result = SubstExpr(Aligned->getAlignmentExpr(),
                                         TemplateArgs);
           if (!Result.isInvalid())
-            AddAlignedAttr(Aligned->getLocation(), New, Result.takeAs<Expr>(), 
-                           Aligned->getIsMSDeclSpec());
+            AddAlignedAttr(Aligned->getLocation(), New, Result.takeAs<Expr>(),
+                           Aligned->getSpellingListIndex());
         } else {
           TypeSourceInfo *Result = SubstType(Aligned->getAlignmentType(),
                                              TemplateArgs,
                                              Aligned->getLocation(),
                                              DeclarationName());
           if (Result)
-            AddAlignedAttr(Aligned->getLocation(), New, Result, 
-                           Aligned->getIsMSDeclSpec());
+            AddAlignedAttr(Aligned->getLocation(), New, Result,
+                           Aligned->getSpellingListIndex());
         }
         continue;
       }
@@ -347,6 +347,9 @@ Decl *TemplateDeclInstantiator::VisitVarDecl(VarDecl *D) {
   }
   SemaRef.InstantiateAttrs(TemplateArgs, D, Var, LateAttrs, StartingScope);
 
+  if (Var->hasAttrs())
+    SemaRef.CheckAlignasUnderalignment(Var);
+
   // Link instantiations of static data members back to the template from
   // which they were instantiated.
   if (Var->isStaticDataMember())
@@ -458,6 +461,9 @@ Decl *TemplateDeclInstantiator::VisitFieldDecl(FieldDecl *D) {
   }
 
   SemaRef.InstantiateAttrs(TemplateArgs, D, Field, LateAttrs, StartingScope);
+
+  if (Field->hasAttrs())
+    SemaRef.CheckAlignasUnderalignment(Field);
 
   if (Invalid)
     Field->setInvalidDecl();
@@ -1120,6 +1126,9 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(FunctionDecl *D,
                            D->isInlineSpecified(), D->hasWrittenPrototype(),
                            D->isConstexpr());
 
+  if (D->isInlined())
+    Function->setImplicitlyInline();
+
   if (QualifierLoc)
     Function->setQualifierInfo(QualifierLoc);
 
@@ -1484,6 +1493,9 @@ TemplateDeclInstantiator::VisitCXXMethodDecl(CXXMethodDecl *D,
                                    D->isInlineSpecified(),
                                    D->isConstexpr(), D->getLocEnd());
   }
+
+  if (D->isInlined())
+    Method->setImplicitlyInline();
 
   if (QualifierLoc)
     Method->setQualifierInfo(QualifierLoc);
@@ -2763,6 +2775,9 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
       !PatternDecl->isInlined())
     return;
 
+  if (PatternDecl->isInlined())
+    Function->setImplicitlyInline();
+
   InstantiatingTemplate Inst(*this, PointOfInstantiation, Function);
   if (Inst)
     return;
@@ -3134,7 +3149,7 @@ Sema::InstantiateMemInitializers(CXXConstructorDecl *New,
   ActOnMemInitializers(New,
                        /*FIXME: ColonLoc */
                        SourceLocation(),
-                       NewInits.data(), NewInits.size(),
+                       NewInits,
                        AnyErrors);
 }
 

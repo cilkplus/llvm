@@ -36,20 +36,17 @@
 // FP-CONTRACT-FAST-CHECK: -ffp-contract=fast
 // FP-CONTRACT-OFF-CHECK: -ffp-contract=off
 
-// RUN: %clang -fms-extensions -fenable-experimental-ms-inline-asm %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS3 %s
-// CHECK-OPTIONS3: -fenable-experimental-ms-inline-asm
+// RUN: %clang -fcilkplus -target x86_64-unknown-linux %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS3 %s
+// CHECK-OPTIONS3: -fcilkplus
 
-// RUN: %clang -fcilkplus -target x86_64-unknown-linux %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS4 %s
+// RUN: %clang -fcilkplus -target x86_64-apple-darwin %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS4 %s
 // CHECK-OPTIONS4: -fcilkplus
 
-// RUN: %clang -fcilkplus -target x86_64-apple-darwin %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS5 %s
-// CHECK-OPTIONS5: -fcilkplus
+// RUN: %clang -x objective-c -fcilkplus %s 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS5 %s
+// CHECK-OPTIONS5: error: Cilk Plus does not support Objective-C
 
-// RUN: %clang -x objective-c -fcilkplus %s 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS6 %s
-// CHECK-OPTIONS6: error: Cilk Plus does not support Objective-C
-
-// RUN: %clang -fcilkplus -target x86_64-unknown-freebsd %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS7 %s
-// CHECK-OPTIONS7: error: Cilk Plus not yet supported for this target
+// RUN: %clang -fcilkplus -target x86_64-unknown-freebsd %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS6 %s
+// CHECK-OPTIONS6: error: Cilk Plus not yet supported for this target
 
 // RUN: %clang -### -S -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
 // RUN: %clang -### -S -fno-vectorize -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s

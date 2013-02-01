@@ -1,4 +1,4 @@
-//===--- SemaOverload.cpp - C++ Overloading ---------------------*- C++ -*-===//
+//===--- SemaOverload.cpp - C++ Overloading -------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -536,11 +536,15 @@ AmbiguousConversionSequence::copyFrom(const AmbiguousConversionSequence &O) {
 
 namespace {
   // Structure used by OverloadCandidate::DeductionFailureInfo to store
-  // template parameter and template argument information.
-  struct DFIParamWithArguments {
-    TemplateParameter Param;
+  // template argument information.
+  struct DFIArguments {
     TemplateArgument FirstArg;
     TemplateArgument SecondArg;
+  };
+  // Structure used by OverloadCandidate::DeductionFailureInfo to store
+  // template parameter and template argument information.
+  struct DFIParamWithArguments : DFIArguments {
+    TemplateParameter Param;
   };
 }
 
@@ -567,6 +571,15 @@ static MakeDeductionFailureInfo(ASTContext &Context,
     Result.Data = Info.Param.getOpaqueValue();
     break;
 
+  case Sema::TDK_NonDeducedMismatch: {
+    // FIXME: Should allocate from normal heap so that we can free this later.
+    DFIArguments *Saved = new (Context) DFIArguments;
+    Saved->FirstArg = Info.FirstArg;
+    Saved->SecondArg = Info.SecondArg;
+    Result.Data = Saved;
+    break;
+  }
+
   case Sema::TDK_Inconsistent:
   case Sema::TDK_Underqualified: {
     // FIXME: Should allocate from normal heap so that we can free this later.
@@ -588,8 +601,11 @@ static MakeDeductionFailureInfo(ASTContext &Context,
     }
     break;
 
-  case Sema::TDK_NonDeducedMismatch:
   case Sema::TDK_FailedOverloadResolution:
+    Result.Data = Info.Expression;
+    break;
+
+  case Sema::TDK_MiscellaneousDeductionFailure:
     break;
   }
 
@@ -605,10 +621,12 @@ void OverloadCandidate::DeductionFailureInfo::Destroy() {
   case Sema::TDK_TooManyArguments:
   case Sema::TDK_TooFewArguments:
   case Sema::TDK_InvalidExplicitArguments:
+  case Sema::TDK_FailedOverloadResolution:
     break;
 
   case Sema::TDK_Inconsistent:
   case Sema::TDK_Underqualified:
+  case Sema::TDK_NonDeducedMismatch:
     // FIXME: Destroy the data?
     Data = 0;
     break;
@@ -623,8 +641,7 @@ void OverloadCandidate::DeductionFailureInfo::Destroy() {
     break;
 
   // Unhandled
-  case Sema::TDK_NonDeducedMismatch:
-  case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_MiscellaneousDeductionFailure:
     break;
   }
 }
@@ -645,6 +662,8 @@ OverloadCandidate::DeductionFailureInfo::getTemplateParameter() {
   case Sema::TDK_TooManyArguments:
   case Sema::TDK_TooFewArguments:
   case Sema::TDK_SubstitutionFailure:
+  case Sema::TDK_NonDeducedMismatch:
+  case Sema::TDK_FailedOverloadResolution:
     return TemplateParameter();
 
   case Sema::TDK_Incomplete:
@@ -656,8 +675,7 @@ OverloadCandidate::DeductionFailureInfo::getTemplateParameter() {
     return static_cast<DFIParamWithArguments*>(Data)->Param;
 
   // Unhandled
-  case Sema::TDK_NonDeducedMismatch:
-  case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_MiscellaneousDeductionFailure:
     break;
   }
 
@@ -667,24 +685,25 @@ OverloadCandidate::DeductionFailureInfo::getTemplateParameter() {
 TemplateArgumentList *
 OverloadCandidate::DeductionFailureInfo::getTemplateArgumentList() {
   switch (static_cast<Sema::TemplateDeductionResult>(Result)) {
-    case Sema::TDK_Success:
-    case Sema::TDK_Invalid:
-    case Sema::TDK_InstantiationDepth:
-    case Sema::TDK_TooManyArguments:
-    case Sema::TDK_TooFewArguments:
-    case Sema::TDK_Incomplete:
-    case Sema::TDK_InvalidExplicitArguments:
-    case Sema::TDK_Inconsistent:
-    case Sema::TDK_Underqualified:
-      return 0;
+  case Sema::TDK_Success:
+  case Sema::TDK_Invalid:
+  case Sema::TDK_InstantiationDepth:
+  case Sema::TDK_TooManyArguments:
+  case Sema::TDK_TooFewArguments:
+  case Sema::TDK_Incomplete:
+  case Sema::TDK_InvalidExplicitArguments:
+  case Sema::TDK_Inconsistent:
+  case Sema::TDK_Underqualified:
+  case Sema::TDK_NonDeducedMismatch:
+  case Sema::TDK_FailedOverloadResolution:
+    return 0;
 
-    case Sema::TDK_SubstitutionFailure:
-      return static_cast<TemplateArgumentList*>(Data);
+  case Sema::TDK_SubstitutionFailure:
+    return static_cast<TemplateArgumentList*>(Data);
 
-    // Unhandled
-    case Sema::TDK_NonDeducedMismatch:
-    case Sema::TDK_FailedOverloadResolution:
-      break;
+  // Unhandled
+  case Sema::TDK_MiscellaneousDeductionFailure:
+    break;
   }
 
   return 0;
@@ -700,15 +719,16 @@ const TemplateArgument *OverloadCandidate::DeductionFailureInfo::getFirstArg() {
   case Sema::TDK_TooFewArguments:
   case Sema::TDK_InvalidExplicitArguments:
   case Sema::TDK_SubstitutionFailure:
+  case Sema::TDK_FailedOverloadResolution:
     return 0;
 
   case Sema::TDK_Inconsistent:
   case Sema::TDK_Underqualified:
-    return &static_cast<DFIParamWithArguments*>(Data)->FirstArg;
+  case Sema::TDK_NonDeducedMismatch:
+    return &static_cast<DFIArguments*>(Data)->FirstArg;
 
   // Unhandled
-  case Sema::TDK_NonDeducedMismatch:
-  case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_MiscellaneousDeductionFailure:
     break;
   }
 
@@ -726,17 +746,27 @@ OverloadCandidate::DeductionFailureInfo::getSecondArg() {
   case Sema::TDK_TooFewArguments:
   case Sema::TDK_InvalidExplicitArguments:
   case Sema::TDK_SubstitutionFailure:
+  case Sema::TDK_FailedOverloadResolution:
     return 0;
 
   case Sema::TDK_Inconsistent:
   case Sema::TDK_Underqualified:
-    return &static_cast<DFIParamWithArguments*>(Data)->SecondArg;
+  case Sema::TDK_NonDeducedMismatch:
+    return &static_cast<DFIArguments*>(Data)->SecondArg;
 
   // Unhandled
-  case Sema::TDK_NonDeducedMismatch:
-  case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_MiscellaneousDeductionFailure:
     break;
   }
+
+  return 0;
+}
+
+Expr *
+OverloadCandidate::DeductionFailureInfo::getExpr() {
+  if (static_cast<Sema::TemplateDeductionResult>(Result) ==
+        Sema::TDK_FailedOverloadResolution)
+    return static_cast<Expr*>(Data);
 
   return 0;
 }
@@ -1840,7 +1870,8 @@ bool Sema::IsFloatingPointPromotion(QualType FromType, QualType ToType) {
         return true;
 
       // Half can be promoted to float.
-      if (FromBuiltin->getKind() == BuiltinType::Half &&
+      if (!getLangOpts().NativeHalfType &&
+           FromBuiltin->getKind() == BuiltinType::Half &&
           ToBuiltin->getKind() == BuiltinType::Float)
         return true;
     }
@@ -4619,7 +4650,7 @@ static bool TryCopyInitialization(const CanQualType FromQTy,
 /// parameter of the given member function (@c Method) from the
 /// expression @p From.
 static ImplicitConversionSequence
-TryObjectArgumentInitialization(Sema &S, QualType OrigFromType,
+TryObjectArgumentInitialization(Sema &S, QualType FromType,
                                 Expr::Classification FromClassification,
                                 CXXMethodDecl *Method,
                                 CXXRecordDecl *ActingContext) {
@@ -4635,7 +4666,6 @@ TryObjectArgumentInitialization(Sema &S, QualType OrigFromType,
   ImplicitConversionSequence ICS;
 
   // We need to have an object of class type.
-  QualType FromType = OrigFromType;
   if (const PointerType *PT = FromType->getAs<PointerType>()) {
     FromType = PT->getPointeeType();
 
@@ -4670,7 +4700,7 @@ TryObjectArgumentInitialization(Sema &S, QualType OrigFromType,
                                     != FromTypeCanon.getLocalCVRQualifiers() &&
       !ImplicitParamType.isAtLeastAsQualifiedAs(FromTypeCanon)) {
     ICS.setBad(BadConversionSequence::bad_qualifiers,
-               OrigFromType, ImplicitParamType);
+               FromType, ImplicitParamType);
     return ICS;
   }
 
@@ -8442,10 +8472,25 @@ void DiagnoseBadDeduction(Sema &S, OverloadCandidate *Cand,
     return;
   }
 
+  case Sema::TDK_FailedOverloadResolution: {
+    OverloadExpr::FindResult R =
+        OverloadExpr::find(Cand->DeductionFailure.getExpr());
+    S.Diag(Fn->getLocation(),
+           diag::note_ovl_candidate_failed_overload_resolution)
+      << R.Expression->getName();
+    return;
+  }
+
+  case Sema::TDK_NonDeducedMismatch:
+    // FIXME: Provide a source location to indicate what we couldn't match.
+    S.Diag(Fn->getLocation(), diag::note_ovl_candidate_non_deduced_mismatch)
+      << *Cand->DeductionFailure.getFirstArg()
+      << *Cand->DeductionFailure.getSecondArg();
+    return;
+
   // TODO: diagnose these individually, then kill off
   // note_ovl_candidate_bad_deduction, which is uselessly vague.
-  case Sema::TDK_NonDeducedMismatch:
-  case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_MiscellaneousDeductionFailure:
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_deduction);
     MaybeEmitInheritedConstructorNote(S, Fn);
     return;
@@ -8623,6 +8668,7 @@ RankDeductionFailure(const OverloadCandidate::DeductionFailureInfo &DFI) {
 
   case Sema::TDK_SubstitutionFailure:
   case Sema::TDK_NonDeducedMismatch:
+  case Sema::TDK_MiscellaneousDeductionFailure:
     return 3;
 
   case Sema::TDK_InstantiationDepth:
@@ -10334,6 +10380,13 @@ Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
         if (CheckCallReturnType(FnDecl->getResultType(), OpLoc, TheCall,
                                 FnDecl))
           return ExprError();
+
+        ArrayRef<const Expr *> ArgsArray(Args, 2);
+        // Cut off the implicit 'this'.
+        if (isa<CXXMethodDecl>(FnDecl))
+          ArgsArray = ArgsArray.slice(1);
+        checkCall(FnDecl, ArgsArray, 0, isa<CXXMethodDecl>(FnDecl), OpLoc, 
+                  TheCall->getSourceRange(), VariadicDoesNotApply);
 
         return MaybeBindToTemporary(TheCall);
       } else {

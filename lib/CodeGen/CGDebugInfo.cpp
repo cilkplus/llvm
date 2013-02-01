@@ -79,7 +79,7 @@ void CGDebugInfo::setLocation(SourceLocation Loc) {
     llvm::MDNode *N = D;
     LexicalBlockStack.pop_back();
     LexicalBlockStack.push_back(N);
-  } else if (Scope.isLexicalBlock()) {
+  } else if (Scope.isLexicalBlock() || Scope.isSubprogram()) {
     llvm::DIDescriptor D
       = DBuilder.createLexicalBlockFile(Scope, getOrCreateFile(CurLoc));
     llvm::MDNode *N = D;
@@ -426,6 +426,9 @@ llvm::DIType CGDebugInfo::CreateType(const BuiltinType *BT) {
   case BuiltinType::OCLImage3d:
     return getOrCreateStructPtrType("opencl_image3d_t",
                                     OCLImage3dDITy);
+  case BuiltinType::OCLEvent:
+    return getOrCreateStructPtrType("opencl_event_t",
+                                    OCLEventDITy);
 
   case BuiltinType::UChar:
   case BuiltinType::Char_U: Encoding = llvm::dwarf::DW_ATE_unsigned_char; break;
@@ -842,11 +845,15 @@ CollectRecordStaticField(const VarDecl *Var,
 
   unsigned LineNumber = getLineNumber(Var->getLocation());
   StringRef VName = Var->getName();
-  llvm::ConstantInt *CI = NULL;
+  llvm::Constant *C = NULL;
   if (Var->getInit()) {
     const APValue *Value = Var->evaluateValue();
-    if (Value && Value->isInt())
-      CI = llvm::ConstantInt::get(CGM.getLLVMContext(), Value->getInt());
+    if (Value) {
+      if (Value->isInt())
+        C = llvm::ConstantInt::get(CGM.getLLVMContext(), Value->getInt());
+      if (Value->isFloat())
+        C = llvm::ConstantFP::get(CGM.getLLVMContext(), Value->getFloat());
+    }
   }
 
   unsigned Flags = 0;
@@ -857,7 +864,7 @@ CollectRecordStaticField(const VarDecl *Var,
     Flags |= llvm::DIDescriptor::FlagProtected;
 
   llvm::DIType GV = DBuilder.createStaticMemberType(RecordTy, VName, VUnit,
-                                                    LineNumber, VTy, Flags, CI);
+                                                    LineNumber, VTy, Flags, C);
   elements.push_back(GV);
   StaticDataMemberCache[Var->getCanonicalDecl()] = llvm::WeakVH(GV);
 }
@@ -1623,8 +1630,15 @@ llvm::DIType CGDebugInfo::CreateType(const RValueReferenceType *Ty,
 
 llvm::DIType CGDebugInfo::CreateType(const MemberPointerType *Ty, 
                                      llvm::DIFile U) {
-  return DBuilder.createMemberPointerType(CreatePointeeType(Ty->getPointeeType(), U),
-                                    getOrCreateType(QualType(Ty->getClass(), 0), U));
+  llvm::DIType ClassType = getOrCreateType(QualType(Ty->getClass(), 0), U);
+  if (!Ty->getPointeeType()->isFunctionType())
+    return DBuilder.createMemberPointerType(
+        CreatePointeeType(Ty->getPointeeType(), U), ClassType);
+  return DBuilder.createMemberPointerType(getOrCreateInstanceMethodType(
+      CGM.getContext().getPointerType(
+          QualType(Ty->getClass(), Ty->getPointeeType().getCVRQualifiers())),
+      Ty->getPointeeType()->getAs<FunctionProtoType>(), U),
+                                          ClassType);
 }
 
 llvm::DIType CGDebugInfo::CreateType(const AtomicType *Ty, 
@@ -1683,12 +1697,14 @@ llvm::DIType CGDebugInfo::CreateEnumType(const EnumDecl *ED) {
   return DbgTy;
 }
 
-static QualType UnwrapTypeForDebugInfo(QualType T) {
+static QualType UnwrapTypeForDebugInfo(QualType T, const ASTContext &C) {
+  Qualifiers Quals;
   do {
+    Quals += T.getLocalQualifiers();
     QualType LastT = T;
     switch (T->getTypeClass()) {
     default:
-      return T;
+      return C.getQualifiedType(T.getTypePtr(), Quals);
     case Type::TemplateSpecialization:
       T = cast<TemplateSpecializationType>(T)->desugar();
       break;
@@ -1713,13 +1729,8 @@ static QualType UnwrapTypeForDebugInfo(QualType T) {
     case Type::Paren:
       T = cast<ParenType>(T)->getInnerType();
       break;
-    case Type::SubstTemplateTypeParm: {
-      // We need to keep the qualifiers handy since getReplacementType()
-      // will strip them away.
-      unsigned Quals = T.getLocalFastQualifiers();
+    case Type::SubstTemplateTypeParm:
       T = cast<SubstTemplateTypeParmType>(T)->getReplacementType();
-      T.addFastQualifiers(Quals);
-    }
       break;
     case Type::Auto:
       T = cast<AutoType>(T)->getDeducedType();
@@ -1727,8 +1738,7 @@ static QualType UnwrapTypeForDebugInfo(QualType T) {
     }
     
     assert(T != LastT && "Type unwrapping failed to unwrap!");
-    if (T == LastT)
-      return T;
+    (void)LastT;
   } while (true);
 }
 
@@ -1736,7 +1746,7 @@ static QualType UnwrapTypeForDebugInfo(QualType T) {
 llvm::DIType CGDebugInfo::getTypeOrNull(QualType Ty) {
 
   // Unwrap the type as needed for debug information.
-  Ty = UnwrapTypeForDebugInfo(Ty);
+  Ty = UnwrapTypeForDebugInfo(Ty, CGM.getContext());
   
   // Check for existing entry.
   llvm::DenseMap<void *, llvm::WeakVH>::iterator it =
@@ -1755,7 +1765,7 @@ llvm::DIType CGDebugInfo::getTypeOrNull(QualType Ty) {
 llvm::DIType CGDebugInfo::getCompletedTypeOrNull(QualType Ty) {
 
   // Unwrap the type as needed for debug information.
-  Ty = UnwrapTypeForDebugInfo(Ty);
+  Ty = UnwrapTypeForDebugInfo(Ty, CGM.getContext());
 
   // Check for existing entry.
   llvm::DenseMap<void *, llvm::WeakVH>::iterator it =
@@ -1777,7 +1787,7 @@ llvm::DIType CGDebugInfo::getOrCreateType(QualType Ty, llvm::DIFile Unit) {
     return llvm::DIType();
 
   // Unwrap the type as needed for debug information.
-  Ty = UnwrapTypeForDebugInfo(Ty);
+  Ty = UnwrapTypeForDebugInfo(Ty, CGM.getContext());
 
   llvm::DIType T = getCompletedTypeOrNull(Ty);
 
@@ -1889,7 +1899,7 @@ llvm::DIType CGDebugInfo::getOrCreateLimitedType(QualType Ty,
     return llvm::DIType();
 
   // Unwrap the type as needed for debug information.
-  Ty = UnwrapTypeForDebugInfo(Ty);
+  Ty = UnwrapTypeForDebugInfo(Ty, CGM.getContext());
 
   llvm::DIType T = getTypeOrNull(Ty);
 

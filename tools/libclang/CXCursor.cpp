@@ -742,7 +742,7 @@ cxcursor::getCursorLabelRef(CXCursor C) {
                                        reinterpret_cast<uintptr_t>(C.data[1])));  
 }
 
-CXCursor cxcursor::MakeCursorOverloadedDeclRef(OverloadExpr *E, 
+CXCursor cxcursor::MakeCursorOverloadedDeclRef(const OverloadExpr *E,
                                                CXTranslationUnit TU) {
   assert(E && TU && "Invalid arguments!");
   OverloadedDeclRefStorage Storage(E);
@@ -754,7 +754,7 @@ CXCursor cxcursor::MakeCursorOverloadedDeclRef(OverloadExpr *E,
   return C;    
 }
 
-CXCursor cxcursor::MakeCursorOverloadedDeclRef(Decl *D, 
+CXCursor cxcursor::MakeCursorOverloadedDeclRef(const Decl *D,
                                                SourceLocation Loc,
                                                CXTranslationUnit TU) {
   assert(D && TU && "Invalid arguments!");
@@ -789,29 +789,29 @@ cxcursor::getCursorOverloadedDeclRef(CXCursor C) {
                                        reinterpret_cast<uintptr_t>(C.data[1])));
 }
 
-Decl *cxcursor::getCursorDecl(CXCursor Cursor) {
-  return (Decl *)Cursor.data[0];
+const Decl *cxcursor::getCursorDecl(CXCursor Cursor) {
+  return static_cast<const Decl *>(Cursor.data[0]);
 }
 
-Expr *cxcursor::getCursorExpr(CXCursor Cursor) {
+const Expr *cxcursor::getCursorExpr(CXCursor Cursor) {
   return dyn_cast_or_null<Expr>(getCursorStmt(Cursor));
 }
 
-Stmt *cxcursor::getCursorStmt(CXCursor Cursor) {
+const Stmt *cxcursor::getCursorStmt(CXCursor Cursor) {
   if (Cursor.kind == CXCursor_ObjCSuperClassRef ||
       Cursor.kind == CXCursor_ObjCProtocolRef ||
       Cursor.kind == CXCursor_ObjCClassRef)
     return 0;
 
-  return (Stmt *)Cursor.data[1];
+  return static_cast<const Stmt *>(Cursor.data[1]);
 }
 
-Attr *cxcursor::getCursorAttr(CXCursor Cursor) {
-  return (Attr *)Cursor.data[1];
+const Attr *cxcursor::getCursorAttr(CXCursor Cursor) {
+  return static_cast<const Attr *>(Cursor.data[1]);
 }
 
-Decl *cxcursor::getCursorParentDecl(CXCursor Cursor) {
-  return (Decl *)Cursor.data[0];
+const Decl *cxcursor::getCursorParentDecl(CXCursor Cursor) {
+  return static_cast<const Decl *>(Cursor.data[0]);
 }
 
 ASTContext &cxcursor::getCursorContext(CXCursor Cursor) {
@@ -822,7 +822,7 @@ ASTUnit *cxcursor::getCursorASTUnit(CXCursor Cursor) {
   CXTranslationUnit TU = getCursorTU(Cursor);
   if (!TU)
     return 0;
-  return static_cast<ASTUnit *>(TU->TUData);
+  return cxtu::getASTUnit(TU);
 }
 
 CXTranslationUnit cxcursor::getCursorTU(CXCursor Cursor) {
@@ -894,12 +894,13 @@ CXCursor cxcursor::getTypeRefCursor(CXCursor cursor) {
   if (cursor.xdata == 0)
     return cursor;
 
-  Expr *E = getCursorExpr(cursor);
+  const Expr *E = getCursorExpr(cursor);
   TypeSourceInfo *Type = 0;
-  if (CXXUnresolvedConstructExpr *
+  if (const CXXUnresolvedConstructExpr *
         UnCtor = dyn_cast<CXXUnresolvedConstructExpr>(E)) {
     Type = UnCtor->getTypeSourceInfo();
-  } else if (CXXTemporaryObjectExpr *Tmp = dyn_cast<CXXTemporaryObjectExpr>(E)){
+  } else if (const CXXTemporaryObjectExpr *Tmp =
+                 dyn_cast<CXXTemporaryObjectExpr>(E)){
     Type = Tmp->getTypeSourceInfo();
   }
 
@@ -955,7 +956,7 @@ CXTranslationUnit clang_Cursor_getTranslationUnit(CXCursor cursor) {
 
 int clang_Cursor_getNumArguments(CXCursor C) {
   if (clang_isDeclaration(C.kind)) {
-    Decl *D = cxcursor::getCursorDecl(C);
+    const Decl *D = cxcursor::getCursorDecl(C);
     if (const ObjCMethodDecl *MD = dyn_cast_or_null<ObjCMethodDecl>(D))
       return MD->param_size();
     if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D))
@@ -967,12 +968,12 @@ int clang_Cursor_getNumArguments(CXCursor C) {
 
 CXCursor clang_Cursor_getArgument(CXCursor C, unsigned i) {
   if (clang_isDeclaration(C.kind)) {
-    Decl *D = cxcursor::getCursorDecl(C);
-    if (ObjCMethodDecl *MD = dyn_cast_or_null<ObjCMethodDecl>(D)) {
+    const Decl *D = cxcursor::getCursorDecl(C);
+    if (const ObjCMethodDecl *MD = dyn_cast_or_null<ObjCMethodDecl>(D)) {
       if (i < MD->param_size())
         return cxcursor::MakeCXCursor(MD->param_begin()[i],
                                       cxcursor::getCursorTU(C));
-    } else if (FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D)) {
+    } else if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D)) {
       if (i < FD->param_size())
         return cxcursor::MakeCXCursor(FD->param_begin()[i],
                                       cxcursor::getCursorTU(C));
@@ -1051,10 +1052,10 @@ unsigned clang_CXCursorSet_insert(CXCursorSet set, CXCursor cursor) {
 CXCompletionString clang_getCursorCompletionString(CXCursor cursor) {
   enum CXCursorKind kind = clang_getCursorKind(cursor);
   if (clang_isDeclaration(kind)) {
-    Decl *decl = getCursorDecl(cursor);
-    if (NamedDecl *namedDecl = dyn_cast_or_null<NamedDecl>(decl)) {
+    const Decl *decl = getCursorDecl(cursor);
+    if (const NamedDecl *namedDecl = dyn_cast_or_null<NamedDecl>(decl)) {
       ASTUnit *unit = getCursorASTUnit(cursor);
-      CodeCompletionResult Result(namedDecl);
+      CodeCompletionResult Result(namedDecl, CCP_Declaration);
       CodeCompletionString *String
         = Result.CreateCodeCompletionString(unit->getASTContext(),
                                             unit->getPreprocessor(),

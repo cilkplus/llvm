@@ -28,6 +28,8 @@ namespace frontend {
     IndexHeaderMap, ///< Like Angled, but marks header maps used when
                        ///  building frameworks.
     System,         ///< Like Angled, but marks system directories.
+    ExternCSystem,  ///< Like System, but headers are implicitly wrapped in
+                    ///  extern "C".
     CSystem,        ///< Like System, but only used for C.
     CXXSystem,      ///< Like System, but only used for C++.
     ObjCSystem,     ///< Like System, but only used for ObjC.
@@ -43,7 +45,6 @@ public:
   struct Entry {
     std::string Path;
     frontend::IncludeDirGroup Group;
-    unsigned IsUserSupplied : 1;
     unsigned IsFramework : 1;
     
     /// IgnoreSysRoot - This is false if an absolute path should be treated
@@ -51,24 +52,10 @@ public:
     /// path.
     unsigned IgnoreSysRoot : 1;
 
-    /// \brief True if this entry is an internal search path.
-    ///
-    /// This typically indicates that users didn't directly provide it, but
-    /// instead it was provided by a compatibility layer for a particular
-    /// system. This isn't redundant with IsUserSupplied (even though perhaps
-    /// it should be) because that is false for user provided '-iwithprefix'
-    /// header search entries.
-    unsigned IsInternal : 1;
-
-    /// \brief True if this entry's headers should be wrapped in extern "C".
-    unsigned ImplicitExternC : 1;
-
-    Entry(StringRef path, frontend::IncludeDirGroup group,
-          bool isUserSupplied, bool isFramework, bool ignoreSysRoot,
-          bool isInternal, bool implicitExternC)
-      : Path(path), Group(group), IsUserSupplied(isUserSupplied),
-        IsFramework(isFramework), IgnoreSysRoot(ignoreSysRoot),
-        IsInternal(isInternal), ImplicitExternC(implicitExternC) {}
+    Entry(StringRef path, frontend::IncludeDirGroup group, bool isFramework,
+          bool ignoreSysRoot)
+      : Path(path), Group(group), IsFramework(isFramework),
+        IgnoreSysRoot(ignoreSysRoot) {}
   };
 
   struct SystemHeaderPrefix {
@@ -129,10 +116,8 @@ public:
 
   /// AddPath - Add the \p Path path to the specified \p Group list.
   void AddPath(StringRef Path, frontend::IncludeDirGroup Group,
-               bool IsUserSupplied, bool IsFramework, bool IgnoreSysRoot,
-               bool IsInternal = false, bool ImplicitExternC = false) {
-    UserEntries.push_back(Entry(Path, Group, IsUserSupplied, IsFramework,
-                                IgnoreSysRoot, IsInternal, ImplicitExternC));
+               bool IsFramework, bool IgnoreSysRoot) {
+    UserEntries.push_back(Entry(Path, Group, IsFramework, IgnoreSysRoot));
   }
 
   /// AddSystemHeaderPrefix - Override whether \#include directives naming a

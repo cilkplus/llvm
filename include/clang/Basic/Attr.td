@@ -29,8 +29,8 @@ class SubsetSubject<AttrSubject base, string description, code check>
   code CheckCode = check;
 }
 
-// This is the type of a variable which C++11 defines [[aligned()]] as being
-// a possible subject.
+// This is the type of a variable which C++11 allows alignas(...) to appertain
+// to.
 def NormalVar : SubsetSubject<Var, "non-register, non-parameter variable",
                               [{S->getStorageClass() != VarDecl::Register &&
                                 S->getKind() != Decl::ImplicitParam &&
@@ -91,6 +91,12 @@ class Declspec<string name> : Spelling<name, "Declspec">;
 class CXX11<string namespace, string name> : Spelling<name, "CXX11"> {
   string Namespace = namespace;
 }
+class Keyword<string name> : Spelling<name, "Keyword">;
+
+class Accessor<string name, list<Spelling> spellings> {
+  string Name = name;
+  list<Spelling> Spellings = spellings;
+}
 
 class Attr {
   // The various ways in which an attribute can be spelled in source
@@ -99,8 +105,10 @@ class Attr {
   list<AttrSubject> Subjects;
   // The arguments allowed on an attribute
   list<Argument> Args = [];
-  // Set to true for attributes with arguments which require delayed parsing. 
-  bit LateParsed = 0;  
+  // Accessors which should be generated for the attribute.
+  list<Accessor> Accessors = [];
+  // Set to true for attributes with arguments which require delayed parsing.
+  bit LateParsed = 0;
   // Set to false to prevent an attribute from being propagated from a template
   // to the instantiation.
   bit Clone = 1;
@@ -114,7 +122,7 @@ class Attr {
   bit Ignored = 0;
   // Set to true if each of the spellings is a distinct attribute.
   bit DistinctSpellings = 0;
-  // Any additional text that should be included verbatim in the class.  
+  // Any additional text that should be included verbatim in the class.
   code AdditionalMembers = [{}];
 }
 
@@ -125,6 +133,13 @@ class InheritableAttr : Attr;
 /// redeclarations, even when it's written on a parameter.
 class InheritableParamAttr : InheritableAttr;
 
+/// An ignored attribute, which we parse but discard with no checking.
+class IgnoredAttr : Attr {
+  let Ignored = 1;
+  let ASTNode = 0;
+  let SemaHandler = 0;
+}
+
 //
 // Attributes begin here
 //
@@ -132,7 +147,7 @@ class InheritableParamAttr : InheritableAttr;
 def AddressSpace : Attr {
   let Spellings = [GNU<"address_space">];
   let Args = [IntArgument<"AddressSpace">];
-  let ASTNode = 0;  
+  let ASTNode = 0;
 }
 
 def Alias : InheritableAttr {
@@ -141,9 +156,15 @@ def Alias : InheritableAttr {
 }
 
 def Aligned : InheritableAttr {
-  let Spellings = [GNU<"aligned">, GNU<"align">, CXX11<"gnu", "aligned">];
+  let Spellings = [GNU<"aligned">, Declspec<"align">, CXX11<"gnu", "aligned">,
+                   Keyword<"alignas">, Keyword<"_Alignas">];
   let Subjects = [NonBitField, NormalVar, Tag];
-  let Args = [AlignedArgument<"Alignment">, BoolArgument<"IsMSDeclSpec">];
+  let Args = [AlignedArgument<"Alignment">];
+  let Accessors = [Accessor<"isGNU", [GNU<"aligned">, CXX11<"gnu","aligned">]>,
+                   Accessor<"isC11", [Keyword<"_Alignas">]>,
+                   Accessor<"isAlignas", [Keyword<"alignas">,
+                                          Keyword<"_Alignas">]>,
+                   Accessor<"isDeclspec",[Declspec<"align">]>];
 }
 
 def AlignMac68k : InheritableAttr {
@@ -200,11 +221,8 @@ def Blocks : InheritableAttr {
   let Args = [EnumArgument<"Type", "BlockType", ["byref"], ["ByRef"]>];
 }
 
-def Bounded : Attr {
+def Bounded : IgnoredAttr {
   let Spellings = [GNU<"bounded">];
-  let ASTNode = 0;
-  let SemaHandler = 0;
-  let Ignored = 1;
 }
 
 def CarriesDependency : InheritableParamAttr {
@@ -214,7 +232,8 @@ def CarriesDependency : InheritableParamAttr {
 }
 
 def CDecl : InheritableAttr {
-  let Spellings = [GNU<"cdecl">, GNU<"__cdecl">, CXX11<"gnu", "cdecl">];
+  let Spellings = [GNU<"cdecl">, CXX11<"gnu", "cdecl">, Keyword<"__cdecl">,
+                   Keyword<"_cdecl">];
 }
 
 // cf_audited_transfer indicates that the given function has been
@@ -296,8 +315,19 @@ def CUDAShared : InheritableAttr {
   let Spellings = [GNU<"shared">];
 }
 
+def C11NoReturn : InheritableAttr {
+  let Spellings = [Keyword<"_Noreturn">];
+  let Subjects = [Function];
+  let SemaHandler = 0;
+}
+
+def CXX11NoReturn : InheritableAttr {
+  let Spellings = [CXX11<"","noreturn">, CXX11<"std","noreturn">];
+  let Subjects = [Function];
+}
+
 def OpenCLKernel : Attr {
-  let Spellings = [GNU<"opencl_kernel_function">];
+  let Spellings = [Keyword<"__kernel">, Keyword<"kernel">];
 }
 
 def OpenCLImageAccess : Attr {
@@ -328,8 +358,8 @@ def FallThrough : Attr {
 }
 
 def FastCall : InheritableAttr {
-  let Spellings = [GNU<"fastcall">, GNU<"__fastcall">,
-                   CXX11<"gnu", "fastcall">];
+  let Spellings = [GNU<"fastcall">, CXX11<"gnu", "fastcall">,
+                   Keyword<"__fastcall">, Keyword<"_fastcall">];
 }
 
 def Final : InheritableAttr {
@@ -466,8 +496,7 @@ def NonNull : InheritableAttr {
 }
 
 def NoReturn : InheritableAttr {
-  let Spellings = [GNU<"noreturn">, CXX11<"gnu", "noreturn">,
-                   CXX11<"", "noreturn">, CXX11<"std", "noreturn">];
+  let Spellings = [GNU<"noreturn">, CXX11<"gnu", "noreturn">];
   // FIXME: Does GCC allow this on the function instead?
   let Subjects = [Function];
 }
@@ -627,16 +656,17 @@ def Sentinel : InheritableAttr {
 }
 
 def StdCall : InheritableAttr {
-  let Spellings = [GNU<"stdcall">, GNU<"__stdcall">, CXX11<"gnu", "stdcall">];
+  let Spellings = [GNU<"stdcall">, CXX11<"gnu", "stdcall">,
+                   Keyword<"__stdcall">, Keyword<"_stdcall">];
 }
 
 def ThisCall : InheritableAttr {
-  let Spellings = [GNU<"thiscall">, GNU<"__thiscall">,
-                   CXX11<"gnu", "thiscall">];
+  let Spellings = [GNU<"thiscall">, CXX11<"gnu", "thiscall">,
+                   Keyword<"__thiscall">, Keyword<"_thiscall">];
 }
 
 def Pascal : InheritableAttr {
-  let Spellings = [GNU<"pascal">];
+  let Spellings = [GNU<"pascal">, Keyword<"__pascal">, Keyword<"_pascal">];
 }
 
 def TransparentUnion : InheritableAttr {
@@ -690,11 +720,8 @@ def VectorSize : Attr {
   let ASTNode = 0;
 }
 
-def VecTypeHint : Attr {
+def VecTypeHint : IgnoredAttr {
   let Spellings = [GNU<"vec_type_hint">];
-  let ASTNode = 0;
-  let SemaHandler = 0;
-  let Ignored = 1;
 }
 
 def Visibility : InheritableAttr {
@@ -890,29 +917,33 @@ def DLLImport : InheritableAttr {
 }
 
 def ForceInline : InheritableAttr {
-  let Spellings = [Declspec<"__forceinline">];
+  let Spellings = [Keyword<"__forceinline">];
 }
 
 def Win64 : InheritableAttr {
-  let Spellings = [Declspec<"w64">];
+  let Spellings = [Keyword<"__w64">];
 }
 
 def Ptr32 : InheritableAttr {
-  let Spellings = [Declspec<"__ptr32">];
+  let Spellings = [Keyword<"__ptr32">];
 }
 
 def Ptr64 : InheritableAttr {
-  let Spellings = [Declspec<"__ptr64">];
+  let Spellings = [Keyword<"__ptr64">];
 }
 
 def SingleInheritance : InheritableAttr {
-  let Spellings = [Declspec<"__single_inheritance">];
+  let Spellings = [Keyword<"__single_inheritance">];
 }
 
 def MultipleInheritance : InheritableAttr {
-  let Spellings = [Declspec<"__multiple_inheritance">];
+  let Spellings = [Keyword<"__multiple_inheritance">];
 }
 
 def VirtualInheritance : InheritableAttr {
-  let Spellings = [Declspec<"__virtual_inheritance">];
+  let Spellings = [Keyword<"__virtual_inheritance">];
+}
+
+def Unaligned : IgnoredAttr {
+  let Spellings = [Keyword<"__unaligned">];
 }

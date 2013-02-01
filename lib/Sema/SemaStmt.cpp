@@ -157,12 +157,15 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
   const Expr *E = dyn_cast_or_null<Expr>(S);
   if (!E)
     return;
+  SourceLocation ExprLoc = E->IgnoreParens()->getExprLoc();
+  if (SourceMgr.isInSystemMacro(ExprLoc) ||
+      SourceMgr.isMacroBodyExpansion(ExprLoc))
+    return;
 
   const Expr *WarnExpr;
   SourceLocation Loc;
   SourceRange R1, R2;
-  if (SourceMgr.isInSystemMacro(E->getExprLoc()) ||
-      !E->isUnusedResultAWarning(WarnExpr, Loc, R1, R2, Context))
+  if (!E->isUnusedResultAWarning(WarnExpr, Loc, R1, R2, Context))
     return;
 
   // If this is a GNU statement expression expanded from a macro, it is probably
@@ -549,6 +552,12 @@ Sema::ActOnCaseStmt(SourceLocation CaseLoc, Expr *LHSVal,
       // Recover from an error by just forgetting about it.
     }
   }
+  
+  LHSVal = ActOnFinishFullExpr(LHSVal, LHSVal->getExprLoc(), false,
+                               getLangOpts().CPlusPlus11).take();
+  if (RHSVal)
+    RHSVal = ActOnFinishFullExpr(RHSVal, RHSVal->getExprLoc(), false,
+                                 getLangOpts().CPlusPlus11).take();
 
   CaseStmt *CS = new (Context) CaseStmt(LHSVal, RHSVal, CaseLoc, DotDotDotLoc,
                                         ColonLoc);
@@ -943,14 +952,7 @@ Sema::ActOnFinishSwitchStmt(SourceLocation SwitchLoc, Stmt *Switch,
       } else {
         // We already verified that the expression has a i-c-e value (C99
         // 6.8.4.2p3) - get that value now.
-        SmallVector<PartialDiagnosticAt, 8> Diags;
-        LoVal = Lo->EvaluateKnownConstInt(Context, &Diags);
-        if (Diags.size() == 1 && 
-            Diags[0].second.getDiagID() == diag::note_constexpr_overflow) {
-          Diag(Lo->getLocStart(), diag::warn_case_constant_overflow) <<
-            LoVal.toString(10);
-          Diag(Diags[0].first, Diags[0].second);
-        }
+        LoVal = Lo->EvaluateKnownConstInt(Context);
 
         // If the LHS is not the same type as the condition, insert an implicit
         // cast.
@@ -2639,8 +2641,7 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   QualType RelatedRetType;
   if (const FunctionDecl *FD = getCurFunctionDecl()) {
     FnRetType = FD->getResultType();
-    if (FD->hasAttr<NoReturnAttr>() ||
-        FD->getType()->getAs<FunctionType>()->getNoReturnAttr())
+    if (FD->isNoReturn())
       Diag(ReturnLoc, diag::warn_noreturn_function_has_return_expr)
         << FD->getDeclName();
   } else if (ObjCMethodDecl *MD = getCurMethodDecl()) {

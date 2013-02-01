@@ -489,8 +489,7 @@ public: // Part of public interface to class.
   /// Get the state and region whose binding this region R corresponds to.
   std::pair<Store, const MemRegion*>
   getLazyBinding(RegionBindingsConstRef B, const MemRegion *R,
-                 const MemRegion *originalRegion,
-                 bool includeSuffix = false);
+                 const MemRegion *originalRegion);
 
   //===------------------------------------------------------------------===//
   // State pruning.
@@ -1220,9 +1219,7 @@ SVal RegionStoreManager::getBinding(RegionBindingsConstRef B, Loc L, QualType T)
 std::pair<Store, const MemRegion *>
 RegionStoreManager::getLazyBinding(RegionBindingsConstRef B,
                                    const MemRegion *R,
-                                   const MemRegion *originalRegion,
-                                   bool includeSuffix) {
-  
+                                   const MemRegion *originalRegion) {
   if (originalRegion != R) {
     if (Optional<SVal> OV = B.getDefaultBinding(R)) {
       if (const nonloc::LazyCompoundVal *V =
@@ -1244,10 +1241,8 @@ RegionStoreManager::getLazyBinding(RegionBindingsConstRef B,
       getLazyBinding(B, FR->getSuperRegion(), originalRegion);
 
     if (X.second) {
-      if (includeSuffix)
-        return std::make_pair(X.first,
-                              MRMgr.getFieldRegionWithSuper(FR, X.second));
-      return X;
+      return std::make_pair(X.first,
+                            MRMgr.getFieldRegionWithSuper(FR, X.second));
     }
         
   }
@@ -1259,11 +1254,9 @@ RegionStoreManager::getLazyBinding(RegionBindingsConstRef B,
       getLazyBinding(B, baseReg->getSuperRegion(), originalRegion);
     
     if (X.second) {
-      if (includeSuffix)
-        return std::make_pair(X.first,
-                              MRMgr.getCXXBaseObjectRegionWithSuper(baseReg,
-                                                                    X.second));
-      return X;
+      return std::make_pair(X.first,
+                            MRMgr.getCXXBaseObjectRegionWithSuper(baseReg,
+                                                                  X.second));
     }
   }
 
@@ -1391,9 +1384,31 @@ RegionStoreManager::getBindingForDerivedDefaultValue(RegionBindingsConstRef B,
 
 SVal RegionStoreManager::getLazyBinding(const MemRegion *LazyBindingRegion,
                                         RegionBindingsRef LazyBinding) {
+  SVal Result;
   if (const ElementRegion *ER = dyn_cast<ElementRegion>(LazyBindingRegion))
-    return getBindingForElement(LazyBinding, ER);
-  return getBindingForField(LazyBinding, cast<FieldRegion>(LazyBindingRegion));
+    Result = getBindingForElement(LazyBinding, ER);
+  else
+    Result = getBindingForField(LazyBinding,
+                                cast<FieldRegion>(LazyBindingRegion));
+
+  // This is a hack to deal with RegionStore's inability to distinguish a
+  // default value for /part/ of an aggregate from a default value for the
+  // /entire/ aggregate. The most common case of this is when struct Outer
+  // has as its first member a struct Inner, which is copied in from a stack
+  // variable. In this case, even if the Outer's default value is symbolic, 0,
+  // or unknown, it gets overridden by the Inner's default value of undefined.
+  //
+  // This is a general problem -- if the Inner is zero-initialized, the Outer
+  // will now look zero-initialized. The proper way to solve this is with a
+  // new version of RegionStore that tracks the extent of a binding as well
+  // as the offset.
+  //
+  // This hack only takes care of the undefined case because that can very
+  // quickly result in a warning.
+  if (Result.isUndef())
+    Result = UnknownVal();
+
+  return Result;
 }
                                         
 SVal
@@ -1408,8 +1423,7 @@ RegionStoreManager::getBindingForFieldOrElementCommon(RegionBindingsConstRef B,
   // Lazy binding?
   Store lazyBindingStore = NULL;
   const MemRegion *lazyBindingRegion = NULL;
-  llvm::tie(lazyBindingStore, lazyBindingRegion) = getLazyBinding(B, R, R,
-                                                                  true);
+  llvm::tie(lazyBindingStore, lazyBindingRegion) = getLazyBinding(B, R, R);
   if (lazyBindingRegion)
     return getLazyBinding(lazyBindingRegion,
                           getRegionBindings(lazyBindingStore));

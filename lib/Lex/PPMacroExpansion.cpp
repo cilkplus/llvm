@@ -55,9 +55,11 @@ void Preprocessor::setMacroInfo(IdentifierInfo *II, MacroInfo *MI) {
     II->setChangedSinceDeserialization();
 }
 
-void Preprocessor::addLoadedMacroInfo(IdentifierInfo *II, MacroInfo *MI) {
+void Preprocessor::addLoadedMacroInfo(IdentifierInfo *II, MacroInfo *MI,
+                                      MacroInfo *Hint) {
   assert(MI && "Missing macro?");
   assert(MI->isFromAST() && "Macro is not from an AST?");
+  assert(!MI->getPreviousDefinition() && "Macro already in chain?");
   
   MacroInfo *&StoredMI = Macros[II];
 
@@ -77,7 +79,7 @@ void Preprocessor::addLoadedMacroInfo(IdentifierInfo *II, MacroInfo *MI) {
     // Simple case: if this is the first actual definition, just put it at
     // th beginning.
     if (!StoredMI->isDefined()) {
-      MI->getFirstDefinition()->setPreviousDefinition(StoredMI);
+      MI->setPreviousDefinition(StoredMI);
       StoredMI = MI;
 
       II->setHasMacroDefinition(true);
@@ -110,14 +112,16 @@ void Preprocessor::addLoadedMacroInfo(IdentifierInfo *II, MacroInfo *MI) {
       MI->setAmbiguous(true);
 
     // Wire this macro information into the chain.
-    MI->getFirstDefinition()->setPreviousDefinition(
-                                                 Prev->getPreviousDefinition());
+    MI->setPreviousDefinition(Prev->getPreviousDefinition());
     Prev->setPreviousDefinition(MI);
     return;
   }
 
   // The macro is not a definition; put it at the end of the list.
-  StoredMI->getFirstDefinition()->setPreviousDefinition(MI);
+  MacroInfo *Prev = Hint? Hint : StoredMI;
+  while (Prev->getPreviousDefinition())
+    Prev = Prev->getPreviousDefinition();
+  Prev->setPreviousDefinition(MI);
 }
 
 void Preprocessor::makeLoadedMacroInfoVisible(IdentifierInfo *II,
@@ -373,6 +377,9 @@ bool Preprocessor::HandleMacroExpandedIdentifier(Token &Identifier,
     }
   }
 
+  // FIXME: Temporarily disable this warning that is currently bogus with a PCH
+  // that redefined a macro without undef'ing it first (test/PCH/macro-redef.c).
+#if 0
   // If the macro definition is ambiguous, complain.
   if (MI->isAmbiguous()) {
     Diag(Identifier, diag::warn_pp_ambiguous_macro)
@@ -388,6 +395,7 @@ bool Preprocessor::HandleMacroExpandedIdentifier(Token &Identifier,
       }
     }
   }
+#endif
 
   // If we started lexing a macro, enter the macro expansion body.
 
@@ -451,7 +459,10 @@ bool Preprocessor::HandleMacroExpandedIdentifier(Token &Identifier,
       if (MacroInfo *NewMI = getMacroInfo(NewII))
         if (!NewMI->isEnabled() || NewMI == MI) {
           Identifier.setFlag(Token::DisableExpand);
-          Diag(Identifier, diag::pp_disabled_macro_expansion);
+          // Don't warn for "#define X X" like "#define bool bool" from
+          // stdbool.h.
+          if (NewMI != MI || MI->isFunctionLike())
+            Diag(Identifier, diag::pp_disabled_macro_expansion);
         }
     }
 
@@ -781,7 +792,7 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
     Feature = Feature.substr(2, Feature.size() - 4);
 
   return llvm::StringSwitch<bool>(Feature)
-           .Case("address_sanitizer", LangOpts.SanitizeAddress)
+           .Case("address_sanitizer", LangOpts.Sanitize.Address)
            .Case("attribute_analyzer_noreturn", true)
            .Case("attribute_availability", true)
            .Case("attribute_availability_with_message", true)
@@ -803,8 +814,8 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
            .Case("cxx_exceptions", LangOpts.Exceptions)
            .Case("cxx_rtti", LangOpts.RTTI)
            .Case("enumerator_attributes", true)
-           .Case("memory_sanitizer", LangOpts.SanitizeMemory)
-           .Case("thread_sanitizer", LangOpts.SanitizeThread)
+           .Case("memory_sanitizer", LangOpts.Sanitize.Memory)
+           .Case("thread_sanitizer", LangOpts.Sanitize.Thread)
            // Objective-C features
            .Case("objc_arr", LangOpts.ObjCAutoRefCount) // FIXME: REMOVE?
            .Case("objc_arc", LangOpts.ObjCAutoRefCount)
@@ -963,6 +974,12 @@ static bool EvaluateHasIncludeCommon(Token &Tok,
   // Save the location of the current token.  If a '(' is later found, use
   // that location.  If not, use the end of this location instead.
   SourceLocation LParenLoc = Tok.getLocation();
+
+  // These expressions are only allowed within a preprocessor directive.
+  if (!PP.isParsingIfOrElifDirective()) {
+    PP.Diag(LParenLoc, diag::err_pp_directive_required) << II->getName();
+    return false;
+  }
 
   // Get '('.
   PP.LexNonComment(Tok);

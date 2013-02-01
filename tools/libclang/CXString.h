@@ -18,15 +18,20 @@
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
+#include <vector>
 
 namespace clang {
 namespace cxstring {
-  
-struct CXStringBuf {
-  SmallString<128> Data;
-  CXTranslationUnit TU;
-  CXStringBuf(CXTranslationUnit tu) : TU(tu) {}
-};
+
+struct CXStringBuf;
+
+/// \brief Create a CXString object for an empty "" string.
+CXString createEmpty();
+
+/// \brief Create a CXString object for an NULL string.
+///
+/// A NULL string should be used as an "invalid" value in case of errors.
+CXString createNull();
 
 /// \brief Create a CXString object from a C string.
 CXString createCXString(const char *String, bool DupString = false);
@@ -37,15 +42,30 @@ CXString createCXString(StringRef String, bool DupString = true);
 /// \brief Create a CXString object that is backed by a string buffer.
 CXString createCXString(CXStringBuf *buf);
 
-/// \brief Create an opaque string pool used for fast geneneration of strings.
-void *createCXStringPool();
+/// \brief A string pool used for fast allocation/deallocation of strings.
+class CXStringPool {
+public:
+  ~CXStringPool();
 
-/// \brief Dispose of a string pool.
-void disposeCXStringPool(void *pool);
-  
+  CXStringBuf *getCXStringBuf(CXTranslationUnit TU);
+
+private:
+  std::vector<CXStringBuf *> Pool;
+
+  friend struct CXStringBuf;
+};
+
+struct CXStringBuf {
+  SmallString<128> Data;
+  CXTranslationUnit TU;
+
+  CXStringBuf(CXTranslationUnit TU) : TU(TU) {}
+
+  /// \brief Return this buffer to the pool.
+  void dispose();
+};
+
 CXStringBuf *getCXStringBuf(CXTranslationUnit TU);
- 
-void disposeCXStringBuf(CXStringBuf *buf);
 
 /// \brief Returns true if the CXString data is managed by a pool.
 bool isManagedByPool(CXString str);

@@ -127,6 +127,7 @@ namespace {
     virtual void writeValue(raw_ostream &OS) const = 0;
     virtual void writeDump(raw_ostream &OS) const = 0;
     virtual void writeDumpChildren(raw_ostream &OS) const {}
+    virtual void writeHasChildren(raw_ostream &OS) const { OS << "false"; }
   };
 
   class SimpleArgument : public Argument {
@@ -384,11 +385,15 @@ namespace {
     void writeDump(raw_ostream &OS) const {
     }
     void writeDumpChildren(raw_ostream &OS) const {
-      OS << "    if (SA->is" << getUpperName() << "Expr())\n";
+      OS << "    if (SA->is" << getUpperName() << "Expr()) {\n";
+      OS << "      lastChild();\n";
       OS << "      dumpStmt(SA->get" << getUpperName() << "Expr());\n";
-      OS << "    else\n";
+      OS << "    } else\n";
       OS << "      dumpType(SA->get" << getUpperName()
          << "Type()->getType());\n";
+    }
+    void writeHasChildren(raw_ostream &OS) const {
+      OS << "SA->is" << getUpperName() << "Expr()";
     }
   };
 
@@ -635,8 +640,10 @@ namespace {
     }
 
     void writeDumpChildren(raw_ostream &OS) const {
+      OS << "    lastChild();\n";
       OS << "    dumpStmt(SA->get" << getUpperName() << "());\n";
     }
+    void writeHasChildren(raw_ostream &OS) const { OS << "true"; }
   };
 
   class VariadicExprArgument : public VariadicArgument {
@@ -676,8 +683,16 @@ namespace {
     void writeDumpChildren(raw_ostream &OS) const {
       OS << "    for (" << getAttrName() << "Attr::" << getLowerName()
          << "_iterator I = SA->" << getLowerName() << "_begin(), E = SA->"
-         << getLowerName() << "_end(); I != E; ++I)\n";
+         << getLowerName() << "_end(); I != E; ++I) {\n";
+      OS << "      if (I + 1 == E)\n";
+      OS << "        lastChild();\n";
       OS << "      dumpStmt(*I);\n";
+      OS << "    }\n";
+    }
+
+    void writeHasChildren(raw_ostream &OS) const {
+      OS << "SA->" << getLowerName() << "_begin() != "
+         << "SA->" << getLowerName() << "_end()";
     }
   };
 }
@@ -735,11 +750,136 @@ static void writeAvailabilityValue(raw_ostream &OS) {
      << "  OS << \"";
 }
 
+static void writePrettyPrintFunction(Record &R, std::vector<Argument*> &Args,
+                                     raw_ostream &OS) {
+  std::vector<Record*> Spellings = R.getValueAsListOfDefs("Spellings");
+
+  OS << "void " << R.getName() << "Attr::printPretty("
+    << "raw_ostream &OS, const PrintingPolicy &Policy) const {\n";
+
+  if (Spellings.size() == 0) {
+    OS << "}\n\n";
+    return;
+  }
+
+  OS <<
+    "  switch (SpellingListIndex) {\n"
+    "  default:\n"
+    "    llvm_unreachable(\"Unknown attribute spelling!\");\n"
+    "    break;\n";
+
+  for (unsigned I = 0; I < Spellings.size(); ++ I) {
+    llvm::SmallString<16> Prefix;
+    llvm::SmallString<8> Suffix;
+    // The actual spelling of the name and namespace (if applicable)
+    // of an attribute without considering prefix and suffix.
+    llvm::SmallString<64> Spelling;
+    std::string Name = Spellings[I]->getValueAsString("Name");
+    std::string Variety = Spellings[I]->getValueAsString("Variety");
+
+    if (Variety == "GNU") {
+      Prefix = " __attribute__((";
+      Suffix = "))";
+    } else if (Variety == "CXX11") {
+      Prefix = " [[";
+      Suffix = "]]";
+      std::string Namespace = Spellings[I]->getValueAsString("Namespace");
+      if (Namespace != "") {
+        Spelling += Namespace;
+        Spelling += "::";
+      }
+    } else if (Variety == "Declspec") {
+      Prefix = " __declspec(";
+      Suffix = ")";
+    } else if (Variety == "Keyword") {
+      Prefix = " ";
+      Suffix = "";
+    } else {
+      llvm_unreachable("Unknown attribute syntax variety!");
+    }
+
+    Spelling += Name;
+
+    OS <<
+      "  case " << I << " : {\n"
+      "    OS << \"" + Prefix.str() + Spelling.str();
+
+    if (Args.size()) OS << "(";
+    if (Spelling == "availability") {
+      writeAvailabilityValue(OS);
+    } else {
+      for (std::vector<Argument*>::const_iterator I = Args.begin(),
+           E = Args.end(); I != E; ++ I) {
+        if (I != Args.begin()) OS << ", ";
+        (*I)->writeValue(OS);
+      }
+    }
+
+    if (Args.size()) OS << ")";
+    OS << Suffix.str() + "\";\n";
+
+    OS <<
+      "    break;\n"
+      "  }\n";
+  }
+
+  // End of the switch statement.
+  OS << "}\n";
+  // End of the print function.
+  OS << "}\n\n";
+}
+
+/// \brief Return the index of a spelling in a spelling list.
+static unsigned getSpellingListIndex(const std::vector<Record*> &SpellingList,
+                                     const Record &Spelling) {
+  assert(SpellingList.size() && "Spelling list is empty!");
+
+  for (unsigned Index = 0; Index < SpellingList.size(); ++Index) {
+    Record *S = SpellingList[Index];
+    if (S->getValueAsString("Variety") != Spelling.getValueAsString("Variety"))
+      continue;
+    if (S->getValueAsString("Variety") == "CXX11" &&
+        S->getValueAsString("Namespace") !=
+        Spelling.getValueAsString("Namespace"))
+      continue;
+    if (S->getValueAsString("Name") != Spelling.getValueAsString("Name"))
+      continue;
+
+    return Index;
+  }
+
+  llvm_unreachable("Unknown spelling!");
+}
+
+static void writeAttrAccessorDefinition(Record &R, raw_ostream &OS) {
+  std::vector<Record*> Accessors = R.getValueAsListOfDefs("Accessors");
+  for (std::vector<Record*>::const_iterator I = Accessors.begin(),
+       E = Accessors.end(); I != E; ++I) {
+    Record *Accessor = *I;
+    std::string Name = Accessor->getValueAsString("Name");
+    std::vector<Record*> Spellings = Accessor->getValueAsListOfDefs(
+      "Spellings");
+    std::vector<Record*> SpellingList = R.getValueAsListOfDefs("Spellings");
+    assert(SpellingList.size() &&
+           "Attribute with empty spelling list can't have accessors!");
+
+    OS << "  bool " << Name << "() const { return SpellingListIndex == ";
+    for (unsigned Index = 0; Index < Spellings.size(); ++Index) {
+      OS << getSpellingListIndex(SpellingList, *Spellings[Index]);
+      if (Index != Spellings.size() -1)
+        OS << " ||\n    SpellingListIndex == ";
+      else
+        OS << "; }\n";
+    }
+  }
+}
+
 namespace clang {
 
 // Emits the class definitions for attributes.
 void EmitClangAttrClass(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
+  emitSourceFileHeader("Attribute classes' definitions", OS);
+
   OS << "#ifndef LLVM_CLANG_ATTR_CLASSES_INC\n";
   OS << "#define LLVM_CLANG_ATTR_CLASSES_INC\n\n";
 
@@ -783,9 +923,12 @@ void EmitClangAttrClass(RecordKeeper &Records, raw_ostream &OS) {
       (*ai)->writeCtorParameters(OS);
       OS << "\n";
     }
-    
+
+    OS << "              , ";
+    OS << "unsigned SI = 0\n";
+
     OS << "             )\n";
-    OS << "    : " << SuperName << "(attr::" << R.getName() << ", R)\n";
+    OS << "    : " << SuperName << "(attr::" << R.getName() << ", R, SI)\n";
 
     for (ai = Args.begin(); ai != ae; ++ai) {
       OS << "              , ";
@@ -802,8 +945,10 @@ void EmitClangAttrClass(RecordKeeper &Records, raw_ostream &OS) {
     OS << "  }\n\n";
 
     OS << "  virtual " << R.getName() << "Attr *clone (ASTContext &C) const;\n";
-    OS << "  virtual void printPretty(raw_ostream &OS,"
+    OS << "  virtual void printPretty(raw_ostream &OS,\n"
        << "                           const PrintingPolicy &Policy) const;\n";
+
+    writeAttrAccessorDefinition(R, OS);
 
     for (ai = Args.begin(); ai != ae; ++ai) {
       (*ai)->writeAccessors(OS);
@@ -828,7 +973,7 @@ void EmitClangAttrClass(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits the class method definitions for attributes.
 void EmitClangAttrImpl(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
+  emitSourceFileHeader("Attribute classes' member function definitions", OS);
 
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr");
   std::vector<Record*>::iterator i = Attrs.begin(), e = Attrs.end(), ri, re;
@@ -841,7 +986,6 @@ void EmitClangAttrImpl(RecordKeeper &Records, raw_ostream &OS) {
       continue;
     
     std::vector<Record*> ArgRecords = R.getValueAsListOfDefs("Args");
-    std::vector<Record*> Spellings = R.getValueAsListOfDefs("Spellings");
     std::vector<Argument*> Args;
     for (ri = ArgRecords.begin(), re = ArgRecords.end(); ri != re; ++ri)
       Args.push_back(createArgument(**ri, R.getName()));
@@ -856,26 +1000,9 @@ void EmitClangAttrImpl(RecordKeeper &Records, raw_ostream &OS) {
       OS << ", ";
       (*ai)->writeCloneArgs(OS);
     }
-    OS << ");\n}\n\n";
+    OS << ", getSpellingListIndex());\n}\n\n";
 
-    OS << "void " << R.getName() << "Attr::printPretty("
-       << "raw_ostream &OS, const PrintingPolicy &Policy) const {\n";
-    if (Spellings.begin() != Spellings.end()) {
-      std::string Spelling = (*Spellings.begin())->getValueAsString("Name");
-      OS << "  OS << \" __attribute__((" << Spelling;
-      if (Args.size()) OS << "(";
-      if (Spelling == "availability") {
-        writeAvailabilityValue(OS);
-      } else {
-        for (ai = Args.begin(); ai != ae; ++ai) {
-          if (ai!=Args.begin()) OS <<", ";
-          (*ai)->writeValue(OS);
-        }
-      }
-      if (Args.size()) OS << ")";
-      OS << "))\";\n";
-    }
-    OS << "}\n\n";
+    writePrettyPrintFunction(R, Args, OS);
   }
 }
 
@@ -902,7 +1029,7 @@ namespace clang {
 
 // Emits the enumeration list for attributes.
 void EmitClangAttrList(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
+  emitSourceFileHeader("List of all attributes that Clang recognizes", OS);
 
   OS << "#ifndef LAST_ATTR\n";
   OS << "#define LAST_ATTR(NAME) ATTR(NAME)\n";
@@ -955,7 +1082,7 @@ void EmitClangAttrList(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits the code to read an attribute from a precompiled header.
 void EmitClangAttrPCHRead(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
+  emitSourceFileHeader("Attribute deserialization code", OS);
 
   Record *InhClass = Records.getClass("InheritableAttr");
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr"),
@@ -999,6 +1126,8 @@ void EmitClangAttrPCHRead(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits the code to write an attribute to a precompiled header.
 void EmitClangAttrPCHWrite(RecordKeeper &Records, raw_ostream &OS) {
+  emitSourceFileHeader("Attribute serialization code", OS);
+
   Record *InhClass = Records.getClass("InheritableAttr");
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr"), Args;
   std::vector<Record*>::iterator i = Attrs.begin(), e = Attrs.end(), ai, ae;
@@ -1028,7 +1157,8 @@ void EmitClangAttrPCHWrite(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits the list of spellings for attributes.
 void EmitClangAttrSpellingList(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
+  emitSourceFileHeader("llvm::StringSwitch code to match all known attributes",
+                       OS);
 
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr");
   
@@ -1044,9 +1174,70 @@ void EmitClangAttrSpellingList(RecordKeeper &Records, raw_ostream &OS) {
 
 }
 
+void EmitClangAttrSpellingListIndex(RecordKeeper &Records, raw_ostream &OS) {
+  emitSourceFileHeader("Code to translate different attribute spellings "
+                       "into internal identifiers", OS);
+
+  OS <<
+    "  unsigned Index = 0;\n"
+    "  switch (AttrKind) {\n"
+    "  default:\n"
+    "    llvm_unreachable(\"Unknown attribute kind!\");\n"
+    "    break;\n";
+
+  std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr");
+  for (std::vector<Record*>::const_iterator I = Attrs.begin(), E = Attrs.end();
+       I != E; ++I) {
+    Record &R = **I;
+    // We only care about attributes that participate in Sema checking, so
+    // skip those attributes that are not able to make their way to Sema.
+    if (!R.getValueAsBit("SemaHandler"))
+      continue;
+
+    std::vector<Record*> Spellings = R.getValueAsListOfDefs("Spellings");
+    // Each distinct spelling yields an attribute kind.
+    if (R.getValueAsBit("DistinctSpellings")) {
+      for (unsigned I = 0; I < Spellings.size(); ++ I) {
+        OS <<
+          "  case AT_" << Spellings[I]->getValueAsString("Name") << ": \n"
+          "    Index = " << I << ";\n"
+          "  break;\n";
+      }
+    } else {
+      OS << "  case AT_" << R.getName() << " : {\n";
+      for (unsigned I = 0; I < Spellings.size(); ++ I) {
+        SmallString<16> Namespace;
+        if (Spellings[I]->getValueAsString("Variety") == "CXX11")
+          Namespace = Spellings[I]->getValueAsString("Namespace");
+        else
+          Namespace = "";
+
+        OS << "    if (Name == \""
+          << Spellings[I]->getValueAsString("Name") << "\" && "
+          << "SyntaxUsed == "
+          << StringSwitch<unsigned>(Spellings[I]->getValueAsString("Variety"))
+            .Case("GNU", 0)
+            .Case("CXX11", 1)
+            .Case("Declspec", 2)
+            .Case("Keyword", 3)
+            .Default(0)
+          << " && Scope == \"" << Namespace << "\")\n"
+          << "        return " << I << ";\n";
+      }
+
+      OS << "    break;\n";
+      OS << "  }\n";
+    }
+  }
+
+  OS << "  }\n";
+  OS << "  return Index;\n";
+}
+
 // Emits the LateParsed property for attributes.
 void EmitClangAttrLateParsedList(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
+  emitSourceFileHeader("llvm::StringSwitch code to match late parsed "
+                       "attributes", OS);
 
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr");
 
@@ -1074,7 +1265,7 @@ void EmitClangAttrLateParsedList(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits code to instantiate dependent attributes on templates.
 void EmitClangAttrTemplateInstantiate(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
+  emitSourceFileHeader("Template instantiation code for attributes", OS);
 
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr");
 
@@ -1147,8 +1338,8 @@ void EmitClangAttrTemplateInstantiate(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits the list of parsed attributes.
 void EmitClangAttrParsedAttrList(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
-  
+  emitSourceFileHeader("List of all attributes that Clang recognizes", OS);
+
   OS << "#ifndef PARSED_ATTR\n";
   OS << "#define PARSED_ATTR(NAME) NAME\n";
   OS << "#endif\n\n";
@@ -1185,9 +1376,8 @@ void EmitClangAttrParsedAttrList(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits the kind list of parsed attributes
 void EmitClangAttrParsedAttrKinds(RecordKeeper &Records, raw_ostream &OS) {
-  OS << "// This file is generated by TableGen. Do not edit.\n\n";
-  OS << "\n";
-  
+  emitSourceFileHeader("Attribute name matcher", OS);
+
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr");
 
   std::vector<StringMatcher::StringPair> Matches;
@@ -1237,6 +1427,8 @@ void EmitClangAttrParsedAttrKinds(RecordKeeper &Records, raw_ostream &OS) {
 
 // Emits the code to dump an attribute.
 void EmitClangAttrDump(RecordKeeper &Records, raw_ostream &OS) {
+  emitSourceFileHeader("Attribute dumper", OS);
+
   OS <<
     "  switch (A->getKind()) {\n"
     "  default:\n"
@@ -1256,9 +1448,27 @@ void EmitClangAttrDump(RecordKeeper &Records, raw_ostream &OS) {
       for (std::vector<Record*>::iterator I = Args.begin(), E = Args.end();
            I != E; ++I)
         createArgument(**I, R.getName())->writeDump(OS);
+
+      // Code for detecting the last child.
+      OS << "    bool OldMoreChildren = hasMoreChildren();\n";
+      OS << "    bool MoreChildren = OldMoreChildren;\n";     
+
       for (std::vector<Record*>::iterator I = Args.begin(), E = Args.end();
-           I != E; ++I)
+           I != E; ++I) {
+        // More code for detecting the last child.
+        OS << "    MoreChildren = OldMoreChildren";
+        for (std::vector<Record*>::iterator Next = I + 1; Next != E; ++Next) {
+          OS << " || ";
+          createArgument(**Next, R.getName())->writeHasChildren(OS);
+        }
+        OS << ";\n";
+        OS << "    setMoreChildren(MoreChildren);\n";
+
         createArgument(**I, R.getName())->writeDumpChildren(OS);
+      }
+
+      // Reset the last child.
+      OS << "    setMoreChildren(OldMoreChildren);\n";
     }
     OS <<
       "    break;\n"

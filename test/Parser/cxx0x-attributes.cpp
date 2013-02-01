@@ -210,8 +210,11 @@ template<typename...Ts> void variadic() {
 
 // Expression tests
 void bar () {
-  [] () [[noreturn]] { return; } (); // expected-error {{should not return}}
-  [] () [[noreturn]] { throw; } ();
+  // FIXME: GCC accepts [[gnu::noreturn]] on a lambda, even though it appertains
+  // to the operator()'s type, and GCC does not otherwise accept attributes
+  // applied to types. Use that to test this.
+  [] () [[gnu::noreturn]] { return; } (); // expected-warning {{attribute 'noreturn' ignored}} FIXME-error {{should not return}}
+  [] () [[gnu::noreturn]] { throw; } (); // expected-warning {{attribute 'noreturn' ignored}}
   new int[42][[]][5][[]]{};
 }
 
@@ -252,11 +255,11 @@ namespace arguments {
 }
 
 // Forbid attributes on decl specifiers.
-unsigned [[gnu::used]] static int [[gnu::unused]] v1; // expected-warning {{attribute 'unused' ignored, because it is not attached to a declaration}} \
+unsigned [[gnu::used]] static int [[gnu::unused]] v1; // expected-error {{'unused' attribute cannot be applied to types}} \
            expected-error {{an attribute list cannot appear here}}
-typedef [[gnu::used]] unsigned long [[gnu::unused]] v2; // expected-warning {{attribute 'unused' ignored, because it is not attached to a declaration}} \
+typedef [[gnu::used]] unsigned long [[gnu::unused]] v2; // expected-error {{'unused' attribute cannot be applied to types}} \
           expected-error {{an attribute list cannot appear here}}
-int [[carries_dependency]] foo(int [[carries_dependency]] x); // expected-warning 2{{attribute 'carries_dependency' ignored, because it is not attached to a declaration}}
+int [[carries_dependency]] foo(int [[carries_dependency]] x); // expected-error 2{{'carries_dependency' attribute cannot be applied to types}}
 
 // Forbid [[gnu::...]] attributes on declarator chunks.
 int *[[gnu::unused]] v3; // expected-warning {{attribute 'unused' ignored}}

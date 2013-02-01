@@ -318,10 +318,7 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
 
   // Add Ubsan runtime library, if required.
   if (Sanitize.needsUbsanRt()) {
-    if (Args.hasArg(options::OPT_dynamiclib) ||
-        Args.hasArg(options::OPT_bundle)) {
-      // Assume the binary will provide the Ubsan runtime.
-    } else if (isTargetIPhoneOS()) {
+    if (isTargetIPhoneOS()) {
       getDriver().Diag(diag::err_drv_clang_unsupported_per_platform)
         << "-fsanitize=undefined";
     } else {
@@ -342,12 +339,10 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
       getDriver().Diag(diag::err_drv_clang_unsupported_per_platform)
         << "-fsanitize=address";
     } else {
-      AddLinkRuntimeLib(Args, CmdArgs, "libclang_rt.asan_osx.a", true);
+      AddLinkRuntimeLib(Args, CmdArgs, "libclang_rt.asan_osx_dynamic.dylib", true);
 
-      // The ASAN runtime library requires C++ and CoreFoundation.
+      // The ASAN runtime library requires C++.
       AddCXXStdlibLibArgs(Args, CmdArgs);
-      CmdArgs.push_back("-framework");
-      CmdArgs.push_back("CoreFoundation");
     }
   }
 
@@ -1086,6 +1081,12 @@ Generic_GCC::GCCInstallationDetector::GCCInstallationDetector(
   // Declare a bunch of static data sets that we'll select between below. These
   // are specifically designed to always refer to string literals to avoid any
   // lifetime or initialization issues.
+  static const char *const AArch64LibDirs[] = { "/lib" };
+  static const char *const AArch64Triples[] = {
+    "aarch64-none-linux-gnu",
+    "aarch64-linux-gnu"
+  };
+
   static const char *const ARMLibDirs[] = { "/lib" };
   static const char *const ARMTriples[] = {
     "arm-linux-gnueabi",
@@ -1151,6 +1152,16 @@ Generic_GCC::GCCInstallationDetector::GCCInstallationDetector(
   };
 
   switch (TargetTriple.getArch()) {
+  case llvm::Triple::aarch64:
+    LibDirs.append(AArch64LibDirs, AArch64LibDirs 
+                   + llvm::array_lengthof(AArch64LibDirs));
+    TripleAliases.append(
+      AArch64Triples, AArch64Triples + llvm::array_lengthof(AArch64Triples));
+    MultiarchLibDirs.append(
+      AArch64LibDirs, AArch64LibDirs + llvm::array_lengthof(AArch64LibDirs));
+    MultiarchTripleAliases.append(
+      AArch64Triples, AArch64Triples + llvm::array_lengthof(AArch64Triples));
+    break;
   case llvm::Triple::arm:
   case llvm::Triple::thumb:
     LibDirs.append(ARMLibDirs, ARMLibDirs + llvm::array_lengthof(ARMLibDirs));
@@ -2223,6 +2234,9 @@ static std::string getMultiarchTriple(const llvm::Triple TargetTriple,
     if (llvm::sys::fs::exists(SysRoot + "/lib/x86_64-linux-gnu"))
       return "x86_64-linux-gnu";
     return TargetTriple.str();
+  case llvm::Triple::aarch64:
+    if (llvm::sys::fs::exists(SysRoot + "/lib/aarch64-linux-gnu"))
+      return "aarch64-linux-gnu";
   case llvm::Triple::mips:
     if (llvm::sys::fs::exists(SysRoot + "/lib/mips-linux-gnu"))
       return "mips-linux-gnu";
@@ -2449,6 +2463,7 @@ void Linux::addClangTargetOptions(const ArgList &DriverArgs,
   const Generic_GCC::GCCVersion &V = GCCInstallation.getVersion();
   bool UseInitArrayDefault
     = V >= Generic_GCC::GCCVersion::Parse("4.7.0") ||
+      getTriple().getArch() == llvm::Triple::aarch64 ||
       getTriple().getEnvironment() == llvm::Triple::Android;
   if (DriverArgs.hasFlag(options::OPT_fuse_init_array,
                          options::OPT_fno_use_init_array,
@@ -2511,6 +2526,9 @@ void Linux::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
     "/usr/include/i686-linux-gnu",
     "/usr/include/i486-linux-gnu"
   };
+  const StringRef AArch64MultiarchIncludeDirs[] = {
+    "/usr/include/aarch64-linux-gnu"
+  };
   const StringRef ARMMultiarchIncludeDirs[] = {
     "/usr/include/arm-linux-gnueabi"
   };
@@ -2534,6 +2552,8 @@ void Linux::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
     MultiarchIncludeDirs = X86_64MultiarchIncludeDirs;
   } else if (getTriple().getArch() == llvm::Triple::x86) {
     MultiarchIncludeDirs = X86MultiarchIncludeDirs;
+  } else if (getTriple().getArch() == llvm::Triple::aarch64) {
+    MultiarchIncludeDirs = AArch64MultiarchIncludeDirs;
   } else if (getTriple().getArch() == llvm::Triple::arm) {
     if (getTriple().getEnvironment() == llvm::Triple::GNUEABIHF)
       MultiarchIncludeDirs = ARMHFMultiarchIncludeDirs;

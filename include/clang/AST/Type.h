@@ -784,8 +784,8 @@ public:
   /// Executing \c getUnqualifiedType() on the type \c DifferenceType will
   /// desugar until we hit the type \c Integer, which has no qualifiers on it.
   ///
-  /// The resulting type might still be qualified if it's an array
-  /// type.  To strip qualifiers even from within an array type, use
+  /// The resulting type might still be qualified if it's sugar for an array
+  /// type.  To strip qualifiers even from within a sugared array type, use
   /// ASTContext::getUnqualifiedArrayType.
   inline QualType getUnqualifiedType() const;
 
@@ -795,8 +795,8 @@ public:
   /// Like getUnqualifiedType(), but also returns the set of
   /// qualifiers that were built up.
   ///
-  /// The resulting type might still be qualified if it's an array
-  /// type.  To strip qualifiers even from within an array type, use
+  /// The resulting type might still be qualified if it's sugar for an array
+  /// type.  To strip qualifiers even from within a sugared array type, use
   /// ASTContext::getUnqualifiedArrayType.
   inline SplitQualType getSplitUnqualifiedType() const;
 
@@ -1583,6 +1583,8 @@ public:
   bool isImage3dT() const;                      // OpenCL image3d_t
 
   bool isImageType() const;                     // Any OpenCL image type
+
+  bool isEventT() const;                        // OpenCL event_t
 
   bool isOpenCLSpecificType() const;            // Any OpenCL specific type
 
@@ -2706,6 +2708,9 @@ public:
 
   bool getHasRegParm() const { return getExtInfo().getHasRegParm(); }
   unsigned getRegParmType() const { return getExtInfo().getRegParm(); }
+  /// \brief Determine whether this function type includes the GNU noreturn
+  /// attribute. The C++11 [[noreturn]] attribute does not affect the function
+  /// type.
   bool getNoReturnAttr() const { return getExtInfo().getNoReturn(); }
   CallingConv getCallConv() const { return getExtInfo().getCC(); }
   ExtInfo getExtInfo() const { return ExtInfo(FunctionTypeBits.ExtInfo); }
@@ -4913,6 +4918,10 @@ inline bool Type::isImage2dArrayT() const {
 inline bool Type::isImage3dT() const {
   return isSpecificBuiltinType(BuiltinType::OCLImage3d);
 }
+inline bool Type::isEventT() const {
+  return isSpecificBuiltinType(BuiltinType::OCLEvent);
+}
+
 inline bool Type::isImageType() const {
   return isImage3dT() ||
          isImage2dT() || isImage2dArrayT() ||
@@ -4920,7 +4929,7 @@ inline bool Type::isImageType() const {
 }
 
 inline bool Type::isOpenCLSpecificType() const {
-  return isImageType();
+  return isImageType() || isEventT();
 }
 
 inline bool Type::isTemplateTypeParmType() const {

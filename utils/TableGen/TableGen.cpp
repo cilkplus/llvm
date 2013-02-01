@@ -29,6 +29,7 @@ enum ActionType {
   GenClangAttrPCHRead,
   GenClangAttrPCHWrite,
   GenClangAttrSpellingList,
+  GenClangAttrSpellingListIndex,
   GenClangAttrLateParsedList,
   GenClangAttrTemplateInstantiate,
   GenClangAttrParsedAttrList,
@@ -43,6 +44,7 @@ enum ActionType {
   GenClangSACheckers,
   GenClangCommentHTMLTags,
   GenClangCommentHTMLTagsProperties,
+  GenClangCommentHTMLNamedCharacterReferences,
   GenClangCommentCommandInfo,
   GenOptParserDefs, GenOptParserImpl,
   GenArmNeon,
@@ -70,6 +72,9 @@ namespace {
                     clEnumValN(GenClangAttrSpellingList,
                                "gen-clang-attr-spelling-list",
                                "Generate a clang attribute spelling list"),
+                    clEnumValN(GenClangAttrSpellingListIndex,
+                               "gen-clang-attr-spelling-index",
+                               "Generate a clang attribute spelling index"),
                     clEnumValN(GenClangAttrLateParsedList,
                                "gen-clang-attr-late-parsed-list",
                                "Generate a clang attribute LateParsed list"),
@@ -107,6 +112,10 @@ namespace {
                                "gen-clang-comment-html-tags-properties",
                                "Generate efficient matchers for HTML tag "
                                "properties"),
+                    clEnumValN(GenClangCommentHTMLNamedCharacterReferences,
+                               "gen-clang-comment-html-named-character-references",
+                               "Generate function to translate named character "
+                               "references to UTF-8 sequences"),
                     clEnumValN(GenClangCommentCommandInfo,
                                "gen-clang-comment-command-info",
                                "Generate list of commands that are used in "
@@ -143,6 +152,9 @@ bool ClangTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
     break;
   case GenClangAttrSpellingList:
     EmitClangAttrSpellingList(Records, OS);
+    break;
+  case GenClangAttrSpellingListIndex:
+    EmitClangAttrSpellingListIndex(Records, OS);
     break;
   case GenClangAttrLateParsedList:
     EmitClangAttrLateParsedList(Records, OS);
@@ -186,6 +198,9 @@ bool ClangTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
     break;
   case GenClangCommentHTMLTagsProperties:
     EmitClangCommentHTMLTagsProperties(Records, OS);
+    break;
+  case GenClangCommentHTMLNamedCharacterReferences:
+    EmitClangCommentHTMLNamedCharacterReferences(Records, OS);
     break;
   case GenClangCommentCommandInfo:
     EmitClangCommentCommandInfo(Records, OS);

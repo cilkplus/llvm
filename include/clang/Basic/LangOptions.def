@@ -116,6 +116,7 @@ LANGOPT(ShortEnums        , 1, 0, "short enum types")
 
 LANGOPT(OpenCL            , 1, 0, "OpenCL")
 LANGOPT(OpenCLVersion     , 32, 0, "OpenCL version")
+LANGOPT(NativeHalfType    , 1, 0, "Native half type support")
 LANGOPT(CUDA              , 1, 0, "CUDA")
 LANGOPT(OpenMP            , 1, 0, "OpenMP support")
 
@@ -164,17 +165,9 @@ VALUE_LANGOPT(MSCVersion, 32, 0,
 
 LANGOPT(ApplePragmaPack, 1, 0, "Apple gcc-compatible #pragma pack handling")
 
-BENIGN_LANGOPT(EmitMicrosoftInlineAsm , 1, 0, 
-               "Enable emission of MS-style inline assembly.")
-
 LANGOPT(CilkPlus, 1, 0, "Intel Cilk Plus extensions to C/C++")
 
 BENIGN_LANGOPT(RetainCommentsFromSystemHeaders, 1, 0, "retain documentation comments from system headers in the AST")
-
-/// Runtime sanitizers.
-#define SANITIZER(NAME, ID) \
-BENIGN_LANGOPT(Sanitize##ID, 1, 0, NAME " sanitizer")
-#include "clang/Basic/Sanitizers.def"
 
 #undef LANGOPT
 #undef VALUE_LANGOPT

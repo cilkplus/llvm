@@ -12,6 +12,7 @@
 #include "SanitizerArgs.h"
 #include "ToolChains.h"
 #include "clang/Basic/ObjCRuntime.h"
+#include "clang/Basic/Version.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Arg.h"
 #include "clang/Driver/ArgList.h"
@@ -227,6 +228,7 @@ static bool forwardToGCC(const Option &O) {
 }
 
 void Clang::AddPreprocessingOptions(Compilation &C,
+                                    const JobAction &JA,
                                     const Driver &D,
                                     const ArgList &Args,
                                     ArgStringList &CmdArgs,
@@ -247,7 +249,7 @@ void Clang::AddPreprocessingOptions(Compilation &C,
     const char *DepFile;
     if (Arg *MF = Args.getLastArg(options::OPT_MF)) {
       DepFile = MF->getValue();
-      C.addFailureResultFile(DepFile);
+      C.addFailureResultFile(DepFile, &JA);
     } else if (Output.getType() == types::TY_Dependencies) {
       DepFile = Output.getFilename();
     } else if (A->getOption().matches(options::OPT_M) ||
@@ -255,7 +257,7 @@ void Clang::AddPreprocessingOptions(Compilation &C,
       DepFile = "-";
     } else {
       DepFile = getDependencyFileName(Args, Inputs);
-      C.addFailureResultFile(DepFile);
+      C.addFailureResultFile(DepFile, &JA);
     }
     CmdArgs.push_back("-dependency-file");
     CmdArgs.push_back(DepFile);
@@ -547,6 +549,7 @@ static bool isSignedCharDefault(const llvm::Triple &Triple) {
   default:
     return true;
 
+  case llvm::Triple::aarch64:
   case llvm::Triple::arm:
   case llvm::Triple::ppc:
   case llvm::Triple::ppc64:
@@ -1050,6 +1053,7 @@ static std::string getPPCTargetCPU(const ArgList &Args) {
       .Case("970", "970")
       .Case("G5", "g5")
       .Case("a2", "a2")
+      .Case("a2q", "a2q")
       .Case("e500mc", "e500mc")
       .Case("e5500", "e5500")
       .Case("power6", "pwr6")
@@ -1080,6 +1084,17 @@ void Clang::AddPPCTargetArgs(const ArgList &Args,
   if (!TargetCPUName.empty()) {
     CmdArgs.push_back("-target-cpu");
     CmdArgs.push_back(Args.MakeArgString(TargetCPUName.c_str()));
+  }
+
+  // Allow override of the Altivec feature.
+  if (Args.hasFlag(options::OPT_fno_altivec, options::OPT_faltivec, false)) {
+    CmdArgs.push_back("-target-feature");
+    CmdArgs.push_back("-altivec");
+  }
+
+  if (Args.hasFlag(options::OPT_mno_qpx, options::OPT_mqpx, false)) {
+    CmdArgs.push_back("-target-feature");
+    CmdArgs.push_back("-qpx");
   }
 }
 
@@ -1443,8 +1458,10 @@ static bool UseRelaxAll(Compilation &C, const ArgList &Args) {
 }
 
 SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args)
-    : Kind(0), BlacklistFile(""), MsanTrackOrigins(false) {
-
+    : Kind(0), BlacklistFile(""), MsanTrackOrigins(false),
+      AsanZeroBaseShadow(false) {
+  unsigned AllKinds = 0;  // All kinds of sanitizers that were turned on
+                          // at least once (possibly, disabled further).
   for (ArgList::const_iterator I = Args.begin(), E = Args.end(); I != E; ++I) {
     unsigned Add, Remove;
     if (!parse(D, Args, *I, Add, Remove, true))
@@ -1452,6 +1469,34 @@ SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args)
     (*I)->claim();
     Kind |= Add;
     Kind &= ~Remove;
+    AllKinds |= Add;
+  }
+
+  UbsanTrapOnError =
+    Args.hasArg(options::OPT_fcatch_undefined_behavior) ||
+    Args.hasFlag(options::OPT_fsanitize_undefined_trap_on_error,
+                 options::OPT_fno_sanitize_undefined_trap_on_error, false);
+
+  if (Args.hasArg(options::OPT_fcatch_undefined_behavior) &&
+      !Args.hasFlag(options::OPT_fsanitize_undefined_trap_on_error,
+                    options::OPT_fno_sanitize_undefined_trap_on_error, true)) {
+    D.Diag(diag::err_drv_argument_not_allowed_with)
+      << "-fcatch-undefined-behavior"
+      << "-fno-sanitize-undefined-trap-on-error";
+  }
+
+  // Warn about undefined sanitizer options that require runtime support.
+  if (UbsanTrapOnError && notAllowedWithTrap()) {
+    if (Args.hasArg(options::OPT_fcatch_undefined_behavior))
+      D.Diag(diag::err_drv_argument_not_allowed_with)
+        << lastArgumentForKind(D, Args, NotAllowedWithTrap)
+        << "-fcatch-undefined-behavior";
+    else if (Args.hasFlag(options::OPT_fsanitize_undefined_trap_on_error,
+                          options::OPT_fno_sanitize_undefined_trap_on_error,
+                          false))
+      D.Diag(diag::err_drv_argument_not_allowed_with)
+        << lastArgumentForKind(D, Args, NotAllowedWithTrap)
+        << "-fsanitize-undefined-trap-on-error";
   }
 
   // Only one runtime library can be used at once.
@@ -1472,11 +1517,12 @@ SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args)
       << lastArgumentForKind(D, Args, NeedsMsanRt);
 
   // If -fsanitize contains extra features of ASan, it should also
-  // explicitly contain -fsanitize=address.
-  if (NeedsAsan && ((Kind & Address) == 0))
-    D.Diag(diag::err_drv_argument_only_allowed_with)
-      << lastArgumentForKind(D, Args, NeedsAsanRt)
-      << "-fsanitize=address";
+  // explicitly contain -fsanitize=address (probably, turned off later in the
+  // command line).
+  if ((Kind & AddressFull) != 0 && (AllKinds & Address) == 0)
+    D.Diag(diag::warn_drv_unused_sanitizer)
+     << lastArgumentForKind(D, Args, AddressFull)
+     << "-fsanitize=address";
 
   // Parse -f(no-)sanitize-blacklist options.
   if (Arg *BLArg = Args.getLastArg(options::OPT_fsanitize_blacklist,
@@ -1492,10 +1538,17 @@ SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args)
   }
 
   // Parse -f(no-)sanitize-memory-track-origins options.
-  if (Kind & Memory)
+  if (NeedsMsan)
     MsanTrackOrigins =
       Args.hasFlag(options::OPT_fsanitize_memory_track_origins,
                    options::OPT_fno_sanitize_memory_track_origins,
+                   /* Default */false);
+
+  // Parse -f(no-)sanitize-address-zero-base-shadow options.
+  if (NeedsAsan)
+    AsanZeroBaseShadow =
+      Args.hasFlag(options::OPT_fsanitize_address_zero_base_shadow,
+                   options::OPT_fno_sanitize_address_zero_base_shadow,
                    /* Default */false);
 }
 
@@ -1516,6 +1569,13 @@ static void addAsanRTLinux(const ToolChain &TC, const ArgList &Args,
     CmdArgs.insert(CmdArgs.begin(), Args.MakeArgString(LibAsan));
   } else {
     if (!Args.hasArg(options::OPT_shared)) {
+      bool ZeroBaseShadow = Args.hasFlag(
+          options::OPT_fsanitize_address_zero_base_shadow,
+          options::OPT_fno_sanitize_address_zero_base_shadow, false);
+      if (ZeroBaseShadow && !Args.hasArg(options::OPT_pie)) {
+        TC.getDriver().Diag(diag::err_drv_argument_only_allowed_with) <<
+            "-fsanitize-address-zero-base-shadow" << "-pie";
+      }
       // LibAsan is "libclang_rt.asan-<ArchName>.a" in the Linux library
       // resource directory.
       SmallString<128> LibAsan(TC.getDriver().ResourceDir);
@@ -1586,17 +1646,15 @@ static void addMsanRTLinux(const ToolChain &TC, const ArgList &Args,
 /// (Linux).
 static void addUbsanRTLinux(const ToolChain &TC, const ArgList &Args,
                             ArgStringList &CmdArgs) {
-  if (!Args.hasArg(options::OPT_shared)) {
-    // LibUbsan is "libclang_rt.ubsan-<ArchName>.a" in the Linux library
-    // resource directory.
-    SmallString<128> LibUbsan(TC.getDriver().ResourceDir);
-    llvm::sys::path::append(LibUbsan, "lib", "linux",
-                            (Twine("libclang_rt.ubsan-") +
-                             TC.getArchName() + ".a"));
-    CmdArgs.push_back(Args.MakeArgString(LibUbsan));
-    CmdArgs.push_back("-lpthread");
-    CmdArgs.push_back("-export-dynamic");
-  }
+  // LibUbsan is "libclang_rt.ubsan-<ArchName>.a" in the Linux library
+  // resource directory.
+  SmallString<128> LibUbsan(TC.getDriver().ResourceDir);
+  llvm::sys::path::append(LibUbsan, "lib", "linux",
+                          (Twine("libclang_rt.ubsan-") +
+                           TC.getArchName() + ".a"));
+  CmdArgs.push_back(Args.MakeArgString(LibUbsan));
+  CmdArgs.push_back("-lpthread");
+  CmdArgs.push_back("-export-dynamic");
 }
 
 static bool shouldUseFramePointer(const ArgList &Args,
@@ -2286,7 +2344,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   //
   // FIXME: Support -fpreprocessed
   if (types::getPreprocessedType(InputType) != types::TY_INVALID)
-    AddPreprocessingOptions(C, D, Args, CmdArgs, Output, Inputs);
+    AddPreprocessingOptions(C, JA, D, Args, CmdArgs, Output, Inputs);
 
   // Don't warn about "clang -c -DPIC -fPIC test.i" because libtool.m4 assumes
   // that "The compiler can only warn and ignore the option if not recognized".
@@ -2489,6 +2547,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                     options::OPT_fno_sanitize_recover,
                     true))
     CmdArgs.push_back("-fno-sanitize-recover");
+
+  if (Args.hasArg(options::OPT_fcatch_undefined_behavior) ||
+      Args.hasFlag(options::OPT_fsanitize_undefined_trap_on_error,
+                   options::OPT_fno_sanitize_undefined_trap_on_error, false))
+    CmdArgs.push_back("-fsanitize-undefined-trap-on-error");
 
   // Report and error for -faltivec on anything other then PowerPC.
   if (const Arg *A = Args.getLastArg(options::OPT_faltivec))
@@ -2707,10 +2770,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_fms_extensions, options::OPT_fno_ms_extensions,
                    getToolChain().getTriple().getOS() == llvm::Triple::Win32))
     CmdArgs.push_back("-fms-extensions");
-
-  // -fms-inline-asm.
-  if (Args.hasArg(options::OPT_fenable_experimental_ms_inline_asm))
-    CmdArgs.push_back("-fenable-experimental-ms-inline-asm");
 
   // -fms-compatibility=0 is default.
   if (Args.hasFlag(options::OPT_fms_compatibility, 
@@ -3348,6 +3407,11 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
 
     // Add the -fdebug-compilation-dir flag if needed.
     addDebugCompDirArg(Args, CmdArgs);
+
+    // Set the AT_producer to the clang version when using the integrated
+    // assembler on assembly source files.
+    CmdArgs.push_back("-dwarf-debug-producer");
+    CmdArgs.push_back(Args.MakeArgString(getClangFullVersion()));
   }
 
   // Optionally embed the -cc1as level arguments into the debug info, for build
@@ -4284,11 +4348,11 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
   SanitizerArgs Sanitize(getToolChain().getDriver(), Args);
-  // If we're building a dynamic lib with -fsanitize=address, or
-  // -fsanitize=undefined, unresolved symbols may appear. Mark all
+  // If we're building a dynamic lib with -fsanitize=address,
+  // unresolved symbols may appear. Mark all
   // of them as dynamic_lookup. Linking executables is handled in
   // lib/Driver/ToolChains.cpp.
-  if (Sanitize.needsAsanRt() || Sanitize.needsUbsanRt()) {
+  if (Sanitize.needsAsanRt()) {
     if (Args.hasArg(options::OPT_dynamiclib) ||
         Args.hasArg(options::OPT_bundle)) {
       CmdArgs.push_back("-undefined");
@@ -5513,7 +5577,7 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
   if (!D.SysRoot.empty())
     CmdArgs.push_back(Args.MakeArgString("--sysroot=" + D.SysRoot));
 
-  if (Args.hasArg(options::OPT_pie))
+  if (Args.hasArg(options::OPT_pie) && !Args.hasArg(options::OPT_shared))
     CmdArgs.push_back("-pie");
 
   if (Args.hasArg(options::OPT_rdynamic))
@@ -5534,6 +5598,8 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-m");
   if (ToolChain.getArch() == llvm::Triple::x86)
     CmdArgs.push_back("elf_i386");
+  else if (ToolChain.getArch() == llvm::Triple::aarch64)
+    CmdArgs.push_back("aarch64linux");
   else if (ToolChain.getArch() == llvm::Triple::arm
            ||  ToolChain.getArch() == llvm::Triple::thumb)
     CmdArgs.push_back("armelf_linux_eabi");
@@ -5582,6 +5648,8 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("/system/bin/linker");
     else if (ToolChain.getArch() == llvm::Triple::x86)
       CmdArgs.push_back("/lib/ld-linux.so.2");
+    else if (ToolChain.getArch() == llvm::Triple::aarch64)
+      CmdArgs.push_back("/lib/ld-linux-aarch64.so.1");
     else if (ToolChain.getArch() == llvm::Triple::arm ||
              ToolChain.getArch() == llvm::Triple::thumb) {
       if (ToolChain.getTriple().getEnvironment() == llvm::Triple::GNUEABIHF)
@@ -5712,10 +5780,19 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       if (Args.hasArg(options::OPT_static))
         CmdArgs.push_back("--start-group");
 
+      bool OpenMP = Args.hasArg(options::OPT_fopenmp);
+      if (OpenMP) {
+        CmdArgs.push_back("-lgomp");
+
+        // FIXME: Exclude this for platforms whith libgomp that doesn't require
+        // librt. Most modern Linux platfroms require it, but some may not.
+        CmdArgs.push_back("-lrt");
+      }
+
       AddLibgcc(ToolChain.getTriple(), D, CmdArgs, Args);
 
       if (Args.hasArg(options::OPT_pthread) ||
-          Args.hasArg(options::OPT_pthreads))
+          Args.hasArg(options::OPT_pthreads) || OpenMP)
         CmdArgs.push_back("-lpthread");
 
       CmdArgs.push_back("-lc");

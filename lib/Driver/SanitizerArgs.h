@@ -33,26 +33,35 @@ class SanitizerArgs {
 #define SANITIZER(NAME, ID) ID = 1 << SO_##ID,
 #define SANITIZER_GROUP(NAME, ID, ALIAS) ID = ALIAS,
 #include "clang/Basic/Sanitizers.def"
-    NeedsAsanRt = AddressFull,
+    NeedsAsanRt = Address,
     NeedsTsanRt = Thread,
     NeedsMsanRt = Memory,
-    NeedsUbsanRt = (Undefined & ~Bounds) | Integer
+    NeedsUbsanRt = (Undefined & ~Bounds) | Integer,
+    NotAllowedWithTrap = Vptr
   };
   unsigned Kind;
   std::string BlacklistFile;
   bool MsanTrackOrigins;
+  bool AsanZeroBaseShadow;
+  bool UbsanTrapOnError;
 
  public:
-  SanitizerArgs() : Kind(0), BlacklistFile(""), MsanTrackOrigins(false) {}
+  SanitizerArgs() : Kind(0), BlacklistFile(""), MsanTrackOrigins(false),
+                    AsanZeroBaseShadow(false), UbsanTrapOnError(false) {}
   /// Parses the sanitizer arguments from an argument list.
   SanitizerArgs(const Driver &D, const ArgList &Args);
 
   bool needsAsanRt() const { return Kind & NeedsAsanRt; }
   bool needsTsanRt() const { return Kind & NeedsTsanRt; }
   bool needsMsanRt() const { return Kind & NeedsMsanRt; }
-  bool needsUbsanRt() const { return Kind & NeedsUbsanRt; }
+  bool needsUbsanRt() const {
+    if (UbsanTrapOnError)
+      return false;
+    return Kind & NeedsUbsanRt;
+  }
 
   bool sanitizesVptr() const { return Kind & Vptr; }
+  bool notAllowedWithTrap() const { return Kind & NotAllowedWithTrap; }
 
   void addArgs(const ArgList &Args, ArgStringList &CmdArgs) const {
     if (!Kind)
@@ -72,6 +81,10 @@ class SanitizerArgs {
 
     if (MsanTrackOrigins)
       CmdArgs.push_back(Args.MakeArgString("-fsanitize-memory-track-origins"));
+
+    if (AsanZeroBaseShadow)
+      CmdArgs.push_back(Args.MakeArgString(
+          "-fsanitize-address-zero-base-shadow"));
   }
 
  private:
@@ -121,8 +134,9 @@ class SanitizerArgs {
       Remove = Thread;
       DeprecatedReplacement = "-fno-sanitize=thread";
     } else if (A->getOption().matches(options::OPT_fcatch_undefined_behavior)) {
-      Add = Undefined;
-      DeprecatedReplacement = "-fsanitize=undefined";
+      Add = UndefinedTrap;
+      DeprecatedReplacement = 
+        "-fsanitize=undefined-trap -fsanitize-undefined-trap-on-error";
     } else if (A->getOption().matches(options::OPT_fbounds_checking) ||
                A->getOption().matches(options::OPT_fbounds_checking_EQ)) {
       Add = Bounds;

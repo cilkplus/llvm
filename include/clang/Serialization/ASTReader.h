@@ -68,6 +68,7 @@ class NestedNameSpecifier;
 class CXXBaseSpecifier;
 class CXXConstructorDecl;
 class CXXCtorInitializer;
+class GlobalModuleIndex;
 class GotoStmt;
 class MacroDefinition;
 class NamedDecl;
@@ -291,6 +292,9 @@ private:
 
   /// \brief The module manager which manages modules and their dependencies
   ModuleManager ModuleMgr;
+
+  /// \brief The global module index, if loaded.
+  llvm::OwningPtr<GlobalModuleIndex> GlobalIndex;
 
   /// \brief A map of global bit offsets to the module that stores entities
   /// at those bit offsets.
@@ -545,7 +549,7 @@ private:
     GlobalSelectorMapType;
 
   /// \brief Mapping from global selector IDs to the module in which the
-  /// selector resides along with the offset that should be added to the
+
   /// global selector ID to produce a local ID.
   GlobalSelectorMapType GlobalSelectorMap;
 
@@ -673,6 +677,10 @@ private:
   /// \brief A list of the namespaces we've seen.
   SmallVector<uint64_t, 4> KnownNamespaces;
 
+  /// \brief A list of undefined decls with internal linkage followed by the
+  /// SourceLocation of a matching ODR-use.
+  SmallVector<uint64_t, 8> UndefinedButUsed;
+
   /// \brief A list of modules that were imported by precompiled headers or
   /// any other non-module AST file.
   SmallVector<serialization::SubmoduleID, 2> ImportedModules;
@@ -691,6 +699,12 @@ private:
 
   /// \brief Whether to accept an AST file with compiler errors.
   bool AllowASTWithCompilerErrors;
+
+  /// \brief Whether we are allowed to use the global module index.
+  bool UseGlobalIndex;
+
+  /// \brief Whether we have tried loading the global module index yet.
+  bool TriedLoadingGlobalIndex;
 
   /// \brief The current "generation" of the module file import stack, which 
   /// indicates how many separate module file load operations have occurred.
@@ -726,6 +740,12 @@ private:
   /// \brief The total number of macros stored in the chain.
   unsigned TotalNumMacros;
 
+  /// \brief The number of lookups into identifier tables.
+  unsigned NumIdentifierLookups;
+
+  /// \brief The number of lookups into identifier tables that succeed.
+  unsigned NumIdentifierLookupHits;
+
   /// \brief The number of selectors that have been read.
   unsigned NumSelectorsRead;
 
@@ -733,8 +753,20 @@ private:
   unsigned NumMethodPoolEntriesRead;
 
   /// \brief The number of times we have looked up a selector in the method
-  /// pool and not found anything interesting.
-  unsigned NumMethodPoolMisses;
+  /// pool.
+  unsigned NumMethodPoolLookups;
+
+  /// \brief The number of times we have looked up a selector in the method
+  /// pool and found something.
+  unsigned NumMethodPoolHits;
+
+  /// \brief The number of times we have looked up a selector in the method
+  /// pool within a specific module.
+  unsigned NumMethodPoolTableLookups;
+
+  /// \brief The number of times we have looked up a selector in the method
+  /// pool within a specific module and found something.
+  unsigned NumMethodPoolTableHits;
 
   /// \brief The total number of method pool entries in the selector table.
   unsigned TotalNumMethodPoolEntries;
@@ -1075,9 +1107,13 @@ public:
   /// \param AllowASTWithCompilerErrors If true, the AST reader will accept an
   /// AST file the was created out of an AST with compiler errors,
   /// otherwise it will reject it.
+  ///
+  /// \param UseGlobalIndex If true, the AST reader will try to load and use
+  /// the global module index.
   ASTReader(Preprocessor &PP, ASTContext &Context, StringRef isysroot = "",
             bool DisableValidation = false,
-            bool AllowASTWithCompilerErrors = false);
+            bool AllowASTWithCompilerErrors = false,
+            bool UseGlobalIndex = true);
 
   ~ASTReader();
 
@@ -1128,7 +1164,8 @@ public:
   /// \param NameVisibility The level of visibility to give the names in the
   /// module.  Visibility can only be increased over time.
   void makeModuleVisible(Module *Mod, 
-                         Module::NameVisibilityKind NameVisibility);
+                         Module::NameVisibilityKind NameVisibility,
+                         SourceLocation ImportLoc);
   
   /// \brief Make the names within this set of hidden names visible.
   void makeNamesVisible(const HiddenNames &Names);
@@ -1141,6 +1178,18 @@ public:
   /// \brief Set the AST deserialization listener.
   void setDeserializationListener(ASTDeserializationListener *Listener);
 
+  /// \brief Determine whether this AST reader has a global index.
+  bool hasGlobalIndex() const { return GlobalIndex; }
+
+  /// \brief Attempts to load the global index.
+  ///
+  /// \returns true if loading the global index has failed for any reason.
+  bool loadGlobalIndex();
+
+  /// \brief Determine whether we tried to load the global index, but failed,
+  /// e.g., because it is out-of-date or does not exist.
+  bool isGlobalIndexUnavailable() const;
+  
   /// \brief Initializes the ASTContext
   void InitializeContext();
 
@@ -1311,7 +1360,7 @@ public:
 
   /// \brief Retrieve the module file that owns the given declaration, or NULL
   /// if the declaration is not from a module file.
-  ModuleFile *getOwningModuleFile(Decl *D);
+  ModuleFile *getOwningModuleFile(const Decl *D);
   
   /// \brief Returns the source location for the decl \p ID.
   SourceLocation getSourceLocationForDeclID(serialization::GlobalDeclID ID);
@@ -1473,6 +1522,9 @@ public:
   virtual void ReadKnownNamespaces(
                            SmallVectorImpl<NamespaceDecl *> &Namespaces);
 
+  virtual void ReadUndefinedButUsed(
+                        llvm::DenseMap<NamedDecl *, SourceLocation> &Undefined);
+
   virtual void ReadTentativeDefinitions(
                  SmallVectorImpl<VarDecl *> &TentativeDefs);
 
@@ -1535,7 +1587,7 @@ public:
                                                     unsigned LocalID);
 
   /// \brief Retrieve the macro with the given ID.
-  MacroInfo *getMacro(serialization::MacroID ID);
+  MacroInfo *getMacro(serialization::MacroID ID, MacroInfo *Hint = 0);
 
   /// \brief Retrieve the global macro ID corresponding to the given local
   /// ID within the given module file.
@@ -1643,13 +1695,13 @@ public:
 
   /// \brief Read a source location.
   SourceLocation ReadSourceLocation(ModuleFile &ModuleFile,
-                                    const RecordData &Record, unsigned& Idx) {
+                                    const RecordData &Record, unsigned &Idx) {
     return ReadSourceLocation(ModuleFile, Record[Idx++]);
   }
 
   /// \brief Read a source range.
   SourceRange ReadSourceRange(ModuleFile &F,
-                              const RecordData &Record, unsigned& Idx);
+                              const RecordData &Record, unsigned &Idx);
 
   /// \brief Read an integral value
   llvm::APInt ReadAPInt(const RecordData &Record, unsigned &Idx);
@@ -1658,7 +1710,8 @@ public:
   llvm::APSInt ReadAPSInt(const RecordData &Record, unsigned &Idx);
 
   /// \brief Read a floating-point value
-  llvm::APFloat ReadAPFloat(const RecordData &Record, unsigned &Idx);
+  llvm::APFloat ReadAPFloat(const RecordData &Record,
+                            const llvm::fltSemantics &Sem, unsigned &Idx);
 
   // \brief Read a string
   static std::string ReadString(const RecordData &Record, unsigned &Idx);
@@ -1693,19 +1746,20 @@ public:
   Expr *ReadSubExpr();
 
   /// \brief Reads the macro record located at the given offset.
-  void ReadMacroRecord(ModuleFile &F, uint64_t Offset);
+  void ReadMacroRecord(ModuleFile &F, uint64_t Offset, MacroInfo *Hint = 0);
 
   /// \brief Determine the global preprocessed entity ID that corresponds to
   /// the given local ID within the given module.
   serialization::PreprocessedEntityID
   getGlobalPreprocessedEntityID(ModuleFile &M, unsigned LocalID) const;
 
-  /// \brief Add the macro ID assosiated with \c II for deserialization.
+  /// \brief Note that the identifier has a macro history.
   ///
   /// \param II The name of the macro.
-  /// \param ID The global macro ID that is associated with this identifier.
-  void addMacroIDForDeserialization(IdentifierInfo *II,
-                                    serialization::MacroID ID);
+  ///
+  /// \param IDs The global macro IDs that are associated with this identifier.
+  void setIdentifierIsMacro(IdentifierInfo *II,
+                            ArrayRef<serialization::MacroID> IDs);
 
   /// \brief Read the set of macros defined by this external macro source.
   virtual void ReadDefinedMacros();
@@ -1756,7 +1810,7 @@ public:
 /// then restores it when destroyed.
 struct SavedStreamPosition {
   explicit SavedStreamPosition(llvm::BitstreamCursor &Cursor)
-  : Cursor(Cursor), Offset(Cursor.GetCurrentBitNo()) { }
+    : Cursor(Cursor), Offset(Cursor.GetCurrentBitNo()) { }
 
   ~SavedStreamPosition() {
     Cursor.JumpToBit(Offset);

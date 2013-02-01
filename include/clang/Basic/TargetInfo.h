@@ -16,6 +16,7 @@
 #define LLVM_CLANG_BASIC_TARGETINFO_H
 
 #include "clang/Basic/AddressSpaces.h"
+#include "clang/Basic/TargetCXXABI.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Basic/TargetOptions.h"
@@ -42,22 +43,6 @@ class SourceLocation;
 class SourceManager;
 
 namespace Builtin { struct Info; }
-
-/// \brief The types of C++ ABIs for which we can generate code.
-enum TargetCXXABI {
-  /// The generic ("Itanium") C++ ABI, documented at:
-  ///   http://www.codesourcery.com/public/cxx-abi/
-  CXXABI_Itanium,
-
-  /// The ARM C++ ABI, based largely on the Itanium ABI but with
-  /// significant differences.
-  ///    http://infocenter.arm.com
-  ///                    /help/topic/com.arm.doc.ihi0041c/IHI0041C_cppabi.pdf
-  CXXABI_ARM,
-
-  /// The Visual Studio ABI.  Only scattered official documentation exists.
-  CXXABI_Microsoft
-};
 
 /// \brief Exposes information about the current target.
 ///
@@ -89,7 +74,7 @@ protected:
   const llvm::fltSemantics *HalfFormat, *FloatFormat, *DoubleFormat,
     *LongDoubleFormat;
   unsigned char RegParmMax, SSERegParmMax;
-  TargetCXXABI CXXABI;
+  TargetCXXABI TheCXXABI;
   const LangAS::Map *AddrSpaceMap;
 
   mutable StringRef PlatformName;
@@ -150,6 +135,10 @@ public:
 
     /// typedef void* __builtin_va_list;
     VoidPtrBuiltinVaList,
+
+    /// __builtin_va_list as defind by the AArch64 ABI
+    /// http://infocenter.arm.com/help/topic/com.arm.doc.ihi0055a/IHI0055A_aapcs64.pdf
+    AArch64ABIBuiltinVaList,
 
     /// __builtin_va_list as defined by the PNaCl ABI:
     /// http://www.chromium.org/nativeclient/pnacl/bitcode-abi#TOC-Machine-Types
@@ -634,8 +623,8 @@ public:
   }
 
   /// \brief Get the C++ ABI currently in use.
-  virtual TargetCXXABI getCXXABI() const {
-    return CXXABI;
+  TargetCXXABI getCXXABI() const {
+    return TheCXXABI;
   }
 
   /// \brief Target the specified CPU.
@@ -655,14 +644,9 @@ public:
   /// \brief Use this specified C++ ABI.
   ///
   /// \return False on error (invalid C++ ABI name).
-  bool setCXXABI(const std::string &Name) {
-    static const TargetCXXABI Unknown = static_cast<TargetCXXABI>(-1);
-    TargetCXXABI ABI = llvm::StringSwitch<TargetCXXABI>(Name)
-      .Case("arm", CXXABI_ARM)
-      .Case("itanium", CXXABI_Itanium)
-      .Case("microsoft", CXXABI_Microsoft)
-      .Default(Unknown);
-    if (ABI == Unknown) return false;
+  bool setCXXABI(llvm::StringRef name) {
+    TargetCXXABI ABI;
+    if (!ABI.tryParse(name)) return false;
     return setCXXABI(ABI);
   }
 
@@ -670,7 +654,7 @@ public:
   ///
   /// \return False on error (ABI not valid on this target)
   virtual bool setCXXABI(TargetCXXABI ABI) {
-    CXXABI = ABI;
+    TheCXXABI = ABI;
     return true;
   }
 

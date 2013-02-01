@@ -8,13 +8,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Frontend/TextDiagnostic.h"
-#include "clang/Basic/ConvertUTF.h"
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Locale.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -1096,17 +1096,25 @@ void TextDiagnostic::emitSnippetAndCaret(
 
   unsigned LineNo = SM.getLineNumber(FID, FileOffset);
   unsigned ColNo = SM.getColumnNumber(FID, FileOffset);
+  
+  // Arbitrarily stop showing snippets when the line is too long.
+  static const unsigned MaxLineLengthToPrint = 4096;
+  if (ColNo > MaxLineLengthToPrint)
+    return;
 
   // Rewind from the current position to the start of the line.
   const char *TokPtr = BufStart+FileOffset;
   const char *LineStart = TokPtr-ColNo+1; // Column # is 1-based.
-
 
   // Compute the line end.  Scan forward from the error position to the end of
   // the line.
   const char *LineEnd = TokPtr;
   while (*LineEnd != '\n' && *LineEnd != '\r' && *LineEnd != '\0')
     ++LineEnd;
+
+  // Arbitrarily stop showing snippets when the line is too long.
+  if (LineEnd - LineStart > MaxLineLengthToPrint)
+    return;
 
   // Copy the line of code into an std::string for ease of manipulation.
   std::string SourceLine(LineStart, LineEnd);

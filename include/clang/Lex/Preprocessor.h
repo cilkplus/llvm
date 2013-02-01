@@ -160,6 +160,12 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
   /// \brief True if pragmas are enabled.
   bool PragmasEnabled : 1;
 
+  /// \brief True if the current build action is a preprocessing action.
+  bool PreprocessedOutput : 1;
+
+  /// \brief True if we are currently preprocessing a #if or #elif directive
+  bool ParsingIfOrElifDirective;
+
   /// \brief True if we are pre-expanding macro arguments.
   bool InMacroArgPreExpansion;
 
@@ -342,6 +348,9 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
   /// should use from the command line etc.
   std::string Predefines;
 
+  /// \brief The file ID for the preprocessor predefines.
+  FileID PredefinesFileID;
+
   /// TokenLexerCache - Cache macro expanders to reduce malloc traffic.
   enum { TokenLexerCacheSize = 8 };
   unsigned NumCachedTokenLexers;
@@ -446,6 +455,11 @@ public:
   /// \brief Retrieve the module loader associated with this preprocessor.
   ModuleLoader &getModuleLoader() const { return TheModuleLoader; }
 
+  /// \brief True if we are currently preprocessing a #if or #elif directive
+  bool isParsingIfOrElifDirective() const { 
+    return ParsingIfOrElifDirective;
+  }
+
   /// SetCommentRetentionState - Control whether or not the preprocessor retains
   /// comments in output.
   void SetCommentRetentionState(bool KeepComments, bool KeepMacroComments) {
@@ -466,6 +480,16 @@ public:
     return SuppressIncludeNotFoundError;
   }
 
+  /// Sets whether the preprocessor is responsible for producing output or if
+  /// it is producing tokens to be consumed by Parse and Sema.
+  void setPreprocessedOutput(bool IsPreprocessedOutput) {
+    PreprocessedOutput = IsPreprocessedOutput;
+  }
+
+  /// Returns true if the preprocessor is responsible for generating output,
+  /// false if it is producing tokens to be consumed by Parse and Sema.
+  bool isPreprocessedOutput() const { return PreprocessedOutput; }
+
   /// isCurrentLexer - Return true if we are lexing directly from the specified
   /// lexer.
   bool isCurrentLexer(const PreprocessorLexer *L) const {
@@ -481,6 +505,9 @@ public:
   /// Note that this ignores any potentially active macro expansions and _Pragma
   /// expansions going on at the time.
   PreprocessorLexer *getCurrentFileLexer() const;
+
+  /// \brief Returns the file ID for the preprocessor predefines.
+  FileID getPredefinesFileID() { return PredefinesFileID; }
 
   /// getPPCallbacks/addPPCallbacks - Accessors for preprocessor callbacks.
   /// Note that this class takes ownership of any PPCallbacks object given to
@@ -525,7 +552,8 @@ public:
   /// \brief Specify a macro for this identifier.
   void setMacroInfo(IdentifierInfo *II, MacroInfo *MI);
   /// \brief Add a MacroInfo that was loaded from an AST file.
-  void addLoadedMacroInfo(IdentifierInfo *II, MacroInfo *MI);
+  void addLoadedMacroInfo(IdentifierInfo *II, MacroInfo *MI,
+                          MacroInfo *Hint = 0);
   /// \brief Make the given MacroInfo, that was loaded from an AST file and
   /// previously hidden, visible.
   void makeLoadedMacroInfoVisible(IdentifierInfo *II, MacroInfo *MI);
@@ -1334,6 +1362,12 @@ private:
   /// EnterSourceFileWithPTH - Add a lexer to the top of the include stack and
   /// start getting tokens from it using the PTH cache.
   void EnterSourceFileWithPTH(PTHLexer *PL, const DirectoryLookup *Dir);
+
+  /// \brief Set the file ID for the preprocessor predefines.
+  void setPredefinesFileID(FileID FID) {
+    assert(PredefinesFileID.isInvalid() && "PredefinesFileID already set!");
+    PredefinesFileID = FID;
+  }
 
   /// IsFileLexer - Returns true if we are lexing from a file and not a
   ///  pragma or a macro.

@@ -264,16 +264,19 @@ static void adjustCallLocations(PathPieces &Pieces,
     }
 
     if (LastCallLocation) {
-      if (!Call->callEnter.asLocation().isValid())
+      if (!Call->callEnter.asLocation().isValid() ||
+          Call->getCaller()->isImplicit())
         Call->callEnter = *LastCallLocation;
-      if (!Call->callReturn.asLocation().isValid())
+      if (!Call->callReturn.asLocation().isValid() ||
+          Call->getCaller()->isImplicit())
         Call->callReturn = *LastCallLocation;
     }
 
     // Recursively clean out the subclass.  Keep this call around if
     // it contains any informative diagnostics.
     PathDiagnosticLocation *ThisCallLocation;
-    if (Call->callEnterWithin.asLocation().isValid())
+    if (Call->callEnterWithin.asLocation().isValid() &&
+        !Call->getCallee()->isImplicit())
       ThisCallLocation = &Call->callEnterWithin;
     else
       ThisCallLocation = &Call->callEnter;
@@ -2044,6 +2047,7 @@ bool GRBugReporter::generatePathDiagnostic(PathDiagnostic& PD,
   // Register additional node visitors.
   R->addVisitor(new NilReceiverBRVisitor());
   R->addVisitor(new ConditionBRVisitor());
+  R->addVisitor(new LikelyFalsePositiveSuppressionBRVisitor());
 
   BugReport::VisitorList visitors;
   unsigned originalReportConfigToken, finalReportConfigToken;
@@ -2064,16 +2068,17 @@ bool GRBugReporter::generatePathDiagnostic(PathDiagnostic& PD,
 
     // Generate the very last diagnostic piece - the piece is visible before 
     // the trace is expanded.
-    if (PDB.getGenerationScheme() != PathDiagnosticConsumer::None) {
-      PathDiagnosticPiece *LastPiece = 0;
-      for (BugReport::visitor_iterator I = visitors.begin(), E = visitors.end();
-           I != E; ++I) {
-        if (PathDiagnosticPiece *Piece = (*I)->getEndPath(PDB, N, *R)) {
-          assert (!LastPiece &&
-                  "There can only be one final piece in a diagnostic.");
-          LastPiece = Piece;
-        }
+    PathDiagnosticPiece *LastPiece = 0;
+    for (BugReport::visitor_iterator I = visitors.begin(), E = visitors.end();
+        I != E; ++I) {
+      if (PathDiagnosticPiece *Piece = (*I)->getEndPath(PDB, N, *R)) {
+        assert (!LastPiece &&
+            "There can only be one final piece in a diagnostic.");
+        LastPiece = Piece;
       }
+    }
+
+    if (PDB.getGenerationScheme() != PathDiagnosticConsumer::None) {
       if (!LastPiece)
         LastPiece = BugReporterVisitor::getDefaultEndPath(PDB, N, *R);
       if (LastPiece)
@@ -2120,7 +2125,8 @@ bool GRBugReporter::generatePathDiagnostic(PathDiagnostic& PD,
     // Remove messages that are basically the same.
     removeRedundantMsgs(PD.getMutablePieces());
 
-    if (R->shouldPrunePath()) {
+    if (R->shouldPrunePath() &&
+        getEngine().getAnalysisManager().options.shouldPrunePaths()) {
       bool hasSomethingInteresting = RemoveUnneededCalls(PD.getMutablePieces(),
                                                          R);
       assert(hasSomethingInteresting);

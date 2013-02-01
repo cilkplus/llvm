@@ -38,10 +38,11 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     EmittingCilkSpawn(false),
     CurCGCapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
-    SanitizePerformTypeCheck(CGM.getLangOpts().SanitizeNull |
-                             CGM.getLangOpts().SanitizeAlignment |
-                             CGM.getLangOpts().SanitizeObjectSize |
-                             CGM.getLangOpts().SanitizeVptr),
+    SanitizePerformTypeCheck(CGM.getSanOpts().Null |
+                             CGM.getSanOpts().Alignment |
+                             CGM.getSanOpts().ObjectSize |
+                             CGM.getSanOpts().Vptr),
+    SanOpts(&CGM.getSanOpts()),
     AutoreleaseResult(false), BlockInfo(0), BlockPointer(0),
     LambdaThisCaptureField(0), NormalCleanupDest(0), NextCleanupDestIndex(1),
     FirstBlockInfo(0), EHResumeBlock(0), ExceptionSlot(0), EHSelectorSlot(0),
@@ -127,7 +128,7 @@ bool CodeGenFunction::hasAggregateLLVMType(QualType type) {
   llvm_unreachable("unknown type kind!");
 }
 
-void CodeGenFunction::EmitReturnBlock() {
+bool CodeGenFunction::EmitReturnBlock() {
   // For cleanliness, we try to avoid emitting the return block for
   // simple cases.
   llvm::BasicBlock *CurBB = Builder.GetInsertBlock();
@@ -142,7 +143,7 @@ void CodeGenFunction::EmitReturnBlock() {
       delete ReturnBlock.getBlock();
     } else
       EmitBlock(ReturnBlock.getBlock());
-    return;
+    return false;
   }
 
   // Otherwise, if the return block is the target of a single direct
@@ -158,7 +159,7 @@ void CodeGenFunction::EmitReturnBlock() {
       Builder.SetInsertPoint(BI->getParent());
       BI->eraseFromParent();
       delete ReturnBlock.getBlock();
-      return;
+      return true;
     }
   }
 
@@ -167,6 +168,7 @@ void CodeGenFunction::EmitReturnBlock() {
   // region.end for now.
 
   EmitBlock(ReturnBlock.getBlock());
+  return false;
 }
 
 static void EmitIfUsed(CodeGenFunction &CGF, llvm::BasicBlock *BB) {
@@ -188,14 +190,14 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
     PopCleanupBlocks(PrologueCleanupDepth);
 
   // Emit function epilog (to return).
-  EmitReturnBlock();
+  bool MoveEndLoc = EmitReturnBlock();
 
   if (ShouldInstrumentFunction())
     EmitFunctionInstrumentation("__cyg_profile_func_exit");
 
   // Emit debug descriptor for function end.
   if (CGDebugInfo *DI = getDebugInfo()) {
-    DI->setLocation(EndLoc);
+    if (!MoveEndLoc) DI->setLocation(EndLoc);
     DI->EmitFunctionEnd(Builder);
   }
 
@@ -357,6 +359,11 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   CurFn = Fn;
   CurFnInfo = &FnInfo;
   assert(CurFn->isDeclaration() && "Function already has body?");
+
+  if (CGM.getSanitizerBlacklist().isIn(*Fn)) {
+    SanOpts = &SanitizerOptions::Disabled;
+    SanitizePerformTypeCheck = false;
+  }
 
   // Pass inline keyword to optimizer if it appears explicitly on any
   // declaration.
@@ -523,7 +530,10 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 void CodeGenFunction::EmitFunctionBody(FunctionArgList &Args) {
   const FunctionDecl *FD = cast<FunctionDecl>(CurGD.getDecl());
   assert(FD->getBody());
-  EmitStmt(FD->getBody());
+  if (const CompoundStmt *S = dyn_cast<CompoundStmt>(FD->getBody()))
+    EmitCompoundStmtWithoutScope(*S);
+  else
+    EmitStmt(FD->getBody());
 }
 
 /// Tries to mark the given function nounwind based on the
@@ -601,7 +611,7 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
   //   function call is used by the caller, the behavior is undefined.
   if (getLangOpts().CPlusPlus && !FD->hasImplicitReturnZero() &&
       !FD->getResultType()->isVoidType() && Builder.GetInsertBlock()) {
-    if (getLangOpts().SanitizeReturn)
+    if (SanOpts->Return)
       EmitCheck(Builder.getFalse(), "missing_return",
                 EmitCheckSourceLocation(FD->getLocation()),
                 ArrayRef<llvm::Value *>(), CRK_Unrecoverable);
@@ -1186,7 +1196,7 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
           //   If the size is an expression that is not an integer constant
           //   expression [...] each time it is evaluated it shall have a value
           //   greater than zero.
-          if (getLangOpts().SanitizeVLABound &&
+          if (SanOpts->VLABound &&
               size->getType()->isSignedIntegerType()) {
             llvm::Value *Zero = llvm::Constant::getNullValue(Size->getType());
             llvm::Constant *StaticArgs[] = {

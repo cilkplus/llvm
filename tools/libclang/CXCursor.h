@@ -219,10 +219,11 @@ CXCursor MakeCursorLabelRef(LabelStmt *Label, SourceLocation Loc,
 std::pair<const LabelStmt *, SourceLocation> getCursorLabelRef(CXCursor C);
 
 /// \brief Create a overloaded declaration reference cursor for an expression.
-CXCursor MakeCursorOverloadedDeclRef(OverloadExpr *E, CXTranslationUnit TU);
+CXCursor MakeCursorOverloadedDeclRef(const OverloadExpr *E,
+                                     CXTranslationUnit TU);
 
 /// \brief Create a overloaded declaration reference cursor for a declaration.
-CXCursor MakeCursorOverloadedDeclRef(Decl *D, SourceLocation Location,
+CXCursor MakeCursorOverloadedDeclRef(const Decl *D, SourceLocation Location,
                                      CXTranslationUnit TU);
 
 /// \brief Create a overloaded declaration reference cursor for a template name.
@@ -231,7 +232,7 @@ CXCursor MakeCursorOverloadedDeclRef(TemplateName Template,
                                      CXTranslationUnit TU);
 
 /// \brief Internal storage for an overloaded declaration reference cursor;
-typedef llvm::PointerUnion3<OverloadExpr *, Decl *, 
+typedef llvm::PointerUnion3<const OverloadExpr *, const Decl *,
                             OverloadedTemplateStorage *>
   OverloadedDeclRefStorage;
   
@@ -240,11 +241,11 @@ typedef llvm::PointerUnion3<OverloadExpr *, Decl *,
 std::pair<OverloadedDeclRefStorage, SourceLocation>
   getCursorOverloadedDeclRef(CXCursor C);
   
-Decl *getCursorDecl(CXCursor Cursor);
-Expr *getCursorExpr(CXCursor Cursor);
-Stmt *getCursorStmt(CXCursor Cursor);
-Attr *getCursorAttr(CXCursor Cursor);
-Decl *getCursorParentDecl(CXCursor Cursor);
+const Decl *getCursorDecl(CXCursor Cursor);
+const Expr *getCursorExpr(CXCursor Cursor);
+const Stmt *getCursorStmt(CXCursor Cursor);
+const Attr *getCursorAttr(CXCursor Cursor);
+const Decl *getCursorParentDecl(CXCursor Cursor);
 
 ASTContext &getCursorContext(CXCursor Cursor);
 ASTUnit *getCursorASTUnit(CXCursor Cursor);

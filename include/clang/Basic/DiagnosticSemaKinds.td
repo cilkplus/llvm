@@ -75,7 +75,9 @@ def warn_double_const_requires_fp64 : Warning<
 
 // C99 variable-length arrays
 def ext_vla : Extension<"variable length arrays are a C99 feature">,
-  InGroup<VLA>;
+  InGroup<VLAExtension>;
+def warn_vla_used : Warning<"variable length array used">,
+  InGroup<VLA>, DefaultIgnore;
 def err_vla_non_pod : Error<"variable length array of non-POD element type %0">;
 def err_vla_in_sfinae : Error<
   "variable length array cannot be formed during template argument deduction">;
@@ -214,6 +216,8 @@ def warn_use_out_of_scope_declaration : Warning<
   "use of out-of-scope declaration of %0">;
 def err_inline_non_function : Error<
   "'inline' can only appear on functions">;
+def err_noreturn_non_function : Error<
+  "'_Noreturn' can only appear on functions">;
 def warn_qual_return_type : Warning< 
   "'%0' type qualifier%s1 on return type %plural{1:has|:have}1 no effect">,
   InGroup<IgnoredQualifiers>, DefaultIgnore;
@@ -336,7 +340,8 @@ def warn_implicit_decl_requires_ucontext : Warning<
   "<ucontext.h>">,
   InGroup<BuiltinRequiresHeader>;
 def warn_redecl_library_builtin : Warning<
-  "incompatible redeclaration of library function %0">;
+  "incompatible redeclaration of library function %0">,
+  InGroup<DiagGroup<"incompatible-library-redeclaration">>;
 def err_builtin_definition : Error<"definition of builtin function %0">;
 def err_types_compatible_p_in_cplusplus : Error<
   "__builtin_types_compatible_p is not valid in C++">;
@@ -381,17 +386,21 @@ def note_strncat_wrong_size : Note<
   "the terminating null byte">;
 
 /// main()
-// static/inline main() are not errors in C, just in C++.
+// static main() is not an error in C, just in C++.
 def warn_static_main : Warning<"'main' should not be declared static">,
     InGroup<Main>;
 def err_static_main : Error<"'main' is not allowed to be declared static">;
 def err_inline_main : Error<"'main' is not allowed to be declared inline">;
+def ext_noreturn_main : ExtWarn<
+  "'main' is not allowed to be declared _Noreturn">, InGroup<Main>;
+def note_main_remove_noreturn : Note<"remove '_Noreturn'">;
 def err_constexpr_main : Error<
   "'main' is not allowed to be declared constexpr">;
 def err_main_template_decl : Error<"'main' cannot be a template">;
 def err_main_returns_nonint : Error<"'main' must return 'int'">;
 def ext_main_returns_nonint : ExtWarn<"return type of 'main' is not 'int'">,
     InGroup<MainReturnType>;
+def note_main_change_return_type : Note<"change return type to 'int'">;
 def err_main_surplus_args : Error<"too many parameters (%0) for 'main': "
     "must be 0, 2, or 3">;
 def warn_main_one_arg : Warning<"only one parameter on 'main' declaration">,
@@ -411,6 +420,18 @@ def err_object_cannot_be_passed_returned_by_value : Error<
   "; did you forget * in %1?">;
 def err_parameters_retval_cannot_have_fp16_type : Error<
   "%select{parameters|function return value}0 cannot have __fp16 type; did you forget * ?">;
+def err_opencl_half_dereferencing : Error<
+  "dereferencing pointer of type %0 is not allowed">;
+def err_opencl_half_subscript : Error<
+  "subscript to array of type %0 is not allowed">;
+def err_opencl_cast_to_half : Error<"casting to type %0 is not allowed">;
+def err_opencl_cast_from_half : Error<"casting from type %0 is not allowed">;
+def err_opencl_half_declaration : Error<
+  "declaring variable of type %0 is not allowed">;
+def err_opencl_half_argument : Error<
+  "declaring function argument of type %0 is not allowed; did you forget * ?">;
+def err_opencl_half_return : Error<
+  "declaring function return value of type %0 is not allowed; did you forget * ?">;
 def warn_enum_value_overflow : Warning<"overflow in enumeration value">;
 def warn_pragma_options_align_reset_failed : Warning<
   "#pragma options align=reset failed: %0">;
@@ -1287,6 +1308,9 @@ def warn_field_is_uninit : Warning<"field %0 is uninitialized when used here">,
 def warn_reference_field_is_uninit : Warning<
   "reference %0 is not yet bound to a value when used here">,
   InGroup<Uninitialized>;
+def warn_static_self_reference_in_init : Warning<
+  "static variable %0 is suspiciously used within its own initialization">,
+  InGroup<UninitializedStaticSelfInit>;
 def warn_uninit_self_reference_in_init : Warning<
   "variable %0 is uninitialized when used within its own initialization">,
   InGroup<Uninitialized>;
@@ -1321,6 +1345,11 @@ def note_uninit_fixit_remove_cond : Note<
   "remove the %select{'%1' if its condition|condition if it}0 "
   "is always %select{false|true}2">;
 def err_init_incomplete_type : Error<"initialization of incomplete type %0">;
+
+def warn_unsequenced_mod_mod : Warning<
+  "multiple unsequenced modifications to %0">, InGroup<Unsequenced>;
+def warn_unsequenced_mod_use : Warning<
+  "unsequenced modification and access to %0">, InGroup<Unsequenced>;
 
 def err_temp_copy_no_viable : Error<
   "no viable constructor %select{copying variable|copying parameter|"
@@ -1507,6 +1536,8 @@ def warn_cxx98_compat_constexpr : Warning<
 def err_invalid_constexpr : Error<
   "%select{function parameter|typedef|non-static data member}0 "
   "cannot be constexpr">;
+def err_invalid_constexpr_member : Error<"non-static data member cannot be "
+  "constexpr%select{; did you intend to make it %select{const|static}0?|}1">;
 def err_constexpr_tag : Error<
   "%select{class|struct|interface|union|enum}0 cannot be marked constexpr">;
 def err_constexpr_dtor : Error<"destructor cannot be marked constexpr">;
@@ -1622,6 +1653,12 @@ def err_attribute_argument_not_int : Error<
   "'%0' attribute requires integer constant">;
 def err_aligned_attribute_argument_not_int : Error<
   "'aligned' attribute requires integer constant">;
+def err_alignas_attribute_wrong_decl_type : Error<
+  "%0 attribute cannot be applied to a %select{"
+  "function parameter|variable with 'register' storage class|"
+  "'catch' variable|bit-field}1">;
+def err_alignas_underaligned : Error<
+  "requested alignment is less than minimum alignment of %1 for type %0">;
 def err_attribute_first_argument_not_int_or_bool : Error<
   "%0 attribute first argument must be of int or bool type">;
 def err_attribute_argument_outof_range : Error<
@@ -1815,7 +1852,8 @@ def warn_attribute_wrong_decl_type : Warning<
   "functions, methods and blocks|functions, methods, and classes|"
   "functions, methods, and parameters|classes|variables|methods|"
   "variables, functions and labels|fields and global variables|structs|"
-  "variables, functions and tag types|thread-local variables}1">,
+  "variables, functions and tag types|thread-local variables|"
+  "variables and fields|variables, data members and tag types}1">,
   InGroup<IgnoredAttributes>;
 def err_attribute_wrong_decl_type : Error<
   "%0 attribute only applies to %select{functions|unions|"
@@ -1823,7 +1861,8 @@ def err_attribute_wrong_decl_type : Error<
   "functions, methods and blocks|functions, methods, and classes|"
   "functions, methods, and parameters|classes|variables|methods|"
   "variables, functions and labels|fields and global variables|structs|"
-  "variables, functions and tag types|thread-local variables}1">;
+  "variables, functions and tag types|thread-local variables|"
+  "variables and fields|variables, data members and tag types}1">;
 def warn_function_attribute_wrong_type : Warning<
   "'%0' only applies to function types; type here is %1">,
   InGroup<IgnoredAttributes>;
@@ -1864,11 +1903,11 @@ def err_objc_precise_lifetime_bad_type : Error<
 def warn_objc_precise_lifetime_meaningless : Error<
   "objc_precise_lifetime is not meaningful for "
   "%select{__unsafe_unretained|__autoreleasing}0 objects">;
-def err_invalid_pcs : Error<"Invalid PCS type">;
+def err_invalid_pcs : Error<"invalid PCS type">;
 def err_attribute_can_be_applied_only_to_value_decl : Error<
   "%0 attribute can only be applied to value declarations">;
-def warn_attribute_not_on_decl : Error<
-  "%0 attribute ignored when parsing type">;
+def warn_attribute_not_on_decl : Warning<
+  "%0 attribute ignored when parsing type">, InGroup<IgnoredAttributes>;
 
 // Availability attribute
 def warn_availability_unknown_platform : Warning<
@@ -2296,6 +2335,11 @@ def note_ovl_candidate_substitution_failure : Note<
     "candidate template ignored: substitution failure%0%1">;
 def note_ovl_candidate_disabled_by_enable_if : Note<
     "candidate template ignored: disabled by %0%1">;
+def note_ovl_candidate_failed_overload_resolution : Note<
+    "candidate template ignored: couldn't resolve reference to overloaded "
+    "function %0">;
+def note_ovl_candidate_non_deduced_mismatch : Note<
+    "candidate template ignored: could not match %diff{$ against $|types}0,1">;
     
 // Note that we don't treat templates differently for this diagnostic.
 def note_ovl_candidate_arity : Note<"candidate "
@@ -3242,10 +3286,12 @@ def note_deleted_assign_field : Note<
   "%select{copy|move}0 assignment operator of %1 is implicitly deleted "
   "because field %2 is of %select{reference|const-qualified}4 type %3">;
 
-// This should eventually be an error.
+// These should be errors.
 def warn_undefined_internal : Warning<
   "%select{function|variable}0 %q1 has internal linkage but is not defined">,
-  DiagGroup<"undefined-internal">;
+  InGroup<DiagGroup<"undefined-internal">>;
+def warn_undefined_inline : Warning<"inline function %q0 is not defined">,
+  InGroup<DiagGroup<"undefined-inline">>;
 def note_used_here : Note<"used here">;
 
 def warn_internal_in_extern_inline : ExtWarn<
@@ -3665,8 +3711,9 @@ def err_arc_mismatched_cast : Error<
   " to %3 is disallowed with ARC">;
 def err_arc_nolifetime_behavior : Error<
   "explicit ownership qualifier on cast result has no effect">;
-def err_arc_objc_object_in_struct : Error<
-  "ARC forbids %select{Objective-C objects|blocks}0 in structs or unions">;
+def err_arc_objc_object_in_tag : Error<
+  "ARC forbids %select{Objective-C objects|blocks}0 in "
+  "%select{struct|interface|union|<<ERROR>>|enum}1">;
 def err_arc_objc_property_default_assign_on_object : Error<
   "ARC forbids synthesizing a property of an Objective-C object "
   "with unspecified ownership or storage attribute">;
@@ -3751,6 +3798,10 @@ def err_arc_collection_forward : Error<
 def err_arc_multiple_method_decl : Error< 
   "multiple methods named %0 found with mismatched result, "
   "parameter type or attributes">;
+def warn_arc_lifetime_result_type : Warning<
+  "ARC %select{unused|__unsafe_unretained|__strong|__weak|__autoreleasing}0 "
+  "lifetime qualifier on return type is ignored">,
+  InGroup<IgnoredQualifiers>;
 
 let CategoryName = "ARC Retain Cycle" in {
 
@@ -4882,7 +4933,7 @@ def ext_typecheck_convert_discards_qualifiers : ExtWarn<
   "sending to parameter of different type}0,1"
   "|%diff{casting $ to type $|casting between types}0,1}2"
   " discards qualifiers">,
-  InGroup<IncompatiblePointerTypes>;
+  InGroup<IncompatiblePointerTypesDiscardsQualifiers>;
 def ext_nested_pointer_qualifier_mismatch : ExtWarn<
   "%select{%diff{assigning to $ from $|assigning to different types}0,1"
   "|%diff{passing $ to parameter of type $|"
@@ -4896,7 +4947,7 @@ def ext_nested_pointer_qualifier_mismatch : ExtWarn<
   "sending to parameter of different type}0,1"
   "|%diff{casting $ to type $|casting between types}0,1}2"
   " discards qualifiers in nested pointer types">,
-  InGroup<IncompatiblePointerTypes>;
+  InGroup<IncompatiblePointerTypesDiscardsQualifiers>;
 def warn_incompatible_vectors : Warning<
   "incompatible vector types "
   "%select{%diff{assigning to $ from $|assigning to different types}0,1"
@@ -5206,6 +5257,8 @@ let CategoryName = "Inline Assembly Issue" in {
     "invalid use of a cast in a inline asm context requiring an l-value: "
     "remove the cast or build with -fheinous-gnu-extensions">;
   def err_inline_ms_asm_parsing : Error<"%0">;
+  def err_msasm_unsupported_arch : Error<
+    "Unsupported architecture '%0' for MS-style inline assembly">;
 
   def warn_asm_label_on_auto_decl : Warning<
     "ignored asm label '%0' on automatic variable">;
@@ -5267,9 +5320,11 @@ def err_in_class_initializer_bad_type : Error<
   "static data member of type %0 must be initialized out of line">;
 def ext_in_class_initializer_float_type : ExtWarn<
   "in-class initializer for static data member of type %0 is a GNU extension">,
-  InGroup<GNU>;
-def note_in_class_initializer_float_type_constexpr : Note<
-  "use 'constexpr' specifier to silence this warning">;
+  InGroup<GNUStaticFloatInit>;
+def ext_in_class_initializer_float_type_cxx11 : ExtWarn<
+  "in-class initializer for static data member of type %0 requires "
+  "'constexpr' specifier">, InGroup<StaticFloatInit>, DefaultError;
+def note_in_class_initializer_float_type_cxx11 : Note<"add 'constexpr'">;
 def err_in_class_initializer_literal_type : Error<
   "in-class initializer for static data member of type %0 requires "
   "'constexpr' specifier">;
@@ -5306,6 +5361,9 @@ def err_anonymous_record_with_type : Error<
 def ext_anonymous_record_with_type : Extension<
   "types declared in an anonymous %select{struct|union}0 are a Microsoft "
   "extension">, InGroup<Microsoft>;
+def ext_anonymous_record_with_anonymous_type : Extension<
+  "anonymous types declared in an anonymous %select{struct|union}0 "
+  "are an extension">, InGroup<DiagGroup<"nested-anon-types">>;
 def err_anonymous_record_with_function : Error<
   "functions cannot be declared in an anonymous %select{struct|union}0">;
 def err_anonymous_record_with_static : Error<
@@ -5719,9 +5777,6 @@ def warn_bool_switch_condition : Warning<
 def warn_case_value_overflow : Warning<
   "overflow converting case value to switch condition type (%0 to %1)">,
   InGroup<Switch>;
-def warn_case_constant_overflow : Warning<
-  "overflow in case constant expression results in value %0">,
-  InGroup<Switch>;
 def err_duplicate_case : Error<"duplicate case value '%0'">;
 def err_duplicate_case_differing_expr : Error<
   "duplicate case value: '%0' and '%1' both equal '%2'">;
@@ -5855,6 +5910,18 @@ def warn_falloff_noreturn_function : Warning<
   InGroup<InvalidNoreturn>;
 def err_noreturn_block_has_return_expr : Error<
   "block declared 'noreturn' should not return">;
+def err_noreturn_missing_on_first_decl : Error<
+  "function declared '[[noreturn]]' after its first declaration">;
+def note_noreturn_missing_first_decl : Note<
+  "declaration missing '[[noreturn]]' attribute is here">;
+def err_carries_dependency_missing_on_first_decl : Error<
+  "%select{function|parameter}0 declared '[[carries_dependency]]' "
+  "after its first declaration">;
+def note_carries_dependency_missing_first_decl : Note<
+  "declaration missing '[[carries_dependency]]' attribute is here">;
+def err_carries_dependency_param_not_function_decl : Error<
+  "'[[carries_dependency]]' attribute only allowed on parameter in a function "
+  "declaration or lambda">;
 def err_block_on_nonlocal : Error<
   "__block attribute not allowed, only allowed on local variables">;
 def err_block_on_vm : Error<
@@ -6052,8 +6119,24 @@ def err_invalid_astype_of_different_size : Error<
   "invalid reinterpretation: sizes of %0 and %1 must match">;
 def err_static_kernel : Error<
   "kernel functions cannot be declared static">;
+def err_opencl_ptrptr_kernel_arg : Error<
+  "kernel argument cannot be declared as a pointer to a pointer">;
 def err_static_function_scope : Error<
   "variables in function scope cannot be declared static">;
+def err_opencl_bitfields : Error<
+  "bitfields are not supported in OpenCL">;
+def err_opencl_vla : Error<
+  "variable length arrays are not supported in OpenCL">;
+def err_event_t_kernel_arg : Error<
+  "the event_t type cannot be used to declare a kernel function argument">;
+def err_event_t_global_var : Error<
+  "the event_t type cannot be used to declare a program scope variable">;
+def err_event_t_struct_field : Error<
+  "the event_t type cannot be used to declare a structure or union field">;
+def err_event_t_addr_space_qual : Error<
+  "the event_t type can only be used with __private address space qualifier">;
+def err_expected_kernel_void_return_type : Error<
+  "kernel must have void return type">;
 
 // Cilk Plus warnings and errors
 def err_not_a_call : Error<
