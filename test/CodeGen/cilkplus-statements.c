@@ -20,7 +20,7 @@ void bar(_Complex float);
 void test_bar() {
   _Complex float b = 0.0f;
   // CHECK: define void @test_bar()
-  // CHECK: call void @bar(<2 x float>
+  // CHECK: call void @bar
   _Cilk_spawn bar(b);
 }
 
