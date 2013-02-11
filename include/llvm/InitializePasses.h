@@ -113,6 +113,7 @@ void initializeDominatorTreePass(PassRegistry&);
 void initializeEarlyIfConverterPass(PassRegistry&);
 void initializeEdgeBundlesPass(PassRegistry&);
 void initializeEdgeProfilerPass(PassRegistry&);
+void initializeElideCilkSyncPass(PassRegistry&);
 void initializeExpandPostRAPass(PassRegistry&);
 void initializePathProfilerPass(PassRegistry&);
 void initializeGCOVProfilerPass(PassRegistry&);
