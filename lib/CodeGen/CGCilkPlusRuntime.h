@@ -72,7 +72,7 @@ public:
 
   void EmitCilkHelperPrologue(CodeGenFunction &CGF);
 
-  void pushCilkImplicitSyncCleanup(CodeGenFunction &CFG);
+  void pushCilkImplicitSyncCleanup(CodeGenFunction &CGF);
 };
 
 /// \brief Creates an instance of a Cilk Plus runtime object.
