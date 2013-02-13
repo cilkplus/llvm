@@ -606,9 +606,15 @@ void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
     // will be emitted on exit, if necessary.
     RunCleanupsScope Scope(*this);
 
-    if (getLangOpts().CilkPlus) {
-      if (CurCGCilkImplicitSyncInfo &&
-          CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
+    if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo) {
+      // The following implicit sync is not required by the Cilk Plus
+      // Language Extension Specificition V1.1. However, this is required
+      // in N1665 [2.8.1] and other compilers also insert this implicit sync.
+      //
+      // Optimizations should be able to elide those unnecessary syncs.
+      CGM.getCilkPlusRuntime().EmitCilkSync(*this);
+
+      if (CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
         CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
     }
 

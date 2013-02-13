@@ -3,6 +3,7 @@
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F2 %s
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_IMPLICIT_SYNC %s
 // RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_SYNC_JUMP %s
+// RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_MISC_IMP_SYNC %s
 //
 namespace stack_frame_cleanup {
   extern void touch();
@@ -101,6 +102,10 @@ namespace stack_frame_cleanup {
 out: return;
     // CHECK_SYNC_JUMP: define void @_ZN19stack_frame_cleanup{{[0-9]+}}test3Ev
     //
+    // * Implicit sync while entering the try block
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    //
     // * Exit due to exception *
     //
     // CHECK_SYNC_JUMP: call void @__cilk_sync
@@ -125,6 +130,10 @@ out: return;
       }
     }
     // CHECK_SYNC_JUMP: define void @_ZN19stack_frame_cleanup{{[0-9]+}}test4Ev
+    //
+    // * Implicit sync while entering the try block
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
     //
     // * Exit due to exception *
     //
@@ -151,6 +160,10 @@ out: return;
     }
     // CHECK_SYNC_JUMP: define void @_ZN19stack_frame_cleanup{{[0-9]+}}test5Ev
     //
+    // * Implicit sync while entering the try block
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    //
     // * Exit due to exception *
     //
     // CHECK_SYNC_JUMP: call void @__cilk_sync
@@ -175,7 +188,7 @@ void test1_anchor() throw ();
 // No implicit sync for the function
 void test1() {
   try {
-    _Cilk_spawn foo(); 
+    _Cilk_spawn foo();
   } catch (...) {
     bar();
   }
@@ -193,7 +206,7 @@ void test2_anchor() throw ();
 // Should have an implicit sync for the function
 void test2() {
   try {
-    foo(); 
+    foo();
   } catch (...) {
     _Cilk_spawn bar();
   }
@@ -209,11 +222,11 @@ void test3_anchor() throw ();
 // Should have an implicit sync for the function
 void test3() {
   try {
-    _Cilk_spawn foo(); 
+    _Cilk_spawn foo();
   } catch (...) {
     _Cilk_spawn bar();
   }
-  
+
   test3_anchor();
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test3Ev
   // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test3_anchorEv
@@ -315,4 +328,45 @@ void test9() {
   // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test9_anchorEv
   // CHECK_IMPLICIT_SYNC-NEXT: br
 }
+} // namespace
+
+namespace misc {
+
+void foo() throw();
+void bar() throw();
+void baz() throw();
+
+void entering_any_try_block() {
+  _Cilk_spawn foo();
+
+  try { bar(); } catch (...) { }
+
+  // CHECK_MISC_IMP_SYNC: define void @_ZN4misc22entering_any_try_blockEv
+  // CHECK_MISC_IMP_SYNC: call void @__cilk_sync
+  // CHECK_MISC_IMP_SYNC-NEXT: call void @_ZN4misc3barEv
+}
+
+void entering_spawning_try_block() {
+  try { foo(); _Cilk_spawn bar(); } catch (...) { }
+
+  // CHECK_MISC_IMP_SYNC: define void @_ZN4misc27entering_spawning_try_blockEv
+  // CHECK_MISC_IMP_SYNC: call void @__cilk_sync
+  // CHECK_MISC_IMP_SYNC: call void @_ZN4misc3fooEv
+}
+
+void entering_nested_try_block() {
+  _Cilk_spawn foo();
+
+  try {
+    bar();
+    try { baz(); } catch (...) { }
+  } catch (...) { }
+
+  // CHECK_MISC_IMP_SYNC: define void @_ZN4misc25entering_nested_try_blockEv
+  // CHECK_MISC_IMP_SYNC: call void @__cilk_sync
+  // CHECK_MISC_IMP_SYNC-NEXT: call void @_ZN4misc3barEv
+  // CHECK_MISC_IMP_SYNC-NEXT: call void @__cilk_sync
+  // CHECK_MISC_IMP_SYNC-NEXT: call void @_ZN4misc3bazEv
+}
+
 } // namespace
