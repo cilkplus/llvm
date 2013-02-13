@@ -65,6 +65,8 @@ public:
 
   void EmitCilkSync(CodeGenFunction &CGF);
 
+  void EmitCilkExceptingSync(CodeGenFunction &CGF);
+
   void EmitCilkParentStackFrame(CodeGenFunction &CGF,
                                 CilkCleanupKind K = ImpSyncAndRelFrameCleanup);
 

@@ -1320,6 +1320,10 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // Catch the exception if this isn't a catch-all.
     const CXXCatchStmt *C = S.getHandler(I-1);
 
+    // Insert a special sync before the catch statement is processed.
+    if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo)
+      CGM.getCilkPlusRuntime().EmitCilkExceptingSync(*this);
+
     // Enter a cleanup scope, including the catch variable and the
     // end-catch.
     RunCleanupsScope CatchScope(*this);

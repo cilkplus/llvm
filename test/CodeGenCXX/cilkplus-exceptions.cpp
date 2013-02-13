@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_PARENT %s
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F1 %s
 // RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F2 %s
-// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_IMPLICIT_SYNC %s
+// RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_IMPLICIT_SYNC %s
 // RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_SYNC_JUMP %s
 // RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_MISC_IMP_SYNC %s
 //
@@ -214,7 +214,9 @@ void test2() {
   test2_anchor();
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test2Ev
   // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test2_anchorEv
-  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_parent_epilogue
+  // CHECK_IMPLICIT_SYNC-NEXT: ret void
 }
 
 void test3_anchor() throw ();
@@ -230,7 +232,9 @@ void test3() {
   test3_anchor();
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test3Ev
   // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test3_anchorEv
-  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_parent_epilogue
+  // CHECK_IMPLICIT_SYNC-NEXT: ret void
 }
 
 void test4_anchor() throw ();
@@ -261,8 +265,8 @@ void test5() {
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test5Ev
   // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
   // CHECK_IMPLICIT_SYNC: store i32 13
-  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
-  // CHECK_IMPLICIT_SYNC: invoke void @__cxa_throw
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: invoke void @__cxa_throw
 }
 
 // Should have an implicit sync before throw
@@ -276,8 +280,8 @@ void test6() {
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test6Ev
   // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
   // CHECK_IMPLICIT_SYNC: store i32 17
-  // CHECK_IMPLICIT_SYNC: call void @__cilkrts_sync
-  // CHECK_IMPLICIT_SYNC: invoke void @__cxa_throw
+  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: invoke void @__cxa_throw
 }
 
 // No implicit sync before throw
@@ -291,11 +295,11 @@ void test7() {
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test7Ev
   // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
   // CHECK_IMPLICIT_SYNC: store i32 19
-  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilkrts_sync
-  // CHECK_IMPLICIT_SYNC: invoke void @__cxa_throw
+  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilk_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: invoke void @__cxa_throw
 }
 
-// No implicit sync inside try-block
+// No implicit sync exiting try-block
 void test8() {
   try {
     foo();
@@ -304,7 +308,7 @@ void test8() {
   }
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test8Ev
   // CHECK_IMPLICIT_SYNC: invoke void @_ZN27implicit_sync_elision_basic3fooEv()
-  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilkrts_sync
+  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilk_sync
   // CHECK_IMPLICIT_SYNC: call i8* @__cxa_begin_catch
 }
 

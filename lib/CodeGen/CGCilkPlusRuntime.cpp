@@ -90,6 +90,8 @@ typedef void (__cilkrts_cilk_for_32)(__cilk_abi_f32_t body, void *data,
 typedef void (__cilkrts_cilk_for_64)(__cilk_abi_f64_t body, void *data,
                                      cilk64_t count, int grain);
 
+typedef void (cilk_func)(__cilkrts_stack_frame *);
+
 } // namespace
 
 #define CILKRTS_FUNC(name, CGF) Get__cilkrts_##name(CGF)
@@ -269,10 +271,10 @@ static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF)
 /// \brief Helper to find a function with the given name, creating it if it
 /// doesn't already exist. If the function needed to be created then return
 /// false, signifying that the caller needs to add the function body.
+template <typename T>
 static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
                                 Function *&Fn, Function::LinkageTypes Linkage =
-                                               Function::InternalLinkage)
-{
+                                               Function::InternalLinkage) {
   llvm::Module &Module = CGF.CGM.getModule();
   LLVMContext &Ctx = CGF.getLLVMContext();
 
@@ -284,8 +286,7 @@ static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
     return true;
 
   // Otherwise we have to create it
-  typedef void (cilk_function)(__cilkrts_stack_frame*);
-  llvm::FunctionType *FTy = TypeBuilder<cilk_function, false>::get(Ctx);
+  llvm::FunctionType *FTy = TypeBuilder<T, false>::get(Ctx);
   Fn = Function::Create(FTy, Linkage, FnName, &Module);
 
   // and let the caller know that the function is incomplete
@@ -339,7 +340,7 @@ static CallInst *EmitCilkSetJmp(CGBuilderTy &B, Value *SF,
 static Function *Get__cilkrts_pop_frame(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilkrts_pop_frame", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilkrts_pop_frame", CGF, Fn))
     return Fn;
 
   // If we get here we need to add the function body
@@ -389,7 +390,7 @@ static Function *Get__cilkrts_pop_frame(CodeGenFunction &CGF) {
 static Function *Get__cilkrts_detach(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilkrts_detach", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilkrts_detach", CGF, Fn))
     return Fn;
 
   // If we get here we need to add the function body
@@ -454,9 +455,109 @@ static Function *Get__cilkrts_detach(CodeGenFunction &CGF) {
   return Fn;
 }
 
+/// \brief Get or create a LLVM function for __cilk_excepting_sync.
+/// This is a special sync to be inserted before processing a catch statement.
+/// Calls to this function are always inlined.
+///
+/// It is equivalent to the following C code
+///
+/// void __cilk_excepting_sync(struct __cilkrts_stack_frame *sf, void *Exn) {
+///   if (sf->flags & CILK_FRAME_UNSYNCHED) {
+///     if (!CILK_SETJMP(sf->ctx)) {
+///       __cilkrts_sync(sf);
+///       sf->except_data = Exn /* Exception_Handler_Pointer */;
+///       sf->flags = sf.flags | CILK_FRAME_EXCEPTING;
+///     } else
+///       sf.flags = sf.flags & ~CILK_FRAME_EXCEPTING;
+///   }
+/// }
+static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
+  Function *Fn = 0;
+
+  typedef void (cilk_func_1)(__cilkrts_stack_frame *, void *);
+  if (GetOrCreateFunction<cilk_func_1>("__cilk_excepting_sync", CGF, Fn))
+    return Fn;
+
+  LLVMContext &Ctx = CGF.getLLVMContext();
+  assert((Fn->arg_size() == 2) && "unexpected function type");
+  Value *SF = Fn->arg_begin();
+  Value *Exn = ++Fn->arg_begin();
+
+  BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", Fn),
+             *JumpTest = BasicBlock::Create(Ctx, "setjmp.test", Fn),
+             *JumpIf = BasicBlock::Create(Ctx, "setjmp.if", Fn),
+             *JumpElse = BasicBlock::Create(Ctx, "setjmp.else", Fn),
+             *Exit = BasicBlock::Create(Ctx, "exit", Fn);
+
+  // Entry
+  {
+    CGBuilderTy B(Entry);
+
+    // if (sf->flags & CILK_FRAME_UNSYNCHED)
+    Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
+    Flags = B.CreateAnd(Flags,
+                        ConstantInt::get(Flags->getType(),
+                                         CILK_FRAME_UNSYNCHED));
+    Value *Zero = Constant::getNullValue(Flags->getType());
+
+    Value *Unsynced = B.CreateICmpEQ(Flags, Zero);
+    B.CreateCondBr(Unsynced, Exit, JumpTest);
+  }
+
+  // JumpTest
+  {
+    CGBuilderTy B(JumpTest);
+    // if (!CILK_SETJMP(sf.ctx))
+    Value *C = EmitCilkSetJmp(B, SF, CGF);
+    C = B.CreateICmpEQ(C, Constant::getNullValue(C->getType()));
+    B.CreateCondBr(C, JumpIf, JumpElse);
+  }
+
+  // JumpIf
+  {
+    CGBuilderTy B(JumpIf);
+
+    // __cilkrts_sync(&sf);
+    B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
+
+    // sf->except_data = Exception_Handler_Pointer;
+    StoreField(B, Exn, SF, StackFrameBuilder::except_data);
+
+    // sf->flags = sf.flags | CILK_FRAME_EXCEPTING;
+    Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
+    Flags = B.CreateOr(Flags, ConstantInt::get(Flags->getType(),
+                                               CILK_FRAME_EXCEPTING));
+    StoreField(B, Flags, SF, StackFrameBuilder::flags);
+    B.CreateBr(Exit);
+  }
+
+  // JumpElse
+  {
+    CGBuilderTy B(JumpElse);
+
+    // sf->flags = sf.flags & ~CILK_FRAME_EXCEPTING;
+    Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
+    Flags = B.CreateAnd(Flags, ConstantInt::get(Flags->getType(),
+                                                ~CILK_FRAME_EXCEPTING));
+    StoreField(B, Flags, SF, StackFrameBuilder::flags);
+    B.CreateBr(Exit);
+  }
+
+  // Exit
+  {
+    CGBuilderTy B(Exit);
+    B.CreateRetVoid();
+  }
+
+  Fn->addFnAttr(Attribute::AlwaysInline);
+
+  return Fn;
+}
+
 /// \brief Get or create a LLVM function for __cilk_sync.
 /// Calls to this function is always inlined, as it saves
-/// the current stack/frame pointer values
+/// the current stack/frame pointer values.
+///
 /// It is equivalent to the following C code
 ///
 /// void __cilk_sync(struct __cilkrts_stack_frame *sf) {
@@ -465,7 +566,7 @@ static Function *Get__cilkrts_detach(CodeGenFunction &CGF) {
 ///     SAVE_FLOAT_STATE(*sf);
 ///     if (!CILK_SETJMP(sf->ctx))
 ///       __cilkrts_sync(sf);
-///     else if (sf->flags & CILK_FRAME_EXCEPTING)
+///     if (sf->flags & CILK_FRAME_EXCEPTING)
 ///       __cilkrts_rethrow(sf);
 ///   }
 ///   ++sf->worker->pedigree.rank;
@@ -473,7 +574,7 @@ static Function *Get__cilkrts_detach(CodeGenFunction &CGF) {
 static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilk_sync", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilk_sync", CGF, Fn))
     return Fn;
 
   // If we get here we need to add the function body
@@ -524,7 +625,7 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
 
     // __cilkrts_sync(&sf);
     B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
-    B.CreateBr(Exit);
+    B.CreateBr(Excepting);
   }
 
   // Excepting
@@ -579,7 +680,7 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
 static Function *GetCilkResetWorkerFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilk_reset_worker", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilk_reset_worker", CGF, Fn))
     return Fn;
 
   LLVMContext &Ctx = CGF.getLLVMContext();
@@ -620,8 +721,8 @@ static Function *GetCilkResetWorkerFn(CodeGenFunction &CGF) {
 static Function *Get__cilkrts_enter_frame_1(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilkrts_enter_frame_1", CGF, Fn,
-                          Function::AvailableExternallyLinkage))
+  if (GetOrCreateFunction<cilk_func>("__cilkrts_enter_frame_1", CGF, Fn,
+                                     Function::AvailableExternallyLinkage))
     return Fn;
 
   LLVMContext &Ctx = CGF.getLLVMContext();
@@ -701,8 +802,8 @@ static Function *Get__cilkrts_enter_frame_1(CodeGenFunction &CGF) {
 static Function *Get__cilkrts_enter_frame_fast_1(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilkrts_enter_frame_fast_1", CGF, Fn,
-                          Function::AvailableExternallyLinkage))
+  if (GetOrCreateFunction<cilk_func>("__cilkrts_enter_frame_fast_1", CGF, Fn,
+                                     Function::AvailableExternallyLinkage))
     return Fn;
 
   LLVMContext &Ctx = CGF.getLLVMContext();
@@ -741,7 +842,7 @@ static Function *Get__cilkrts_enter_frame_fast_1(CodeGenFunction &CGF) {
 static Function *GetCilkParentPrologue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilk_parent_prologue", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilk_parent_prologue", CGF, Fn))
     return Fn;
 
   // If we get here we need to add the function body
@@ -773,7 +874,7 @@ static Function *GetCilkParentPrologue(CodeGenFunction &CGF) {
 static Function *GetCilkParentEpilogue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilk_parent_epilogue", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilk_parent_epilogue", CGF, Fn))
     return Fn;
 
   // If we get here we need to add the function body
@@ -829,7 +930,7 @@ static Function *GetCilkParentEpilogue(CodeGenFunction &CGF) {
 static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilk_helper_prologue", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilk_helper_prologue", CGF, Fn))
     return Fn;
 
   // If we get here we need to add the function body
@@ -865,7 +966,7 @@ static llvm::Function *GetCilkHelperPrologue(CodeGenFunction &CGF) {
 static llvm::Function *GetCilkHelperEpilogue(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction("__cilk_helper_epilogue", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilk_helper_epilogue", CGF, Fn))
     return Fn;
 
   // If we get here we need to add the function body
@@ -1064,12 +1165,21 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
   CGF.EmitBlock(Exit);
 }
 
-/// \brief Emit a call to the __cilk_sync function
+/// \brief Emit a call to the __cilk_sync function.
 void CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF) {
   // Elide the sync if there is no stack frame initialized for this function.
   // This will happen if function only contains _Cilk_sync but no _Cilk_spawn.
   if (llvm::Value *SF = LookupStackFrame(CGF))
     CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
+}
+
+/// \brief Emit a call to __cilk_excepting_sync function.
+void CGCilkPlusRuntime::EmitCilkExceptingSync(CodeGenFunction &CGF) {
+  if (llvm::Value *SF = LookupStackFrame(CGF)) {
+    llvm::Value *Exn = CGF.getExceptionFromSlot();
+    assert(Exn && "null exception handler pointer");
+    CGF.Builder.CreateCall2(GetCilkExceptingSyncFn(CGF), SF, Exn);
+  }
 }
 
 namespace {
