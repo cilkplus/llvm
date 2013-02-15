@@ -154,11 +154,6 @@ static void addObjCARCOptPass(const PassManagerBuilder &Builder, PassManagerBase
     PM.add(createObjCARCOptPass());
 }
 
-static void addCilkSyncElimPass(const PassManagerBuilder &Builder, PassManagerBase &PM) {
-  if (Builder.OptLevel > 0)
-    PM.add(createElideCilkSyncPass());
-}
-
 static void addBoundsCheckingPass(const PassManagerBuilder &Builder,
                                     PassManagerBase &PM) {
   PM.add(createBoundsCheckingPass());
@@ -239,11 +234,6 @@ void EmitAssemblyHelper::CreatePasses(TargetMachine *TM) {
     PMBuilder.addExtension(PassManagerBuilder::EP_ScalarOptimizerLate,
                            addObjCARCOptPass);
   }
-
-  if (LangOpts.CilkPlus)
-   // In Cilk Plus mode, add pass to remove unnecessary Cilk syncs.
-   PMBuilder.addExtension(PassManagerBuilder::EP_ModuleOptimizerEarly,
-                          addCilkSyncElimPass);
 
   if (LangOpts.Sanitize.Bounds) {
     PMBuilder.addExtension(PassManagerBuilder::EP_ScalarOptimizerLate,
