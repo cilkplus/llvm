@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
+#include "CGCleanup.h"
 #include "CGCilkPlusRuntime.h"
 #include "CGCUDARuntime.h"
 #include "CGCXXABI.h"
@@ -181,6 +182,19 @@ static void EmitIfUsed(CodeGenFunction &CGF, llvm::BasicBlock *BB) {
 void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   assert(BreakContinueStack.empty() &&
          "mismatched push/pop in break/continue stack!");
+
+  // Pop a Cilk spawn helper's catch scope.
+  if (getLangOpts().Exceptions && getLangOpts().CilkPlus) {
+    const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CurFuncDecl);
+    if (FD && FD->isParallelRegion()) {
+      EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
+      popCatchScope();
+      if (CatchScope.hasEHBranches()) {
+        CGM.getCilkPlusRuntime().EmitCilkHelperCatch(
+          CatchScope.getHandler(0).Block, *this);
+      }
+    }
+  }
 
   // Pop any cleanups that might have been associated with the
   // parameters.  Do this in whatever block we're currently in; it's

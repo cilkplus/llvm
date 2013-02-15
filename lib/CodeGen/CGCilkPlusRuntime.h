@@ -72,6 +72,8 @@ public:
 
   void EmitCilkHelperStackFrame(CodeGenFunction &CGF);
 
+  void EmitCilkHelperCatch(llvm::BasicBlock *Catch, CodeGenFunction &CGF);
+
   void EmitCilkHelperPrologue(CodeGenFunction &CGF);
 
   void pushCilkImplicitSyncCleanup(CodeGenFunction &CGF);

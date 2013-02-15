@@ -60,15 +60,14 @@ namespace stack_frame_cleanup {
     //
     // Call C's destructor
     // CHECK_HELPER_F1: call void @_ZN19stack_frame_cleanup1CD1Ev
-    // CHECK_HELPER_F1-NEXT: call void @__cilk_helper_epilogue
-    // CHECK_HELPER_F1-NEXT: ret void
+    // CHECK_HELPER_F1: call void @__cilk_helper_epilogue
     //
     // * Exit due to exception *
     //
     // CHECK_HELPER_F1: call void @_ZN19stack_frame_cleanup1CD1Ev
     // CHECK_HELPER_F1-NEXT: br label
     // CHECK_HELPER_F1: call void @__cilk_helper_epilogue
-    // CHECK_HELPER_F1-NEXT: br label
+    // CHECK_HELPER_F1-NEXT: call void @__cxa_end_catch
   }
 
   void helper_check_assignment() {
@@ -84,8 +83,7 @@ namespace stack_frame_cleanup {
     // * Normal exit *
     //
     // CHECK_HELPER_F2: store i32 [[RET_REG]]
-    // CHECK_HELPER_F2-NEXT: call void @__cilk_helper_epilogue
-    // CHECK_HELPER_F2-NEXT: ret void
+    // CHECK_HELPER_F2: call void @__cilk_helper_epilogue
   }
 
   void foo();

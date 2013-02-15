@@ -13,6 +13,7 @@
 ///
 //===----------------------------------------------------------------------===//
 #include "CGCilkPlusRuntime.h"
+#include "CGCleanup.h"
 #include "CodeGenFunction.h"
 #include "clang/AST/ParentMap.h"
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -1177,6 +1178,17 @@ void CGCilkPlusRuntime::EmitCilkExceptingSync(CodeGenFunction &CGF) {
 }
 
 namespace {
+  struct CallFunctionCleanup : EHScopeStack::Cleanup {
+    llvm::Value *F;
+
+    explicit CallFunctionCleanup(llvm::Value *F)
+      : F(F) {}
+
+    void Emit(CodeGenFunction &CGF, Flags flags) {
+      CGF.Builder.CreateCall(F);
+    }
+  };
+
   struct CilkSpawnParentCleanup : EHScopeStack::Cleanup {
     llvm::Value *SF;
     unsigned CleanupKind;
@@ -1234,6 +1246,63 @@ void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF,
   CGF.EHStack.pushCleanup<CilkSpawnParentCleanup>(NormalAndEHCleanup, SF, Kind);
 }
 
+/// \brief Emit code to set the exception flags in the spawn helper.
+/// It is equivalent to the following pseudo code:
+///
+/// try {
+///   sf->flags = sf.flags | CILK_FRAME_EXCEPTING;
+///   sf->except_data = Exn /* Exception_Handler_Pointer */;
+///   __cxa_begin_catch(Exn);
+///   __cxa_rethrow();
+///   __cilk_helper_epilogue(sf);
+/// } finally {
+///   __cxa_end_catch();
+/// }
+void CGCilkPlusRuntime::EmitCilkHelperCatch(llvm::BasicBlock *Catch,
+                                            CodeGenFunction &CGF) {
+  LLVMContext &Ctx = CGF.getLLVMContext();
+  CGBuilderTy::InsertPoint SavedIP = CGF.Builder.saveAndClearIP();
+
+  llvm::Value *SF = LookupStackFrame(CGF);
+
+  Function *BeginCatch = 0, *EndCatch = 0, *Rethrow = 0;
+  Function::LinkageTypes Linkage = Function::ExternalLinkage;
+  GetOrCreateFunction<void*(void*)>("__cxa_begin_catch", CGF, BeginCatch,
+                                    Linkage);
+  GetOrCreateFunction<void()>("__cxa_end_catch", CGF, EndCatch, Linkage);
+  GetOrCreateFunction<void()>("__cxa_rethrow", CGF, Rethrow, Linkage);
+
+  CGF.EmitBlock(Catch);
+  {
+    llvm::Value *Exn = CGF.getExceptionFromSlot();
+    // sf.flags = sf.flags | CILK_FRAME_EXCEPTING;
+    llvm::Value *Flags = LoadField(CGF.Builder, SF, StackFrameBuilder::flags);
+    Flags = CGF.Builder.CreateOr(Flags, ConstantInt::get(Flags->getType(),
+                                                         CILK_FRAME_EXCEPTING));
+    StoreField(CGF.Builder, Flags, SF, StackFrameBuilder::flags);
+    // sf.except_data = Exn;
+    StoreField(CGF.Builder, Exn, SF, StackFrameBuilder::except_data);
+
+    // __cxa_begin_catch(Exn)
+    CGF.Builder.CreateCall(BeginCatch, Exn);
+
+    // finally { __cxa_end_catch() }
+    CodeGenFunction::LexicalScope cleanups(CGF, SourceRange());
+    CGF.EHStack.pushCleanup<CallFunctionCleanup>(NormalAndEHCleanup, EndCatch);
+
+    // __cxa_rethrow()
+    CGF.EmitCallOrInvoke(Rethrow);
+
+    // __cilk_helper_epilogue(sf);
+    CGF.Builder.CreateCall(GetCilkHelperEpilogue(CGF), SF);
+
+    cleanups.ForceCleanup();
+    CGF.EmitBranchThroughCleanup(CGF.ReturnBlock);
+  }
+
+  CGF.Builder.restoreIP(SavedIP);
+}
+
 /// \brief Emit code to create a Cilk stack frame for the helper function and
 /// release it in the end.
 void CGCilkPlusRuntime::EmitCilkHelperStackFrame(CodeGenFunction &CGF) {
@@ -1247,6 +1316,10 @@ void CGCilkPlusRuntime::EmitCilkHelperStackFrame(CodeGenFunction &CGF) {
   // Push cleanups associated to this stack frame initialization.
   //
   CGF.EHStack.pushCleanup<CilkSpawnHelperCleanup>(NormalAndEHCleanup, SF);
+  if (CGF.getLangOpts().Exceptions) {
+    EHCatchScope *CatchScope = CGF.EHStack.pushCatch(1);
+    CatchScope->setCatchAllHandler(0, CGF.createBasicBlock("cilk.spawn.catch"));
+  }
 }
 
 /// \brief Push an implicit sync to the EHStack. A call to __cilk_sync will be
