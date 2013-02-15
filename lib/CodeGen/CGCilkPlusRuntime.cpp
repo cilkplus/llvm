@@ -232,27 +232,21 @@ typedef llvm::TypeBuilder<__cilkrts_stack_frame, false> StackFrameBuilder;
 typedef llvm::TypeBuilder<__cilkrts_worker, false> WorkerBuilder;
 typedef llvm::TypeBuilder<__cilkrts_pedigree, false> PedigreeBuilder;
 
-
-static Value *GEP(CGBuilderTy &B, Value *Base, int field)
-{
+static Value *GEP(CGBuilderTy &B, Value *Base, int field) {
   return B.CreateConstInBoundsGEP2_32(Base, 0, field);
 }
 
-static
-void StoreField(CGBuilderTy &B, Value *Val, Value *Dst, int field)
-{
+static void StoreField(CGBuilderTy &B, Value *Val, Value *Dst, int field) {
   B.CreateStore(Val, GEP(B, Dst, field));
 }
 
-static Value *LoadField(CGBuilderTy &B, Value *Src, int field)
-{
+static Value *LoadField(CGBuilderTy &B, Value *Src, int field) {
   return B.CreateLoad(GEP(B, Src, field));
 }
 
 /// \brief Emit inline assembly code to save the floating point
 /// state, for x86 Only.
-static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF)
-{
+static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF) {
   typedef void (AsmPrototype)(uint32_t*, uint16_t*);
   llvm::FunctionType *FTy =
     TypeBuilder<AsmPrototype, false>::get(B.getContext());
