@@ -26,3 +26,6 @@
 // RUN: %clang_cc1 %s -E -dM -o - \
 // RUN:   | FileCheck %s --check-prefix=CHECK-FINITE-MATH-FLAG-UNDEFINED
 // CHECK-FINITE-MATH-FLAG-UNDEFINED: #define __FINITE_MATH_ONLY__ 0
+//
+// RUN: %clang_cc1 %s -fcilkplus -E -dM -o - | FileCheck %s --check-prefix=CHECK-CILK
+// CHECK-CILK: #define __cilk 200

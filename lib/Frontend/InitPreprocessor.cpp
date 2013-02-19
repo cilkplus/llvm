@@ -651,6 +651,9 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     Builder.defineMacro("_OPENMP", "201107");
   }
 
+  if (LangOpts.CilkPlus)
+    Builder.defineMacro("__cilk", "200");
+
   // Get other target #defines.
   TI.getTargetDefines(LangOpts, Builder);
 }
