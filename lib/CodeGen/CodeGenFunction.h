@@ -593,8 +593,8 @@ public:
 
   class CGCapturedStmtInfo {
   public:
-    explicit CGCapturedStmtInfo(ASTContext &C)
-      : Context(C), ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) { }
+    CGCapturedStmtInfo()
+      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) { }
 
     void setThisValue(llvm::Value *V) { ThisValue = V; }
     llvm::Value *getThisValue() const { return ThisValue; }
@@ -628,8 +628,6 @@ public:
     }
 
   private:
-    ASTContext &Context;
-
     /// \brief Keep the map between VarDecl and FieldDecl
     llvm::SmallDenseMap<const VarDecl *, FieldDecl *> CaptureFields;
 

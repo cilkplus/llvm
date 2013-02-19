@@ -1027,10 +1027,6 @@ static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
 namespace clang {
 namespace CodeGen {
 
-CGCilkPlusRuntime::CGCilkPlusRuntime(CodeGenModule &CGM) : CGM(CGM) { }
-
-CGCilkPlusRuntime::~CGCilkPlusRuntime() { }
-
 /// \brief Emit code the the CilkSpawnStmt.
 ///
 /// FIXME: This function creates helper functions using CodeExtractor
@@ -1260,7 +1256,6 @@ void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF,
 /// }
 void CGCilkPlusRuntime::EmitCilkHelperCatch(llvm::BasicBlock *Catch,
                                             CodeGenFunction &CGF) {
-  LLVMContext &Ctx = CGF.getLLVMContext();
   CGBuilderTy::InsertPoint SavedIP = CGF.Builder.saveAndClearIP();
 
   llvm::Value *SF = LookupStackFrame(CGF);
@@ -1341,10 +1336,6 @@ void CGCilkPlusRuntime::EmitCilkHelperPrologue(CodeGenFunction &CGF) {
 
   // Initialize the stack frame and detach
   CGF.Builder.CreateCall(GetCilkHelperPrologue(CGF), SF);
-}
-
-CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM) {
-  return new CGCilkPlusRuntime(CGM);
 }
 
 /// \brief A utility function for finding the enclosing CXXTryStmt if exists.

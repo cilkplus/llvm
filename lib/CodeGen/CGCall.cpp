@@ -1178,7 +1178,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       assert(I != CGM.getCaptureDeclMap().end()
              && "cannot find its associate CapturedStmt");
 
-      CurCGCapturedStmtInfo = new CGCapturedStmtInfo(getContext());
+      CurCGCapturedStmtInfo = new CGCapturedStmtInfo();
       CurCGCapturedStmtInfo->initCGCapturedStmtInfo(I->second);
     }
   }

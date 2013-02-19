@@ -45,19 +45,12 @@ class CodeGenModule;
 
 /// \brief Implements Cilk Plus runtime specific code generation functions.
 class CGCilkPlusRuntime {
-private:
-  CodeGenModule &CGM;
-
 public:
   enum CilkCleanupKind {
     ImplicitSyncCleanup = 0x01,
     ReleaseFrameCleanup = 0x02,
     ImpSyncAndRelFrameCleanup = ImplicitSyncCleanup | ReleaseFrameCleanup
   };
-
-  CGCilkPlusRuntime(CodeGenModule &CGM);
-
-  ~CGCilkPlusRuntime();
 
   void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &E);
 
@@ -78,9 +71,6 @@ public:
 
   void pushCilkImplicitSyncCleanup(CodeGenFunction &CGF);
 };
-
-/// \brief Creates an instance of a Cilk Plus runtime object.
-CGCilkPlusRuntime *CreateCilkPlusRuntime(CodeGenModule &CGM);
 
 /// \brief API to query if an implicit sync is necessary during code generation.
 class CGCilkImplicitSyncInfo {
