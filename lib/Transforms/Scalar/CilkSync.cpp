@@ -43,7 +43,8 @@ namespace {
 
   class CilkCFGNode {
   public:
-    CilkCFGNode(Instruction *I, CilkCFGNode *Parent) : I(I) {
+    CilkCFGNode(Value *V, CilkCFGNode *Parent) : V(V) {
+      Dummy = isa<BasicBlock>(V);
       if (Parent) {
         addPred(Parent);
         Parent->addSucc(this);
@@ -60,8 +61,10 @@ namespace {
     succ_iterator succ_begin() { return Succs.begin(); }
     succ_iterator succ_end()   { return Succs.end(); }
 
-    Instruction *getInst() { return I; }
-    bool isDummy() { return !getInst(); }
+    Instruction *getInst() {
+      assert(!Dummy && "Dummy can't have instruction");
+      return cast<Instruction>(V);
+    }
 
     void addPred(CilkCFGNode *Parent) { Preds.insert(Parent); }
 
@@ -70,7 +73,13 @@ namespace {
     }
 
   private:
-    Instruction *I;
+    /// \brief The LLVM Value that this node represents, either a BasicBlock
+    /// or a CallInst/InvokeInst of a Cilk function.
+    Value *V;
+
+    /// \brief This node is a dummy if it represents a basic block
+    /// that has no Cilk calls.
+    bool Dummy;
     SmallPtrSet<CilkCFGNode*, 2> Succs;
     SmallPtrSet<CilkCFGNode*, 2> Preds;
 
@@ -93,7 +102,7 @@ namespace {
     }
 
   private:
-    DenseMap<Instruction*, CilkCFGNode*> InstrToCilkCFG;
+    DenseMap<Value*, CilkCFGNode*> InstrToCilkCFG;
     SmallVector<CilkCFGNode*, 4> CilkCalls;
 
     /// \brief Cache of previously visited CilkCFG nodes
@@ -109,6 +118,8 @@ namespace {
     bool updateInOut(CilkCFGNode *Cur);
 
     Instruction *getNextInstr(BasicBlock::iterator &BBI, bool &IsKill);
+    bool insertOrUpdateCilkCFG(Value *V, CilkCFGNode *Parent,
+                               CilkCFGNode *&NewNode);
 
     StringRef getSyncFnName() const { return StringRef("__cilk_sync"); }
     StringRef getSpawnHelperPrefix() const {
@@ -173,9 +184,9 @@ bool ElideCilkSync::runOnFunction(Function &F) {
   return MadeChange;
 }
 
-/// \brief Build a CFG containing only Cilk calls, and
-/// initialize gen and kill sets for each Cilk call. Returns a pointer to
-/// the first node in the Cilk-only CFG.
+/// \brief Build a CFG containing only Cilk calls, and initialize gen and
+/// kill sets for each Cilk call. Returns a pointer to the first node
+/// in the Cilk-only CFG.
 CilkCFGNode *ElideCilkSync::analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode) {
   bool VisitSuccessors = Visited.insert(BB);
 
@@ -184,23 +195,17 @@ CilkCFGNode *ElideCilkSync::analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode) {
 
   bool IsKill;
   Instruction *I = getNextInstr(BBI, IsKill);
+  bool FoundCilkCall = I != 0;
 
   while (I) {
     // Build Cilk-only CFG
-    DenseMap<Instruction*, CilkCFGNode*>::iterator It = InstrToCilkCFG.find(I);
     CilkCFGNode *Parent = CurNode;
-    if (It != InstrToCilkCFG.end()) {
-      // Update predecessors if control flow was in a cycle
-      CurNode = It->second;
-      CurNode->addPred(Parent);
-      break;
-    } else {
-      // Never saw this instruction before, create a new node
-      CurNode = new CilkCFGNode(I, Parent);
+    if (insertOrUpdateCilkCFG(I, Parent, CurNode)) {
       CilkCalls.push_back(CurNode);
-      InstrToCilkCFG[I] = CurNode;
       if (!RootNode)
         RootNode = CurNode;
+    } else {
+      break;
     }
 
     // Compute gen/kill sets for each sync and spawn. The Cilk stack frame
@@ -224,12 +229,13 @@ CilkCFGNode *ElideCilkSync::analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode) {
     I = getNextInstr(BBI, IsKill);
   }
 
-  if (!RootNode) {
-    // If the first BB didn't have a Cilk function, create a dummy node
-    // in the Cilk-only CFG so that successors are correct.
-    RootNode = new CilkCFGNode(0, 0);
-    RootNode->SFInfo.Out = StackFrame;
-    CurNode = RootNode;
+  if (!FoundCilkCall) {
+    // If there were no Cilk calls in this BB, create an empty (dummy) CFG
+    // node in the Cilk-only CFG to represent the control flow through this BB.
+    CilkCFGNode *Parent = CurNode;
+    insertOrUpdateCilkCFG(BB, Parent, CurNode);
+    if (!RootNode)
+      RootNode = CurNode;
   }
 
   if (!VisitSuccessors)
@@ -262,7 +268,7 @@ bool ElideCilkSync::propogateInOut(CilkCFGNode *Root) {
         Next.push_back(*I);
     }
 
-    if (Cur != Root && !Cur->isDummy())
+    if (Cur != Root)
       MadeChange |= updateInOut(Cur);
   }
 
@@ -329,6 +335,27 @@ Instruction *ElideCilkSync::getNextInstr(BasicBlock::iterator &BBI,
   }
 
   return 0;
+}
+
+/// \brief Inserts a node pointing to V into the Cilk-specific CFG. If V
+/// is already in the CFG, update its predecessors to include Parent.
+/// NewNode will be set to the CFG node. Returns true if a node was inserted,
+/// false if the node existed already.
+bool ElideCilkSync::insertOrUpdateCilkCFG(Value *V,
+                                          CilkCFGNode *Parent,
+                                          CilkCFGNode *&NewNode) {
+  DenseMap<Value*, CilkCFGNode*>::iterator It = InstrToCilkCFG.find(V);
+  if (It != InstrToCilkCFG.end()) {
+    // Already exists, update the node's predecessors
+    NewNode = It->second;
+    NewNode->addPred(Parent);
+    return false;
+  } else {
+    // Never saw this instruction/BB before, create a new node
+    NewNode = new CilkCFGNode(V, Parent);
+    InstrToCilkCFG[V] = NewNode;
+    return true;
+  }
 }
 
 /// \brief Sets StackFrame to the unique Cilk stack frame in the given
