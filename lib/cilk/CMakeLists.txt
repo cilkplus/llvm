@@ -3,7 +3,7 @@
 ###############################################################################
 
 # Install cilk header files
-set(output_dir ${LLVM_BINARY_DIR}/lib/clang/${CLANG_VERSION}/include)
+set(output_dir ${LLVM_BINARY_DIR}/include)
 
 set(cilk_header_files
     cilk/cilk.h
@@ -42,7 +42,7 @@ set_target_properties(cilk-headers PROPERTIES FOLDER "Misc")
 
 install(DIRECTORY ""
   FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-  DESTINATION lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION})
+  DESTINATION lib${LLVM_LIBDIR_SUFFIX})
 
 # Sources files for the libraries
 set(cilk_runtime_sources
@@ -125,7 +125,21 @@ set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} ${BASE_CXX_FLAGS}"
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${BASE_CXX_FLAGS}")
 
 # Generate libraries
-add_compiler_rt_osx_dynamic_runtime(cilkrts
+macro(add_cilk_runtime name)
+  parse_arguments(LIB "ARCH;SOURCES;CFLAGS;DEFS;LINKFLAGS" "" ${ARGN})
+  add_library(${name} SHARED ${LIB_SOURCES})
+  set_target_compile_flags(${name} ${LIB_CFLAGS})
+  set_target_link_flags(${name} ${LIB_LINKFLAGS})
+  set_property(TARGET ${name} APPEND PROPERTY
+    COMPILE_DEFINITIONS ${LIB_DEFS})
+  set_target_properties(${name} PROPERTIES
+    OSX_ARCHITECTURES "${LIB_ARCH}"
+    LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib)
+  install(TARGETS ${name}
+    LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX})
+endmacro()
+
+add_cilk_runtime(cilkrts
   ARCH "x86_64"
   SOURCES ${cilk_runtime_sources})
 
