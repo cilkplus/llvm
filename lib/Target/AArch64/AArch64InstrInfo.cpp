@@ -15,8 +15,8 @@
 #include "AArch64InstrInfo.h"
 #include "AArch64MachineFunctionInfo.h"
 #include "AArch64TargetMachine.h"
-#include "MCTargetDesc/AArch64BaseInfo.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
+#include "Utils/AArch64BaseInfo.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -582,8 +582,6 @@ unsigned AArch64InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case TargetOpcode::EH_LABEL:
   case TargetOpcode::DBG_VALUE:
     return 0;
-  case AArch64::CONSTPOOL_ENTRY:
-    return MI.getOperand(2).getImm();
   case AArch64::TLSDESCCALL:
     return 0;
   default:
@@ -613,7 +611,8 @@ bool llvm::rewriteA64FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
   llvm_unreachable("Unimplemented rewriteFrameIndex");
 }
 
-void llvm::emitRegUpdate(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+void llvm::emitRegUpdate(MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator MBBI,
                          DebugLoc dl, const TargetInstrInfo &TII,
                          unsigned DstReg, unsigned SrcReg, unsigned ScratchReg,
                          int64_t NumBytes, MachineInstr::MIFlag MIFlags) {
@@ -622,18 +621,35 @@ void llvm::emitRegUpdate(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBB
   else if (abs(NumBytes) & ~0xffffff) {
     // Generically, we have to materialize the offset into a temporary register
     // and subtract it. There are a couple of ways this could be done, for now
-    // we'll go for a literal-pool load.
-    MachineFunction &MF = *MBB.getParent();
-    MachineConstantPool *MCP = MF.getConstantPool();
-    const Constant *C
-      = ConstantInt::get(Type::getInt64Ty(MF.getFunction()->getContext()),
-                         abs(NumBytes));
-    unsigned CPI = MCP->getConstantPoolIndex(C, 8);
+    // we'll use a movz/movk or movn/movk sequence.
+    uint64_t Bits = static_cast<uint64_t>(abs(NumBytes));
+    BuildMI(MBB, MBBI, dl, TII.get(AArch64::MOVZxii), ScratchReg)
+      .addImm(0xffff & Bits).addImm(0)
+      .setMIFlags(MIFlags);
 
-    // LDR xTMP, .LITPOOL
-    BuildMI(MBB, MBBI, dl, TII.get(AArch64::LDRx_lit), ScratchReg)
-      .addConstantPoolIndex(CPI)
-      .setMIFlag(MIFlags);
+    Bits >>= 16;
+    if (Bits & 0xffff) {
+      BuildMI(MBB, MBBI, dl, TII.get(AArch64::MOVKxii), ScratchReg)
+        .addReg(ScratchReg)
+        .addImm(0xffff & Bits).addImm(1)
+        .setMIFlags(MIFlags);
+    }
+
+    Bits >>= 16;
+    if (Bits & 0xffff) {
+      BuildMI(MBB, MBBI, dl, TII.get(AArch64::MOVKxii), ScratchReg)
+        .addReg(ScratchReg)
+        .addImm(0xffff & Bits).addImm(2)
+        .setMIFlags(MIFlags);
+    }
+
+    Bits >>= 16;
+    if (Bits & 0xffff) {
+      BuildMI(MBB, MBBI, dl, TII.get(AArch64::MOVKxii), ScratchReg)
+        .addReg(ScratchReg)
+        .addImm(0xffff & Bits).addImm(3)
+        .setMIFlags(MIFlags);
+    }
 
     // ADD DST, SRC, xTMP (, lsl #0)
     unsigned AddOp = NumBytes > 0 ? AArch64::ADDxxx_uxtx : AArch64::SUBxxx_uxtx;
@@ -695,7 +711,8 @@ namespace {
     LDTLSCleanup() : MachineFunctionPass(ID) {}
 
     virtual bool runOnMachineFunction(MachineFunction &MF) {
-      AArch64MachineFunctionInfo* MFI = MF.getInfo<AArch64MachineFunctionInfo>();
+      AArch64MachineFunctionInfo* MFI
+        = MF.getInfo<AArch64MachineFunctionInfo>();
       if (MFI->getNumLocalDynamicTLSAccesses() < 2) {
         // No point folding accesses if there isn't at least two.
         return false;

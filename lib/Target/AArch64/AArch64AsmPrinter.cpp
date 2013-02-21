@@ -17,7 +17,6 @@
 #include "InstPrinter/AArch64InstPrinter.h"
 #include "llvm/DebugInfo.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -34,7 +33,8 @@ AArch64AsmPrinter::getDebugValueLocation(const MachineInstr *MI) const {
   // expected to be created.
   assert(MI->getNumOperands() == 4 && MI->getOperand(0).isReg()
          && MI->getOperand(1).isImm() && "unexpected custom DBG_VALUE");
-  return MachineLocation(MI->getOperand(0).getReg(), MI->getOperand(1).getImm());
+  return MachineLocation(MI->getOperand(0).getReg(),
+                         MI->getOperand(1).getImm());
 }
 
 /// Try to print a floating-point register as if it belonged to a specified
@@ -90,7 +90,8 @@ bool AArch64AsmPrinter::printSymbolicAddress(const MachineOperand &MO,
   StringRef Name;
   StringRef Modifier;
   switch (MO.getType()) {
-  default: llvm_unreachable("Unexpected operand for symbolic address constraint");
+  default:
+    llvm_unreachable("Unexpected operand for symbolic address constraint");
   case MachineOperand::MO_GlobalAddress:
     Name = Mang->getSymbol(MO.getGlobal())->getName();
 
@@ -296,20 +297,6 @@ void AArch64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     return;
 
   switch (MI->getOpcode()) {
-  case AArch64::CONSTPOOL_ENTRY: {
-    unsigned LabelId = (unsigned)MI->getOperand(0).getImm();
-    unsigned CPIdx = (unsigned)MI->getOperand(1).getIndex();
-
-    OutStreamer.EmitLabel(GetCPISymbol(LabelId));
-
-    const MachineConstantPoolEntry &MCPE = MCP->getConstants()[CPIdx];
-    if (MCPE.isMachineConstantPoolEntry())
-      EmitMachineConstantPoolValue(MCPE.Val.MachineCPVal);
-    else
-      EmitGlobalConstant(MCPE.Val.ConstVal);
-
-    return;
-  }
   case AArch64::DBG_VALUE: {
     if (isVerbose() && OutStreamer.hasRawTextSupport()) {
       SmallString<128> TmpStr;
@@ -350,7 +337,6 @@ void AArch64AsmPrinter::EmitEndOfAsmFile(Module &M) {
 }
 
 bool AArch64AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
-  MCP = MF.getConstantPool();
   return AsmPrinter::runOnMachineFunction(MF);
 }
 

@@ -1,9 +1,13 @@
-//===-- AArch64TargetInfo.cpp - AArch64 Target Implementation ---------------===//
+//===-- AArch64TargetInfo.cpp - AArch64 Target Implementation -------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file contains the key registration step for the architecture.
 //
 //===----------------------------------------------------------------------===//
 

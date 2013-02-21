@@ -15,7 +15,7 @@
 #ifndef LLVM_TARGET_AARCH64_ISELLOWERING_H
 #define LLVM_TARGET_AARCH64_ISELLOWERING_H
 
-#include "MCTargetDesc/AArch64BaseInfo.h"
+#include "Utils/AArch64BaseInfo.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
@@ -161,8 +161,8 @@ public:
                                     SelectionDAG& DAG) const;
 
   /// Finds the incoming stack arguments which overlap the given fixed stack
-  /// object and incorporates their load into the current chain. This prevents an
-  /// upcoming store from clobbering the stack argument before it's used.
+  /// object and incorporates their load into the current chain. This prevents
+  /// an upcoming store from clobbering the stack argument before it's used.
   SDValue addTokenForArgument(SDValue Chain, SelectionDAG &DAG,
                               MachineFrameInfo *MFI, int ClobberedFI) const;
 

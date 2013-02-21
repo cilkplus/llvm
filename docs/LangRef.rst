@@ -501,6 +501,14 @@ is zero. The address space qualifier must precede any other attributes.
 LLVM allows an explicit section to be specified for globals. If the
 target supports it, it will emit globals to the section specified.
 
+By default, global initializers are optimized by assuming that global
+variables defined within the module are not modified from their
+initial values before the start of the global initializer.  This is
+true even for variables potentially accessible from outside the
+module, including those with external linkage or appearing in
+``@llvm.used``. This assumption may be suppressed by marking the
+variable with ``externally_initialized``.
+
 An explicit alignment may be specified for a global, which must be a
 power of 2. If not present, or if the alignment is set to zero, the
 alignment of the global is set by the target to whatever it feels
@@ -729,6 +737,36 @@ The compiler declares the supported values of *name*. Specifying a
 collector which will cause the compiler to alter its output in order to
 support the named garbage collection algorithm.
 
+.. _attrgrp:
+
+Attribute Groups
+----------------
+
+Attribute groups are groups of attributes that are referenced by objects within
+the IR. They are important for keeping ``.ll`` files readable, because a lot of
+functions will use the same set of attributes. In the degenerative case of a
+``.ll`` file that corresponds to a single ``.c`` file, the single attribute
+group will capture the important command line flags used to build that file.
+
+An attribute group is a module-level object. To use an attribute group, an
+object references the attribute group's ID (e.g. ``#37``). An object may refer
+to more than one attribute group. In that situation, the attributes from the
+different groups are merged.
+
+Here is an example of attribute groups for a function that should always be
+inlined, has a stack alignment of 4, and which shouldn't use SSE instructions:
+
+.. code-block:: llvm
+
+   ; Target-independent attributes:
+   #0 = attributes { alwaysinline alignstack=4 }
+
+   ; Target-dependent attributes:
+   #1 = attributes { "no-sse" }
+
+   ; Function @f has attributes: alwaysinline, alignstack=4, and "no-sse".
+   define void @f() #0 #1 { ... }
+
 .. _fnattrs:
 
 Function Attributes
@@ -774,6 +812,17 @@ example:
 ``naked``
     This attribute disables prologue / epilogue emission for the
     function. This can have very system-specific consequences.
+``noduplicate``
+    This attribute indicates that calls to the function cannot be
+    duplicated. A call to a ``noduplicate`` function may be moved
+    within its parent function, but may not be duplicated within
+    its parent function.
+
+    A function containing a ``noduplicate`` call may still
+    be an inlining candidate, provided that the call is not
+    duplicated by inlining. That implies that the function has
+    internal linkage and only has one call site, so the original
+    call is dead after inlining.
 ``noimplicitfloat``
     This attributes disables implicit floating point instructions.
 ``noinline``
@@ -860,23 +909,18 @@ example:
     If a function that has an ``sspstrong`` attribute is inlined into a
     function that doesn't have an ``sspstrong`` attribute, then the
     resulting function will have an ``sspstrong`` attribute.
+``thread_safety``
+    This attribute indicates that the thread safety analysis is enabled
+    for this function.
+``uninitialized_checks``
+    This attribute indicates that the checks for uses of uninitialized
+    memory are enabled.
 ``uwtable``
     This attribute indicates that the ABI being targeted requires that
     an unwind table entry be produce for this function even if we can
     show that no exceptions passes by it. This is normally the case for
     the ELF x86-64 abi, but it can be disabled for some compilation
     units.
-``noduplicate``
-    This attribute indicates that calls to the function cannot be
-    duplicated. A call to a ``noduplicate`` function may be moved
-    within its parent function, but may not be duplicated within
-    its parent function.
-
-    A function containing a ``noduplicate`` call may still
-    be an inlining candidate, provided that the call is not
-    duplicated by inlining. That implies that the function has
-    internal linkage and only has one call site, so the original
-    call is dead after inlining.
 
 .. _moduleasm:
 
@@ -2477,6 +2521,118 @@ Examples:
     !1 = metadata !{ i8 255, i8 2 }
     !2 = metadata !{ i8 0, i8 2, i8 3, i8 6 }
     !3 = metadata !{ i8 -2, i8 0, i8 3, i8 6 }
+
+'``llvm.loop``'
+^^^^^^^^^^^^^^^
+
+It is sometimes useful to attach information to loop constructs. Currently,
+loop metadata is implemented as metadata attached to the branch instruction
+in the loop latch block. This type of metadata refer to a metadata node that is
+guaranteed to be separate for each loop. The loop-level metadata is prefixed
+with ``llvm.loop``.
+
+The loop identifier metadata is implemented using a metadata that refers to
+itself as follows:
+
+.. code-block:: llvm
+
+    !0 = metadata !{ metadata !0 }
+
+'``llvm.loop.parallel``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This loop metadata can be used to communicate that a loop should be considered
+a parallel loop. The semantics of parallel loops in this case is the one
+with the strongest cross-iteration instruction ordering freedom: the
+iterations in the loop can be considered completely independent of each
+other (also known as embarrassingly parallel loops).
+
+This metadata can originate from a programming language with parallel loop
+constructs. In such a case it is completely the programmer's responsibility
+to ensure the instructions from the different iterations of the loop can be
+executed in an arbitrary order, in parallel, or intertwined. No loop-carried
+dependency checking at all must be expected from the compiler.
+
+In order to fulfill the LLVM requirement for metadata to be safely ignored,
+it is important to ensure that a parallel loop is converted to
+a sequential loop in case an optimization (agnostic of the parallel loop
+semantics) converts the loop back to such. This happens when new memory
+accesses that do not fulfill the requirement of free ordering across iterations
+are added to the loop. Therefore, this metadata is required, but not
+sufficient, to consider the loop at hand a parallel loop. For a loop
+to be parallel,  all its memory accessing instructions need to be
+marked with the ``llvm.mem.parallel_loop_access`` metadata that refer
+to the same loop identifier metadata that identify the loop at hand.
+
+'``llvm.mem``'
+^^^^^^^^^^^^^^^
+
+Metadata types used to annotate memory accesses with information helpful
+for optimizations are prefixed with ``llvm.mem``.
+
+'``llvm.mem.parallel_loop_access``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For a loop to be parallel, in addition to using
+the ``llvm.loop.parallel`` metadata to mark the loop latch branch instruction,
+also all of the memory accessing instructions in the loop body need to be
+marked with the ``llvm.mem.parallel_loop_access`` metadata. If there
+is at least one memory accessing instruction not marked with the metadata,
+the loop, despite it possibly using the ``llvm.loop.parallel`` metadata,
+must be considered a sequential loop. This causes parallel loops to be
+converted to sequential loops due to optimization passes that are unaware of
+the parallel semantics and that insert new memory instructions to the loop
+body.
+
+Example of a loop that is considered parallel due to its correct use of
+both ``llvm.loop.parallel`` and ``llvm.mem.parallel_loop_access``
+metadata types that refer to the same loop identifier metadata.
+
+.. code-block:: llvm
+
+   for.body:
+   ...
+   %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+   ...
+   store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+   ...
+   br i1 %exitcond, label %for.end, label %for.body, !llvm.loop.parallel !0
+
+   for.end:
+   ...
+   !0 = metadata !{ metadata !0 }
+
+It is also possible to have nested parallel loops. In that case the
+memory accesses refer to a list of loop identifier metadata nodes instead of
+the loop identifier metadata node directly:
+
+.. code-block:: llvm
+
+   outer.for.body:
+   ...
+
+   inner.for.body:
+   ...
+   %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+   ...
+   store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+   ...
+   br i1 %exitcond, label %inner.for.end, label %inner.for.body, !llvm.loop.parallel !1
+
+   inner.for.end:
+   ...
+   %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+   ...
+   store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+   ...
+   br i1 %exitcond, label %outer.for.end, label %outer.for.body, !llvm.loop.parallel !2
+
+   outer.for.end:                                          ; preds = %for.body
+   ...
+   !0 = metadata !{ metadata !1, metadata !2 } ; a list of parallel loop identifiers
+   !1 = metadata !{ metadata !1 } ; an identifier for the inner parallel loop
+   !2 = metadata !{ metadata !2 } ; an identifier for the outer parallel loop
+
 
 Module Flags Metadata
 =====================

@@ -386,7 +386,7 @@ class DwarfDebug {
   // section offsets and are created by EmitSectionLabels.
   MCSymbol *DwarfInfoSectionSym, *DwarfAbbrevSectionSym;
   MCSymbol *DwarfStrSectionSym, *TextSectionSym, *DwarfDebugRangeSectionSym;
-  MCSymbol *DwarfDebugLocSectionSym;
+  MCSymbol *DwarfDebugLocSectionSym, *DwarfLineSectionSym;
   MCSymbol *FunctionBeginSym, *FunctionEndSym;
   MCSymbol *DwarfAbbrevDWOSectionSym, *DwarfStrDWOSectionSym;
 
@@ -415,8 +415,8 @@ class DwarfDebug {
   // original object file, rather than things that are meant
   // to be in the .dwo sections.
 
-  // The CU left in the original object file for separated debug info.
-  CompileUnit *SkeletonCU;
+  // The CUs left in the original object file for separated debug info.
+  SmallVector<CompileUnit *, 1> SkeletonCUs;
 
   // Used to uniquely define abbreviations for the skeleton emission.
   FoldingSet<DIEAbbrev> SkeletonAbbrevSet;
@@ -500,6 +500,9 @@ private:
   /// \brief Emit type dies into a hashed accelerator table.
   void emitAccelTypes();
 
+  /// \brief Emit visible names into a debug pubnames section.
+  void emitDebugPubnames();
+
   /// \brief Emit visible types into a debug pubtypes section.
   void emitDebugPubTypes();
 
@@ -526,9 +529,6 @@ private:
   /// \brief Construct the split debug info compile unit for the debug info
   /// section.
   CompileUnit *constructSkeletonCU(const MDNode *);
-
-  /// \brief Emit the local split debug info section.
-  void emitSkeletonCU(const MCSection *);
 
   /// \brief Emit the local split abbreviations.
   void emitSkeletonAbbrevs(const MCSection *);

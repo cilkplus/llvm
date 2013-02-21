@@ -1041,8 +1041,8 @@ static bool CanEvaluateSExtd(Value *V, Type *Ty) {
 }
 
 Instruction *InstCombiner::visitSExt(SExtInst &CI) {
-  // If this sign extend is only used by a truncate, let the truncate by
-  // eliminated before we try to optimize this zext.
+  // If this sign extend is only used by a truncate, let the truncate be
+  // eliminated before we try to optimize this sext.
   if (CI.hasOneUse() && isa<TruncInst>(CI.use_back()))
     return 0;
 
@@ -1322,19 +1322,14 @@ Instruction *InstCombiner::visitIntToPtr(IntToPtrInst &CI) {
   // If the source integer type is not the intptr_t type for this target, do a
   // trunc or zext to the intptr_t type, then inttoptr of it.  This allows the
   // cast to be exposed to other transforms.
-  if (TD) {
-    if (CI.getOperand(0)->getType()->getScalarSizeInBits() >
-        TD->getPointerSizeInBits()) {
-      Value *P = Builder->CreateTrunc(CI.getOperand(0),
-                                      TD->getIntPtrType(CI.getContext()));
-      return new IntToPtrInst(P, CI.getType());
-    }
-    if (CI.getOperand(0)->getType()->getScalarSizeInBits() <
-        TD->getPointerSizeInBits()) {
-      Value *P = Builder->CreateZExt(CI.getOperand(0),
-                                     TD->getIntPtrType(CI.getContext()));
-      return new IntToPtrInst(P, CI.getType());
-    }
+  if (TD && CI.getOperand(0)->getType()->getScalarSizeInBits() !=
+      TD->getPointerSizeInBits()) {
+    Type *Ty = TD->getIntPtrType(CI.getContext());
+    if (CI.getType()->isVectorTy()) // Handle vectors of pointers.
+      Ty = VectorType::get(Ty, CI.getType()->getVectorNumElements());
+
+    Value *P = Builder->CreateZExtOrTrunc(CI.getOperand(0), Ty);
+    return new IntToPtrInst(P, CI.getType());
   }
 
   if (Instruction *I = commonCastTransforms(CI))
@@ -1395,17 +1390,13 @@ Instruction *InstCombiner::visitPtrToInt(PtrToIntInst &CI) {
   // If the destination integer type is not the intptr_t type for this target,
   // do a ptrtoint to intptr_t then do a trunc or zext.  This allows the cast
   // to be exposed to other transforms.
-  if (TD) {
-    if (CI.getType()->getScalarSizeInBits() < TD->getPointerSizeInBits()) {
-      Value *P = Builder->CreatePtrToInt(CI.getOperand(0),
-                                         TD->getIntPtrType(CI.getContext()));
-      return new TruncInst(P, CI.getType());
-    }
-    if (CI.getType()->getScalarSizeInBits() > TD->getPointerSizeInBits()) {
-      Value *P = Builder->CreatePtrToInt(CI.getOperand(0),
-                                         TD->getIntPtrType(CI.getContext()));
-      return new ZExtInst(P, CI.getType());
-    }
+  if (TD && CI.getType()->getScalarSizeInBits() != TD->getPointerSizeInBits()) {
+    Type *Ty = TD->getIntPtrType(CI.getContext());
+    if (CI.getType()->isVectorTy()) // Handle vectors of pointers.
+      Ty = VectorType::get(Ty, CI.getType()->getVectorNumElements());
+
+    Value *P = Builder->CreatePtrToInt(CI.getOperand(0), Ty);
+    return CastInst::CreateIntegerCast(P, CI.getType(), /*isSigned=*/false);
   }
 
   return commonPointerCastTransforms(CI);
@@ -1747,11 +1738,22 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
   }
 
   if (VectorType *SrcVTy = dyn_cast<VectorType>(SrcTy)) {
-    if (SrcVTy->getNumElements() == 1 && !DestTy->isVectorTy()) {
-      Value *Elem =
-        Builder->CreateExtractElement(Src,
-                   Constant::getNullValue(Type::getInt32Ty(CI.getContext())));
-      return CastInst::Create(Instruction::BitCast, Elem, DestTy);
+    if (SrcVTy->getNumElements() == 1) {
+      // If our destination is not a vector, then make this a straight
+      // scalar-scalar cast.
+      if (!DestTy->isVectorTy()) {
+        Value *Elem =
+          Builder->CreateExtractElement(Src,
+                     Constant::getNullValue(Type::getInt32Ty(CI.getContext())));
+        return CastInst::Create(Instruction::BitCast, Elem, DestTy);
+      }
+
+      // Otherwise, see if our source is an insert. If so, then use the scalar
+      // component directly.
+      if (InsertElementInst *IEI =
+            dyn_cast<InsertElementInst>(CI.getOperand(0)))
+        return CastInst::Create(Instruction::BitCast, IEI->getOperand(1),
+                                DestTy);
     }
   }
 

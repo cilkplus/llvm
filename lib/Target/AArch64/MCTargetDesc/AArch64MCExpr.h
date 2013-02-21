@@ -6,6 +6,11 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
+//
+// This file describes AArch64-specific MCExprs, used for modifiers like
+// ":lo12:" or ":gottprel_g1:".
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef LLVM_AARCH64MCEXPR_H
 #define LLVM_AARCH64MCEXPR_H
@@ -83,7 +88,8 @@ public:
     return Create(VK_AARCH64_GOT, Expr, Ctx);
   }
 
-  static const AArch64MCExpr *CreateGOTLo12(const MCExpr *Expr, MCContext &Ctx) {
+  static const AArch64MCExpr *CreateGOTLo12(const MCExpr *Expr,
+                                            MCContext &Ctx) {
     return Create(VK_AARCH64_GOT_LO12, Expr, Ctx);
   }
 

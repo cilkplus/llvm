@@ -17,9 +17,11 @@
 #define LLVM_IR_ATTRIBUTES_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/Support/PointerLikeTypeTraits.h"
+#include <bitset>
 #include <cassert>
+#include <map>
 #include <string>
 
 namespace llvm {
@@ -29,6 +31,7 @@ class AttributeImpl;
 class AttributeSetImpl;
 class AttributeSetNode;
 class Constant;
+template<typename T> struct DenseMapInfo;
 class LLVMContext;
 class Type;
 
@@ -94,13 +97,12 @@ public:
     StackProtectReq,       ///< Stack protection required.
     StackProtectStrong,    ///< Strong Stack protection.
     StructRet,             ///< Hidden pointer to structure to return
+    ThreadSafety,          ///< Thread safety checking is on.
+    UninitializedChecks,   ///< Checking for uses of uninitialized memory is on.
     UWTable,               ///< Function must be in a unwind table
     ZExt,                  ///< Zero extended before/after call
 
-    EndAttrKinds,          ///< Sentinal value useful for loops
-
-    AttrKindEmptyKey,      ///< Empty key value for DenseMapInfo
-    AttrKindTombstoneKey   ///< Tombstone key value for DenseMapInfo
+    EndAttrKinds           ///< Sentinal value useful for loops
   };
 private:
   AttributeImpl *pImpl;
@@ -113,8 +115,9 @@ public:
   //===--------------------------------------------------------------------===//
 
   /// \brief Return a uniquified Attribute object.
-  static Attribute get(LLVMContext &Context, AttrKind Kind, Constant *Val = 0);
-  static Attribute get(LLVMContext &Context, Constant *Kind, Constant *Val = 0);
+  static Attribute get(LLVMContext &Context, AttrKind Kind, uint64_t Val = 0);
+  static Attribute get(LLVMContext &Context, StringRef Kind,
+                       StringRef Val = StringRef());
 
   /// \brief Return a uniquified Attribute object that has the specific
   /// alignment set.
@@ -125,14 +128,37 @@ public:
   // Attribute Accessors
   //===--------------------------------------------------------------------===//
 
+  /// \brief Return true if the attribute is an Attribute::AttrKind type.
+  bool isEnumAttribute() const;
+
+  /// \brief Return true if the attribute is an alignment attribute.
+  bool isAlignAttribute() const;
+
+  /// \brief Return true if the attribute is a string (target-dependent)
+  /// attribute.
+  bool isStringAttribute() const;
+
   /// \brief Return true if the attribute is present.
   bool hasAttribute(AttrKind Val) const;
 
-  /// \brief Return the kind of this attribute.
-  Constant *getAttributeKind() const;
+  /// \brief Return true if the target-dependent attribute is present.
+  bool hasAttribute(StringRef Val) const;
 
-  /// \brief Return the value (if present) of the non-target-specific attribute.
-  ArrayRef<Constant*> getAttributeValues() const;
+  /// \brief Return the attribute's kind as an enum (Attribute::AttrKind). This
+  /// requires the attribute to be an enum or alignment attribute.
+  Attribute::AttrKind getKindAsEnum() const;
+
+  /// \brief Return the attribute's value as an integer. This requires that the
+  /// attribute be an alignment attribute.
+  uint64_t getValueAsInt() const;
+
+  /// \brief Return the attribute's kind as a string. This requires the
+  /// attribute to be a string attribute.
+  StringRef getKindAsString() const;
+
+  /// \brief Return the attribute's value as a string. This requires the
+  /// attribute to be a string attribute.
+  StringRef getValueAsString() const;
 
   /// \brief Returns the alignment field of an attribute as a byte alignment
   /// value.
@@ -144,12 +170,9 @@ public:
 
   /// \brief The Attribute is converted to a string of equivalent mnemonic. This
   /// is, presumably, for writing out the mnemonics for the assembly writer.
-  std::string getAsString() const;
+  std::string getAsString(bool InAttrGrp = false) const;
 
-  /// \brief Equality and non-equality query methods.
-  bool operator==(AttrKind K) const;
-  bool operator!=(AttrKind K) const;
-
+  /// \brief Equality and non-equality operators.
   bool operator==(Attribute A) const { return pImpl == A.pImpl; }
   bool operator!=(Attribute A) const { return pImpl != A.pImpl; }
 
@@ -163,8 +186,12 @@ public:
 
 //===----------------------------------------------------------------------===//
 /// \class
-/// \brief This class manages the ref count for the opaque AttributeSetImpl
-/// object and provides accessors for it.
+/// \brief This class holds the attributes for a function, its return value, and
+/// its parameters. You access the attributes for each of them via an index into
+/// the AttributeSet object. The function attributes are at index
+/// `AttributeSet::FunctionIndex', the return value is at index
+/// `AttributeSet::ReturnIndex', and the attributes for the parameters start at
+/// index `1'.
 class AttributeSet {
 public:
   enum AttrIndex {
@@ -174,6 +201,7 @@ public:
 private:
   friend class AttrBuilder;
   friend class AttributeSetImpl;
+  template <typename Ty> friend struct DenseMapInfo;
 
   /// \brief The attributes that we are managing. This can be null to represent
   /// the empty attributes list.
@@ -239,6 +267,9 @@ public:
   // AttributeSet Accessors
   //===--------------------------------------------------------------------===//
 
+  /// \brief Retrieve the LLVM context.
+  LLVMContext &getContext() const;
+
   /// \brief The attributes for the specified index are returned.
   AttributeSet getParamAttributes(unsigned Idx) const;
 
@@ -251,12 +282,21 @@ public:
   /// \brief Return true if the attribute exists at the given index.
   bool hasAttribute(unsigned Index, Attribute::AttrKind Kind) const;
 
+  /// \brief Return true if the attribute exists at the given index.
+  bool hasAttribute(unsigned Index, StringRef Kind) const;
+
   /// \brief Return true if attribute exists at the given index.
   bool hasAttributes(unsigned Index) const;
 
   /// \brief Return true if the specified attribute is set for at least one
   /// parameter or for the return value.
   bool hasAttrSomewhere(Attribute::AttrKind Attr) const;
+
+  /// \brief Return the attribute object that exists at the given index.
+  Attribute getAttribute(unsigned Index, Attribute::AttrKind Kind) const;
+
+  /// \brief Return the attribute object that exists at the given index.
+  Attribute getAttribute(unsigned Index, StringRef Kind) const;
 
   /// \brief Return the alignment for the specified function parameter.
   unsigned getParamAlignment(unsigned Idx) const;
@@ -265,7 +305,7 @@ public:
   unsigned getStackAlignment(unsigned Index) const;
 
   /// \brief Return the attributes at the index as a string.
-  std::string getAsString(unsigned Index) const;
+  std::string getAsString(unsigned Index, bool InAttrGrp = false) const;
 
   typedef ArrayRef<Attribute>::iterator iterator;
 
@@ -313,22 +353,23 @@ public:
 
 //===----------------------------------------------------------------------===//
 /// \class
-/// \brief Provide DenseMapInfo for Attribute::AttrKinds. This is used by
-/// AttrBuilder.
-template<> struct DenseMapInfo<Attribute::AttrKind> {
-  static inline Attribute::AttrKind getEmptyKey() {
-    return Attribute::AttrKindEmptyKey;
+/// \brief Provide DenseMapInfo for AttributeSet.
+template<> struct DenseMapInfo<AttributeSet> {
+  static inline AttributeSet getEmptyKey() {
+    uintptr_t Val = static_cast<uintptr_t>(-1);
+    Val <<= PointerLikeTypeTraits<void*>::NumLowBitsAvailable;
+    return AttributeSet(reinterpret_cast<AttributeSetImpl*>(Val));
   }
-  static inline Attribute::AttrKind getTombstoneKey() {
-    return Attribute::AttrKindTombstoneKey;
+  static inline AttributeSet getTombstoneKey() {
+    uintptr_t Val = static_cast<uintptr_t>(-2);
+    Val <<= PointerLikeTypeTraits<void*>::NumLowBitsAvailable;
+    return AttributeSet(reinterpret_cast<AttributeSetImpl*>(Val));
   }
-  static unsigned getHashValue(const Attribute::AttrKind &Val) {
-    return Val * 37U;
+  static unsigned getHashValue(AttributeSet AS) {
+    return (unsigned((uintptr_t)AS.pImpl) >> 4) ^
+           (unsigned((uintptr_t)AS.pImpl) >> 9);
   }
-  static bool isEqual(const Attribute::AttrKind &LHS,
-                      const Attribute::AttrKind &RHS) {
-    return LHS == RHS;
-  }
+  static bool isEqual(AttributeSet LHS, AttributeSet RHS) { return LHS == RHS; }
 };
 
 //===----------------------------------------------------------------------===//
@@ -338,18 +379,24 @@ template<> struct DenseMapInfo<Attribute::AttrKind> {
 /// value, however, is not. So this can be used as a quick way to test for
 /// equality, presence of attributes, etc.
 class AttrBuilder {
-  DenseSet<Attribute::AttrKind> Attrs;
+  std::bitset<Attribute::EndAttrKinds> Attrs;
+  std::map<std::string, std::string> TargetDepAttrs;
   uint64_t Alignment;
   uint64_t StackAlignment;
 public:
-  AttrBuilder() : Alignment(0), StackAlignment(0) {}
-  explicit AttrBuilder(uint64_t B) : Alignment(0), StackAlignment(0) {
-    addRawValue(B);
+  AttrBuilder() : Attrs(0), Alignment(0), StackAlignment(0) {}
+  explicit AttrBuilder(uint64_t Val)
+    : Attrs(0), Alignment(0), StackAlignment(0) {
+    addRawValue(Val);
   }
-  AttrBuilder(const Attribute &A) : Alignment(0), StackAlignment(0) {
+  AttrBuilder(const Attribute &A) : Attrs(0), Alignment(0), StackAlignment(0) {
     addAttribute(A);
   }
   AttrBuilder(AttributeSet AS, unsigned Idx);
+  AttrBuilder(const AttrBuilder &B)
+    : Attrs(B.Attrs),
+      TargetDepAttrs(B.TargetDepAttrs.begin(), B.TargetDepAttrs.end()),
+      Alignment(B.Alignment), StackAlignment(B.StackAlignment) {}
 
   void clear();
 
@@ -359,14 +406,30 @@ public:
   /// \brief Add the Attribute object to the builder.
   AttrBuilder &addAttribute(Attribute A);
 
+  /// \brief Add the target-dependent attribute to the builder.
+  AttrBuilder &addAttribute(StringRef A, StringRef V = StringRef());
+
   /// \brief Remove an attribute from the builder.
   AttrBuilder &removeAttribute(Attribute::AttrKind Val);
 
   /// \brief Remove the attributes from the builder.
   AttrBuilder &removeAttributes(AttributeSet A, uint64_t Index);
 
+  /// \brief Remove the target-dependent attribute to the builder.
+  AttrBuilder &removeAttribute(StringRef A);
+
+  /// \brief Add the attributes from the builder.
+  AttrBuilder &merge(const AttrBuilder &B);
+
   /// \brief Return true if the builder has the specified attribute.
-  bool contains(Attribute::AttrKind A) const;
+  bool contains(Attribute::AttrKind A) const {
+    assert((unsigned)A < Attribute::EndAttrKinds && "Attribute out of range!");
+    return Attrs[A];
+  }
+
+  /// \brief Return true if the builder has the specified target-dependent
+  /// attribute.
+  bool contains(StringRef A) const;
 
   /// \brief Return true if the builder has IR-level attributes.
   bool hasAttributes() const;
@@ -392,14 +455,22 @@ public:
   /// the form used internally in Attribute.
   AttrBuilder &addStackAlignmentAttr(unsigned Align);
 
-  typedef DenseSet<Attribute::AttrKind>::iterator       iterator;
-  typedef DenseSet<Attribute::AttrKind>::const_iterator const_iterator;
+  /// \brief Return true if the builder contains no target-independent
+  /// attributes.
+  bool empty() const { return Attrs.none(); }
 
-  iterator begin()             { return Attrs.begin(); }
-  iterator end()               { return Attrs.end(); }
+  // Iterators for target-dependent attributes.
+  typedef std::pair<std::string, std::string>                td_type;
+  typedef std::map<std::string, std::string>::iterator       td_iterator;
+  typedef std::map<std::string, std::string>::const_iterator td_const_iterator;
 
-  const_iterator begin() const { return Attrs.begin(); }
-  const_iterator end() const   { return Attrs.end(); }
+  td_iterator td_begin()             { return TargetDepAttrs.begin(); }
+  td_iterator td_end()               { return TargetDepAttrs.end(); }
+
+  td_const_iterator td_begin() const { return TargetDepAttrs.begin(); }
+  td_const_iterator td_end() const   { return TargetDepAttrs.end(); }
+
+  bool td_empty() const              { return TargetDepAttrs.empty(); }
 
   /// \brief Remove attributes that are used on functions only.
   void removeFunctionOnlyAttrs() {
@@ -422,6 +493,8 @@ public:
       .removeAttribute(Attribute::NonLazyBind)
       .removeAttribute(Attribute::ReturnsTwice)
       .removeAttribute(Attribute::AddressSafety)
+      .removeAttribute(Attribute::ThreadSafety)
+      .removeAttribute(Attribute::UninitializedChecks)
       .removeAttribute(Attribute::MinSize)
       .removeAttribute(Attribute::NoDuplicate);
   }
@@ -431,32 +504,16 @@ public:
     return !(*this == B);
   }
 
-  // FIXME: Remove these.
+  // FIXME: Remove this in 4.0.
 
   /// \brief Add the raw value to the internal representation.
-  /// 
-  /// N.B. This should be used ONLY for decoding LLVM bitcode!
   AttrBuilder &addRawValue(uint64_t Val);
-
-  uint64_t Raw() const;
 };
 
 namespace AttributeFuncs {
 
 /// \brief Which attributes cannot be applied to a type.
 AttributeSet typeIncompatible(Type *Ty, uint64_t Index);
-
-/// \brief This returns an integer containing an encoding of all the LLVM
-/// attributes found in the given attribute bitset.  Any change to this encoding
-/// is a breaking change to bitcode compatibility.
-uint64_t encodeLLVMAttributesForBitcode(AttributeSet Attrs, unsigned Index);
-
-/// \brief This fills an AttrBuilder object with the LLVM attributes that have
-/// been decoded from the given integer. This function must stay in sync with
-/// 'encodeLLVMAttributesForBitcode'.
-/// N.B. This should be used only by the bitcode reader!
-void decodeLLVMAttributesForBitcode(LLVMContext &C, AttrBuilder &B,
-                                    uint64_t EncodedAttrs);
 
 } // end AttributeFuncs namespace
 

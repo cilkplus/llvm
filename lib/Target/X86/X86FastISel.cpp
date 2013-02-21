@@ -326,12 +326,11 @@ bool X86FastISel::X86FastEmitExtend(ISD::NodeType Opc, EVT DstVT,
                                     unsigned &ResultReg) {
   unsigned RR = FastEmit_r(SrcVT.getSimpleVT(), DstVT.getSimpleVT(), Opc,
                            Src, /*TODO: Kill=*/false);
-
-  if (RR != 0) {
-    ResultReg = RR;
-    return true;
-  } else
+  if (RR == 0)
     return false;
+
+  ResultReg = RR;
+  return true;
 }
 
 /// X86SelectAddress - Attempt to fill in an address from the given value.
@@ -727,7 +726,7 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
 
   // Don't handle popping bytes on return for now.
   if (X86MFInfo->getBytesToPopOnReturn() != 0)
-    return 0;
+    return false;
 
   // fastcc with -tailcallopt is intended to provide a guaranteed
   // tail call optimization. Fastisel doesn't know how to do that.
@@ -737,6 +736,9 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
   // Let SDISel handle vararg functions.
   if (F.isVarArg())
     return false;
+
+  // Build a list of return value registers.
+  SmallVector<unsigned, 4> RetRegs;
 
   if (Ret->getNumOperands() > 0) {
     SmallVector<ISD::OutputArg, 4> Outs;
@@ -805,8 +807,8 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(TargetOpcode::COPY),
             DstReg).addReg(SrcReg);
 
-    // Mark the register as live out of the function.
-    MRI.addLiveOut(VA.getLocReg());
+    // Add register to return instruction.
+    RetRegs.push_back(VA.getLocReg());
   }
 
   // The x86-64 ABI for returning structs by value requires that we copy
@@ -819,11 +821,14 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
            "SRetReturnReg should have been set in LowerFormalArguments()!");
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(TargetOpcode::COPY),
             X86::RAX).addReg(Reg);
-    MRI.addLiveOut(X86::RAX);
+    RetRegs.push_back(X86::RAX);
   }
 
   // Now emit the RET.
-  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(X86::RET));
+  MachineInstrBuilder MIB =
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(X86::RET));
+  for (unsigned i = 0, e = RetRegs.size(); i != e; ++i)
+    MIB.addReg(RetRegs[i], RegState::Implicit);
   return true;
 }
 
@@ -1372,7 +1377,6 @@ bool X86FastISel::TryEmitSmallMemcpy(X86AddressMode DestAM,
     else if (Len >= 2)
       VT = MVT::i16;
     else {
-      assert(Len == 1);
       VT = MVT::i8;
     }
 

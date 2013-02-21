@@ -101,10 +101,12 @@ enum DIDumpType {
   DIDT_Abbrev,
   DIDT_AbbrevDwo,
   DIDT_Aranges,
+  DIDT_Frames,
   DIDT_Info,
   DIDT_InfoDwo,
   DIDT_Line,
   DIDT_Ranges,
+  DIDT_Pubnames,
   DIDT_Str,
   DIDT_StrDwo,
   DIDT_StrOffsetsDwo

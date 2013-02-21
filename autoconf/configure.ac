@@ -59,6 +59,11 @@ if test ${srcdir} != "." ; then
   fi
 fi
 
+dnl Default to empty (i.e. assigning the null string to) CFLAGS and CXXFLAGS,
+dnl instead of the autoconf default (for example, '-g -O2' for CC=gcc).
+${CFLAGS=}
+${CXXFLAGS=}
+
 dnl We need to check for the compiler up here to avoid anything else
 dnl starting with a different one.
 AC_PROG_CC(clang llvm-gcc gcc)
@@ -781,13 +786,14 @@ if test "$enableval" = host-only ; then
   enableval=host
 fi
 case "$enableval" in
-  all) TARGETS_TO_BUILD="X86 Sparc PowerPC ARM Mips XCore MSP430 CppBackend MBlaze NVPTX Hexagon" ;;
+  all) TARGETS_TO_BUILD="X86 Sparc PowerPC AArch64 ARM Mips XCore MSP430 CppBackend MBlaze NVPTX Hexagon" ;;
   *)for a_target in `echo $enableval|sed -e 's/,/ /g' ` ; do
       case "$a_target" in
         x86)      TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
         x86_64)   TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
         sparc)    TARGETS_TO_BUILD="Sparc $TARGETS_TO_BUILD" ;;
         powerpc)  TARGETS_TO_BUILD="PowerPC $TARGETS_TO_BUILD" ;;
+        aarch64)  TARGETS_TO_BUILD="AArch64 $TARGETS_TO_BUILD" ;;
         arm)      TARGETS_TO_BUILD="ARM $TARGETS_TO_BUILD" ;;
         mips)     TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
         mipsel)   TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
@@ -1266,39 +1272,21 @@ CXX_FLAG_CHECK(NO_VARIADIC_MACROS, [-Wno-variadic-macros])
 CXX_FLAG_CHECK(NO_MISSING_FIELD_INITIALIZERS, [-Wno-missing-field-initializers])
 CXX_FLAG_CHECK(NO_NESTED_ANON_TYPES, [-Wno-nested-anon-types])
 CXX_FLAG_CHECK(COVERED_SWITCH_DEFAULT, [-Wcovered-switch-default])
+
 dnl GCC's potential uninitialized use analysis is weak and presents lots of
 dnl false positives, so disable it.
+NO_UNINITIALIZED=
+NO_MAYBE_UNINITIALIZED=
 if test "$GXX" = "yes"
 then
   CXX_FLAG_CHECK(NO_MAYBE_UNINITIALIZED, [-Wno-maybe-uninitialized])
   dnl gcc 4.7 introduced -Wmaybe-uninitialized to distinguish cases which are
-  dnl known to be uninitialized from cases which might be uninitialized.  We 
+  dnl known to be uninitialized from cases which might be uninitialized.  We
   dnl still want to catch the first kind of errors.
-  if test "$NO_MAYBE_UNINITIALIZED" != "-Wno-maybe-uninitialized"
+  if test -z "$NO_MAYBE_UNINITIALIZED"
   then
     CXX_FLAG_CHECK(NO_UNINITIALIZED, [-Wno-uninitialized])
-  else
-    dnl Some versions of gcc accept unsupported -W flags if there is
-    dnl no warning but stop with an error when a warning is
-    dnl encountered.  If this gcc is earlier than 4.7, just use
-    dnl -Wno-uninitialized.
-    gxx_version=`$CXX -dumpversion`
-    gxx_version_major=`echo $gxx_version | cut -d'.' -f1`
-    gxx_version_minor=`echo $gxx_version | cut -d'.' -f2`
-    gxx_version_patch=`echo $gxx_version | cut -d'.' -f3`
-
-    if    test "$gxx_version_major" -ge "4" \
-       && test "$gxx_version_minor" -ge "7"; then
-      dnl AC_SUBST doesn't work with empty strings.
-      NO_UNINITIALIZED=
-    else
-      NO_MAYBE_UNINITIALIZED=
-      CXX_FLAG_CHECK(NO_UNINITIALIZED, [-Wno-uninitialized])
-    fi
   fi
-else
-  NO_UNINITIALIZED=
-  NO_MAYBE_UNINITIALIZED=
 fi
 AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $NO_NESTED_ANON_TYPES $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED])
 
@@ -1567,6 +1555,7 @@ dnl===-----------------------------------------------------------------------===
 
 AC_CHECK_FUNCS([backtrace ceilf floorf roundf rintf nearbyintf getcwd ])
 AC_CHECK_FUNCS([powf fmodf strtof round ])
+AC_CHECK_FUNCS([log log2 log10 exp exp2])
 AC_CHECK_FUNCS([getpagesize getrusage getrlimit setrlimit gettimeofday ])
 AC_CHECK_FUNCS([isatty mkdtemp mkstemp ])
 AC_CHECK_FUNCS([mktemp posix_spawn pread realpath sbrk setrlimit strdup ])

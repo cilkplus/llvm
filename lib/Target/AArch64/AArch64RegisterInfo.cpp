@@ -7,7 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the AArch64 implementation of the TargetRegisterInfo class.
+// This file contains the AArch64 implementation of the TargetRegisterInfo
+// class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -87,7 +88,7 @@ AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MBBI,
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   const AArch64FrameLowering *TFI =
-    static_cast<const AArch64FrameLowering *>(MF.getTarget().getFrameLowering());
+   static_cast<const AArch64FrameLowering *>(MF.getTarget().getFrameLowering());
 
   // In order to work out the base and offset for addressing, the FrameLowering
   // code needs to know (sometimes) whether the instruction is storing/loading a
@@ -164,8 +165,8 @@ AArch64RegisterInfo::eliminateCallFramePseudoInstr(MachineFunction &MF,
   if (!TFI->hasReservedCallFrame(MF)) {
     unsigned Align = TFI->getStackAlignment();
 
-    uint64_t Amount = MI->getOperand(0).getImm();
-    Amount = (Amount + Align - 1)/Align * Align;
+    int64_t Amount = MI->getOperand(0).getImm();
+    Amount = RoundUpToAlignment(Amount, Align);
     if (!IsDestroy) Amount = -Amount;
 
     // N.b. if CalleePopAmount is valid but zero (i.e. callee would pop, but it
@@ -176,7 +177,7 @@ AArch64RegisterInfo::eliminateCallFramePseudoInstr(MachineFunction &MF,
       // because there's no guaranteed temporary register available. Mostly call
       // frames will be allocated at the start of a function so this is OK, but
       // it is a limitation that needs dealing with.
-      assert(abs(Amount) < 0xfff && "call frame too large");
+      assert(Amount > -0xfff && Amount < 0xfff && "call frame too large");
       emitSPUpdate(MBB, MI, dl, TII, AArch64::NoRegister, Amount);
     }
   } else if (CalleePopAmount != 0) {
@@ -202,6 +203,7 @@ AArch64RegisterInfo::getFrameRegister(const MachineFunction &MF) const {
 bool
 AArch64RegisterInfo::useFPForScavengingIndex(const MachineFunction &MF) const {
   const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
-  const AArch64FrameLowering *AFI = static_cast<const AArch64FrameLowering*>(TFI);
+  const AArch64FrameLowering *AFI
+    = static_cast<const AArch64FrameLowering*>(TFI);
   return AFI->useFPForAddressing(MF);
 }

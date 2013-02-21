@@ -77,12 +77,27 @@ public:
   void adjustStackPtr(unsigned SP, int64_t Amount, MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator I) const;
 
-  /// Emit a series of instructions to load an immediate. If NewImm is a
-  /// non-NULL parameter, the last instruction is not emitted, but instead
-  /// its immediate operand is returned in NewImm.
-  unsigned loadImmediate(int64_t Imm, MachineBasicBlock &MBB,
+  /// Emit a series of instructions to load an immediate.
+  // This is to adjust some FrameReg. We return the new register to be used
+  // in place of FrameReg and the adjusted immediate field (&NewImm)
+  //
+  unsigned loadImmediate(unsigned FrameReg,
+                         int64_t Imm, MachineBasicBlock &MBB,
                          MachineBasicBlock::iterator II, DebugLoc DL,
-                         unsigned *NewImm) const;
+                         unsigned &NewImm) const;
+
+  static bool validSpImm8(int offset) {
+    return ((offset & 7) == 0) && isInt<11>(offset);
+  }
+
+  //
+  // build the proper one based on the Imm field
+  //
+
+  const MCInstrDesc& AddiuSpImm(int64_t Imm) const;
+
+  void BuildAddiuSpImm
+    (MachineBasicBlock &MBB, MachineBasicBlock::iterator I, int64_t Imm) const;
 
 private:
   virtual unsigned GetAnalyzableBrOpc(unsigned Opc) const;
@@ -100,6 +115,27 @@ private:
                                      MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator I) const;
 
+  void ExpandFEXT_T8I816_ins(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator I,
+                             unsigned BtOpc, unsigned CmpOpc) const;
+
+  void ExpandFEXT_T8I8I16_ins(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+    unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc) const;
+
+  void ExpandFEXT_CCRX16_ins(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+    unsigned SltOpc) const;
+
+  void ExpandFEXT_CCRXI16_ins(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+    unsigned SltiOpc, unsigned SltiXOpc) const;
+
+  static unsigned
+    whichOp8_or_16uimm (unsigned shortOp, unsigned longOp, int64_t Imm);
+
+  static unsigned
+    whichOp8u_or_16simm (unsigned shortOp, unsigned longOp, int64_t Imm);
 
 };
 

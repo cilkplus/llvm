@@ -11,6 +11,9 @@
 // dumps out a plethora of information about an object file depending on the
 // flags.
 //
+// The flags and output of this program should be near identical to those of
+// binutils objdump.
+//
 //===----------------------------------------------------------------------===//
 
 #include "llvm-objdump.h"
@@ -478,7 +481,7 @@ static void PrintSectionContents(const ObjectFile *o) {
       // Print ascii.
       outs() << "  ";
       for (std::size_t i = 0; i < 16 && addr + i < end; ++i) {
-        if (std::isprint(Contents[addr + i] & 0xFF))
+        if (std::isprint(static_cast<unsigned char>(Contents[addr + i]) & 0xFF))
           outs() << Contents[addr + i];
         else
           outs() << ".";

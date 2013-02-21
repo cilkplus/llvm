@@ -64,6 +64,11 @@ public:
     return Vector.empty();
   }
 
+  std::pair<KeyT, ValueT>       &front()       { return Vector.front(); }
+  const std::pair<KeyT, ValueT> &front() const { return Vector.front(); }
+  std::pair<KeyT, ValueT>       &back()        { return Vector.back(); }
+  const std::pair<KeyT, ValueT> &back()  const { return Vector.back(); }
+
   void clear() {
     Map.clear();
     Vector.clear();
@@ -112,6 +117,13 @@ public:
     typename MapType::const_iterator Pos = Map.find(Key);
     return Pos == Map.end()? Vector.end() :
                             (Vector.begin() + Pos->second);
+  }
+
+  /// \brief Remove the last element from the vector.
+  void pop_back() {
+    typename MapType::iterator Pos = Map.find(Vector.back().first);
+    Map.erase(Pos);
+    Vector.pop_back();
   }
 };
 

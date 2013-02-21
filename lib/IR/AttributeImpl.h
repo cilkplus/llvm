@@ -27,49 +27,126 @@ class LLVMContext;
 
 //===----------------------------------------------------------------------===//
 /// \class
+/// \brief A set of classes that contain the kind and (optional) value of the
+/// attribute object. There are three main categories: enum attribute entries,
+/// represented by Attribute::AttrKind; alignment attribute entries; and string
+/// attribute enties, which are for target-dependent attributes.
+class AttributeEntry {
+  unsigned char KindID;
+protected:
+  enum AttrEntryKind {
+    EnumAttrEntry,
+    AlignAttrEntry,
+    StringAttrEntry
+  };
+public:
+  AttributeEntry(AttrEntryKind Kind)
+    : KindID(Kind) {}
+  virtual ~AttributeEntry() {}
+
+  unsigned getKindID() const { return KindID; }
+
+  static inline bool classof(const AttributeEntry *) { return true; }
+};
+
+class EnumAttributeEntry : public AttributeEntry {
+  Attribute::AttrKind Kind;
+public:
+  EnumAttributeEntry(Attribute::AttrKind Kind)
+    : AttributeEntry(EnumAttrEntry), Kind(Kind) {}
+
+  Attribute::AttrKind getEnumKind() const { return Kind; }
+
+  static inline bool classof(const AttributeEntry *AE) {
+    return AE->getKindID() == EnumAttrEntry;
+  }
+  static inline bool classof(const EnumAttributeEntry *) { return true; }
+};
+
+class AlignAttributeEntry : public AttributeEntry {
+  Attribute::AttrKind Kind;
+  unsigned Align;
+public:
+  AlignAttributeEntry(Attribute::AttrKind Kind, unsigned Align)
+    : AttributeEntry(AlignAttrEntry), Kind(Kind), Align(Align) {}
+
+  Attribute::AttrKind getEnumKind() const { return Kind; }
+  unsigned getAlignment() const { return Align; }
+
+  static inline bool classof(const AttributeEntry *AE) {
+    return AE->getKindID() == AlignAttrEntry;
+  }
+  static inline bool classof(const AlignAttributeEntry *) { return true; }
+};
+
+class StringAttributeEntry : public AttributeEntry {
+  std::string Kind;
+  std::string Val;
+public:
+  StringAttributeEntry(StringRef Kind, StringRef Val = StringRef())
+    : AttributeEntry(StringAttrEntry), Kind(Kind), Val(Val) {}
+
+  StringRef getStringKind() const { return Kind; }
+  StringRef getStringValue() const { return Val; }
+
+  static inline bool classof(const AttributeEntry *AE) {
+    return AE->getKindID() == StringAttrEntry;
+  }
+  static inline bool classof(const StringAttributeEntry *) { return true; }
+};
+
+//===----------------------------------------------------------------------===//
+/// \class
 /// \brief This class represents a single, uniqued attribute. That attribute
 /// could be a single enum, a tuple, or a string.
 class AttributeImpl : public FoldingSetNode {
-  LLVMContext &Context;
-  Constant *Kind;
-  SmallVector<Constant*, 0> Vals;
+  LLVMContext &Context;  ///< Global context for uniquing objects
+
+  AttributeEntry *Entry; ///< Holds the kind and value of the attribute
 
   // AttributesImpl is uniqued, these should not be publicly available.
   void operator=(const AttributeImpl &) LLVM_DELETED_FUNCTION;
   AttributeImpl(const AttributeImpl &) LLVM_DELETED_FUNCTION;
 public:
-  AttributeImpl(LLVMContext &C, Constant *Kind,
-                ArrayRef<Constant*> Vals = ArrayRef<Constant*>())
-    : Context(C), Kind(Kind), Vals(Vals.begin(), Vals.end()) {}
+  AttributeImpl(LLVMContext &C, Attribute::AttrKind Kind);
+  AttributeImpl(LLVMContext &C, Attribute::AttrKind Kind, unsigned Align);
+  AttributeImpl(LLVMContext &C, StringRef Kind, StringRef Val = StringRef());
+  ~AttributeImpl();
 
   LLVMContext &getContext() { return Context; }
 
+  bool isEnumAttribute() const;
+  bool isAlignAttribute() const;
+  bool isStringAttribute() const;
+
   bool hasAttribute(Attribute::AttrKind A) const;
+  bool hasAttribute(StringRef Kind) const;
 
-  Constant *getAttributeKind() const { return Kind; }
-  ArrayRef<Constant*> getAttributeValues() const { return Vals; }
+  Attribute::AttrKind getKindAsEnum() const;
+  uint64_t getValueAsInt() const;
 
-  uint64_t getAlignment() const;
-  uint64_t getStackAlignment() const;
-
-  /// \brief Equality and non-equality comparison operators.
-  bool operator==(Attribute::AttrKind Kind) const;
-  bool operator!=(Attribute::AttrKind Kind) const;
-
-  bool operator==(StringRef Kind) const;
-  bool operator!=(StringRef Kind) const;
+  StringRef getKindAsString() const;
+  StringRef getValueAsString() const;
 
   /// \brief Used when sorting the attributes.
   bool operator<(const AttributeImpl &AI) const;
 
   void Profile(FoldingSetNodeID &ID) const {
-    Profile(ID, Kind, Vals);
+    if (isEnumAttribute())
+      Profile(ID, getKindAsEnum(), 0);
+    else if (isAlignAttribute())
+      Profile(ID, getKindAsEnum(), getValueAsInt());
+    else
+      Profile(ID, getKindAsString(), getValueAsString());
   }
-  static void Profile(FoldingSetNodeID &ID, Constant *Kind,
-                      ArrayRef<Constant*> Vals) {
-    ID.AddPointer(Kind);
-    for (unsigned I = 0, E = Vals.size(); I != E; ++I)
-      ID.AddPointer(Vals[I]);
+  static void Profile(FoldingSetNodeID &ID, Attribute::AttrKind Kind,
+                      uint64_t Val) {
+    ID.AddInteger(Kind);
+    if (Val) ID.AddInteger(Val);
+  }
+  static void Profile(FoldingSetNodeID &ID, StringRef Kind, StringRef Values) {
+    ID.AddString(Kind);
+    ID.AddString(Values);
   }
 
   // FIXME: Remove this!
@@ -93,11 +170,15 @@ public:
   static AttributeSetNode *get(LLVMContext &C, ArrayRef<Attribute> Attrs);
 
   bool hasAttribute(Attribute::AttrKind Kind) const;
+  bool hasAttribute(StringRef Kind) const;
   bool hasAttributes() const { return !AttrList.empty(); }
+
+  Attribute getAttribute(Attribute::AttrKind Kind) const;
+  Attribute getAttribute(StringRef Kind) const;
 
   unsigned getAlignment() const;
   unsigned getStackAlignment() const;
-  std::string getAsString() const;
+  std::string getAsString(bool InAttrGrp) const;
 
   typedef SmallVectorImpl<Attribute>::iterator       iterator;
   typedef SmallVectorImpl<Attribute>::const_iterator const_iterator;
@@ -155,7 +236,6 @@ public:
   /// \p Slot is an index into the AttrNodes list, not the index of the return /
   /// parameter/ function which the attributes apply to.
   AttributeSet getSlotAttributes(unsigned Slot) const {
-    // FIXME: This needs to use AttrNodes instead.
     return AttributeSet::get(Context, AttrNodes[Slot]);
   }
 

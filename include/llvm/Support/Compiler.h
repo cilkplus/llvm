@@ -15,7 +15,7 @@
 #ifndef LLVM_SUPPORT_COMPILER_H
 #define LLVM_SUPPORT_COMPILER_H
 
-#include "llvm/Config/config.h"
+#include "llvm/Config/llvm-config.h"
 
 #ifndef __has_feature
 # define __has_feature(x) 0
@@ -69,6 +69,16 @@
 #define LLVM_HAS_CXX11_STDLIB 1
 #else
 #define LLVM_HAS_CXX11_STDLIB 0
+#endif
+
+/// \macro LLVM_HAS_VARIADIC_TEMPLATES
+/// \brief Does this compiler support variadic templates.
+///
+/// Implies LLVM_HAS_RVALUE_REFERENCES and the existence of std::forward.
+#if __has_feature(cxx_variadic_templates)
+# define LLVM_HAS_VARIADIC_TEMPLATES 1
+#else
+# define LLVM_HAS_VARIADIC_TEMPLATES 0
 #endif
 
 /// llvm_move - Expands to ::std::move if the compiler supports
@@ -295,12 +305,11 @@
 # define LLVM_FUNCTION_NAME __func__
 #endif
 
-/// \macro LLVM_ENABLE_MSAN_ANNOTATIONS
-/// \brief Are MemorySanitizer annotations available.
 #if defined(HAVE_SANITIZER_MSAN_INTERFACE_H)
 # include <sanitizer/msan_interface.h>
 #else
 # define __msan_allocated_memory(p, size)
+# define __msan_unpoison(p, size)
 #endif
 
 /// \macro LLVM_MEMORY_SANITIZER_BUILD
@@ -309,6 +318,37 @@
 # define LLVM_MEMORY_SANITIZER_BUILD 1
 #else
 # define LLVM_MEMORY_SANITIZER_BUILD 0
+#endif
+
+/// \macro LLVM_ADDRESS_SANITIZER_BUILD
+/// \brief Whether LLVM itself is built with AddressSanitizer instrumentation.
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+# define LLVM_ADDRESS_SANITIZER_BUILD 1
+#else
+# define LLVM_ADDRESS_SANITIZER_BUILD 0
+#endif
+
+/// \macro LLVM_IS_UNALIGNED_ACCESS_FAST
+/// \brief Is unaligned memory access fast on the host machine.
+///
+/// Don't specialize on alignment for platforms where unaligned memory accesses
+/// generates the same code as aligned memory accesses for common types.
+#if defined(_M_AMD64) || defined(_M_IX86) || defined(__amd64) || \
+    defined(__amd64__) || defined(__x86_64) || defined(__x86_64__) || \
+    defined(_X86_) || defined(__i386) || defined(__i386__)
+# define LLVM_IS_UNALIGNED_ACCESS_FAST 1
+#else
+# define LLVM_IS_UNALIGNED_ACCESS_FAST 0
+#endif
+
+/// \macro LLVM_EXPLICIT
+/// \brief Expands to explicit on compilers which support explicit conversion
+/// operators. Otherwise expands to nothing.
+#if (__has_feature(cxx_explicit_conversions) \
+     || defined(__GXX_EXPERIMENTAL_CXX0X__))
+#define LLVM_EXPLICIT explicit
+#else
+#define LLVM_EXPLICIT
 #endif
 
 #endif

@@ -14,7 +14,8 @@
 #ifndef LLVM_AARCH64INSTPRINTER_H
 #define LLVM_AARCH64INSTPRINTER_H
 
-#include "MCTargetDesc/AArch64BaseInfo.h"
+#include "MCTargetDesc/AArch64MCTargetDesc.h"
+#include "Utils/AArch64BaseInfo.h"
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 
@@ -113,7 +114,7 @@ public:
   }
 
   void printShiftOperand(const char *name, const MCInst *MI,
-                         unsigned OpIdx, raw_ostream &O);  
+                         unsigned OpIdx, raw_ostream &O);
 
   void printLSLOperand(const MCInst *MI, unsigned OpNum, raw_ostream &O);
 

@@ -1,4 +1,4 @@
-//===-- AArch64TargetObjectFile.cpp - AArch64 Object Info ------------------===//
+//===-- AArch64TargetObjectFile.cpp - AArch64 Object Info -----------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -6,6 +6,11 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
+//
+// This file deals with any AArch64 specific requirements on object files.
+//
+//===----------------------------------------------------------------------===//
+
 
 #include "AArch64TargetObjectFile.h"
 

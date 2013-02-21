@@ -14,7 +14,7 @@ add_public_tablegen_target(AArch64CommonTableGen)
 
 add_llvm_target(AArch64CodeGen
   AArch64AsmPrinter.cpp
-  AArch64ConstantIslandPass.cpp
+  AArch64BranchFixupPass.cpp
   AArch64FrameLowering.cpp
   AArch64ISelDAGToDAG.cpp
   AArch64ISelLowering.cpp
@@ -33,3 +33,4 @@ add_subdirectory(Disassembler)
 add_subdirectory(InstPrinter)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)
+add_subdirectory(Utils)

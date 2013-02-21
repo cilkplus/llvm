@@ -66,22 +66,21 @@ static const Module *getModuleFromVal(const Value *V) {
   return 0;
 }
 
-static void PrintCallingConv(unsigned cc, raw_ostream &Out)
-{
+static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   switch (cc) {
-    case CallingConv::Fast:         Out << "fastcc"; break;
-    case CallingConv::Cold:         Out << "coldcc"; break;
-    case CallingConv::X86_StdCall:  Out << "x86_stdcallcc"; break;
-    case CallingConv::X86_FastCall: Out << "x86_fastcallcc"; break;
-    case CallingConv::X86_ThisCall: Out << "x86_thiscallcc"; break;
-    case CallingConv::Intel_OCL_BI: Out << "intel_ocl_bicc"; break;
-    case CallingConv::ARM_APCS:     Out << "arm_apcscc"; break;
-    case CallingConv::ARM_AAPCS:    Out << "arm_aapcscc"; break;
-    case CallingConv::ARM_AAPCS_VFP:Out << "arm_aapcs_vfpcc"; break;
-    case CallingConv::MSP430_INTR:  Out << "msp430_intrcc"; break;
-    case CallingConv::PTX_Kernel:   Out << "ptx_kernel"; break;
-    case CallingConv::PTX_Device:   Out << "ptx_device"; break;
-    default:                        Out << "cc" << cc; break;
+  default:                         Out << "cc" << cc; break;
+  case CallingConv::Fast:          Out << "fastcc"; break;
+  case CallingConv::Cold:          Out << "coldcc"; break;
+  case CallingConv::X86_StdCall:   Out << "x86_stdcallcc"; break;
+  case CallingConv::X86_FastCall:  Out << "x86_fastcallcc"; break;
+  case CallingConv::X86_ThisCall:  Out << "x86_thiscallcc"; break;
+  case CallingConv::Intel_OCL_BI:  Out << "intel_ocl_bicc"; break;
+  case CallingConv::ARM_APCS:      Out << "arm_apcscc"; break;
+  case CallingConv::ARM_AAPCS:     Out << "arm_aapcscc"; break;
+  case CallingConv::ARM_AAPCS_VFP: Out << "arm_aapcs_vfpcc"; break;
+  case CallingConv::MSP430_INTR:   Out << "msp430_intrcc"; break;
+  case CallingConv::PTX_Kernel:    Out << "ptx_kernel"; break;
+  case CallingConv::PTX_Device:    Out << "ptx_device"; break;
   }
 }
 
@@ -117,7 +116,7 @@ static void PrintLLVMName(raw_ostream &OS, StringRef Name, PrefixType Prefix) {
   }
 
   // Scan the name to see if it needs quotes first.
-  bool NeedsQuotes = isdigit(Name[0]);
+  bool NeedsQuotes = isdigit(static_cast<unsigned char>(Name[0]));
   if (!NeedsQuotes) {
     for (unsigned i = 0, e = Name.size(); i != e; ++i) {
       // By making this unsigned, the value passed in to isalnum will always be
@@ -125,7 +124,8 @@ static void PrintLLVMName(raw_ostream &OS, StringRef Name, PrefixType Prefix) {
       // its implementation will assert.  This situation can arise when dealing
       // with UTF-8 multibyte characters.
       unsigned char C = Name[i];
-      if (!isalnum(C) && C != '-' && C != '.' && C != '_') {
+      if (!isalnum(static_cast<unsigned char>(C)) && C != '-' && C != '.' &&
+          C != '_') {
         NeedsQuotes = true;
         break;
       }
@@ -347,6 +347,10 @@ private:
   /// mdnMap - Map for MDNodes.
   DenseMap<const MDNode*, unsigned> mdnMap;
   unsigned mdnNext;
+
+  /// asMap - The slot map for attribute sets.
+  DenseMap<AttributeSet, unsigned> asMap;
+  unsigned asNext;
 public:
   /// Construct from a module
   explicit SlotTracker(const Module *M);
@@ -358,6 +362,7 @@ public:
   int getLocalSlot(const Value *V);
   int getGlobalSlot(const GlobalValue *V);
   int getMetadataSlot(const MDNode *N);
+  int getAttributeGroupSlot(AttributeSet AS);
 
   /// If you'd like to deal with a function instead of just a module, use
   /// this method to get its data into the SlotTracker.
@@ -378,6 +383,13 @@ public:
   unsigned mdn_size() const { return mdnMap.size(); }
   bool mdn_empty() const { return mdnMap.empty(); }
 
+  /// AttributeSet map iterators.
+  typedef DenseMap<AttributeSet, unsigned>::iterator as_iterator;
+  as_iterator as_begin()   { return asMap.begin(); }
+  as_iterator as_end()     { return asMap.end(); }
+  unsigned as_size() const { return asMap.size(); }
+  bool as_empty() const    { return asMap.empty(); }
+
   /// This function does the actual initialization.
   inline void initialize();
 
@@ -391,6 +403,9 @@ private:
 
   /// CreateFunctionSlot - Insert the specified Value* into the slot table.
   void CreateFunctionSlot(const Value *V);
+
+  /// \brief Insert the specified AttributeSet into the slot table.
+  void CreateAttributeSetSlot(AttributeSet AS);
 
   /// Add all of the module level global variables (and their initializers)
   /// and function declarations, but not the contents of those functions.
@@ -446,14 +461,14 @@ static SlotTracker *createSlotTracker(const Value *V) {
 // to be added to the slot table.
 SlotTracker::SlotTracker(const Module *M)
   : TheModule(M), TheFunction(0), FunctionProcessed(false),
-    mNext(0), fNext(0),  mdnNext(0) {
+    mNext(0), fNext(0),  mdnNext(0), asNext(0) {
 }
 
 // Function level constructor. Causes the contents of the Module and the one
 // function provided to be added to the slot table.
 SlotTracker::SlotTracker(const Function *F)
   : TheModule(F ? F->getParent() : 0), TheFunction(F), FunctionProcessed(false),
-    mNext(0), fNext(0), mdnNext(0) {
+    mNext(0), fNext(0), mdnNext(0), asNext(0) {
 }
 
 inline void SlotTracker::initialize() {
@@ -487,11 +502,18 @@ void SlotTracker::processModule() {
       CreateMetadataSlot(NMD->getOperand(i));
   }
 
-  // Add all the unnamed functions to the table.
   for (Module::const_iterator I = TheModule->begin(), E = TheModule->end();
-       I != E; ++I)
+       I != E; ++I) {
     if (!I->hasName())
+      // Add all the unnamed functions to the table.
       CreateModuleSlot(I);
+
+    // Add all the function attributes to the table.
+    // FIXME: Add attributes of other objects?
+    AttributeSet FnAttrs = I->getAttributes().getFnAttributes();
+    if (FnAttrs.hasAttributes(AttributeSet::FunctionIndex))
+      CreateAttributeSetSlot(FnAttrs);
+  }
 
   ST_DEBUG("end processModule!\n");
 }
@@ -531,6 +553,14 @@ void SlotTracker::processFunction() {
             for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i)
               if (MDNode *N = dyn_cast_or_null<MDNode>(I->getOperand(i)))
                 CreateMetadataSlot(N);
+
+        // Add all the call attributes to the table. This is important for
+        // inline ASM, which may have attributes but no declaration.
+        if (CI->isInlineAsm()) {
+          AttributeSet Attrs = CI->getAttributes().getFnAttributes();
+          if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
+            CreateAttributeSetSlot(Attrs);
+        }
       }
 
       // Process metadata attached with this instruction.
@@ -589,6 +619,14 @@ int SlotTracker::getLocalSlot(const Value *V) {
   return FI == fMap.end() ? -1 : (int)FI->second;
 }
 
+int SlotTracker::getAttributeGroupSlot(AttributeSet AS) {
+  // Check for uninitialized state and do lazy initialization.
+  initialize();
+
+  // Find the AttributeSet in the module map.
+  as_iterator AI = asMap.find(AS);
+  return AI == asMap.end() ? -1 : (int)AI->second;
+}
 
 /// CreateModuleSlot - Insert the specified GlobalValue* into the slot table.
 void SlotTracker::CreateModuleSlot(const GlobalValue *V) {
@@ -638,6 +676,18 @@ void SlotTracker::CreateMetadataSlot(const MDNode *N) {
   for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
     if (const MDNode *Op = dyn_cast_or_null<MDNode>(N->getOperand(i)))
       CreateMetadataSlot(Op);
+}
+
+void SlotTracker::CreateAttributeSetSlot(AttributeSet AS) {
+  assert(AS.hasAttributes(AttributeSet::FunctionIndex) &&
+         "Doesn't need a slot!");
+
+  as_iterator I = asMap.find(AS);
+  if (I != asMap.end())
+    return;
+
+  unsigned DestSlot = asNext++;
+  asMap[AS] = DestSlot;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1201,6 +1251,7 @@ public:
   void writeAtomic(AtomicOrdering Ordering, SynchronizationScope SynchScope);
 
   void writeAllMDNodes();
+  void writeAllAttributeGroups();
 
   void printTypeIdentities();
   void printGlobal(const GlobalVariable *GV);
@@ -1268,6 +1319,8 @@ void AssemblyWriter::writeParamOperand(const Value *Operand,
 }
 
 void AssemblyWriter::printModule(const Module *M) {
+  Machine.initialize();
+
   if (!M->getModuleIdentifier().empty() &&
       // Don't print the ID if it will start a new line (which would
       // require a comment char before it).
@@ -1322,6 +1375,12 @@ void AssemblyWriter::printModule(const Module *M) {
   for (Module::const_iterator I = M->begin(), E = M->end(); I != E; ++I)
     printFunction(I);
 
+  // Output all attribute groups.
+  if (!Machine.as_empty()) {
+    Out << '\n';
+    writeAllAttributeGroups();
+  }
+
   // Output named metadata.
   if (!M->named_metadata_empty()) Out << '\n';
 
@@ -1342,14 +1401,16 @@ void AssemblyWriter::printNamedMDNode(const NamedMDNode *NMD) {
   if (Name.empty()) {
     Out << "<empty name> ";
   } else {
-    if (isalpha(Name[0]) || Name[0] == '-' || Name[0] == '$' ||
+    if (isalpha(static_cast<unsigned char>(Name[0])) ||
+        Name[0] == '-' || Name[0] == '$' ||
         Name[0] == '.' || Name[0] == '_')
       Out << Name[0];
     else
       Out << '\\' << hexdigit(Name[0] >> 4) << hexdigit(Name[0] & 0x0F);
     for (unsigned i = 1, e = Name.size(); i != e; ++i) {
       unsigned char C = Name[i];
-      if (isalnum(C) || C == '-' || C == '$' || C == '.' || C == '_')
+      if (isalnum(static_cast<unsigned char>(C)) || C == '-' || C == '$' ||
+          C == '.' || C == '_')
         Out << C;
       else
         Out << '\\' << hexdigit(C >> 4) << hexdigit(C & 0x0F);
@@ -1443,6 +1504,7 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   if (unsigned AddressSpace = GV->getType()->getAddressSpace())
     Out << "addrspace(" << AddressSpace << ") ";
   if (GV->hasUnnamedAddr()) Out << "unnamed_addr ";
+  if (GV->isExternallyInitialized()) Out << "externally_initialized ";
   Out << (GV->isConstant() ? "constant " : "global ");
   TypePrinter.print(GV->getType()->getElementType(), Out);
 
@@ -1600,7 +1662,7 @@ void AssemblyWriter::printFunction(const Function *F) {
   if (F->hasUnnamedAddr())
     Out << " unnamed_addr";
   if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
-    Out << ' ' << Attrs.getAsString(AttributeSet::FunctionIndex);
+    Out << " #" << Machine.getAttributeGroupSlot(Attrs.getFnAttributes());
   if (F->hasSection()) {
     Out << " section \"";
     PrintEscapedString(F->getSection(), Out);
@@ -1757,7 +1819,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
 
   // Special case conditional branches to swizzle the condition out to the front
   if (isa<BranchInst>(I) && cast<BranchInst>(I).isConditional()) {
-    BranchInst &BI(cast<BranchInst>(I));
+    const BranchInst &BI(cast<BranchInst>(I));
     Out << ' ';
     writeOperand(BI.getCondition(), true);
     Out << ", ";
@@ -1766,14 +1828,14 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     writeOperand(BI.getSuccessor(1), true);
 
   } else if (isa<SwitchInst>(I)) {
-    SwitchInst& SI(cast<SwitchInst>(I));
+    const SwitchInst& SI(cast<SwitchInst>(I));
     // Special case switch instruction to get formatting nice and correct.
     Out << ' ';
     writeOperand(SI.getCondition(), true);
     Out << ", ";
     writeOperand(SI.getDefaultDest(), true);
     Out << " [";
-    for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end();
+    for (SwitchInst::ConstCaseIt i = SI.case_begin(), e = SI.case_end();
          i != e; ++i) {
       Out << "\n    ";
       writeOperand(i.getCaseValue(), true);
@@ -1922,7 +1984,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
 
   } else if (const AllocaInst *AI = dyn_cast<AllocaInst>(&I)) {
     Out << ' ';
-    TypePrinter.print(AI->getType()->getElementType(), Out);
+    TypePrinter.print(AI->getAllocatedType(), Out);
     if (!AI->getArraySize() || AI->isArrayAllocation()) {
       Out << ", ";
       writeOperand(AI->getArraySize(), true);
@@ -2060,6 +2122,20 @@ void AssemblyWriter::printMDNodeBody(const MDNode *Node) {
   WriteMDNodeBodyInternal(Out, Node, &TypePrinter, &Machine, TheModule);
   WriteMDNodeComment(Node, Out);
   Out << "\n";
+}
+
+void AssemblyWriter::writeAllAttributeGroups() {
+  std::vector<std::pair<AttributeSet, unsigned> > asVec;
+  asVec.resize(Machine.as_size());
+
+  for (SlotTracker::as_iterator I = Machine.as_begin(), E = Machine.as_end();
+       I != E; ++I)
+    asVec[I->second] = *I;
+
+  for (std::vector<std::pair<AttributeSet, unsigned> >::iterator
+         I = asVec.begin(), E = asVec.end(); I != E; ++I)
+    Out << "attributes #" << I->second << " = { "
+        << I->first.getAsString(AttributeSet::FunctionIndex, true) << " }\n";
 }
 
 //===----------------------------------------------------------------------===//

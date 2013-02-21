@@ -1,4 +1,4 @@
-//===- ARMRegisterInfo.td - ARM Register defs --------------*- tablegen -*-===//
+//===- AArch64RegisterInfo.td - ARM Register defs ----------*- tablegen -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -6,9 +6,9 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-
-//===----------------------------------------------------------------------===//
-//  Declarations that describe the ARM register file
+//
+//  This file contains declarations that describe the AArch64 register file
+//
 //===----------------------------------------------------------------------===//
 
 let Namespace = "AArch64" in {
@@ -193,13 +193,11 @@ def VPR128 : RegisterClass<"AArch64",
                            (sequence "V%u", 0, 31)>;
 
 // Flags register
-def NZCV : Register<"nzcv">
-{
+def NZCV : Register<"nzcv"> {
   let Namespace = "AArch64";
 }
 
-def FlagClass : RegisterClass<"AArch64", [i32], 32, (add NZCV)>
-{
+def FlagClass : RegisterClass<"AArch64", [i32], 32, (add NZCV)> {
   let CopyCost = -1;
   let isAllocatable = 0;
 }

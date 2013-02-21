@@ -12,9 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "mccodeemitter"
-#include "MCTargetDesc/AArch64BaseInfo.h"
 #include "MCTargetDesc/AArch64FixupKinds.h"
 #include "MCTargetDesc/AArch64MCExpr.h"
+#include "MCTargetDesc/AArch64MCTargetDesc.h"
+#include "Utils/AArch64BaseInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInst.h"
@@ -28,17 +29,12 @@ using namespace llvm;
 
 namespace {
 class AArch64MCCodeEmitter : public MCCodeEmitter {
-  AArch64MCCodeEmitter(const AArch64MCCodeEmitter &); // DO NOT IMPLEMENT
-  void operator=(const AArch64MCCodeEmitter &); // DO NOT IMPLEMENT
-  const MCInstrInfo &MCII;
-  const MCSubtargetInfo &STI;
+  AArch64MCCodeEmitter(const AArch64MCCodeEmitter &) LLVM_DELETED_FUNCTION;
+  void operator=(const AArch64MCCodeEmitter &) LLVM_DELETED_FUNCTION;
   MCContext &Ctx;
 
 public:
-  AArch64MCCodeEmitter(const MCInstrInfo &mcii, const MCSubtargetInfo &sti,
-                       MCContext &ctx)
-    : MCII(mcii), STI(sti), Ctx(ctx) {
-  }
+  AArch64MCCodeEmitter(MCContext &ctx) : Ctx(ctx) {}
 
   ~AArch64MCCodeEmitter() {}
 
@@ -363,7 +359,7 @@ AArch64MCCodeEmitter::getMachineOpValue(const MCInst &MI,
 
 unsigned
 AArch64MCCodeEmitter::getMoveWideImmOpValue(const MCInst &MI, unsigned OpIdx,
-                                            SmallVectorImpl<MCFixup> &Fixups) const {
+                                       SmallVectorImpl<MCFixup> &Fixups) const {
   const MCOperand &UImm16MO = MI.getOperand(OpIdx);
   const MCOperand &ShiftMO = MI.getOperand(OpIdx + 1);
 
@@ -491,7 +487,7 @@ MCCodeEmitter *llvm::createAArch64MCCodeEmitter(const MCInstrInfo &MCII,
                                                 const MCRegisterInfo &MRI,
                                                 const MCSubtargetInfo &STI,
                                                 MCContext &Ctx) {
-  return new AArch64MCCodeEmitter(MCII, STI, Ctx);
+  return new AArch64MCCodeEmitter(Ctx);
 }
 
 void AArch64MCCodeEmitter::

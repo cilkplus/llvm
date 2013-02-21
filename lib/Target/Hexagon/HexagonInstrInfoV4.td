@@ -21,6 +21,17 @@ def IMMEXT_c : T_Immext<(ins calltarget:$imm)>;
 def IMMEXT_g : T_Immext<(ins globaladdress:$imm)>;
 def IMMEXT_i : T_Immext<(ins u26_6Imm:$imm)>;
 
+// Fold (add (CONST32 tglobaladdr:$addr) <offset>) into a global address.
+def FoldGlobalAddr : ComplexPattern<i32, 1, "foldGlobalAddress", [], []>;
+
+// Fold (add (CONST32_GP tglobaladdr:$addr) <offset>) into a global address.
+def FoldGlobalAddrGP : ComplexPattern<i32, 1, "foldGlobalAddressGP", [], []>;
+
+def NumUsesBelowThresCONST32 : PatFrag<(ops node:$addr),
+                                       (HexagonCONST32 node:$addr), [{
+  return hasNumUsesBelowThresGA(N->getOperand(0).getNode());
+}]>;
+
 // Hexagon V4 Architecture spec defines 8 instruction classes:
 // LD ST ALU32 XTYPE J JR MEMOP NV CR SYSTEM(system is not implemented in the
 // compiler)
@@ -251,6 +262,54 @@ def TFR_FI_immext_V4 : ALU32_ri<(outs IntRegs:$dst),
             []>,
             Requires<[HasV4T]>;
 
+// Rd=cmp.eq(Rs,#s8)
+let validSubTargets = HasV4SubT, isExtendable = 1, opExtendable = 2,
+isExtentSigned = 1, opExtentBits = 8 in
+def V4_A4_rcmpeqi : ALU32_ri<(outs IntRegs:$Rd),
+                    (ins IntRegs:$Rs, s8Ext:$s8),
+                    "$Rd = cmp.eq($Rs, #$s8)",
+                    [(set (i32 IntRegs:$Rd),
+                          (i32 (zext (i1 (seteq (i32 IntRegs:$Rs),
+                                                s8ExtPred:$s8)))))]>,
+                    Requires<[HasV4T]>;
+
+// Preserve the TSTBIT generation
+def : Pat <(i32 (zext (i1 (setne (i32 (and (i32 (shl 1, (i32 IntRegs:$src2))),
+                                           (i32 IntRegs:$src1))), 0)))),
+      (i32 (MUX_ii (i1 (TSTBIT_rr (i32 IntRegs:$src1), (i32 IntRegs:$src2))),
+                   1, 0))>;
+
+// Interfered with tstbit generation, above pattern preserves, see : tstbit.ll
+// Rd=cmp.ne(Rs,#s8)
+let validSubTargets = HasV4SubT, isExtendable = 1, opExtendable = 2,
+isExtentSigned = 1, opExtentBits = 8 in
+def V4_A4_rcmpneqi : ALU32_ri<(outs IntRegs:$Rd),
+                     (ins IntRegs:$Rs, s8Ext:$s8),
+                     "$Rd = !cmp.eq($Rs, #$s8)",
+                     [(set (i32 IntRegs:$Rd),
+                           (i32 (zext (i1 (setne (i32 IntRegs:$Rs),
+                                                 s8ExtPred:$s8)))))]>,
+                     Requires<[HasV4T]>;
+
+// Rd=cmp.eq(Rs,Rt)
+let validSubTargets = HasV4SubT in
+def V4_A4_rcmpeq : ALU32_ri<(outs IntRegs:$Rd),
+                   (ins IntRegs:$Rs, IntRegs:$Rt),
+                   "$Rd = cmp.eq($Rs, $Rt)",
+                   [(set (i32 IntRegs:$Rd),
+                         (i32 (zext (i1 (seteq (i32 IntRegs:$Rs),
+                                               IntRegs:$Rt)))))]>,
+                   Requires<[HasV4T]>;
+
+// Rd=cmp.ne(Rs,Rt)
+let validSubTargets = HasV4SubT in
+def V4_A4_rcmpneq : ALU32_ri<(outs IntRegs:$Rd),
+                    (ins IntRegs:$Rs, IntRegs:$Rt),
+                    "$Rd = !cmp.eq($Rs, $Rt)",
+                    [(set (i32 IntRegs:$Rd),
+                          (i32 (zext (i1 (setne (i32 IntRegs:$Rs),
+                                               IntRegs:$Rt)))))]>,
+                    Requires<[HasV4T]>;
 
 //===----------------------------------------------------------------------===//
 // ALU32 -
@@ -279,6 +338,19 @@ def COMBINE_Ir_V4 : ALU32_ir<(outs DoubleRegs:$dst),
             "$dst = combine(#$src1, $src2)",
             []>,
             Requires<[HasV4T]>;
+
+def HexagonWrapperCombineRI_V4 :
+  SDNode<"HexagonISD::WrapperCombineRI_V4", SDTHexagonI64I32I32>;
+def HexagonWrapperCombineIR_V4 :
+  SDNode<"HexagonISD::WrapperCombineIR_V4", SDTHexagonI64I32I32>;
+
+def : Pat <(HexagonWrapperCombineRI_V4 IntRegs:$r, s8ExtPred:$i),
+           (COMBINE_rI_V4 IntRegs:$r, s8ExtPred:$i)>,
+          Requires<[HasV4T]>;
+
+def : Pat <(HexagonWrapperCombineIR_V4 s8ExtPred:$i, IntRegs:$r),
+           (COMBINE_Ir_V4 s8ExtPred:$i, IntRegs:$r)>,
+          Requires<[HasV4T]>;
 
 let isExtendable = 1, opExtendable = 2, isExtentSigned = 0, opExtentBits = 6,
     neverHasSideEffects = 1, validSubTargets = HasV4SubT in
@@ -523,226 +595,6 @@ def : Pat <(i32 (load (add IntRegs:$src1, IntRegs:$src2))),
            (LDriw_indexed_shl_V4 IntRegs:$src1, IntRegs:$src2, 0)>,
             Requires<[HasV4T]>;
 }
-
-/// Load from global offset
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def LDrid_GP_V4 : LDInst2<(outs DoubleRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst=memd(#$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrid_GP_cPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1) $dst=memd(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrid_GP_cNotPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1) $dst=memd(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrid_GP_cdnPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1.new) $dst=memd(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrid_GP_cdnNotPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1.new) $dst=memd(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def LDrib_GP_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst=memb(#$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrib_GP_cPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1) $dst=memb(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrib_GP_cNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1) $dst=memb(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrib_GP_cdnPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1.new) $dst=memb(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrib_GP_cdnNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1.new) $dst=memb(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def LDriub_GP_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst=memub(#$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriub_GP_cPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1) $dst=memub(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriub_GP_cNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1) $dst=memub(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriub_GP_cdnPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1.new) $dst=memub(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriub_GP_cdnNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1.new) $dst=memub(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def LDrih_GP_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst=memh(#$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrih_GP_cPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1) $dst=memh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrih_GP_cNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1) $dst=memh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrih_GP_cdnPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1.new) $dst=memh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDrih_GP_cdnNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1.new) $dst=memh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def LDriuh_GP_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst=memuh(#$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriuh_GP_cPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1) $dst=memuh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriuh_GP_cNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1) $dst=memuh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriuh_GP_cdnPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1.new) $dst=memuh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriuh_GP_cdnNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1.new) $dst=memuh(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def LDriw_GP_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst=memw(#$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriw_GP_cPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1) $dst=memw(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriw_GP_cNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1) $dst=memw(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriw_GP_cdnPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if ($src1.new) $dst=memw(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def LDriw_GP_cdnNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset),
-            "if (!$src1.new) $dst=memw(##$global+$offset)",
-            []>,
-            Requires<[HasV4T]>;
-
 
 let isPredicable = 1, neverHasSideEffects = 1, validSubTargets = HasV4SubT in
 def LDd_GP_V4 : LDInst2<(outs DoubleRegs:$dst),
@@ -1067,82 +919,73 @@ def : Pat <(i32 (load (HexagonCONST32_GP tglobaladdr:$global))),
            (i32 (LDw_GP_V4 tglobaladdr:$global))>,
             Requires<[HasV4T]>;
 
-def : Pat <(atomic_load_64 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset)),
-           (i64 (LDrid_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-           Requires<[HasV4T]>;
+// zext i1->i64
+def : Pat <(i64 (zext (i1 PredRegs:$src1))),
+      (i64 (COMBINE_Ir_V4 0, (MUX_ii (i1 PredRegs:$src1), 1, 0)))>,
+      Requires<[HasV4T]>;
 
-def : Pat <(atomic_load_32 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset)),
-           (i32 (LDriw_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[HasV4T]>;
+// zext i32->i64
+def : Pat <(i64 (zext (i32 IntRegs:$src1))),
+      (i64 (COMBINE_Ir_V4 0, (i32 IntRegs:$src1)))>,
+      Requires<[HasV4T]>;
+// zext i8->i64
+def:  Pat <(i64 (zextloadi8 ADDRriS11_0:$src1)),
+      (i64 (COMBINE_Ir_V4 0, (LDriub ADDRriS11_0:$src1)))>,
+      Requires<[HasV4T]>;
 
-def : Pat <(atomic_load_16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset)),
-           (i32 (LDriuh_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[HasV4T]>;
+let AddedComplexity = 20 in
+def:  Pat <(i64 (zextloadi8 (add (i32 IntRegs:$src1),
+                                s11_0ExtPred:$offset))),
+      (i64 (COMBINE_Ir_V4 0, (LDriub_indexed IntRegs:$src1,
+                                  s11_0ExtPred:$offset)))>,
+      Requires<[HasV4T]>;
 
-def : Pat <(atomic_load_8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                               u16ImmPred:$offset)),
-           (i32 (LDriub_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-           Requires<[HasV4T]>;
+// zext i16->i64
+def:  Pat <(i64 (zextloadi16 ADDRriS11_1:$src1)),
+      (i64 (COMBINE_Ir_V4 0, (LDriuh ADDRriS11_1:$src1)))>,
+      Requires<[HasV4T]>;
 
-// Map from load(globaladdress + x) -> memd(#foo + x)
+let AddedComplexity = 20 in
+def:  Pat <(i64 (zextloadi16 (add (i32 IntRegs:$src1),
+                                  s11_1ExtPred:$offset))),
+      (i64 (COMBINE_Ir_V4 0, (LDriuh_indexed IntRegs:$src1,
+                                  s11_1ExtPred:$offset)))>,
+      Requires<[HasV4T]>;
+
+// anyext i16->i64
+def:  Pat <(i64 (extloadi16 ADDRriS11_2:$src1)),
+      (i64 (COMBINE_Ir_V4 0, (LDrih ADDRriS11_2:$src1)))>,
+      Requires<[HasV4T]>;
+
+let AddedComplexity = 20 in
+def:  Pat <(i64 (extloadi16 (add (i32 IntRegs:$src1),
+                                  s11_1ExtPred:$offset))),
+      (i64 (COMBINE_Ir_V4 0, (LDrih_indexed IntRegs:$src1,
+                                  s11_1ExtPred:$offset)))>,
+      Requires<[HasV4T]>;
+
+// zext i32->i64
+def:  Pat <(i64 (zextloadi32 ADDRriS11_2:$src1)),
+      (i64 (COMBINE_Ir_V4 0, (LDriw ADDRriS11_2:$src1)))>,
+      Requires<[HasV4T]>;
+
 let AddedComplexity = 100 in
-def : Pat <(i64 (load (add (HexagonCONST32_GP tglobaladdr:$global),
-                           u16ImmPred:$offset))),
-           (i64 (LDrid_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-           Requires<[HasV4T]>;
+def:  Pat <(i64 (zextloadi32 (i32 (add IntRegs:$src1, s11_2ExtPred:$offset)))),
+      (i64 (COMBINE_Ir_V4 0, (LDriw_indexed IntRegs:$src1,
+                                  s11_2ExtPred:$offset)))>,
+      Requires<[HasV4T]>;
 
-// Map from load(globaladdress + x) -> memb(#foo + x)
+// anyext i32->i64
+def:  Pat <(i64 (extloadi32 ADDRriS11_2:$src1)),
+      (i64 (COMBINE_Ir_V4 0, (LDriw ADDRriS11_2:$src1)))>,
+      Requires<[HasV4T]>;
+
 let AddedComplexity = 100 in
-def : Pat <(i32 (extloadi8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                           u16ImmPred:$offset))),
-           (i32 (LDrib_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-           Requires<[HasV4T]>;
+def:  Pat <(i64 (extloadi32 (i32 (add IntRegs:$src1, s11_2ExtPred:$offset)))),
+      (i64 (COMBINE_Ir_V4 0, (LDriw_indexed IntRegs:$src1,
+                                  s11_2ExtPred:$offset)))>,
+      Requires<[HasV4T]>;
 
-// Map from load(globaladdress + x) -> memb(#foo + x)
-let AddedComplexity = 100 in
-def : Pat <(i32 (sextloadi8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                            u16ImmPred:$offset))),
-           (i32 (LDrib_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-           Requires<[HasV4T]>;
-
-// Map from load(globaladdress + x) -> memub(#foo + x)
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                            u16ImmPred:$offset))),
-           (i32 (LDriub_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-           Requires<[HasV4T]>;
-
-// Map from load(globaladdress + x) -> memuh(#foo + x)
-let AddedComplexity = 100 in
-def : Pat <(i32 (extloadi16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                            u16ImmPred:$offset))),
-           (i32 (LDrih_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[HasV4T]>;
-
-// Map from load(globaladdress + x) -> memh(#foo + x)
-let AddedComplexity = 100 in
-def : Pat <(i32 (sextloadi16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                             u16ImmPred:$offset))),
-           (i32 (LDrih_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-           Requires<[HasV4T]>;
-
-
-// Map from load(globaladdress + x) -> memuh(#foo + x)
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                             u16ImmPred:$offset))),
-           (i32 (LDriuh_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[HasV4T]>;
-
-// Map from load(globaladdress + x) -> memw(#foo + x)
-let AddedComplexity = 100 in
-def : Pat <(i32 (load (add (HexagonCONST32_GP tglobaladdr:$global),
-                      u16ImmPred:$offset))),
-           (i32 (LDriw_GP_V4 tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[HasV4T]>;
 
 
 //===----------------------------------------------------------------------===//
@@ -1521,166 +1364,10 @@ def STriw_shl_V4 : STInst<(outs),
 // memw(Rx++Mu:brev)=Rt
 // memw(gp+#u16:2)=Rt
 
-/// store to global address
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def STrid_GP_V4 : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, DoubleRegs:$src),
-            "memd(#$global+$offset) = $src",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrid_GP_cPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        DoubleRegs:$src2),
-            "if ($src1) memd(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrid_GP_cNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        DoubleRegs:$src2),
-            "if (!$src1) memd(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrid_GP_cdnPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        DoubleRegs:$src2),
-            "if ($src1.new) memd(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrid_GP_cdnNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        DoubleRegs:$src2),
-            "if (!$src1.new) memd(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def STrib_GP_V4 : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memb(#$global+$offset) = $src",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrib_GP_cPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1) memb(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrib_GP_cNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1) memb(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrib_GP_cdnPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1.new) memb(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrib_GP_cdnNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1.new) memb(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def STrih_GP_V4 : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memh(#$global+$offset) = $src",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrih_GP_cPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1) memh(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrih_GP_cNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1) memh(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrih_GP_cdnPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1.new) memh(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STrih_GP_cdnNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1.new) memh(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let isPredicable = 1, neverHasSideEffects = 1 in
-def STriw_GP_V4 : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memw(#$global+$offset) = $src",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STriw_GP_cPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1) memw(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STriw_GP_cNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1) memw(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STriw_GP_cdnPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1.new) memw(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
-
-let neverHasSideEffects = 1, isPredicated = 1 in
-def STriw_GP_cdnNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1.new) memw(##$global+$offset) = $src2",
-            []>,
-            Requires<[HasV4T]>;
 
 // memd(#global)=Rtt
-let isPredicable = 1, neverHasSideEffects = 1 in
+let isPredicable = 1, mayStore = 1, neverHasSideEffects = 1,
+validSubTargets = HasV4SubT in
 def STd_GP_V4 : STInst2<(outs),
             (ins globaladdress:$global, DoubleRegs:$src),
             "memd(#$global) = $src",
@@ -1688,7 +1375,8 @@ def STd_GP_V4 : STInst2<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memd(##global) = Rtt
-let neverHasSideEffects = 1, isPredicated = 1 in
+let mayStore = 1, neverHasSideEffects = 1, isPredicated = 1,
+isExtended = 1, opExtendable = 1, validSubTargets = HasV4SubT in {
 def STd_GP_cPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, DoubleRegs:$src2),
             "if ($src1) memd(##$global) = $src2",
@@ -1696,7 +1384,6 @@ def STd_GP_cPt_V4 : STInst2<(outs),
             Requires<[HasV4T]>;
 
 // if (!Pv) memd(##global) = Rtt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STd_GP_cNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, DoubleRegs:$src2),
             "if (!$src1) memd(##$global) = $src2",
@@ -1704,7 +1391,6 @@ def STd_GP_cNotPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (Pv) memd(##global) = Rtt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STd_GP_cdnPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, DoubleRegs:$src2),
             "if ($src1.new) memd(##$global) = $src2",
@@ -1712,15 +1398,16 @@ def STd_GP_cdnPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (!Pv) memd(##global) = Rtt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STd_GP_cdnNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, DoubleRegs:$src2),
             "if (!$src1.new) memd(##$global) = $src2",
             []>,
             Requires<[HasV4T]>;
+}
 
 // memb(#global)=Rt
-let isPredicable = 1, neverHasSideEffects = 1 in
+let isPredicable = 1, neverHasSideEffects = 1, isNVStorable = 1,
+validSubTargets = HasV4SubT in
 def STb_GP_V4 : STInst2<(outs),
             (ins globaladdress:$global, IntRegs:$src),
             "memb(#$global) = $src",
@@ -1728,7 +1415,8 @@ def STb_GP_V4 : STInst2<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memb(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
+let neverHasSideEffects = 1, isPredicated = 1, isNVStorable = 1,
+isExtended = 1, opExtendable = 1, validSubTargets = HasV4SubT in {
 def STb_GP_cPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1) memb(##$global) = $src2",
@@ -1736,7 +1424,6 @@ def STb_GP_cPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (!Pv) memb(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STb_GP_cNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1) memb(##$global) = $src2",
@@ -1744,7 +1431,6 @@ def STb_GP_cNotPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (Pv) memb(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STb_GP_cdnPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1.new) memb(##$global) = $src2",
@@ -1752,15 +1438,16 @@ def STb_GP_cdnPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (!Pv) memb(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STb_GP_cdnNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1.new) memb(##$global) = $src2",
               []>,
               Requires<[HasV4T]>;
+}
 
 // memh(#global)=Rt
-let isPredicable = 1, neverHasSideEffects = 1 in
+let isPredicable = 1, neverHasSideEffects = 1, isNVStorable = 1,
+validSubTargets = HasV4SubT in
 def STh_GP_V4 : STInst2<(outs),
             (ins globaladdress:$global, IntRegs:$src),
             "memh(#$global) = $src",
@@ -1768,7 +1455,8 @@ def STh_GP_V4 : STInst2<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memh(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
+let neverHasSideEffects = 1, isPredicated = 1, isNVStorable = 1,
+isExtended = 1, opExtendable = 1, validSubTargets = HasV4SubT in {
 def STh_GP_cPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1) memh(##$global) = $src2",
@@ -1776,7 +1464,6 @@ def STh_GP_cPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (!Pv) memh(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STh_GP_cNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1) memh(##$global) = $src2",
@@ -1784,7 +1471,6 @@ def STh_GP_cNotPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (Pv) memh(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STh_GP_cdnPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1.new) memh(##$global) = $src2",
@@ -1792,15 +1478,16 @@ def STh_GP_cdnPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (!Pv) memh(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STh_GP_cdnNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1.new) memh(##$global) = $src2",
               []>,
               Requires<[HasV4T]>;
+}
 
 // memw(#global)=Rt
-let isPredicable = 1, neverHasSideEffects = 1 in
+let isPredicable = 1, neverHasSideEffects = 1, isNVStorable = 1,
+validSubTargets = HasV4SubT in
 def STw_GP_V4 : STInst2<(outs),
             (ins globaladdress:$global, IntRegs:$src),
             "memw(#$global) = $src",
@@ -1808,7 +1495,8 @@ def STw_GP_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (Pv) memw(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
+let neverHasSideEffects = 1, isPredicated = 1, isNVStorable = 1,
+isExtended = 1, opExtendable = 1, validSubTargets = HasV4SubT in {
 def STw_GP_cPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1) memw(##$global) = $src2",
@@ -1816,7 +1504,6 @@ def STw_GP_cPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (!Pv) memw(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STw_GP_cNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1) memw(##$global) = $src2",
@@ -1824,7 +1511,6 @@ def STw_GP_cNotPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (Pv) memw(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STw_GP_cdnPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1.new) memw(##$global) = $src2",
@@ -1832,12 +1518,12 @@ def STw_GP_cdnPt_V4 : STInst2<(outs),
               Requires<[HasV4T]>;
 
 // if (!Pv) memw(##global) = Rt
-let neverHasSideEffects = 1, isPredicated = 1 in
 def STw_GP_cdnNotPt_V4 : STInst2<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1.new) memw(##$global) = $src2",
             []>,
               Requires<[HasV4T]>;
+}
 
 // 64 bit atomic store
 def : Pat <(atomic_store_64 (HexagonCONST32_GP tglobaladdr:$global),
@@ -1895,72 +1581,6 @@ let AddedComplexity = 100 in
 def : Pat<(store (i32 IntRegs:$src1), (HexagonCONST32_GP tglobaladdr:$global)),
           (STw_GP_V4 tglobaladdr:$global, (i32 IntRegs:$src1))>,
           Requires<[HasV4T]>;
-
-def : Pat<(atomic_store_64 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset),
-                           (i64 DoubleRegs:$src1)),
-          (STrid_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i64 DoubleRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-def : Pat<(atomic_store_32 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset),
-                           (i32 IntRegs:$src1)),
-          (STriw_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i32 IntRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-def : Pat<(atomic_store_16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset),
-                           (i32 IntRegs:$src1)),
-          (STrih_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i32 IntRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-def : Pat<(atomic_store_8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                               u16ImmPred:$offset),
-                          (i32 IntRegs:$src1)),
-          (STrib_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i32 IntRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-// Map from store(globaladdress + x) -> memd(#foo + x)
-let AddedComplexity = 100 in
-def : Pat<(store (i64 DoubleRegs:$src1),
-                    (add (HexagonCONST32_GP tglobaladdr:$global),
-                                        u16ImmPred:$offset)),
-          (STrid_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i64 DoubleRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-// Map from store(globaladdress + x) -> memb(#foo + x)
-let AddedComplexity = 100 in
-def : Pat<(truncstorei8 (i32 IntRegs:$src1),
-                        (add (HexagonCONST32_GP tglobaladdr:$global),
-                             u16ImmPred:$offset)),
-          (STrib_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i32 IntRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-// Map from store(globaladdress + x) -> memh(#foo + x)
-let AddedComplexity = 100 in
-def : Pat<(truncstorei16 (i32 IntRegs:$src1),
-                         (add (HexagonCONST32_GP tglobaladdr:$global),
-                              u16ImmPred:$offset)),
-          (STrih_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i32 IntRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-// Map from store(globaladdress + x) -> memw(#foo + x)
-let AddedComplexity = 100 in
-def : Pat<(store (i32 IntRegs:$src1),
-                 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset)),
-          (STriw_GP_V4 tglobaladdr:$global, u16ImmPred:$offset,
-                                            (i32 IntRegs:$src1))>,
-          Requires<[HasV4T]>;
-
-
 
 //===----------------------------------------------------------------------===
 // ST -
@@ -2141,14 +1761,6 @@ defm POST_STwri: ST_PostInc_nv <"memw", "STriw", IntRegs, s4_2Imm>, AddrModeRel;
 // memb(Rx++Mu)=Nt.new
 // memb(Rx++Mu:brev)=Nt.new
 
-// memb(gp+#u16:0)=Nt.new
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrib_GP_nv_V4 : NVInst_V4<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memb(#$global+$offset) = $src.new",
-            []>,
-            Requires<[HasV4T]>;
-
 // memb(#global)=Nt.new
 let mayStore = 1, neverHasSideEffects = 1 in
 def STb_GP_nv_V4 : NVInst_V4<(outs),
@@ -2170,14 +1782,6 @@ def STrih_shl_nv_V4 : NVInst_V4<(outs),
 // memh(Rx++I:circ(Mu))=Nt.new
 // memh(Rx++Mu)=Nt.new
 // memh(Rx++Mu:brev)=Nt.new
-
-// memh(gp+#u16:1)=Nt.new
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrih_GP_nv_V4 : NVInst_V4<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memh(#$global+$offset) = $src.new",
-            []>,
-            Requires<[HasV4T]>;
 
 // memh(#global)=Nt.new
 let mayStore = 1, neverHasSideEffects = 1 in
@@ -2201,14 +1805,9 @@ def STriw_shl_nv_V4 : NVInst_V4<(outs),
 // memw(Rx++Mu)=Nt.new
 // memw(Rx++Mu:brev)=Nt.new
 // memw(gp+#u16:2)=Nt.new
-let mayStore = 1, neverHasSideEffects = 1 in
-def STriw_GP_nv_V4 : NVInst_V4<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memw(#$global+$offset) = $src.new",
-            []>,
-            Requires<[HasV4T]>;
 
-let mayStore = 1, neverHasSideEffects = 1 in
+let mayStore = 1, neverHasSideEffects = 1, isNVStore = 1,
+validSubTargets = HasV4SubT in
 def STw_GP_nv_V4 : NVInst_V4<(outs),
             (ins globaladdress:$global, IntRegs:$src),
             "memw(#$global) = $src.new",
@@ -2216,7 +1815,8 @@ def STw_GP_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memb(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
+let mayStore = 1, neverHasSideEffects = 1, isNVStore = 1,
+isExtended = 1, opExtendable = 1, validSubTargets = HasV4SubT in {
 def STb_GP_cPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1) memb(##$global) = $src2.new",
@@ -2224,7 +1824,6 @@ def STb_GP_cPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (!Pv) memb(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STb_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1) memb(##$global) = $src2.new",
@@ -2232,7 +1831,6 @@ def STb_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memb(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STb_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1.new) memb(##$global) = $src2.new",
@@ -2240,7 +1838,6 @@ def STb_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (!Pv) memb(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STb_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1.new) memb(##$global) = $src2.new",
@@ -2248,7 +1845,6 @@ def STb_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memh(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STh_GP_cPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1) memh(##$global) = $src2.new",
@@ -2256,7 +1852,6 @@ def STh_GP_cPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (!Pv) memh(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STh_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1) memh(##$global) = $src2.new",
@@ -2264,7 +1859,6 @@ def STh_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memh(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STh_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1.new) memh(##$global) = $src2.new",
@@ -2272,7 +1866,6 @@ def STh_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (!Pv) memh(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STh_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1.new) memh(##$global) = $src2.new",
@@ -2280,7 +1873,6 @@ def STh_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memw(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STw_GP_cPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1) memw(##$global) = $src2.new",
@@ -2288,7 +1880,6 @@ def STw_GP_cPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (!Pv) memw(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STw_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1) memw(##$global) = $src2.new",
@@ -2296,7 +1887,6 @@ def STw_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (Pv) memw(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STw_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if ($src1.new) memw(##$global) = $src2.new",
@@ -2304,108 +1894,12 @@ def STw_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
             Requires<[HasV4T]>;
 
 // if (!Pv) memw(##global) = Rt
-let mayStore = 1, neverHasSideEffects = 1 in
 def STw_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
             (ins PredRegs:$src1, globaladdress:$global, IntRegs:$src2),
             "if (!$src1.new) memw(##$global) = $src2.new",
             []>,
             Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrib_GP_cPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1) memb(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrib_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1) memb(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrib_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1.new) memb(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrib_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1.new) memb(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrih_GP_cPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1) memh(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrih_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1) memh(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrih_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1.new) memh(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STrih_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1.new) memh(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STriw_GP_cPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1) memw(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STriw_GP_cNotPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1) memw(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STriw_GP_cdnPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if ($src1.new) memw(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
-
-let mayStore = 1, neverHasSideEffects = 1 in
-def STriw_GP_cdnNotPt_nv_V4 : NVInst_V4<(outs),
-            (ins PredRegs:$src1, globaladdress:$global, u16Imm:$offset,
-                                                        IntRegs:$src2),
-            "if (!$src1.new) memw(##$global+$offset) = $src2.new",
-            []>,
-            Requires<[HasV4T]>;
+}
 
 //===----------------------------------------------------------------------===//
 // NV/ST -
@@ -3576,13 +3070,73 @@ def MEMb_ORr_MEM_V4 : MEMInst_V4<(outs),
 // incorrect code for negative numbers.
 // Pd=cmpb.eq(Rs,#u8)
 
-let isCompare = 1 in
+// p=!cmp.eq(r1,r2)
+let isCompare = 1, validSubTargets = HasV4SubT in
+def CMPnotEQ_rr : ALU32_rr<(outs PredRegs:$dst),
+                           (ins IntRegs:$src1, IntRegs:$src2),
+      "$dst = !cmp.eq($src1, $src2)",
+      [(set (i1 PredRegs:$dst),
+            (setne (i32 IntRegs:$src1), (i32 IntRegs:$src2)))]>,
+      Requires<[HasV4T]>;
+
+// p=!cmp.eq(r1,#s10)
+let isCompare = 1, validSubTargets = HasV4SubT in
+def CMPnotEQ_ri : ALU32_ri<(outs PredRegs:$dst),
+                           (ins IntRegs:$src1, s10Ext:$src2),
+      "$dst = !cmp.eq($src1, #$src2)",
+      [(set (i1 PredRegs:$dst),
+            (setne (i32 IntRegs:$src1), s10ImmPred:$src2))]>,
+      Requires<[HasV4T]>;
+
+// p=!cmp.gt(r1,r2)
+let isCompare = 1, validSubTargets = HasV4SubT in
+def CMPnotGT_rr : ALU32_rr<(outs PredRegs:$dst),
+                           (ins IntRegs:$src1, IntRegs:$src2),
+      "$dst = !cmp.gt($src1, $src2)",
+      [(set (i1 PredRegs:$dst),
+            (not (setgt (i32 IntRegs:$src1), (i32 IntRegs:$src2))))]>,
+      Requires<[HasV4T]>;
+
+// p=!cmp.gt(r1,#s10)
+let isCompare = 1, validSubTargets = HasV4SubT in
+def CMPnotGT_ri : ALU32_ri<(outs PredRegs:$dst),
+                           (ins IntRegs:$src1, s10Ext:$src2),
+      "$dst = !cmp.gt($src1, #$src2)",
+      [(set (i1 PredRegs:$dst),
+            (not (setgt (i32 IntRegs:$src1), s10ImmPred:$src2)))]>,
+      Requires<[HasV4T]>;
+
+// p=!cmp.gtu(r1,r2)
+let isCompare = 1, validSubTargets = HasV4SubT in
+def CMPnotGTU_rr : ALU32_rr<(outs PredRegs:$dst),
+                            (ins IntRegs:$src1, IntRegs:$src2),
+      "$dst = !cmp.gtu($src1, $src2)",
+      [(set (i1 PredRegs:$dst),
+            (not (setugt (i32 IntRegs:$src1), (i32 IntRegs:$src2))))]>,
+      Requires<[HasV4T]>;
+
+// p=!cmp.gtu(r1,#u9)
+let isCompare = 1, validSubTargets = HasV4SubT in
+def CMPnotGTU_ri : ALU32_ri<(outs PredRegs:$dst),
+                            (ins IntRegs:$src1, u9Ext:$src2),
+      "$dst = !cmp.gtu($src1, #$src2)",
+      [(set (i1 PredRegs:$dst),
+            (not (setugt (i32 IntRegs:$src1), u9ImmPred:$src2)))]>,
+      Requires<[HasV4T]>;
+
+let isCompare = 1, validSubTargets = HasV4SubT in
 def CMPbEQri_V4 : MInst<(outs PredRegs:$dst),
             (ins IntRegs:$src1, u8Imm:$src2),
             "$dst = cmpb.eq($src1, #$src2)",
             [(set (i1 PredRegs:$dst),
                   (seteq (and (i32 IntRegs:$src1), 255), u8ImmPred:$src2))]>,
             Requires<[HasV4T]>;
+
+def : Pat <(brcond (i1 (setne (and (i32 IntRegs:$src1), 255), u8ImmPred:$src2)),
+                       bb:$offset),
+      (JMP_cNot (CMPbEQri_V4 (i32 IntRegs:$src1), u8ImmPred:$src2),
+                bb:$offset)>,
+      Requires<[HasV4T]>;
 
 // Pd=cmpb.eq(Rs,Rt)
 let isCompare = 1, validSubTargets = HasV4SubT in
@@ -3624,21 +3178,228 @@ def CMPbGTUri_V4 : MInst<(outs PredRegs:$dst),
                                               u7ExtPred:$src2))]>,
             Requires<[HasV4T]>, ImmRegRel;
 
+// SDNode for converting immediate C to C-1.
+def DEC_CONST_BYTE : SDNodeXForm<imm, [{
+   // Return the byte immediate const-1 as an SDNode.
+   int32_t imm = N->getSExtValue();
+   return XformU7ToU7M1Imm(imm);
+}]>;
+
+// For the sequence
+//   zext( seteq ( and(Rs, 255), u8))
+// Generate
+//   Pd=cmpb.eq(Rs, #u8)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+def : Pat <(i32 (zext (i1 (seteq (i32 (and (i32 IntRegs:$Rs), 255)),
+                                           u8ExtPred:$u8)))),
+           (i32 (TFR_condset_ii (i1 (CMPbEQri_V4 (i32 IntRegs:$Rs),
+                                                 (u8ExtPred:$u8))),
+                                1, 0))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setne ( and(Rs, 255), u8))
+// Generate
+//   Pd=cmpb.eq(Rs, #u8)
+//   if (Pd.new) Rd=#0
+//   if (!Pd.new) Rd=#1
+def : Pat <(i32 (zext (i1 (setne (i32 (and (i32 IntRegs:$Rs), 255)),
+                                           u8ExtPred:$u8)))),
+           (i32 (TFR_condset_ii (i1 (CMPbEQri_V4 (i32 IntRegs:$Rs),
+                                                 (u8ExtPred:$u8))),
+                                0, 1))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( seteq (Rs, and(Rt, 255)))
+// Generate
+//   Pd=cmpb.eq(Rs, Rt)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+def : Pat <(i32 (zext (i1 (seteq (i32 IntRegs:$Rt),
+                                 (i32 (and (i32 IntRegs:$Rs), 255)))))),
+           (i32 (TFR_condset_ii (i1 (CMPbEQrr_ubub_V4 (i32 IntRegs:$Rs),
+                                                      (i32 IntRegs:$Rt))),
+                                1, 0))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setne (Rs, and(Rt, 255)))
+// Generate
+//   Pd=cmpb.eq(Rs, Rt)
+//   if (Pd.new) Rd=#0
+//   if (!Pd.new) Rd=#1
+def : Pat <(i32 (zext (i1 (setne (i32 IntRegs:$Rt),
+                                 (i32 (and (i32 IntRegs:$Rs), 255)))))),
+           (i32 (TFR_condset_ii (i1 (CMPbEQrr_ubub_V4 (i32 IntRegs:$Rs),
+                                                      (i32 IntRegs:$Rt))),
+                                0, 1))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setugt ( and(Rs, 255), u8))
+// Generate
+//   Pd=cmpb.gtu(Rs, #u8)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+def : Pat <(i32 (zext (i1 (setugt (i32 (and (i32 IntRegs:$Rs), 255)),
+                                            u8ExtPred:$u8)))),
+           (i32 (TFR_condset_ii (i1 (CMPbGTUri_V4 (i32 IntRegs:$Rs),
+                                                  (u8ExtPred:$u8))),
+                                1, 0))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setugt ( and(Rs, 254), u8))
+// Generate
+//   Pd=cmpb.gtu(Rs, #u8)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+def : Pat <(i32 (zext (i1 (setugt (i32 (and (i32 IntRegs:$Rs), 254)),
+                                            u8ExtPred:$u8)))),
+           (i32 (TFR_condset_ii (i1 (CMPbGTUri_V4 (i32 IntRegs:$Rs),
+                                                  (u8ExtPred:$u8))),
+                                1, 0))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setult ( Rs, Rt))
+// Generate
+//   Pd=cmp.ltu(Rs, Rt)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+// cmp.ltu(Rs, Rt) -> cmp.gtu(Rt, Rs)
+def : Pat <(i32 (zext (i1 (setult (i32 IntRegs:$Rs), (i32 IntRegs:$Rt))))),
+           (i32 (TFR_condset_ii (i1 (CMPGTUrr (i32 IntRegs:$Rt),
+                                              (i32 IntRegs:$Rs))),
+                                1, 0))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setlt ( Rs, Rt))
+// Generate
+//   Pd=cmp.lt(Rs, Rt)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+// cmp.lt(Rs, Rt) -> cmp.gt(Rt, Rs)
+def : Pat <(i32 (zext (i1 (setlt (i32 IntRegs:$Rs), (i32 IntRegs:$Rt))))),
+           (i32 (TFR_condset_ii (i1 (CMPGTrr (i32 IntRegs:$Rt),
+                                             (i32 IntRegs:$Rs))),
+                                1, 0))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setugt ( Rs, Rt))
+// Generate
+//   Pd=cmp.gtu(Rs, Rt)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+def : Pat <(i32 (zext (i1 (setugt (i32 IntRegs:$Rs), (i32 IntRegs:$Rt))))),
+           (i32 (TFR_condset_ii (i1 (CMPGTUrr (i32 IntRegs:$Rs),
+                                              (i32 IntRegs:$Rt))),
+                                1, 0))>,
+           Requires<[HasV4T]>;
+
+// This pattern interefers with coremark performance, not implementing at this
+// time.
+// For the sequence
+//   zext( setgt ( Rs, Rt))
+// Generate
+//   Pd=cmp.gt(Rs, Rt)
+//   if (Pd.new) Rd=#1
+//   if (!Pd.new) Rd=#0
+
+// For the sequence
+//   zext( setuge ( Rs, Rt))
+// Generate
+//   Pd=cmp.ltu(Rs, Rt)
+//   if (Pd.new) Rd=#0
+//   if (!Pd.new) Rd=#1
+// cmp.ltu(Rs, Rt) -> cmp.gtu(Rt, Rs)
+def : Pat <(i32 (zext (i1 (setuge (i32 IntRegs:$Rs), (i32 IntRegs:$Rt))))),
+           (i32 (TFR_condset_ii (i1 (CMPGTUrr (i32 IntRegs:$Rt),
+                                              (i32 IntRegs:$Rs))),
+                                0, 1))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setge ( Rs, Rt))
+// Generate
+//   Pd=cmp.lt(Rs, Rt)
+//   if (Pd.new) Rd=#0
+//   if (!Pd.new) Rd=#1
+// cmp.lt(Rs, Rt) -> cmp.gt(Rt, Rs)
+def : Pat <(i32 (zext (i1 (setge (i32 IntRegs:$Rs), (i32 IntRegs:$Rt))))),
+           (i32 (TFR_condset_ii (i1 (CMPGTrr (i32 IntRegs:$Rt),
+                                             (i32 IntRegs:$Rs))),
+                                0, 1))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setule ( Rs, Rt))
+// Generate
+//   Pd=cmp.gtu(Rs, Rt)
+//   if (Pd.new) Rd=#0
+//   if (!Pd.new) Rd=#1
+def : Pat <(i32 (zext (i1 (setule (i32 IntRegs:$Rs), (i32 IntRegs:$Rt))))),
+           (i32 (TFR_condset_ii (i1 (CMPGTUrr (i32 IntRegs:$Rs),
+                                              (i32 IntRegs:$Rt))),
+                                0, 1))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setle ( Rs, Rt))
+// Generate
+//   Pd=cmp.gt(Rs, Rt)
+//   if (Pd.new) Rd=#0
+//   if (!Pd.new) Rd=#1
+def : Pat <(i32 (zext (i1 (setle (i32 IntRegs:$Rs), (i32 IntRegs:$Rt))))),
+           (i32 (TFR_condset_ii (i1 (CMPGTrr (i32 IntRegs:$Rs),
+                                             (i32 IntRegs:$Rt))),
+                                0, 1))>,
+           Requires<[HasV4T]>;
+
+// For the sequence
+//   zext( setult ( and(Rs, 255), u8))
+// Use the isdigit transformation below
+
+// Generate code of the form 'mux_ii(cmpbgtu(Rdd, C-1),0,1)'
+// for C code of the form r = ((c>='0') & (c<='9')) ? 1 : 0;.
+// The isdigit transformation relies on two 'clever' aspects:
+// 1) The data type is unsigned which allows us to eliminate a zero test after
+//    biasing the expression by 48. We are depending on the representation of
+//    the unsigned types, and semantics.
+// 2) The front end has converted <= 9 into < 10 on entry to LLVM
+//
+// For the C code:
+//   retval = ((c>='0') & (c<='9')) ? 1 : 0;
+// The code is transformed upstream of llvm into
+//   retval = (c-48) < 10 ? 1 : 0;
+let AddedComplexity = 139 in
+def : Pat <(i32 (zext (i1 (setult (i32 (and (i32 IntRegs:$src1), 255)),
+                                  u7StrictPosImmPred:$src2)))),
+  (i32 (MUX_ii (i1 (CMPbGTUri_V4 (i32 IntRegs:$src1),
+                                 (DEC_CONST_BYTE u7StrictPosImmPred:$src2))),
+                   0, 1))>,
+                   Requires<[HasV4T]>;
+
 // Pd=cmpb.gtu(Rs,Rt)
-let isCompare = 1 in
+let isCompare = 1, validSubTargets = HasV4SubT, CextOpcode = "CMPbGTU",
+InputType = "reg" in
 def CMPbGTUrr_V4 : MInst<(outs PredRegs:$dst),
             (ins IntRegs:$src1, IntRegs:$src2),
             "$dst = cmpb.gtu($src1, $src2)",
             [(set (i1 PredRegs:$dst), (setugt (and (i32 IntRegs:$src1), 255),
                                              (and (i32 IntRegs:$src2), 255)))]>,
-            Requires<[HasV4T]>;
+            Requires<[HasV4T]>, ImmRegRel;
 
 // Following instruction is not being extended as it results into the incorrect
 // code for negative numbers.
 
 // Signed half compare(.eq) ri.
 // Pd=cmph.eq(Rs,#s8)
-let isCompare = 1 in
+let isCompare = 1, validSubTargets = HasV4SubT in
 def CMPhEQri_V4 : MInst<(outs PredRegs:$dst),
             (ins IntRegs:$src1, s8Imm:$src2),
             "$dst = cmph.eq($src1, #$src2)",
@@ -3652,7 +3413,7 @@ def CMPhEQri_V4 : MInst<(outs PredRegs:$dst),
 //   r0=and(r0,#0xffff)
 //   p0=cmp.eq(r0,#0)
 // Pd=cmph.eq(Rs,Rt)
-let isCompare = 1 in
+let isCompare = 1, validSubTargets = HasV4SubT in
 def CMPhEQrr_xor_V4 : MInst<(outs PredRegs:$dst),
             (ins IntRegs:$src1, IntRegs:$src2),
             "$dst = cmph.eq($src1, $src2)",
@@ -3667,7 +3428,7 @@ def CMPhEQrr_xor_V4 : MInst<(outs PredRegs:$dst),
 //   r1=asl(r1,16)
 //   p0=cmp.eq(r0,r1)
 // Pd=cmph.eq(Rs,Rt)
-let isCompare = 1 in
+let isCompare = 1, validSubTargets = HasV4SubT in
 def CMPhEQrr_shl_V4 : MInst<(outs PredRegs:$dst),
             (ins IntRegs:$src1, IntRegs:$src2),
             "$dst = cmph.eq($src1, $src2)",
@@ -3681,19 +3442,20 @@ used in the cmph.gt instruction.
 // Signed half compare(.gt) ri.
 // Pd=cmph.gt(Rs,#s8)
 
-let isCompare = 1 in
+let isExtendable = 1, opExtendable = 2, isExtentSigned = 1, opExtentBits = 8,
+isCompare = 1, validSubTargets = HasV4SubT in
 def CMPhGTri_V4 : MInst<(outs PredRegs:$dst),
-            (ins IntRegs:$src1, s8Imm:$src2),
+            (ins IntRegs:$src1, s8Ext:$src2),
             "$dst = cmph.gt($src1, #$src2)",
             [(set (i1 PredRegs:$dst),
                   (setgt (shl (i32 IntRegs:$src1), (i32 16)),
-                         s8ImmPred:$src2))]>,
+                         s8ExtPred:$src2))]>,
             Requires<[HasV4T]>;
 */
 
 // Signed half compare(.gt) rr.
 // Pd=cmph.gt(Rs,Rt)
-let isCompare = 1 in
+let isCompare = 1, validSubTargets = HasV4SubT in
 def CMPhGTrr_shl_V4 : MInst<(outs PredRegs:$dst),
             (ins IntRegs:$src1, IntRegs:$src2),
             "$dst = cmph.gt($src1, $src2)",
@@ -3704,24 +3466,41 @@ def CMPhGTrr_shl_V4 : MInst<(outs PredRegs:$dst),
 
 // Unsigned half compare rr (.gtu).
 // Pd=cmph.gtu(Rs,Rt)
-let isCompare = 1 in
+let isCompare = 1, validSubTargets = HasV4SubT, CextOpcode = "CMPhGTU",
+InputType = "reg" in
 def CMPhGTUrr_V4 : MInst<(outs PredRegs:$dst),
             (ins IntRegs:$src1, IntRegs:$src2),
             "$dst = cmph.gtu($src1, $src2)",
             [(set (i1 PredRegs:$dst),
                   (setugt (and (i32 IntRegs:$src1), 65535),
                           (and (i32 IntRegs:$src2), 65535)))]>,
-            Requires<[HasV4T]>;
+            Requires<[HasV4T]>, ImmRegRel;
 
 // Unsigned half compare ri (.gtu).
 // Pd=cmph.gtu(Rs,#u7)
-let isCompare = 1 in
+let isExtendable = 1, opExtendable = 2, isExtentSigned = 0, opExtentBits = 7,
+isCompare = 1, validSubTargets = HasV4SubT, CextOpcode = "CMPhGTU",
+InputType = "imm" in
 def CMPhGTUri_V4 : MInst<(outs PredRegs:$dst),
-            (ins IntRegs:$src1, u7Imm:$src2),
+            (ins IntRegs:$src1, u7Ext:$src2),
             "$dst = cmph.gtu($src1, #$src2)",
             [(set (i1 PredRegs:$dst), (setugt (and (i32 IntRegs:$src1), 65535),
-                                              u7ImmPred:$src2))]>,
-            Requires<[HasV4T]>;
+                                              u7ExtPred:$src2))]>,
+            Requires<[HasV4T]>, ImmRegRel;
+
+let validSubTargets = HasV4SubT in
+def NTSTBIT_rr : SInst<(outs PredRegs:$dst), (ins IntRegs:$src1, IntRegs:$src2),
+    "$dst = !tstbit($src1, $src2)",
+    [(set (i1 PredRegs:$dst),
+          (seteq (and (shl 1, (i32 IntRegs:$src2)), (i32 IntRegs:$src1)), 0))]>,
+    Requires<[HasV4T]>;
+
+let validSubTargets = HasV4SubT in
+def NTSTBIT_ri : SInst<(outs PredRegs:$dst), (ins IntRegs:$src1, u5Imm:$src2),
+    "$dst = !tstbit($src1, $src2)",
+    [(set (i1 PredRegs:$dst),
+          (seteq (and (shl 1, u5ImmPred:$src2), (i32 IntRegs:$src1)), 0))]>,
+    Requires<[HasV4T]>;
 
 //===----------------------------------------------------------------------===//
 // XTYPE/PRED -
@@ -3833,227 +3612,156 @@ let isReturn = 1, isTerminator = 1,
             Requires<[HasV4T]>;
 }
 
-
 // Load/Store with absolute addressing mode
 // memw(#u6)=Rt
 
-multiclass ST_abs<string OpcStr> {
-  let isPredicable = 1 in
-  def _abs_V4 : STInst2<(outs),
-            (ins globaladdress:$absaddr, IntRegs:$src),
-            !strconcat(OpcStr, "(##$absaddr) = $src"),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if ($src1)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if (!$src1)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cdnPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if ($src1.new)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cdnNotPt_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if (!$src1.new)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2")),
-            []>,
-            Requires<[HasV4T]>;
-
-  def _abs_nv_V4 : STInst2<(outs),
-            (ins globaladdress:$absaddr, IntRegs:$src),
-            !strconcat(OpcStr, "(##$absaddr) = $src.new"),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cPt_nv_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if ($src1)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2.new")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cNotPt_nv_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if (!$src1)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2.new")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cdnPt_nv_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if ($src1.new)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2.new")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cdnNotPt_nv_V4 : STInst2<(outs),
-            (ins PredRegs:$src1, globaladdress:$absaddr, IntRegs:$src2),
-            !strconcat("if (!$src1.new)",
-            !strconcat(OpcStr, "(##$absaddr) = $src2.new")),
+multiclass ST_Abs_Predbase<string mnemonic, RegisterClass RC, bit isNot,
+                           bit isPredNew> {
+  let PNewValue = !if(isPredNew, "new", "") in
+  def NAME#_V4 : STInst2<(outs),
+            (ins PredRegs:$src1, globaladdressExt:$absaddr, RC: $src2),
+            !if(isNot, "if (!$src1", "if ($src1")#!if(isPredNew, ".new) ",
+            ") ")#mnemonic#"(##$absaddr) = $src2",
             []>,
             Requires<[HasV4T]>;
 }
 
-let AddedComplexity = 30, isPredicable = 1 in
-def STrid_abs_V4 : STInst<(outs),
-          (ins globaladdress:$absaddr, DoubleRegs:$src),
-           "memd(##$absaddr) = $src",
-          [(store (i64 DoubleRegs:$src),
-                  (HexagonCONST32 tglobaladdr:$absaddr))]>,
-          Requires<[HasV4T]>;
+multiclass ST_Abs_Pred<string mnemonic, RegisterClass RC, bit PredNot> {
+  let PredSense = !if(PredNot, "false", "true") in {
+    defm _c#NAME : ST_Abs_Predbase<mnemonic, RC, PredNot, 0>;
+    // Predicate new
+    defm _cdn#NAME : ST_Abs_Predbase<mnemonic, RC, PredNot, 1>;
+  }
+}
 
-let AddedComplexity = 30, isPredicated = 1 in
-def STrid_abs_cPt_V4 : STInst2<(outs),
-          (ins PredRegs:$src1, globaladdress:$absaddr, DoubleRegs:$src2),
-          "if ($src1) memd(##$absaddr) = $src2",
-          []>,
-          Requires<[HasV4T]>;
+let isNVStorable = 1, isExtended = 1, neverHasSideEffects = 1 in
+multiclass ST_Abs<string mnemonic, string CextOp, RegisterClass RC> {
+  let CextOpcode = CextOp, BaseOpcode = CextOp#_abs in {
+    let opExtendable = 0, isPredicable = 1 in
+    def NAME#_V4 : STInst2<(outs),
+            (ins globaladdressExt:$absaddr, RC:$src),
+            mnemonic#"(##$absaddr) = $src",
+            []>,
+            Requires<[HasV4T]>;
 
-let AddedComplexity = 30, isPredicated = 1 in
-def STrid_abs_cNotPt_V4 : STInst2<(outs),
-          (ins PredRegs:$src1, globaladdress:$absaddr, DoubleRegs:$src2),
-          "if (!$src1) memd(##$absaddr) = $src2",
-          []>,
-          Requires<[HasV4T]>;
+    let opExtendable = 1, isPredicated = 1 in {
+      defm Pt : ST_Abs_Pred<mnemonic, RC, 0>;
+      defm NotPt : ST_Abs_Pred<mnemonic, RC, 1>;
+    }
+  }
+}
 
-let AddedComplexity = 30, isPredicated = 1 in
-def STrid_abs_cdnPt_V4 : STInst2<(outs),
-          (ins PredRegs:$src1, globaladdress:$absaddr, DoubleRegs:$src2),
-          "if ($src1.new) memd(##$absaddr) = $src2",
-          []>,
-          Requires<[HasV4T]>;
+multiclass ST_Abs_Predbase_nv<string mnemonic, RegisterClass RC, bit isNot,
+                           bit isPredNew> {
+  let PNewValue = !if(isPredNew, "new", "") in
+  def NAME#_nv_V4 : NVInst_V4<(outs),
+            (ins PredRegs:$src1, globaladdressExt:$absaddr, RC: $src2),
+            !if(isNot, "if (!$src1", "if ($src1")#!if(isPredNew, ".new) ",
+            ") ")#mnemonic#"(##$absaddr) = $src2.new",
+            []>,
+            Requires<[HasV4T]>;
+}
 
-let AddedComplexity = 30, isPredicated = 1 in
-def STrid_abs_cdnNotPt_V4 : STInst2<(outs),
-          (ins PredRegs:$src1, globaladdress:$absaddr, DoubleRegs:$src2),
-          "if (!$src1.new) memd(##$absaddr) = $src2",
-          []>,
-          Requires<[HasV4T]>;
+multiclass ST_Abs_Pred_nv<string mnemonic, RegisterClass RC, bit PredNot> {
+  let PredSense = !if(PredNot, "false", "true") in {
+    defm _c#NAME : ST_Abs_Predbase_nv<mnemonic, RC, PredNot, 0>;
+    // Predicate new
+    defm _cdn#NAME : ST_Abs_Predbase_nv<mnemonic, RC, PredNot, 1>;
+  }
+}
 
-defm STrib : ST_abs<"memb">;
-defm STrih : ST_abs<"memh">;
-defm STriw : ST_abs<"memw">;
+let mayStore = 1, isNVStore = 1, isExtended = 1, neverHasSideEffects = 1 in
+multiclass ST_Abs_nv<string mnemonic, string CextOp, RegisterClass RC> {
+  let CextOpcode = CextOp, BaseOpcode = CextOp#_abs in {
+    let opExtendable = 0, isPredicable = 1 in
+    def NAME#_nv_V4 : NVInst_V4<(outs),
+            (ins globaladdressExt:$absaddr, RC:$src),
+            mnemonic#"(##$absaddr) = $src.new",
+            []>,
+            Requires<[HasV4T]>;
 
-let Predicates = [HasV4T], AddedComplexity  = 30 in
+    let opExtendable = 1, isPredicated = 1 in {
+      defm Pt : ST_Abs_Pred_nv<mnemonic, RC, 0>;
+      defm NotPt : ST_Abs_Pred_nv<mnemonic, RC, 1>;
+    }
+  }
+}
+
+let addrMode = Absolute in {
+    defm STrib_abs : ST_Abs<"memb", "STrib", IntRegs>,
+                     ST_Abs_nv<"memb", "STrib", IntRegs>, AddrModeRel;
+
+    defm STrih_abs : ST_Abs<"memh", "STrih", IntRegs>,
+                     ST_Abs_nv<"memh", "STrih", IntRegs>, AddrModeRel;
+
+    defm STriw_abs : ST_Abs<"memw", "STriw", IntRegs>,
+                     ST_Abs_nv<"memw", "STriw", IntRegs>, AddrModeRel;
+
+  let isNVStorable = 0 in
+    defm STrid_abs : ST_Abs<"memd", "STrid", DoubleRegs>, AddrModeRel;
+}
+
+let Predicates = [HasV4T], AddedComplexity = 30 in {
 def : Pat<(truncstorei8 (i32 IntRegs:$src1),
                         (HexagonCONST32 tglobaladdr:$absaddr)),
           (STrib_abs_V4 tglobaladdr: $absaddr, IntRegs: $src1)>;
 
-let Predicates = [HasV4T], AddedComplexity  = 30 in
 def : Pat<(truncstorei16 (i32 IntRegs:$src1),
                           (HexagonCONST32 tglobaladdr:$absaddr)),
           (STrih_abs_V4 tglobaladdr: $absaddr, IntRegs: $src1)>;
 
-let Predicates = [HasV4T], AddedComplexity  = 30 in
 def : Pat<(store (i32 IntRegs:$src1), (HexagonCONST32 tglobaladdr:$absaddr)),
           (STriw_abs_V4 tglobaladdr: $absaddr, IntRegs: $src1)>;
 
+def : Pat<(store (i64 DoubleRegs:$src1),
+                 (HexagonCONST32 tglobaladdr:$absaddr)),
+          (STrid_abs_V4 tglobaladdr: $absaddr, DoubleRegs: $src1)>;
+}
 
-multiclass LD_abs<string OpcStr> {
-  let isPredicable = 1 in
-  def _abs_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$absaddr),
-            !strconcat("$dst = ", !strconcat(OpcStr, "(##$absaddr)")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$absaddr),
-            !strconcat("if ($src1) $dst = ",
-            !strconcat(OpcStr, "(##$absaddr)")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$absaddr),
-            !strconcat("if (!$src1) $dst = ",
-            !strconcat(OpcStr, "(##$absaddr)")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cdnPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$absaddr),
-            !strconcat("if ($src1.new) $dst = ",
-            !strconcat(OpcStr, "(##$absaddr)")),
-            []>,
-            Requires<[HasV4T]>;
-
-  let isPredicated = 1 in
-  def _abs_cdnNotPt_V4 : LDInst2<(outs IntRegs:$dst),
-            (ins PredRegs:$src1, globaladdress:$absaddr),
-            !strconcat("if (!$src1.new) $dst = ",
-            !strconcat(OpcStr, "(##$absaddr)")),
+multiclass LD_Abs_Predbase<string mnemonic, RegisterClass RC, bit isNot,
+                           bit isPredNew> {
+  let PNewValue = !if(isPredNew, "new", "") in
+  def NAME : LDInst2<(outs RC:$dst),
+            (ins PredRegs:$src1, globaladdressExt:$absaddr),
+            !if(isNot, "if (!$src1", "if ($src1")#!if(isPredNew, ".new) ",
+            ") ")#"$dst = "#mnemonic#"(##$absaddr)",
             []>,
             Requires<[HasV4T]>;
 }
 
-let AddedComplexity = 30 in
-def LDrid_abs_V4 : LDInst<(outs DoubleRegs:$dst),
-          (ins globaladdress:$absaddr),
-          "$dst = memd(##$absaddr)",
-          [(set (i64 DoubleRegs:$dst),
-                (load (HexagonCONST32 tglobaladdr:$absaddr)))]>,
-          Requires<[HasV4T]>;
+multiclass LD_Abs_Pred<string mnemonic, RegisterClass RC, bit PredNot> {
+  let PredSense = !if(PredNot, "false", "true") in {
+    defm _c#NAME : LD_Abs_Predbase<mnemonic, RC, PredNot, 0>;
+    // Predicate new
+    defm _cdn#NAME : LD_Abs_Predbase<mnemonic, RC, PredNot, 1>;
+  }
+}
 
-let AddedComplexity = 30, isPredicated = 1 in
-def LDrid_abs_cPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-          (ins PredRegs:$src1, globaladdress:$absaddr),
-          "if ($src1) $dst = memd(##$absaddr)",
-          []>,
-          Requires<[HasV4T]>;
+let isExtended = 1, neverHasSideEffects = 1 in
+multiclass LD_Abs<string mnemonic, string CextOp, RegisterClass RC> {
+  let CextOpcode = CextOp, BaseOpcode = CextOp#_abs in {
+    let  opExtendable = 1, isPredicable = 1 in
+    def NAME#_V4 : LDInst2<(outs RC:$dst),
+            (ins globaladdressExt:$absaddr),
+            "$dst = "#mnemonic#"(##$absaddr)",
+            []>,
+            Requires<[HasV4T]>;
 
-let AddedComplexity = 30, isPredicated = 1 in
-def LDrid_abs_cNotPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-          (ins PredRegs:$src1, globaladdress:$absaddr),
-          "if (!$src1) $dst = memd(##$absaddr)",
-          []>,
-          Requires<[HasV4T]>;
+    let opExtendable = 2, isPredicated = 1 in {
+      defm Pt_V4 : LD_Abs_Pred<mnemonic, RC, 0>;
+      defm NotPt_V4 : LD_Abs_Pred<mnemonic, RC, 1>;
+    }
+  }
+}
 
-let AddedComplexity = 30, isPredicated = 1 in
-def LDrid_abs_cdnPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-          (ins PredRegs:$src1, globaladdress:$absaddr),
-          "if ($src1.new) $dst = memd(##$absaddr)",
-          []>,
-          Requires<[HasV4T]>;
-
-let AddedComplexity = 30, isPredicated = 1 in
-def LDrid_abs_cdnNotPt_V4 : LDInst2<(outs DoubleRegs:$dst),
-          (ins PredRegs:$src1, globaladdress:$absaddr),
-          "if (!$src1.new) $dst = memd(##$absaddr)",
-          []>,
-          Requires<[HasV4T]>;
-
-defm LDrib : LD_abs<"memb">;
-defm LDriub : LD_abs<"memub">;
-defm LDrih : LD_abs<"memh">;
-defm LDriuh : LD_abs<"memuh">;
-defm LDriw : LD_abs<"memw">;
-
+let addrMode = Absolute in {
+    defm LDrib_abs  : LD_Abs<"memb", "LDrib", IntRegs>, AddrModeRel;
+    defm LDriub_abs : LD_Abs<"memub", "LDriub", IntRegs>, AddrModeRel;
+    defm LDrih_abs  : LD_Abs<"memh", "LDrih", IntRegs>, AddrModeRel;
+    defm LDriuh_abs : LD_Abs<"memuh", "LDriuh", IntRegs>, AddrModeRel;
+    defm LDriw_abs  : LD_Abs<"memw", "LDriw", IntRegs>, AddrModeRel;
+    defm LDrid_abs : LD_Abs<"memd",  "LDrid", DoubleRegs>, AddrModeRel;
+}
 
 let Predicates = [HasV4T], AddedComplexity  = 30 in
 def : Pat<(i32 (load (HexagonCONST32 tglobaladdr:$absaddr))),
@@ -4355,3 +4063,109 @@ def STrih_offset_ext_V4 : STInst<(outs),
             [(truncstorei16 (HexagonCONST32 tglobaladdr:$src3),
                     (add IntRegs:$src1, u6_1ImmPred:$src2))]>,
             Requires<[HasV4T]>;
+// Map from store(globaladdress + x) -> memd(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(store (i64 DoubleRegs:$src1),
+                 FoldGlobalAddrGP:$addr),
+          (STrid_abs_V4 FoldGlobalAddrGP:$addr, (i64 DoubleRegs:$src1))>,
+          Requires<[HasV4T]>;
+
+def : Pat<(atomic_store_64 FoldGlobalAddrGP:$addr,
+                           (i64 DoubleRegs:$src1)),
+          (STrid_abs_V4 FoldGlobalAddrGP:$addr, (i64 DoubleRegs:$src1))>,
+          Requires<[HasV4T]>;
+
+// Map from store(globaladdress + x) -> memb(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(truncstorei8 (i32 IntRegs:$src1), FoldGlobalAddrGP:$addr),
+          (STrib_abs_V4 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1))>,
+            Requires<[HasV4T]>;
+
+def : Pat<(atomic_store_8 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1)),
+          (STrib_abs_V4 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1))>,
+            Requires<[HasV4T]>;
+
+// Map from store(globaladdress + x) -> memh(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(truncstorei16 (i32 IntRegs:$src1), FoldGlobalAddrGP:$addr),
+          (STrih_abs_V4 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1))>,
+            Requires<[HasV4T]>;
+
+def : Pat<(atomic_store_16 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1)),
+          (STrih_abs_V4 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1))>,
+            Requires<[HasV4T]>;
+
+// Map from store(globaladdress + x) -> memw(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(store (i32 IntRegs:$src1), FoldGlobalAddrGP:$addr),
+          (STriw_abs_V4 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1))>,
+           Requires<[HasV4T]>;
+
+def : Pat<(atomic_store_32 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1)),
+          (STriw_abs_V4 FoldGlobalAddrGP:$addr, (i32 IntRegs:$src1))>,
+            Requires<[HasV4T]>;
+
+// Map from load(globaladdress + x) -> memd(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(i64 (load FoldGlobalAddrGP:$addr)),
+          (i64 (LDrid_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+def : Pat<(atomic_load_64 FoldGlobalAddrGP:$addr),
+          (i64 (LDrid_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+// Map from load(globaladdress + x) -> memb(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(i32 (extloadi8 FoldGlobalAddrGP:$addr)),
+          (i32 (LDrib_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+// Map from load(globaladdress + x) -> memb(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(i32 (sextloadi8 FoldGlobalAddrGP:$addr)),
+          (i32 (LDrib_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+//let AddedComplexity = 100 in
+let AddedComplexity = 100 in
+def : Pat<(i32 (extloadi16 FoldGlobalAddrGP:$addr)),
+          (i32 (LDrih_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+// Map from load(globaladdress + x) -> memh(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(i32 (sextloadi16 FoldGlobalAddrGP:$addr)),
+          (i32 (LDrih_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+// Map from load(globaladdress + x) -> memuh(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(i32 (zextloadi16 FoldGlobalAddrGP:$addr)),
+          (i32 (LDriuh_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+def : Pat<(atomic_load_16 FoldGlobalAddrGP:$addr),
+          (i32 (LDriuh_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+// Map from load(globaladdress + x) -> memub(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(i32 (zextloadi8 FoldGlobalAddrGP:$addr)),
+          (i32 (LDriub_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+def : Pat<(atomic_load_8 FoldGlobalAddrGP:$addr),
+          (i32 (LDriub_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+// Map from load(globaladdress + x) -> memw(#foo + x)
+let AddedComplexity = 100 in
+def : Pat<(i32 (load FoldGlobalAddrGP:$addr)),
+          (i32 (LDriw_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+
+def : Pat<(atomic_load_32 FoldGlobalAddrGP:$addr),
+          (i32 (LDriw_abs_V4 FoldGlobalAddrGP:$addr))>,
+           Requires<[HasV4T]>;
+

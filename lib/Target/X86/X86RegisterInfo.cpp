@@ -50,7 +50,7 @@ ForceStackAlign("force-align-stack",
                            " needed for the function."),
                  cl::init(false), cl::Hidden);
 
-cl::opt<bool>
+static cl::opt<bool>
 EnableBasePointer("x86-use-base-pointer", cl::Hidden, cl::init(true),
           cl::desc("Enable use of a base pointer for complex stack frames"));
 
@@ -390,7 +390,13 @@ bool X86RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
 
    // When we need stack realignment and there are dynamic allocas, we can't
    // reference off of the stack pointer, so we reserve a base pointer.
-   if (needsStackRealignment(MF) && MFI->hasVarSizedObjects())
+   //
+   // This is also true if the function contain MS-style inline assembly.  We
+   // do this because if any stack changes occur in the inline assembly, e.g.,
+   // "pusha", then any C local variable or C argument references in the
+   // inline assembly will be wrong because the SP is not properly tracked.
+   if ((needsStackRealignment(MF) && MFI->hasVarSizedObjects()) ||
+       MF.hasMSInlineAsm())
      return true;
 
    return false;
@@ -614,7 +620,15 @@ unsigned getX86SubSuperRegister(unsigned Reg, MVT::SimpleValueType VT,
   case MVT::i8:
     if (High) {
       switch (Reg) {
-      default: return getX86SubSuperRegister(Reg, MVT::i64, High);
+      default: return getX86SubSuperRegister(Reg, MVT::i64);
+      case X86::SIL: case X86::SI: case X86::ESI: case X86::RSI:
+        return X86::SI;
+      case X86::DIL: case X86::DI: case X86::EDI: case X86::RDI:
+        return X86::DI;
+      case X86::BPL: case X86::BP: case X86::EBP: case X86::RBP:
+        return X86::BP;
+      case X86::SPL: case X86::SP: case X86::ESP: case X86::RSP:
+        return X86::SP;
       case X86::AH: case X86::AL: case X86::AX: case X86::EAX: case X86::RAX:
         return X86::AH;
       case X86::DH: case X86::DL: case X86::DX: case X86::EDX: case X86::RDX:
@@ -734,22 +748,6 @@ unsigned getX86SubSuperRegister(unsigned Reg, MVT::SimpleValueType VT,
       return X86::R15D;
     }
   case MVT::i64:
-    // For 64-bit mode if we've requested a "high" register and the
-    // Q or r constraints we want one of these high registers or
-    // just the register name otherwise.
-    if (High) {
-      switch (Reg) {
-      case X86::SIL: case X86::SI: case X86::ESI: case X86::RSI:
-        return X86::SI;
-      case X86::DIL: case X86::DI: case X86::EDI: case X86::RDI:
-        return X86::DI;
-      case X86::BPL: case X86::BP: case X86::EBP: case X86::RBP:
-        return X86::BP;
-      case X86::SPL: case X86::SP: case X86::ESP: case X86::RSP:
-        return X86::SP;
-      // Fallthrough.
-      }
-    }
     switch (Reg) {
     default: llvm_unreachable("Unexpected register");
     case X86::AH: case X86::AL: case X86::AX: case X86::EAX: case X86::RAX:
