@@ -86,6 +86,10 @@ module redecl_merge_right {
   export *
 }
 module redecl_merge_bottom { 
+  explicit module prefix {
+    header "redecl-merge-bottom-prefix.h"
+  }
+
   header "redecl-merge-bottom.h" 
   export *
 }
@@ -115,6 +119,10 @@ module templates_right {
 }
 module MethodPoolA {
   header "MethodPoolA.h"
+
+  explicit module Sub2 {
+    header "MethodPoolASub2.h"
+  }
 
   explicit module Sub {
     header "MethodPoolASub.h"
@@ -154,4 +162,24 @@ module autolink {
     header "autolink-sub2.h"
     link framework "autolink_framework"
   }
+}
+
+module weird_objc {
+  header "weird_objc.h"
+}
+
+module ignored_macros {
+  header "ignored_macros.h"
+}
+
+module cxx_many_overloads {
+  header "cxx-many-overloads.h"
+}
+
+module cxx_inline_namespace {
+  header "cxx-inline-namespace.h"
+}
+
+module cxx_linkage_cache {
+  header "cxx-linkage-cache.h"
 }

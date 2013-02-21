@@ -92,8 +92,10 @@ bool PreprocessingRecord::isEntityInFileID(iterator PPEI, FileID FID) {
 
   int Pos = PPEI.Position;
   if (Pos < 0) {
-    assert(unsigned(-Pos-1) < LoadedPreprocessedEntities.size() &&
-           "Out-of bounds loaded preprocessed entity");
+    if (unsigned(-Pos-1) >= LoadedPreprocessedEntities.size()) {
+      assert(0 && "Out-of bounds loaded preprocessed entity");
+      return false;
+    }
     assert(ExternalSource && "No external source to load from");
     unsigned LoadedIndex = LoadedPreprocessedEntities.size()+Pos;
     if (PreprocessedEntity *PPE = LoadedPreprocessedEntities[LoadedIndex])
@@ -101,8 +103,8 @@ bool PreprocessingRecord::isEntityInFileID(iterator PPEI, FileID FID) {
 
     // See if the external source can see if the entity is in the file without
     // deserializing it.
-    llvm::Optional<bool>
-      IsInFile = ExternalSource->isPreprocessedEntityInFileID(LoadedIndex, FID);
+    Optional<bool> IsInFile =
+        ExternalSource->isPreprocessedEntityInFileID(LoadedIndex, FID);
     if (IsInFile.hasValue())
       return IsInFile.getValue();
 
@@ -113,8 +115,10 @@ bool PreprocessingRecord::isEntityInFileID(iterator PPEI, FileID FID) {
                                           FID, SourceMgr);
   }
 
-  assert(unsigned(Pos) < PreprocessedEntities.size() &&
-         "Out-of bounds local preprocessed entity");
+  if (unsigned(Pos) >= PreprocessedEntities.size()) {
+    assert(0 && "Out-of bounds local preprocessed entity");
+    return false;
+  }
   return isPreprocessedEntityIfInFileID(PreprocessedEntities[Pos],
                                         FID, SourceMgr);
 }

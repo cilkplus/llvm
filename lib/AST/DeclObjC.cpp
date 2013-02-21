@@ -217,16 +217,18 @@ ObjCInterfaceDecl::FindPropertyVisibleInPrimaryClass(
   return 0;
 }
 
-void ObjCInterfaceDecl::collectPropertiesToImplement(PropertyMap &PM) const {
+void ObjCInterfaceDecl::collectPropertiesToImplement(PropertyMap &PM,
+                                                     PropertyDeclOrder &PO) const {
   for (ObjCContainerDecl::prop_iterator P = prop_begin(),
       E = prop_end(); P != E; ++P) {
     ObjCPropertyDecl *Prop = *P;
     PM[Prop->getIdentifier()] = Prop;
+    PO.push_back(Prop);
   }
   for (ObjCInterfaceDecl::all_protocol_iterator
       PI = all_referenced_protocol_begin(),
       E = all_referenced_protocol_end(); PI != E; ++PI)
-    (*PI)->collectPropertiesToImplement(PM);
+    (*PI)->collectPropertiesToImplement(PM, PO);
   // Note, the properties declared only in class extensions are still copied
   // into the main @interface's property list, and therefore we don't
   // explicitly, have to search class extension properties.
@@ -301,8 +303,8 @@ void ObjCInterfaceDecl::mergeClassExtensionProtocolList(
 
 void ObjCInterfaceDecl::allocateDefinitionData() {
   assert(!hasDefinition() && "ObjC class already has a definition");
-  Data = new (getASTContext()) DefinitionData();
-  Data->Definition = this;
+  Data.setPointer(new (getASTContext()) DefinitionData());
+  Data.getPointer()->Definition = this;
 
   // Make the type point at the definition, now that we have one.
   if (TypeForDecl)
@@ -1011,6 +1013,7 @@ ObjCInterfaceDecl *ObjCInterfaceDecl::Create(const ASTContext &C,
                                              bool isInternal){
   ObjCInterfaceDecl *Result = new (C) ObjCInterfaceDecl(DC, atLoc, Id, ClassLoc, 
                                                         PrevDecl, isInternal);
+  Result->Data.setInt(!C.getLangOpts().Modules);
   C.getObjCInterfaceType(Result, PrevDecl);
   return Result;
 }
@@ -1018,8 +1021,11 @@ ObjCInterfaceDecl *ObjCInterfaceDecl::Create(const ASTContext &C,
 ObjCInterfaceDecl *ObjCInterfaceDecl::CreateDeserialized(ASTContext &C, 
                                                          unsigned ID) {
   void *Mem = AllocateDeserializedDecl(C, ID, sizeof(ObjCInterfaceDecl));
-  return new (Mem) ObjCInterfaceDecl(0, SourceLocation(), 0, SourceLocation(),
-                                     0, false);
+  ObjCInterfaceDecl *Result = new (Mem) ObjCInterfaceDecl(0, SourceLocation(),
+                                                          0, SourceLocation(),
+                                                          0, false);
+  Result->Data.setInt(!C.getLangOpts().Modules);
+  return Result;
 }
 
 ObjCInterfaceDecl::
@@ -1070,6 +1076,20 @@ void ObjCInterfaceDecl::setImplementation(ObjCImplementationDecl *ImplD) {
   getASTContext().setObjCImplementation(getDefinition(), ImplD);
 }
 
+namespace {
+  struct SynthesizeIvarChunk {
+    uint64_t Size;
+    ObjCIvarDecl *Ivar;
+    SynthesizeIvarChunk(uint64_t size, ObjCIvarDecl *ivar)
+      : Size(size), Ivar(ivar) {}
+  };
+
+  bool operator<(const SynthesizeIvarChunk & LHS,
+                 const SynthesizeIvarChunk &RHS) {
+      return LHS.Size < RHS.Size;
+  }
+}
+
 /// all_declared_ivar_begin - return first ivar declared in this class,
 /// its extensions and its implementation. Lazily build the list on first
 /// access.
@@ -1106,14 +1126,33 @@ ObjCIvarDecl *ObjCInterfaceDecl::all_declared_ivar_begin() {
   
   if (ObjCImplementationDecl *ImplDecl = getImplementation()) {
     if (!ImplDecl->ivar_empty()) {
-      ObjCImplementationDecl::ivar_iterator I = ImplDecl->ivar_begin(),
-                                            E = ImplDecl->ivar_end();
-      if (!data().IvarList) {
-        data().IvarList = *I; ++I;
-        curIvar = data().IvarList;
+      SmallVector<SynthesizeIvarChunk, 16> layout;
+      for (ObjCImplementationDecl::ivar_iterator I = ImplDecl->ivar_begin(),
+           E = ImplDecl->ivar_end(); I != E; ++I) {
+        ObjCIvarDecl *IV = *I;
+        if (IV->getSynthesize() && !IV->isInvalidDecl()) {
+          layout.push_back(SynthesizeIvarChunk(
+                             IV->getASTContext().getTypeSize(IV->getType()), IV));
+          continue;
+        }
+        if (!data().IvarList)
+          data().IvarList = *I;
+        else
+          curIvar->setNextIvar(*I);
+        curIvar = *I;
       }
-      for ( ;I != E; curIvar = *I, ++I)
-        curIvar->setNextIvar(*I);
+      
+      if (!layout.empty()) {
+        // Order synthesized ivars by their size.
+        std::stable_sort(layout.begin(), layout.end());
+        unsigned Ix = 0, EIx = layout.size();
+        if (!data().IvarList) {
+          data().IvarList = layout[0].Ivar; Ix++;
+          curIvar = data().IvarList;
+        }
+        for ( ; Ix != EIx; curIvar = layout[Ix].Ivar, Ix++)
+          curIvar->setNextIvar(layout[Ix].Ivar);
+      }
     }
   }
   return data().IvarList;
@@ -1334,15 +1373,17 @@ ObjCProtocolDecl *ObjCProtocolDecl::Create(ASTContext &C, DeclContext *DC,
                                            ObjCProtocolDecl *PrevDecl) {
   ObjCProtocolDecl *Result 
     = new (C) ObjCProtocolDecl(DC, Id, nameLoc, atStartLoc, PrevDecl);
-  
+  Result->Data.setInt(!C.getLangOpts().Modules);
   return Result;
 }
 
 ObjCProtocolDecl *ObjCProtocolDecl::CreateDeserialized(ASTContext &C, 
                                                        unsigned ID) {
   void *Mem = AllocateDeserializedDecl(C, ID, sizeof(ObjCProtocolDecl));
-  return new (Mem) ObjCProtocolDecl(0, 0, SourceLocation(), SourceLocation(),
-                                    0);
+  ObjCProtocolDecl *Result = new (Mem) ObjCProtocolDecl(0, 0, SourceLocation(),
+                                                        SourceLocation(), 0);
+  Result->Data.setInt(!C.getLangOpts().Modules);
+  return Result;
 }
 
 ObjCProtocolDecl *ObjCProtocolDecl::lookupProtocolNamed(IdentifierInfo *Name) {
@@ -1380,9 +1421,9 @@ ObjCMethodDecl *ObjCProtocolDecl::lookupMethod(Selector Sel,
 }
 
 void ObjCProtocolDecl::allocateDefinitionData() {
-  assert(!Data && "Protocol already has a definition!");
-  Data = new (getASTContext()) DefinitionData;
-  Data->Definition = this;
+  assert(!Data.getPointer() && "Protocol already has a definition!");
+  Data.setPointer(new (getASTContext()) DefinitionData);
+  Data.getPointer()->Definition = this;
 }
 
 void ObjCProtocolDecl::startDefinition() {
@@ -1394,7 +1435,8 @@ void ObjCProtocolDecl::startDefinition() {
     RD->Data = this->Data;
 }
 
-void ObjCProtocolDecl::collectPropertiesToImplement(PropertyMap &PM) const {
+void ObjCProtocolDecl::collectPropertiesToImplement(PropertyMap &PM,
+                                                    PropertyDeclOrder &PO) const {
   
   if (const ObjCProtocolDecl *PDecl = getDefinition()) {
     for (ObjCProtocolDecl::prop_iterator P = PDecl->prop_begin(),
@@ -1402,11 +1444,12 @@ void ObjCProtocolDecl::collectPropertiesToImplement(PropertyMap &PM) const {
       ObjCPropertyDecl *Prop = *P;
       // Insert into PM if not there already.
       PM.insert(std::make_pair(Prop->getIdentifier(), Prop));
+      PO.push_back(Prop);
     }
     // Scan through protocol's protocols.
     for (ObjCProtocolDecl::protocol_iterator PI = PDecl->protocol_begin(),
          E = PDecl->protocol_end(); PI != E; ++PI)
-      (*PI)->collectPropertiesToImplement(PM);
+      (*PI)->collectPropertiesToImplement(PM, PO);
   }
 }
 

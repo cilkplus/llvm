@@ -414,21 +414,7 @@ void Clang::AddPreprocessingOptions(Compilation &C,
       CmdArgs.push_back(C.getArgs().MakeArgString(sysroot));
     }
   }
-  
-  // If a module path was provided, pass it along. Otherwise, use a temporary
-  // directory.
-  if (Arg *A = Args.getLastArg(options::OPT_fmodule_cache_path)) {
-    A->claim();
-    A->render(Args, CmdArgs);
-  } else {
-    SmallString<128> DefaultModuleCache;
-    llvm::sys::path::system_temp_directory(/*erasedOnReboot=*/false, 
-                                           DefaultModuleCache);
-    llvm::sys::path::append(DefaultModuleCache, "clang-module-cache");
-    CmdArgs.push_back("-fmodule-cache-path");
-    CmdArgs.push_back(Args.MakeArgString(DefaultModuleCache));
-  }
-  
+
   // Parse additional include paths from environment variables.
   // FIXME: We should probably sink the logic for handling these from the
   // frontend into the driver. It will allow deleting 4 otherwise unused flags.
@@ -1044,6 +1030,7 @@ static std::string getPPCTargetCPU(const ArgList &Args) {
       .Case("604", "604")
       .Case("604e", "604e")
       .Case("620", "620")
+      .Case("630", "pwr3")
       .Case("G3", "g3")
       .Case("7400", "7400")
       .Case("G4", "g4")
@@ -1056,8 +1043,20 @@ static std::string getPPCTargetCPU(const ArgList &Args) {
       .Case("a2q", "a2q")
       .Case("e500mc", "e500mc")
       .Case("e5500", "e5500")
+      .Case("power3", "pwr3")
+      .Case("power4", "pwr4")
+      .Case("power5", "pwr5")
+      .Case("power5x", "pwr5x")
       .Case("power6", "pwr6")
+      .Case("power6x", "pwr6x")
       .Case("power7", "pwr7")
+      .Case("pwr3", "pwr3")
+      .Case("pwr4", "pwr4")
+      .Case("pwr5", "pwr5")
+      .Case("pwr5x", "pwr5x")
+      .Case("pwr6", "pwr6")
+      .Case("pwr6x", "pwr6x")
+      .Case("pwr7", "pwr7")
       .Case("powerpc", "ppc")
       .Case("powerpc64", "ppc64")
       .Default("");
@@ -1201,9 +1200,18 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
       Args.hasArg(options::OPT_fapple_kext))
     CmdArgs.push_back("-disable-red-zone");
 
-  if (Args.hasFlag(options::OPT_msoft_float,
-                   options::OPT_mno_soft_float,
-                   false))
+  // Default to avoid implicit floating-point for kernel/kext code, but allow
+  // that to be overridden with -mno-soft-float.
+  bool NoImplicitFloat = (Args.hasArg(options::OPT_mkernel) ||
+                          Args.hasArg(options::OPT_fapple_kext));
+  if (Arg *A = Args.getLastArg(options::OPT_msoft_float,
+                               options::OPT_mno_soft_float,
+                               options::OPT_mno_implicit_float)) {
+    const Option &O = A->getOption();
+    NoImplicitFloat = (O.matches(options::OPT_mno_implicit_float) ||
+                       O.matches(options::OPT_msoft_float));
+  }
+  if (NoImplicitFloat)
     CmdArgs.push_back("-no-implicit-float");
 
   if (const char *CPUName = getX86TargetCPU(Args, getToolChain().getTriple())) {
@@ -1535,6 +1543,14 @@ SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args)
       else
         D.Diag(diag::err_drv_no_such_file) << BLPath;
     }
+  } else {
+    // If no -fsanitize-blacklist option is specified, try to look up for
+    // blacklist in the resource directory.
+    std::string BLPath;
+    bool BLExists = false;
+    if (getDefaultBlacklistForKind(D, Kind, BLPath) &&
+        !llvm::sys::fs::exists(BLPath, BLExists) && BLExists)
+      BlacklistFile = BLPath;
   }
 
   // Parse -f(no-)sanitize-memory-track-origins options.
@@ -1906,8 +1922,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Note that these flags are trump-cards. Regardless of the order w.r.t. the
   // PIC or PIE options above, if these show up, PIC is disabled.
   llvm::Triple Triple(TripleStr);
-  if ((Args.hasArg(options::OPT_mkernel) ||
-       Args.hasArg(options::OPT_fapple_kext)) &&
+  if (KernelOrKext &&
       (Triple.getOS() != llvm::Triple::IOS ||
        Triple.isOSVersionLT(6)))
     PIC = PIE = false;
@@ -2237,22 +2252,29 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                       D.CCLogDiagnosticsFilename : "-");
   }
 
-  // Use the last option from "-g" group. "-gline-tables-only" is
-  // preserved, all other debug options are substituted with "-g".
+  // Use the last option from "-g" group. "-gline-tables-only"
+  // is preserved, all other debug options are substituted with "-g".
   Args.ClaimAllArgs(options::OPT_g_Group);
   if (Arg *A = Args.getLastArg(options::OPT_g_Group)) {
-    if (A->getOption().matches(options::OPT_gline_tables_only)) {
+    if (A->getOption().matches(options::OPT_gline_tables_only))
       CmdArgs.push_back("-gline-tables-only");
-    } else if (!A->getOption().matches(options::OPT_g0) &&
-               !A->getOption().matches(options::OPT_ggdb0)) {
+    else if (!A->getOption().matches(options::OPT_g0) &&
+             !A->getOption().matches(options::OPT_ggdb0))
       CmdArgs.push_back("-g");
-    }
   }
 
   // We ignore flags -gstrict-dwarf and -grecord-gcc-switches for now.
   Args.ClaimAllArgs(options::OPT_g_flags_Group);
   if (Args.hasArg(options::OPT_gcolumn_info))
     CmdArgs.push_back("-dwarf-column-info");
+
+  // -gsplit-dwarf should turn on -g and enable the backend dwarf
+  // splitting and extraction.
+  if (Args.hasArg(options::OPT_gsplit_dwarf)) {
+    CmdArgs.push_back("-g");
+    CmdArgs.push_back("-backend-option");
+    CmdArgs.push_back("-split-dwarf=Enable");
+  }
 
   Args.AddAllArgs(CmdArgs, options::OPT_ffunction_sections);
   Args.AddAllArgs(CmdArgs, options::OPT_fdata_sections);
@@ -2270,9 +2292,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       C.getArgs().hasArg(options::OPT_S)) {
     if (Output.isFilename()) {
       CmdArgs.push_back("-coverage-file");
-      SmallString<128> absFilename(Output.getFilename());
-      llvm::sys::fs::make_absolute(absFilename);
-      CmdArgs.push_back(Args.MakeArgString(absFilename));
+      if (C.getArgs().hasArg(options::OPT_no_canonical_prefixes)) {
+        CmdArgs.push_back(Args.MakeArgString(Output.getFilename()));
+      } else {
+        SmallString<128> absFilename(Output.getFilename());
+        llvm::sys::fs::make_absolute(absFilename);
+        CmdArgs.push_back(Args.MakeArgString(absFilename));
+      }
     }
   }
 
@@ -2509,9 +2535,19 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(Twine(N)));
   }
 
-  if (const Arg *A = Args.getLastArg(options::OPT_fvisibility_EQ)) {
-    CmdArgs.push_back("-fvisibility");
-    CmdArgs.push_back(A->getValue());
+  // -fvisibility= and -fvisibility-ms-compat are of a piece.
+  if (const Arg *A = Args.getLastArg(options::OPT_fvisibility_EQ,
+                                     options::OPT_fvisibility_ms_compat)) {
+    if (A->getOption().matches(options::OPT_fvisibility_EQ)) {
+      CmdArgs.push_back("-fvisibility");
+      CmdArgs.push_back(A->getValue());
+    } else {
+      assert(A->getOption().matches(options::OPT_fvisibility_ms_compat));
+      CmdArgs.push_back("-fvisibility");
+      CmdArgs.push_back("hidden");
+      CmdArgs.push_back("-ftype-visibility");
+      CmdArgs.push_back("default");
+    }
   }
 
   Args.AddLastArg(CmdArgs, options::OPT_fvisibility_inlines_hidden);
@@ -2553,7 +2589,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    options::OPT_fno_sanitize_undefined_trap_on_error, false))
     CmdArgs.push_back("-fsanitize-undefined-trap-on-error");
 
-  // Report and error for -faltivec on anything other then PowerPC.
+  // Report an error for -faltivec on anything other than PowerPC.
   if (const Arg *A = Args.getLastArg(options::OPT_faltivec))
     if (!(getToolChain().getTriple().getArch() == llvm::Triple::ppc ||
           getToolChain().getTriple().getArch() == llvm::Triple::ppc64))
@@ -2703,6 +2739,27 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
+  // If a module path was provided, pass it along. Otherwise, use a temporary
+  // directory.
+  if (Arg *A = Args.getLastArg(options::OPT_fmodules_cache_path)) {
+    A->claim();
+    if (HaveModules) {
+      A->render(Args, CmdArgs);
+    }
+  } else if (HaveModules) {
+    SmallString<128> DefaultModuleCache;
+    llvm::sys::path::system_temp_directory(/*erasedOnReboot=*/false,
+                                           DefaultModuleCache);
+    llvm::sys::path::append(DefaultModuleCache, "clang-module-cache");
+    const char Arg[] = "-fmodules-cache-path=";
+    DefaultModuleCache.insert(DefaultModuleCache.begin(),
+                              Arg, Arg + strlen(Arg));
+    CmdArgs.push_back(Args.MakeArgString(DefaultModuleCache));
+  }
+
+  // Pass through all -fmodules-ignore-macro arguments.
+  Args.AddAllArgs(CmdArgs, options::OPT_fmodules_ignore_macro);
+
   // -fmodules-autolink (on by default when modules is enabled) automatically
   // links against libraries for imported modules.
   if (HaveModules &&
@@ -2792,7 +2849,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
 
-  // -fborland-extensions=0 is default.
+  // -fno-borland-extensions is default.
   if (Args.hasFlag(options::OPT_fborland_extensions,
                    options::OPT_fno_borland_extensions, false))
     CmdArgs.push_back("-fborland-extensions");
@@ -2946,8 +3003,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fpack-struct=1");
   }
 
-  if (Args.hasArg(options::OPT_mkernel) ||
-      Args.hasArg(options::OPT_fapple_kext)) {
+  if (KernelOrKext) {
     if (!Args.hasArg(options::OPT_fcommon))
       CmdArgs.push_back("-fno-common");
     Args.ClaimAllArgs(options::OPT_fno_common);
@@ -3167,6 +3223,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(Flags.str()));
   }
 
+  // Finally add the command to the compilation.
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 
   if (Arg *A = Args.getLastArg(options::OPT_pg))
@@ -3952,7 +4009,7 @@ void darwin::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (getToolChain().getTriple().getArch() != llvm::Triple::x86_64 &&
       (((Args.hasArg(options::OPT_mkernel) ||
-         Args.hasArg(options::OPT_fapple_kext)) &&
+	 Args.hasArg(options::OPT_fapple_kext)) &&
         (!getDarwinToolChain().isTargetIPhoneOS() ||
          getDarwinToolChain().isIPhoneOSVersionLT(6, 0))) ||
        Args.hasArg(options::OPT_static)))
@@ -5821,6 +5878,42 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
   addProfileRT(getToolChain(), Args, CmdArgs, getToolChain().getTriple());
 
   C.addCommand(new Command(JA, *this, ToolChain.Linker.c_str(), CmdArgs));
+}
+
+void linuxtools::SplitDebug::ConstructJob(Compilation &C, const JobAction &JA,
+                                          const InputInfo &Output,
+                                          const InputInfoList &Inputs,
+                                          const ArgList &Args,
+                                          const char *LinkingOutput) const {
+  // Assert some invariants.
+  assert(Inputs.size() == 1 && "Unable to handle multiple inputs.");
+  const InputInfo &Input = Inputs[0];
+  assert(Input.isFilename() && "Unexpected verify input");
+
+  ArgStringList ExtractArgs;
+  ExtractArgs.push_back("--extract-dwo");
+
+  ArgStringList StripArgs;
+  StripArgs.push_back("--strip-dwo");
+
+  // Grabbing the output of the earlier compile step.
+  StripArgs.push_back(Input.getFilename());
+  ExtractArgs.push_back(Input.getFilename());
+
+  // Add an output for the extract.
+  SmallString<128> T(Inputs[0].getBaseInput());
+  llvm::sys::path::replace_extension(T, "dwo");
+  const char *OutFile = Args.MakeArgString(T);
+  ExtractArgs.push_back(OutFile);
+
+  const char *Exec =
+    Args.MakeArgString(getToolChain().GetProgramPath("objcopy"));
+
+  // First extract the dwo sections.
+  C.addCommand(new Command(JA, *this, Exec, ExtractArgs));
+
+  // Then remove them from the original .o file.
+  C.addCommand(new Command(JA, *this, Exec, StripArgs));
 }
 
 void minix::Assemble::ConstructJob(Compilation &C, const JobAction &JA,

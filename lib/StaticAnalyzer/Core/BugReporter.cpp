@@ -309,7 +309,6 @@ public:
 class PathDiagnosticBuilder : public BugReporterContext {
   BugReport *R;
   PathDiagnosticConsumer *PDC;
-  OwningPtr<ParentMap> PM;
   NodeMapClosure NMC;
 public:
   const LocationContext *LC;
@@ -1295,7 +1294,25 @@ static void reversePropagateInterestingSymbols(BugReport &R,
     }
   }
 }
-                                               
+
+/// Return true if the terminator is a loop and the destination is the
+/// false branch.
+static bool isLoopJumpPastBody(const Stmt *Term, const BlockEdge *BE) {
+  switch (Term->getStmtClass()) {
+    case Stmt::ForStmtClass:
+    case Stmt::WhileStmtClass:
+      break;
+    default:
+      // Note that we intentionally do not include do..while here.
+      return false;
+  }
+
+  // Did we take the false branch?
+  const CFGBlock *Src = BE->getSrc();
+  assert(Src->succ_size() == 2);
+  return (*(Src->succ_begin()+1) == BE->getDst());
+}
+
 static bool GenerateExtensivePathDiagnostic(PathDiagnostic& PD,
                                             PathDiagnosticBuilder &PDB,
                                             const ExplodedNode *N,
@@ -1304,6 +1321,11 @@ static bool GenerateExtensivePathDiagnostic(PathDiagnostic& PD,
   const SourceManager& SM = PDB.getSourceManager();
   StackDiagVector CallStack;
   InterestingExprs IE;
+
+  // Record the last "looping back" diagnostic.  This is used
+  // for determining if we should emit a diagnostic for skipped loops.
+  std::pair<const Stmt *, PathDiagnosticEventPiece *>
+    LastLoopDiagnostic((Stmt*)0, (PathDiagnosticEventPiece*)0);
 
   const ExplodedNode *NextNode = N->pred_empty() ? NULL : *(N->pred_begin());
   while (NextNode) {
@@ -1416,6 +1438,12 @@ static bool GenerateExtensivePathDiagnostic(PathDiagnostic& PD,
                                         "Looping back to the head of the loop");
           p->setPrunable(true);
 
+          // Record the loop diagnostic for later consultation.  We can
+          // use this to determine whether or not to emit a "skipped loop"
+          // event.
+          LastLoopDiagnostic.first = Loop;
+          LastLoopDiagnostic.second = p;
+
           EB.addEdge(p->getLocation(), true);
           PD.getActivePath().push_front(p);
 
@@ -1425,9 +1453,29 @@ static bool GenerateExtensivePathDiagnostic(PathDiagnostic& PD,
             EB.addEdge(BL);
           }
         }
-        
-        if (const Stmt *Term = BE->getSrc()->getTerminator())
+
+        if (const Stmt *Term = BE->getSrc()->getTerminator()) {
+          // Are we jumping past the loop body without ever executing the
+          // loop (because the condition was false)?
+          if (isLoopJumpPastBody(Term, BE) &&
+              !PD.getActivePath().empty() &&
+              PD.getActivePath().front() != LastLoopDiagnostic.second &&
+              Term != LastLoopDiagnostic.first)
+          {
+            PathDiagnosticLocation L(Term, SM, PDB.LC);
+            PathDiagnosticEventPiece *PE =
+            new PathDiagnosticEventPiece(L,
+                                         "Loop body executed 0 times");
+            PE->setPrunable(true);
+            LastLoopDiagnostic.first = 0;
+            LastLoopDiagnostic.second = 0;
+
+            EB.addEdge(PE->getLocation(), true);
+            PD.getActivePath().push_front(PE);
+          }
+
           EB.addContext(Term);
+        }
 
         break;
       }

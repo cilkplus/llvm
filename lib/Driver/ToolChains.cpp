@@ -189,6 +189,7 @@ Tool &Darwin::SelectTool(const Compilation &C, const JobAction &JA,
   Tool *&T = Tools[Key];
   if (!T) {
     switch (Key) {
+    case Action::SplitDebugJobClass:
     case Action::InputClass:
     case Action::BindArchClass:
       llvm_unreachable("Invalid tool kind.");
@@ -1153,7 +1154,7 @@ Generic_GCC::GCCInstallationDetector::GCCInstallationDetector(
 
   switch (TargetTriple.getArch()) {
   case llvm::Triple::aarch64:
-    LibDirs.append(AArch64LibDirs, AArch64LibDirs 
+    LibDirs.append(AArch64LibDirs, AArch64LibDirs
                    + llvm::array_lengthof(AArch64LibDirs));
     TripleAliases.append(
       AArch64Triples, AArch64Triples + llvm::array_lengthof(AArch64Triples));
@@ -1388,6 +1389,7 @@ Tool &Generic_GCC::SelectTool(const Compilation &C,
   Tool *&T = Tools[Key];
   if (!T) {
     switch (Key) {
+    case Action::SplitDebugJobClass:
     case Action::InputClass:
     case Action::BindArchClass:
       llvm_unreachable("Invalid tool kind.");
@@ -2157,11 +2159,11 @@ static LinuxDistro DetectLinuxDistro(llvm::Triple::ArchType Arch) {
              Data.find("release 6") != StringRef::npos)
       return RHEL6;
     else if ((Data.startswith("Red Hat Enterprise Linux") ||
-	      Data.startswith("CentOS")) &&
+              Data.startswith("CentOS")) &&
              Data.find("release 5") != StringRef::npos)
       return RHEL5;
     else if ((Data.startswith("Red Hat Enterprise Linux") ||
-	      Data.startswith("CentOS")) &&
+              Data.startswith("CentOS")) &&
              Data.find("release 4") != StringRef::npos)
       return RHEL4;
     return UnknownDistro;
@@ -2450,6 +2452,8 @@ Tool &Linux::SelectTool(const Compilation &C, const JobAction &JA,
       break;
     case Action::LinkJobClass:
       T = new tools::linuxtools::Link(*this); break;
+    case Action::SplitDebugJobClass:
+      T = new tools::linuxtools::SplitDebug(*this); break;
     default:
       T = &Generic_GCC::SelectTool(C, JA, Inputs);
     }

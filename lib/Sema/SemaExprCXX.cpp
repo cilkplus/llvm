@@ -1390,10 +1390,14 @@ Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
   }
 
   // Mark the new and delete operators as referenced.
-  if (OperatorNew)
+  if (OperatorNew) {
+    DiagnoseUseOfDecl(OperatorNew, StartLoc);
     MarkFunctionReferenced(StartLoc, OperatorNew);
-  if (OperatorDelete)
+  }
+  if (OperatorDelete) {
+    DiagnoseUseOfDecl(OperatorDelete, StartLoc);
     MarkFunctionReferenced(StartLoc, OperatorDelete);
+  }
 
   // C++0x [expr.new]p17:
   //   If the new expression creates an array of objects of class type,
@@ -2796,6 +2800,12 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
     (void)ConvTy;
     break;
   }
+
+  case ICK_Zero_Event_Conversion:
+    From = ImpCastExprToType(From, ToType,
+                             CK_ZeroToOCLEvent,
+                             From->getValueKind()).take();
+    break;
 
   case ICK_Lvalue_To_Rvalue:
   case ICK_Array_To_Pointer:
@@ -5343,12 +5353,12 @@ ExprResult Sema::BuildCXXMemberCallExpr(Expr *E, NamedDecl *FoundDecl,
                                VK_RValue, OK_Ordinary);
   if (HadMultipleCandidates)
     ME->setHadMultipleCandidates(true);
+  MarkMemberReferenced(ME);
 
   QualType ResultType = Method->getResultType();
   ExprValueKind VK = Expr::getValueKindForType(ResultType);
   ResultType = ResultType.getNonLValueExprType(Context);
 
-  MarkFunctionReferenced(Exp.get()->getLocStart(), Method);
   CXXMemberCallExpr *CE =
     new (Context) CXXMemberCallExpr(Context, ME, MultiExprArg(), ResultType, VK,
                                     Exp.get()->getLocEnd());

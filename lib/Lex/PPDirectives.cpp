@@ -57,10 +57,12 @@ MacroInfo *Preprocessor::AllocateMacroInfo(SourceLocation L) {
   return MI;
 }
 
-MacroInfo *Preprocessor::CloneMacroInfo(const MacroInfo &MacroToClone) {
-  MacroInfo *MI = AllocateMacroInfo();
-  new (MI) MacroInfo(MacroToClone, BP);
-  return MI;
+MacroDirective *Preprocessor::AllocateMacroDirective(MacroInfo *MI,
+                                                     SourceLocation Loc,
+                                                     bool isImported) {
+  MacroDirective *MD = BP.Allocate<MacroDirective>();
+  new (MD) MacroDirective(MI, Loc, isImported);
+  return MD;
 }
 
 /// \brief Release the specified MacroInfo to be reused for allocating
@@ -267,7 +269,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation IfTokenLoc,
     if (Tok.isNot(tok::raw_identifier)) {
       CurPPLexer->ParsingPreprocessorDirective = false;
       // Restore comment saving mode.
-      if (CurLexer) CurLexer->SetCommentRetentionState(KeepComments);
+      if (CurLexer) CurLexer->resetExtendedTokenMode();
       continue;
     }
 
@@ -283,7 +285,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation IfTokenLoc,
         FirstChar != 'i' && FirstChar != 'e') {
       CurPPLexer->ParsingPreprocessorDirective = false;
       // Restore comment saving mode.
-      if (CurLexer) CurLexer->SetCommentRetentionState(KeepComments);
+      if (CurLexer) CurLexer->resetExtendedTokenMode();
       continue;
     }
 
@@ -300,7 +302,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation IfTokenLoc,
       if (IdLen >= 20) {
         CurPPLexer->ParsingPreprocessorDirective = false;
         // Restore comment saving mode.
-        if (CurLexer) CurLexer->SetCommentRetentionState(KeepComments);
+        if (CurLexer) CurLexer->resetExtendedTokenMode();
         continue;
       }
       memcpy(DirectiveBuf, &DirectiveStr[0], IdLen);
@@ -406,7 +408,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation IfTokenLoc,
 
     CurPPLexer->ParsingPreprocessorDirective = false;
     // Restore comment saving mode.
-    if (CurLexer) CurLexer->SetCommentRetentionState(KeepComments);
+    if (CurLexer) CurLexer->resetExtendedTokenMode();
   }
 
   // Finally, if we are out of the conditional (saw an #endif or ran off the end
@@ -537,11 +539,11 @@ const FileEntry *Preprocessor::LookupFile(
   // Otherwise, see if this is a subframework header.  If so, this is relative
   // to one of the headers on the #include stack.  Walk the list of the current
   // headers on the #include stack and pass them to HeaderInfo.
-  // FIXME: SuggestedModule!
   if (IsFileLexer()) {
     if ((CurFileEnt = SourceMgr.getFileEntryForID(CurPPLexer->getFileID())))
       if ((FE = HeaderInfo.LookupSubframeworkHeader(Filename, CurFileEnt,
-                                                    SearchPath, RelativePath)))
+                                                    SearchPath, RelativePath,
+                                                    SuggestedModule)))
         return FE;
   }
 
@@ -551,7 +553,8 @@ const FileEntry *Preprocessor::LookupFile(
       if ((CurFileEnt =
            SourceMgr.getFileEntryForID(ISEntry.ThePPLexer->getFileID())))
         if ((FE = HeaderInfo.LookupSubframeworkHeader(
-                Filename, CurFileEnt, SearchPath, RelativePath)))
+                Filename, CurFileEnt, SearchPath, RelativePath,
+                SuggestedModule)))
           return FE;
     }
   }
@@ -591,6 +594,7 @@ void Preprocessor::HandleDirective(Token &Result) {
   // mode.  Tell the lexer this so any newlines we see will be converted into an
   // EOD token (which terminates the directive).
   CurPPLexer->ParsingPreprocessorDirective = true;
+  if (CurLexer) CurLexer->SetKeepWhitespaceMode(false);
 
   ++NumDirectives;
 
@@ -635,14 +639,9 @@ void Preprocessor::HandleDirective(Token &Result) {
   // and reset to previous state when returning from this function.
   ResetMacroExpansionHelper helper(this);
 
-TryAgain:
   switch (Result.getKind()) {
   case tok::eod:
     return;   // null directive.
-  case tok::comment:
-    // Handle stuff like "# /*foo*/ define X" in -E -C mode.
-    LexUnexpandedToken(Result);
-    goto TryAgain;
   case tok::code_completion:
     if (CodeComplete)
       CodeComplete->CodeCompleteDirective(
@@ -789,7 +788,7 @@ static bool GetLineValue(Token &DigitTok, unsigned &Val,
   // here.
   Val = 0;
   for (unsigned i = 0; i != ActualLength; ++i) {
-    if (!isdigit(DigitTokBegin[i])) {
+    if (!isDigit(DigitTokBegin[i])) {
       PP.Diag(PP.AdvanceToTokenCharacter(DigitTok.getLocation(), i),
               diag::err_pp_line_digit_sequence);
       PP.DiscardUntilEndOfDirective();
@@ -1109,22 +1108,22 @@ void Preprocessor::HandleMacroPublicDirective(Token &Tok) {
   CheckEndOfDirective("__public_macro");
 
   // Okay, we finally have a valid identifier to undef.
-  MacroInfo *MI = getMacroInfo(MacroNameTok.getIdentifierInfo());
+  MacroDirective *MD = getMacroDirective(MacroNameTok.getIdentifierInfo());
   
   // If the macro is not defined, this is an error.
-  if (MI == 0) {
+  if (MD == 0) {
     Diag(MacroNameTok, diag::err_pp_visibility_non_macro)
       << MacroNameTok.getIdentifierInfo();
     return;
   }
   
   // Note that this macro has now been exported.
-  MI->setVisibility(/*IsPublic=*/true, MacroNameTok.getLocation());
-  
+  MD->setVisibility(/*IsPublic=*/true, MacroNameTok.getLocation());
+
   // If this macro definition came from a PCH file, mark it
   // as having changed since serialization.
-  if (MI->isFromAST())
-    MI->setChangedAfterLoad();
+  if (MD->isImported())
+    MD->setChangedAfterLoad();
 }
 
 /// \brief Handle a #private directive.
@@ -1140,22 +1139,22 @@ void Preprocessor::HandleMacroPrivateDirective(Token &Tok) {
   CheckEndOfDirective("__private_macro");
   
   // Okay, we finally have a valid identifier to undef.
-  MacroInfo *MI = getMacroInfo(MacroNameTok.getIdentifierInfo());
+  MacroDirective *MD = getMacroDirective(MacroNameTok.getIdentifierInfo());
   
   // If the macro is not defined, this is an error.
-  if (MI == 0) {
+  if (MD == 0) {
     Diag(MacroNameTok, diag::err_pp_visibility_non_macro)
       << MacroNameTok.getIdentifierInfo();
     return;
   }
   
   // Note that this macro has now been marked private.
-  MI->setVisibility(/*IsPublic=*/false, MacroNameTok.getLocation());
-  
+  MD->setVisibility(/*IsPublic=*/false, MacroNameTok.getLocation());
+
   // If this macro definition came from a PCH file, mark it
   // as having changed since serialization.
-  if (MI->isFromAST())
-    MI->setChangedAfterLoad();
+  if (MD->isImported())
+    MD->setChangedAfterLoad();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1917,7 +1916,7 @@ void Preprocessor::HandleDefineDirective(Token &DefineTok) {
 
   // Finally, if this identifier already had a macro defined for it, verify that
   // the macro bodies are identical, and issue diagnostics if they are not.
-  if (MacroInfo *OtherMI = getMacroInfo(MacroNameTok.getIdentifierInfo())) {
+  if (const MacroInfo *OtherMI=getMacroInfo(MacroNameTok.getIdentifierInfo())) {
     // It is very common for system headers to have tons of macro redefinitions
     // and for warnings to be disabled in system headers.  If this is the case,
     // then don't bother calling MacroInfo::isIdenticalTo.
@@ -1939,7 +1938,7 @@ void Preprocessor::HandleDefineDirective(Token &DefineTok) {
       WarnUnusedMacroLocs.erase(OtherMI->getDefinitionLoc());
   }
 
-  setMacroInfo(MacroNameTok.getIdentifierInfo(), MI);
+  setMacroDirective(MacroNameTok.getIdentifierInfo(), MI);
 
   assert(!MI->isUsed());
   // If we need warning for not using the macro, add its location in the
@@ -1972,7 +1971,8 @@ void Preprocessor::HandleUndefDirective(Token &UndefTok) {
   CheckEndOfDirective("undef");
 
   // Okay, we finally have a valid identifier to undef.
-  MacroInfo *MI = getMacroInfo(MacroNameTok.getIdentifierInfo());
+  MacroDirective *MD = getMacroDirective(MacroNameTok.getIdentifierInfo());
+  const MacroInfo *MI = MD ? MD->getInfo() : 0;
 
   // If the callbacks want to know, tell them about the macro #undef.
   // Note: no matter if the macro was defined or not.
@@ -1988,17 +1988,17 @@ void Preprocessor::HandleUndefDirective(Token &UndefTok) {
   if (MI->isWarnIfUnused())
     WarnUnusedMacroLocs.erase(MI->getDefinitionLoc());
 
-  UndefineMacro(MacroNameTok.getIdentifierInfo(), MI,
+  UndefineMacro(MacroNameTok.getIdentifierInfo(), MD,
                 MacroNameTok.getLocation());
 }
 
-void Preprocessor::UndefineMacro(IdentifierInfo *II, MacroInfo *MI,
+void Preprocessor::UndefineMacro(IdentifierInfo *II, MacroDirective *MD,
                                  SourceLocation UndefLoc) {
-  MI->setUndefLoc(UndefLoc);
-  if (MI->isFromAST()) {
-    MI->setChangedAfterLoad();
+  MD->setUndefLoc(UndefLoc);
+  if (MD->isImported()) {
+    MD->setChangedAfterLoad();
     if (Listener)
-      Listener->UndefinedMacro(MI);
+      Listener->UndefinedMacro(MD);
   }
 
   clearMacroInfo(II);

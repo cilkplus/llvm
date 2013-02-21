@@ -96,7 +96,7 @@ void test1() {
   // CHECK-CILK1-NEXT: ret void
 }
 
-// CHECK-CILK1: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK1: define internal void @[[HelperName]]({{.*}}) #[[AttributeNum:[0-9]+]]
 // CHECK-CILK1: %{{.*}} = alloca %__cilkrts_stack_frame
 
 // CHECK-CILK1: call void @_ZN3FooC1Ev(%struct.Foo*
@@ -108,6 +108,8 @@ void test1() {
 // CHECK-CILK1: call void @__cilk_helper_epilogue(%__cilkrts_stack_frame*
 // CHECK-CILK1-NEXT: ret void
 
+// CHECK-CILK1: attributes #[[AttributeNum]] = {{.*}} noinline
+
 //-----------------------------------------------------------------------------
 
 // Make sure that "x" is initialized after the spawn point
@@ -117,7 +119,7 @@ void test2() {
   int x = _Cilk_spawn f(param1 + param2);
 }
 
-// CHECK-CILK2: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK2: define internal void @[[HelperName]]({{.*}})
 
 // CHECK-CILK2: call void @_ZplRK3FooS1_
 // CHECK-CILK2-NEXT: call void @__cilk_helper_prologue
@@ -136,7 +138,7 @@ void test3() {
   y = _Cilk_spawn f(param1 + param2);
 }
 
-// CHECK-CILK3: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK3: define internal void @[[HelperName]]({{.*}})
 
 // CHECK-CILK3: call void @_ZplRK3FooS1_
 // CHECK-CILK3-NEXT: call void @__cilk_helper_prologue
@@ -155,7 +157,7 @@ void test4() {
   float b = _Cilk_spawn i();
 }
 
-// CHECK-CILK4: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}} {
+// CHECK-CILK4: define internal void @[[HelperName]]({{.*}})
 
 // CHECK-CILK4: call void @__cilk_helper_prologue
 // CHECK-CILK4-NEXT: call {{.*}} @_Z1iv()
@@ -172,7 +174,7 @@ void test5() {
   Bar a = _Cilk_spawn g();
 }
 
-// CHECK-CILK5: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK5: define internal void @[[HelperName]]({{.*}})
 
 // CHECK-CILK5: call void @__cilk_helper_prologue
 // CHECK-CILK5-NEXT: call {{.*}} @_Z1gv()
@@ -213,7 +215,7 @@ void test7() {
   z[i()] = _Cilk_spawn f(Foo());
 }
 
-// CHECK-CILK7: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK7: define internal void @[[HelperName]]({{.*}})
 
 // CHECK-CILK7: call {{.*}} @_Z1iv()
 // CHECK-CILK7: call void @_ZN3FooC1Ev
@@ -236,7 +238,7 @@ void test8() {
   int d = _Cilk_spawn test_lambda(Foo());
 }
 
-// CHECK-CILK8: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK8: define internal void @[[HelperName]]({{.*}})
 // CHECK-CILK8: call void @_ZN3FooC1Ev
 // CHECK-CILK8-NEXT: call void @__cilk_helper_prologue
 // CHECK-CILK8-NEXT: {{call|invoke}} i32 @"_ZZ5test8vENK3$_0clE3Foo"
@@ -253,7 +255,7 @@ void test9() {
   _Cilk_spawn h();
 }
 
-// CHECK-CILK9: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK9: define internal void @[[HelperName]]({{.*}})
 // CHECK-CILK9: call void @__cilk_helper_prologue
 // CHECK-CILK9-NEXT: call void @_Z1hv
 
@@ -271,7 +273,7 @@ void test10() {
 // CHECK-CILK10: define linkonce_odr void @_ZN3Foo7MemFuncEv
 // CHECK-CILK10: call void @[[HelperName:.+cilk_spawn_helper.*]](%[[CaptureStruct]]*
 
-// CHECK-CILK10: define internal void @[[HelperName]]({{.*}}) {{.*noinline.*}}
+// CHECK-CILK10: define internal void @[[HelperName]]({{.*}})
 // CHECK-CILK10: call void @__cilk_helper_prologue
 // CHECK-CILK10-NEXT: call i32 @_Z3fibi
 
@@ -299,10 +301,10 @@ namespace scopeinfo_missing_during_instantiation {
 
 namespace capture_array_by_value {
   template <typename T>
-  void touch(const T *);
+  void touch(const T *) { }
 
   template <typename T>
-  void touch(T);
+  void touch(T) { }
 
   template <typename T, unsigned n>
   void invoke_ptr() {

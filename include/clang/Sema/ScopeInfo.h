@@ -99,6 +99,9 @@ public:
   /// \brief Whether this function contains any indirect gotos.
   bool HasIndirectGoto;
 
+  /// \brief Whether a statement was dropped because it was invalid.
+  bool HasDroppedStmt;
+
   /// A flag that is set when parsing a method that must call super's
   /// implementation, such as \c -dealloc, \c -finalize, or any method marked
   /// with \c __attribute__((objc_requires_super)).
@@ -295,9 +298,14 @@ public:
     HasIndirectGoto = true;
   }
 
+  void setHasDroppedStmt() {
+    HasDroppedStmt = true;
+  }
+
   bool NeedsScopeChecking() const {
-    return HasIndirectGoto ||
-          (HasBranchProtectedScope && HasBranchIntoScope);
+    return !HasDroppedStmt &&
+        (HasIndirectGoto ||
+          (HasBranchProtectedScope && HasBranchIntoScope));
   }
   
   FunctionScopeInfo(DiagnosticsEngine &Diag)
@@ -305,6 +313,7 @@ public:
       HasBranchProtectedScope(false),
       HasBranchIntoScope(false),
       HasIndirectGoto(false),
+      HasDroppedStmt(false),
       ObjCShouldCallSuper(false),
       ErrorTrap(Diag) { }
 

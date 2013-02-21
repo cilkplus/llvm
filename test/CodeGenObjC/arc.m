@@ -1,6 +1,37 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fblocks -fobjc-arc -fobjc-runtime-has-weak -O2 -disable-llvm-optzns -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fblocks -fobjc-arc -fobjc-runtime-has-weak -o - %s | FileCheck -check-prefix=CHECK-GLOBALS %s
 
+// rdar://13129783. Check both native/non-native arc platforms. Here we check
+// that they treat nonlazybind differently.
+// RUN: %clang_cc1 -fobjc-runtime=macosx-10.6.0 -triple x86_64-apple-darwin10 -emit-llvm -fblocks -fobjc-arc -fobjc-runtime-has-weak -o - %s | FileCheck -check-prefix=ARC-ALIEN %s
+// RUN: %clang_cc1 -fobjc-runtime=macosx-10.7.0 -triple x86_64-apple-darwin11 -emit-llvm -fblocks -fobjc-arc -fobjc-runtime-has-weak -o - %s | FileCheck -check-prefix=ARC-NATIVE %s
+
+// ARC-ALIEN: declare extern_weak void @objc_storeStrong(i8**, i8*)
+// ARC-ALIEN: declare extern_weak i8* @objc_retain(i8*)
+// ARC-ALIEN: declare extern_weak i8* @objc_autoreleaseReturnValue(i8*)
+// ARC-ALIEN: declare i8* @objc_msgSend(i8*, i8*, ...) #1
+// ARC-ALIEN: declare extern_weak void @objc_release(i8*)
+// ARC-ALIEN: declare extern_weak i8* @objc_retainAutoreleasedReturnValue(i8*)
+// ARC-ALIEN: declare extern_weak i8* @objc_initWeak(i8**, i8*)
+// ARC-ALIEN: declare extern_weak i8* @objc_storeWeak(i8**, i8*)
+// ARC-ALIEN: declare extern_weak i8* @objc_loadWeakRetained(i8**)
+// ARC-ALIEN: declare extern_weak void @objc_destroyWeak(i8**)
+// ARC-ALIEN: declare extern_weak i8* @objc_autorelease(i8*)
+// ARC-ALIEN: declare extern_weak i8* @objc_retainAutorelease(i8*)
+
+// ARC-NATIVE: declare void @objc_storeStrong(i8**, i8*)
+// ARC-NATIVE: declare i8* @objc_retain(i8*) #1
+// ARC-NATIVE: declare i8* @objc_autoreleaseReturnValue(i8*)
+// ARC-NATIVE: declare i8* @objc_msgSend(i8*, i8*, ...) #1
+// ARC-NATIVE: declare void @objc_release(i8*) #1
+// ARC-NATIVE: declare i8* @objc_retainAutoreleasedReturnValue(i8*)
+// ARC-NATIVE: declare i8* @objc_initWeak(i8**, i8*)
+// ARC-NATIVE: declare i8* @objc_storeWeak(i8**, i8*)
+// ARC-NATIVE: declare i8* @objc_loadWeakRetained(i8**)
+// ARC-NATIVE: declare void @objc_destroyWeak(i8**)
+// ARC-NATIVE: declare i8* @objc_autorelease(i8*)
+// ARC-NATIVE: declare i8* @objc_retainAutorelease(i8*)
+
 // CHECK: define void @test0
 void test0(id x) {
   // CHECK:      [[X:%.*]] = alloca i8*
@@ -9,9 +40,6 @@ void test0(id x) {
   // CHECK-NEXT: [[TMP:%.*]] = load i8** [[X]]
   // CHECK-NEXT: call void @objc_release(i8* [[TMP]])
   // CHECK-NEXT: ret void
-// rdar://12040837
-  // CHECK: declare extern_weak i8* @objc_retain(i8*) nonlazybind
-  // CHECK: declare extern_weak void @objc_release(i8*) nonlazybind
 }
 
 // CHECK: define i8* @test1(i8*
@@ -567,39 +595,6 @@ void test21(unsigned n) {
   // CHECK-NEXT: ret void
 }
 
-void test22(_Bool cond) {
-  id test22_helper(void) __attribute__((ns_returns_retained));
-
-  // CHECK:      define void @test22(
-  // CHECK:      [[COND:%.*]] = alloca i8,
-  // CHECK-NEXT: [[X:%.*]] = alloca i8*,
-  // CHECK-NEXT: [[RELVAL:%.*]] = alloca i8*
-  // CHECK-NEXT: [[RELCOND:%.*]] = alloca i1
-  // CHECK-NEXT: zext
-  // CHECK-NEXT: store
-  // CHECK-NEXT: [[T0:%.*]] = load i8* [[COND]]
-  // CHECK-NEXT: [[T1:%.*]] = trunc i8 [[T0]] to i1
-  // CHECK-NEXT: store i1 false, i1* [[RELCOND]]
-  // CHECK-NEXT: br i1 [[T1]],
-  // CHECK:      br label
-  // CHECK:      [[CALL:%.*]] = call i8* @test22_helper()
-  // CHECK-NEXT: store i8* [[CALL]], i8** [[RELVAL]]
-  // CHECK-NEXT: store i1 true, i1* [[RELCOND]]
-  // CHECK-NEXT: br label
-  // CHECK:      [[T0:%.*]] = phi i8* [ null, {{%.*}} ], [ [[CALL]], {{%.*}} ]
-  // CHECK-NEXT: [[T1:%.*]] = call i8* @objc_retain(i8* [[T0]]) nounwind
-  // CHECK-NEXT: store i8* [[T1]], i8** [[X]],
-  // CHECK-NEXT: [[REL:%.*]] = load i1* [[RELCOND]]
-  // CHECK-NEXT: br i1 [[REL]],
-  // CHECK:      [[T0:%.*]] = load i8** [[RELVAL]]
-  // CHECK-NEXT: call void @objc_release(i8* [[T0]]) nounwind
-  // CHECK-NEXT: br label
-  // CHECK:      [[T0:%.*]] = load i8** [[X]]
-  // CHECK-NEXT: call void @objc_release(i8* [[T0]]) nounwind
-  // CHECK-NEXT: ret void
-  id x = (cond ? 0 : test22_helper());
-}
-
 // rdar://problem/8922540
 //   Note that we no longer emit .release_ivars flags.
 // rdar://problem/12492434
@@ -681,7 +676,7 @@ void test22(_Bool cond) {
 @implementation Test29
 static id _test29_allocator = 0;
 - (id) init {
-// CHECK:    define internal i8* @"\01-[Test29 init]"([[TEST29:%.*]]* {{%.*}},
+// CHECK:    define internal i8* @"\01-[Test29 init]"([[TEST29:%[^*]*]]* {{%.*}},
 // CHECK:      [[SELF:%.*]] = alloca [[TEST29]]*, align 8
 // CHECK-NEXT: [[CMD:%.*]] = alloca i8*, align 8
 // CHECK-NEXT: [[CLEANUP:%.*]] = alloca i32
@@ -791,7 +786,7 @@ typedef struct Test30_helper Test30_helper;
 char *helper;
 }
 - (id) init {
-// CHECK:    define internal i8* @"\01-[Test30 init]"([[TEST30:%.*]]* {{%.*}},
+// CHECK:    define internal i8* @"\01-[Test30 init]"([[TEST30:%[^*]*]]* {{%.*}},
 // CHECK:      [[RET:%.*]] = alloca [[TEST30]]*
 // CHECK-NEXT: alloca i8*
 // CHECK-NEXT: alloca i32
@@ -945,66 +940,6 @@ void test33(Test33 *ptr) {
   // CHECK-NEXT: ret void
 }
 
-void test34(int cond) {
-  __strong id strong;
-  __weak id weak;
-  extern void test34_sink(id *);
-  test34_sink(cond ? &strong : 0);
-  test34_sink(cond ? &weak : 0);
-
-  // CHECK:    define void @test34(
-  // CHECK:      [[COND:%.*]] = alloca i32
-  // CHECK-NEXT: [[STRONG:%.*]] = alloca i8*
-  // CHECK-NEXT: [[WEAK:%.*]] = alloca i8*
-  // CHECK-NEXT: [[TEMP1:%.*]] = alloca i8*
-  // CHECK-NEXT: [[TEMP2:%.*]] = alloca i8*
-  // CHECK-NEXT: [[CONDCLEANUPSAVE:%.*]] = alloca i8*
-  // CHECK-NEXT: [[CONDCLEANUP:%.*]] = alloca i1
-  // CHECK-NEXT: store i32
-  // CHECK-NEXT: store i8* null, i8** [[STRONG]]
-  // CHECK-NEXT: call i8* @objc_initWeak(i8** [[WEAK]], i8* null)
-
-  // CHECK-NEXT: [[T0:%.*]] = load i32* [[COND]]
-  // CHECK-NEXT: [[T1:%.*]] = icmp ne i32 [[T0]], 0
-  // CHECK:      [[ARG:%.*]] = phi i8**
-  // CHECK-NEXT: [[T0:%.*]] = icmp eq i8** [[ARG]], null
-  // CHECK-NEXT: [[T1:%.*]] = select i1 [[T0]], i8** null, i8** [[TEMP1]]
-  // CHECK-NEXT: br i1 [[T0]],
-  // CHECK:      [[T0:%.*]] = load i8** [[ARG]]
-  // CHECK-NEXT: store i8* [[T0]], i8** [[TEMP1]]
-  // CHECK-NEXT: br label
-  // CHECK:      call void @test34_sink(i8** [[T1]])
-  // CHECK-NEXT: [[T0:%.*]] = icmp eq i8** [[ARG]], null
-  // CHECK-NEXT: br i1 [[T0]],
-  // CHECK:      [[T0:%.*]] = load i8** [[TEMP1]]
-  // CHECK-NEXT: [[T1:%.*]] = call i8* @objc_retain(i8* [[T0]])
-  // CHECK-NEXT: [[T2:%.*]] = load i8** [[ARG]]
-  // CHECK-NEXT: store i8* [[T1]], i8** [[ARG]]
-  // CHECK-NEXT: call void @objc_release(i8* [[T2]])
-  // CHECK-NEXT: br label
-
-  // CHECK:      [[T0:%.*]] = load i32* [[COND]]
-  // CHECK-NEXT: [[T1:%.*]] = icmp ne i32 [[T0]], 0
-  // CHECK:      [[ARG:%.*]] = phi i8**
-  // CHECK-NEXT: [[T0:%.*]] = icmp eq i8** [[ARG]], null
-  // CHECK-NEXT: [[T1:%.*]] = select i1 [[T0]], i8** null, i8** [[TEMP2]]
-  // CHECK-NEXT: store i1 false, i1* [[CONDCLEANUP]]
-  // CHECK-NEXT: br i1 [[T0]],
-  // CHECK:      [[T0:%.*]] = call i8* @objc_loadWeakRetained(i8** [[ARG]])
-  // CHECK-NEXT: store i8* [[T0]], i8** [[CONDCLEANUPSAVE]]
-  // CHECK-NEXT: store i1 true, i1* [[CONDCLEANUP]]
-  // CHECK-NEXT: store i8* [[T0]], i8** [[TEMP2]]
-  // CHECK-NEXT: br label
-  // CHECK:      call void @test34_sink(i8** [[T1]])
-  // CHECK-NEXT: [[T0:%.*]] = icmp eq i8** [[ARG]], null
-  // CHECK-NEXT: br i1 [[T0]],
-  // CHECK:      [[T0:%.*]] = load i8** [[TEMP2]]
-  // CHECK-NEXT: call i8* @objc_storeWeak(i8** [[ARG]], i8* [[T0]])
-  // CHECK-NEXT: br label
-
-  // CHECK:      call void @objc_destroyWeak(i8** [[WEAK]])
-  // CHECK:      ret void
-}
 
 // CHECK: define void @test36
 void test36(id x) {
@@ -1548,3 +1483,8 @@ void test70(id i) {
     [2] = i
   };
 }
+
+// CHECK: attributes #0 = { nounwind "target-features"={{.*}} }
+// CHECK: attributes #1 = { nonlazybind }
+// CHECK: attributes #2 = { "target-features"={{.*}} }
+// CHECK: attributes #3 = { nounwind }

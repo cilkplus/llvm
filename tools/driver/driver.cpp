@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/Basic/CharInfo.h"
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Driver/ArgList.h"
 #include "clang/Driver/Compilation.h"
@@ -42,7 +43,6 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/system_error.h"
-#include <cctype>
 using namespace clang;
 using namespace clang::driver;
 
@@ -202,7 +202,7 @@ static void ExpandArgsFromBuf(const char *Arg,
   std::string CurArg;
 
   for (const char *P = Buf; ; ++P) {
-    if (*P == '\0' || (isspace(*P) && InQuote == ' ')) {
+    if (*P == '\0' || (isWhitespace(*P) && InQuote == ' ')) {
       if (!CurArg.empty()) {
 
         if (CurArg[0] != '@') {
@@ -219,7 +219,7 @@ static void ExpandArgsFromBuf(const char *Arg,
         continue;
     }
 
-    if (isspace(*P)) {
+    if (isWhitespace(*P)) {
       if (InQuote != ' ')
         CurArg.push_back(*P);
       continue;
@@ -373,6 +373,32 @@ int main(int argc_, const char **argv_) {
     }
   }
 
+  // Handle QA_OVERRIDE_GCC3_OPTIONS and CCC_ADD_ARGS, used for editing a
+  // command line behind the scenes.
+  if (const char *OverrideStr = ::getenv("QA_OVERRIDE_GCC3_OPTIONS")) {
+    // FIXME: Driver shouldn't take extra initial argument.
+    ApplyQAOverride(argv, OverrideStr, SavedStrings);
+  } else if (const char *Cur = ::getenv("CCC_ADD_ARGS")) {
+    // FIXME: Driver shouldn't take extra initial argument.
+    std::vector<const char*> ExtraArgs;
+
+    for (;;) {
+      const char *Next = strchr(Cur, ',');
+
+      if (Next) {
+        ExtraArgs.push_back(SaveStringInSet(SavedStrings,
+                                            std::string(Cur, Next)));
+        Cur = Next + 1;
+      } else {
+        if (*Cur != '\0')
+          ExtraArgs.push_back(SaveStringInSet(SavedStrings, Cur));
+        break;
+      }
+    }
+
+    argv.insert(&argv[1], ExtraArgs.begin(), ExtraArgs.end());
+  }
+
   llvm::sys::Path Path = GetExecutablePath(argv[0], CanonicalPrefixes);
 
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions;
@@ -437,32 +463,6 @@ int main(int argc_, const char **argv_) {
   TheDriver.CCLogDiagnostics = !!::getenv("CC_LOG_DIAGNOSTICS");
   if (TheDriver.CCLogDiagnostics)
     TheDriver.CCLogDiagnosticsFilename = ::getenv("CC_LOG_DIAGNOSTICS_FILE");
-
-  // Handle QA_OVERRIDE_GCC3_OPTIONS and CCC_ADD_ARGS, used for editing a
-  // command line behind the scenes.
-  if (const char *OverrideStr = ::getenv("QA_OVERRIDE_GCC3_OPTIONS")) {
-    // FIXME: Driver shouldn't take extra initial argument.
-    ApplyQAOverride(argv, OverrideStr, SavedStrings);
-  } else if (const char *Cur = ::getenv("CCC_ADD_ARGS")) {
-    // FIXME: Driver shouldn't take extra initial argument.
-    std::vector<const char*> ExtraArgs;
-
-    for (;;) {
-      const char *Next = strchr(Cur, ',');
-
-      if (Next) {
-        ExtraArgs.push_back(SaveStringInSet(SavedStrings,
-                                            std::string(Cur, Next)));
-        Cur = Next + 1;
-      } else {
-        if (*Cur != '\0')
-          ExtraArgs.push_back(SaveStringInSet(SavedStrings, Cur));
-        break;
-      }
-    }
-
-    argv.insert(&argv[1], ExtraArgs.begin(), ExtraArgs.end());
-  }
 
   OwningPtr<Compilation> C(TheDriver.BuildCompilation(argv));
   int Res = 0;

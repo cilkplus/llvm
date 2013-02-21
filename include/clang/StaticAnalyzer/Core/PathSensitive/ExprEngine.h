@@ -44,6 +44,7 @@ namespace ento {
 class AnalysisManager;
 class CallEvent;
 class SimpleCall;
+class CXXConstructorCall;
 
 class ExprEngine : public SubEngine {
 public:
@@ -428,11 +429,11 @@ public:
     geteagerlyAssumeBinOpBifurcationTags();
 
   SVal evalMinus(SVal X) {
-    return X.isValid() ? svalBuilder.evalMinus(cast<NonLoc>(X)) : X;
+    return X.isValid() ? svalBuilder.evalMinus(X.castAs<NonLoc>()) : X;
   }
 
   SVal evalComplement(SVal X) {
-    return X.isValid() ? svalBuilder.evalComplement(cast<NonLoc>(X)) : X;
+    return X.isValid() ? svalBuilder.evalComplement(X.castAs<NonLoc>()) : X;
   }
 
 public:
@@ -444,7 +445,8 @@ public:
 
   SVal evalBinOp(ProgramStateRef state, BinaryOperator::Opcode op,
                  NonLoc L, SVal R, QualType T) {
-    return R.isValid() ? svalBuilder.evalBinOpNN(state,op,L, cast<NonLoc>(R), T) : R;
+    return R.isValid() ? svalBuilder.evalBinOpNN(state, op, L,
+                                                 R.castAs<NonLoc>(), T) : R;
   }
 
   SVal evalBinOp(ProgramStateRef ST, BinaryOperator::Opcode Op,
@@ -546,6 +548,10 @@ private:
                      ExplodedNode *Pred);
 
   bool replayWithoutInlining(ExplodedNode *P, const LocationContext *CalleeLC);
+
+  /// Models a trivial copy or move constructor call with a simple bind.
+  void performTrivialCopy(NodeBuilder &Bldr, ExplodedNode *Pred,
+                          const CXXConstructorCall &Call);
 };
 
 /// Traits for storing the call processing policy inside GDM.

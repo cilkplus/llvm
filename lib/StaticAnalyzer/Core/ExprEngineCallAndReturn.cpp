@@ -121,7 +121,7 @@ static std::pair<const Stmt*,
 static SVal adjustReturnValue(SVal V, QualType ExpectedTy, QualType ActualTy,
                               StoreManager &StoreMgr) {
   // For now, the only adjustments we handle apply only to locations.
-  if (!isa<Loc>(V))
+  if (!V.getAs<Loc>())
     return V;
 
   // If the types already match, don't do any unnecessary work.
@@ -187,6 +187,23 @@ static bool wasDifferentDeclUsedForInlining(CallEventRef<> Call,
   return RuntimeCallee->getCanonicalDecl() != StaticDecl->getCanonicalDecl();
 }
 
+/// Returns true if the CXXConstructExpr \p E was intended to construct a
+/// prvalue for the region in \p V.
+///
+/// Note that we can't just test for rvalue vs. glvalue because
+/// CXXConstructExprs embedded in DeclStmts and initializers are considered
+/// rvalues by the AST, and the analyzer would like to treat them as lvalues.
+static bool isTemporaryPRValue(const CXXConstructExpr *E, SVal V) {
+  if (E->isGLValue())
+    return false;
+
+  const MemRegion *MR = V.getAsRegion();
+  if (!MR)
+    return false;
+
+  return isa<CXXTempObjectRegion>(MR);
+}
+
 /// The call exit is simulated with a sequence of nodes, which occur between 
 /// CallExitBegin and CallExitEnd. The following operations occur between the 
 /// two program points:
@@ -247,13 +264,9 @@ void ExprEngine::processCallExit(ExplodedNode *CEBNode) {
         svalBuilder.getCXXThis(CCE->getConstructor()->getParent(), calleeCtx);
       SVal ThisV = state->getSVal(This);
 
-      // If the constructed object is a prvalue, get its bindings.
-      // Note that we have to be careful here because constructors embedded
-      // in DeclStmts are not marked as lvalues.
-      if (!CCE->isGLValue())
-        if (const MemRegion *MR = ThisV.getAsRegion())
-          if (isa<CXXTempObjectRegion>(MR))
-            ThisV = state->getSVal(cast<Loc>(ThisV));
+      // If the constructed object is a temporary prvalue, get its bindings.
+      if (isTemporaryPRValue(CCE, ThisV))
+        ThisV = state->getSVal(ThisV.castAs<Loc>());
 
       state = state->BindExpr(CCE, callerCtx, ThisV);
     }
@@ -692,7 +705,13 @@ ProgramStateRef ExprEngine::bindReturnValue(const CallEvent &Call,
     }
     }
   } else if (const CXXConstructorCall *C = dyn_cast<CXXConstructorCall>(&Call)){
-    return State->BindExpr(E, LCtx, C->getCXXThisVal());
+    SVal ThisV = C->getCXXThisVal();
+
+    // If the constructed object is a temporary prvalue, get its bindings.
+    if (isTemporaryPRValue(cast<CXXConstructExpr>(E), ThisV))
+      ThisV = State->getSVal(ThisV.castAs<Loc>());
+
+    return State->BindExpr(E, LCtx, ThisV);
   }
 
   // Conjure a symbol if the return value is unknown.
@@ -714,13 +733,27 @@ void ExprEngine::conservativeEvalCall(const CallEvent &Call, NodeBuilder &Bldr,
   Bldr.generateNode(Call.getProgramPoint(), State, Pred);
 }
 
+static bool isEssentialToInline(const CallEvent &Call) {
+  const Decl *D = Call.getDecl();
+  if (D) {
+    AnalysisDeclContext *AD =
+      Call.getLocationContext()->getAnalysisDeclContext()->
+      getManager()->getContext(D);
+
+    // The auto-synthesized bodies are essential to inline as they are
+    // usually small and commonly used.
+    return AD->isBodyAutosynthesized();
+  }
+  return false;
+}
+
 void ExprEngine::defaultEvalCall(NodeBuilder &Bldr, ExplodedNode *Pred,
                                  const CallEvent &CallTemplate) {
   // Make sure we have the most recent state attached to the call.
   ProgramStateRef State = Pred->getState();
   CallEventRef<> Call = CallTemplate.cloneWithState(State);
 
-  if (HowToInline == Inline_None) {
+  if (HowToInline == Inline_None && !isEssentialToInline(CallTemplate)) {
     conservativeEvalCall(*Call, Bldr, Pred, State);
     return;
   }

@@ -49,6 +49,35 @@ void ExprEngine::CreateCXXTemporaryObject(const MaterializeTemporaryExpr *ME,
   Bldr.generateNode(ME, Pred, state->BindExpr(ME, LCtx, V));
 }
 
+void ExprEngine::performTrivialCopy(NodeBuilder &Bldr, ExplodedNode *Pred,
+                                    const CXXConstructorCall &Call) {
+  const CXXConstructExpr *CtorExpr = Call.getOriginExpr();
+  assert(CtorExpr->getConstructor()->isCopyOrMoveConstructor());
+  assert(CtorExpr->getConstructor()->isTrivial());
+
+  SVal ThisVal = Call.getCXXThisVal();
+  const LocationContext *LCtx = Pred->getLocationContext();
+
+  ExplodedNodeSet Dst;
+  Bldr.takeNodes(Pred);
+
+  SVal V = Call.getArgSVal(0);
+
+  // Make sure the value being copied is not unknown.
+  if (Optional<Loc> L = V.getAs<Loc>())
+    V = Pred->getState()->getSVal(*L);
+
+  evalBind(Dst, CtorExpr, Pred, ThisVal, V, true);
+
+  PostStmt PS(CtorExpr, LCtx);
+  for (ExplodedNodeSet::iterator I = Dst.begin(), E = Dst.end();
+       I != E; ++I) {
+    ProgramStateRef State = (*I)->getState();
+    State = bindReturnValue(Call, LCtx, State);
+    Bldr.generateNode(PS, State, *I);
+  }
+}
+
 void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
                                        ExplodedNode *Pred,
                                        ExplodedNodeSet &destNodes) {
@@ -56,6 +85,7 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
   ProgramStateRef State = Pred->getState();
 
   const MemRegion *Target = 0;
+  bool IsArray = false;
 
   switch (CE->getConstructionKind()) {
   case CXXConstructExpr::CK_Complete: {
@@ -79,6 +109,7 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
                 Target = State->getLValue(AT->getElementType(),
                                           getSValBuilder().makeZeroArrayIndex(),
                                           Base).getAsRegion();
+                IsArray = true;
               } else {
                 Target = State->getLValue(Var, LCtx).getAsRegion();
               }
@@ -130,8 +161,10 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
       Target = ThisVal.getAsRegion();
     } else {
       // Cast to the base type.
-      QualType BaseTy = CE->getType();
-      SVal BaseVal = getStoreManager().evalDerivedToBase(ThisVal, BaseTy);
+      bool IsVirtual =
+        (CE->getConstructionKind() == CXXConstructExpr::CK_VirtualBase);
+      SVal BaseVal = getStoreManager().evalDerivedToBase(ThisVal, CE->getType(),
+                                                         IsVirtual);
       Target = BaseVal.getAsRegion();
     }
     break;
@@ -148,14 +181,25 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
   getCheckerManager().runCheckersForPreCall(DstPreCall, DstPreVisit,
                                             *Call, *this);
 
-  ExplodedNodeSet DstInvalidated;
-  StmtNodeBuilder Bldr(DstPreCall, DstInvalidated, *currBldrCtx);
-  for (ExplodedNodeSet::iterator I = DstPreCall.begin(), E = DstPreCall.end();
-       I != E; ++I)
-    defaultEvalCall(Bldr, *I, *Call);
+  ExplodedNodeSet DstEvaluated;
+  StmtNodeBuilder Bldr(DstPreCall, DstEvaluated, *currBldrCtx);
+
+  if (CE->getConstructor()->isTrivial() &&
+      CE->getConstructor()->isCopyOrMoveConstructor() &&
+      !IsArray) {
+    // FIXME: Handle other kinds of trivial constructors as well.
+    for (ExplodedNodeSet::iterator I = DstPreCall.begin(), E = DstPreCall.end();
+         I != E; ++I)
+      performTrivialCopy(Bldr, *I, *Call);
+
+  } else {
+    for (ExplodedNodeSet::iterator I = DstPreCall.begin(), E = DstPreCall.end();
+         I != E; ++I)
+      defaultEvalCall(Bldr, *I, *Call);
+  }
 
   ExplodedNodeSet DstPostCall;
-  getCheckerManager().runCheckersForPostCall(DstPostCall, DstInvalidated,
+  getCheckerManager().runCheckersForPostCall(DstPostCall, DstEvaluated,
                                              *Call, *this);
   getCheckerManager().runCheckersForPostStmt(destNodes, DstPostCall, CE, *this);
 }
@@ -245,7 +289,7 @@ void ExprEngine::VisitCXXNewExpr(const CXXNewExpr *CNE, ExplodedNode *Pred,
   if (CNE->isArray()) {
     // FIXME: allocating an array requires simulating the constructors.
     // For now, just return a symbolicated region.
-    const MemRegion *NewReg = cast<loc::MemRegionVal>(symVal).getRegion();
+    const MemRegion *NewReg = symVal.castAs<loc::MemRegionVal>().getRegion();
     QualType ObjTy = CNE->getType()->getAs<PointerType>()->getPointeeType();
     const ElementRegion *EleReg =
       getStoreManager().GetElementZeroRegion(NewReg, ObjTy);
@@ -277,8 +321,8 @@ void ExprEngine::VisitCXXNewExpr(const CXXNewExpr *CNE, ExplodedNode *Pred,
       (void)ObjTy;
       assert(!ObjTy->isRecordType());
       SVal Location = State->getSVal(CNE, LCtx);
-      if (isa<Loc>(Location))
-        State = State->bindLoc(cast<Loc>(Location), State->getSVal(Init, LCtx));
+      if (Optional<Loc> LV = Location.getAs<Loc>())
+        State = State->bindLoc(*LV, State->getSVal(Init, LCtx));
     }
   }
 

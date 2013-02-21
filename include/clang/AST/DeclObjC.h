@@ -549,11 +549,14 @@ public:
   ObjCPropertyDecl *FindPropertyDeclaration(IdentifierInfo *PropertyId) const;
 
   typedef llvm::DenseMap<IdentifierInfo*, ObjCPropertyDecl*> PropertyMap;
-
+  
+  typedef llvm::SmallVector<ObjCPropertyDecl*, 8> PropertyDeclOrder;
+  
   /// This routine collects list of properties to be implemented in the class.
   /// This includes, class's and its conforming protocols' properties.
   /// Note, the superclass's properties are not included in the list.
-  virtual void collectPropertiesToImplement(PropertyMap &PM) const {}
+  virtual void collectPropertiesToImplement(PropertyMap &PM,
+                                            PropertyDeclOrder &PO) const {}
 
   SourceLocation getAtStartLoc() const { return AtStart; }
   void setAtStartLoc(SourceLocation Loc) { AtStart = Loc; }
@@ -668,11 +671,14 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
 
   /// \brief Contains a pointer to the data associated with this class,
   /// which will be NULL if this class has not yet been defined.
-  DefinitionData *Data;
+  ///
+  /// The bit indicates when we don't need to check for out-of-date
+  /// declarations. It will be set unless modules are enabled.
+  llvm::PointerIntPair<DefinitionData *, 1, bool> Data;
 
   DefinitionData &data() const {
-    assert(Data != 0 && "Declaration has no definition!");
-    return *Data;
+    assert(Data.getPointer() && "Declaration has no definition!");
+    return *Data.getPointer();
   }
 
   /// \brief Allocate the definition data for this class.
@@ -680,7 +686,7 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
   
   typedef Redeclarable<ObjCInterfaceDecl> redeclarable_base;
   virtual ObjCInterfaceDecl *getNextRedeclaration() { 
-    return RedeclLink.getNext(); 
+    return RedeclLink.getNext();
   }
   virtual ObjCInterfaceDecl *getPreviousDeclImpl() {
     return getPreviousDecl();
@@ -853,24 +859,38 @@ public:
   /// \brief Determine whether this particular declaration of this class is
   /// actually also a definition.
   bool isThisDeclarationADefinition() const { 
-    return Data && Data->Definition == this;
+    return getDefinition() == this;
   }
                           
   /// \brief Determine whether this class has been defined.
-  bool hasDefinition() const { return Data; }
+  bool hasDefinition() const {
+    // If the name of this class is out-of-date, bring it up-to-date, which
+    // might bring in a definition.
+    // Note: a null value indicates that we don't have a definition and that
+    // modules are enabled.
+    if (!Data.getOpaqueValue()) {
+      if (IdentifierInfo *II = getIdentifier()) {
+        if (II->isOutOfDate()) {
+          updateOutOfDate(*II);
+        }
+      }
+    }
+
+    return Data.getPointer();
+  }
                         
   /// \brief Retrieve the definition of this class, or NULL if this class 
   /// has been forward-declared (with \@class) but not yet defined (with 
   /// \@interface).
   ObjCInterfaceDecl *getDefinition() {
-    return hasDefinition()? Data->Definition : 0;
+    return hasDefinition()? Data.getPointer()->Definition : 0;
   }
 
   /// \brief Retrieve the definition of this class, or NULL if this class 
   /// has been forward-declared (with \@class) but not yet defined (with 
   /// \@interface).
   const ObjCInterfaceDecl *getDefinition() const {
-    return hasDefinition()? Data->Definition : 0;
+    return hasDefinition()? Data.getPointer()->Definition : 0;
   }
 
   /// \brief Starts the definition of this Objective-C class, taking it from
@@ -1073,7 +1093,8 @@ public:
   ObjCPropertyDecl
     *FindPropertyVisibleInPrimaryClass(IdentifierInfo *PropertyId) const;
 
-  virtual void collectPropertiesToImplement(PropertyMap &PM) const;
+  virtual void collectPropertiesToImplement(PropertyMap &PM,
+                                            PropertyDeclOrder &PO) const;
 
   /// isSuperClassOf - Return true if this class is the specified class or is a
   /// super class of the specified interface class.
@@ -1142,7 +1163,7 @@ public:
   /// ObjCInterfaceDecl node. This is for legacy objective-c \@implementation
   /// declaration without an \@interface declaration.
   bool isImplicitInterfaceDecl() const { 
-    return hasDefinition() ? Data->Definition->isImplicit() : isImplicit(); 
+    return hasDefinition() ? data().Definition->isImplicit() : isImplicit();
   }
 
   /// ClassImplementsProtocol - Checks that 'lProto' protocol
@@ -1319,12 +1340,17 @@ class ObjCProtocolDecl : public ObjCContainerDecl,
     /// \brief Referenced protocols
     ObjCProtocolList ReferencedProtocols;    
   };
-  
-  DefinitionData *Data;
+
+  /// \brief Contains a pointer to the data associated with this class,
+  /// which will be NULL if this class has not yet been defined.
+  ///
+  /// The bit indicates when we don't need to check for out-of-date
+  /// declarations. It will be set unless modules are enabled.
+  llvm::PointerIntPair<DefinitionData *, 1, bool> Data;
 
   DefinitionData &data() const {
-    assert(Data && "Objective-C protocol has no definition!");
-    return *Data;
+    assert(Data.getPointer() && "Objective-C protocol has no definition!");
+    return *Data.getPointer();
   }
   
   ObjCProtocolDecl(DeclContext *DC, IdentifierInfo *Id,
@@ -1343,7 +1369,7 @@ class ObjCProtocolDecl : public ObjCContainerDecl,
   virtual ObjCProtocolDecl *getMostRecentDeclImpl() {
     return getMostRecentDecl();
   }
-                           
+
 public:
   static ObjCProtocolDecl *Create(ASTContext &C, DeclContext *DC,
                                   IdentifierInfo *Id,
@@ -1394,7 +1420,7 @@ public:
   /// implements.
   void setProtocolList(ObjCProtocolDecl *const*List, unsigned Num,
                        const SourceLocation *Locs, ASTContext &C) {
-    assert(Data && "Protocol is not defined");
+    assert(hasDefinition() && "Protocol is not defined");
     data().ReferencedProtocols.set(List, Num, Locs, C);
   }
 
@@ -1411,16 +1437,30 @@ public:
   }
 
   /// \brief Determine whether this protocol has a definition.
-  bool hasDefinition() const { return Data != 0; }
+  bool hasDefinition() const {
+    // If the name of this protocol is out-of-date, bring it up-to-date, which
+    // might bring in a definition.
+    // Note: a null value indicates that we don't have a definition and that
+    // modules are enabled.
+    if (!Data.getOpaqueValue()) {
+      if (IdentifierInfo *II = getIdentifier()) {
+        if (II->isOutOfDate()) {
+          updateOutOfDate(*II);
+        }
+      }
+    }
+
+    return Data.getPointer();
+  }
 
   /// \brief Retrieve the definition of this protocol, if any.
   ObjCProtocolDecl *getDefinition() {
-    return Data? Data->Definition : 0;
+    return hasDefinition()? Data.getPointer()->Definition : 0;
   }
 
   /// \brief Retrieve the definition of this protocol, if any.
   const ObjCProtocolDecl *getDefinition() const {
-    return Data? Data->Definition : 0;
+    return hasDefinition()? Data.getPointer()->Definition : 0;
   }
 
   /// \brief Determine whether this particular declaration is also the 
@@ -1453,7 +1493,8 @@ public:
     return getFirstDeclaration();
   }
 
-  virtual void collectPropertiesToImplement(PropertyMap &PM) const;
+  virtual void collectPropertiesToImplement(PropertyMap &PM,
+                                            PropertyDeclOrder &PO) const;
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == ObjCProtocol; }

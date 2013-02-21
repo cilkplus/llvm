@@ -129,6 +129,7 @@ class MallocChecker : public Checker<check::DeadSymbols,
   mutable OwningPtr<BugType> BT_Leak;
   mutable OwningPtr<BugType> BT_UseFree;
   mutable OwningPtr<BugType> BT_BadFree;
+  mutable OwningPtr<BugType> BT_OffsetFree;
   mutable IdentifierInfo *II_malloc, *II_free, *II_realloc, *II_calloc,
                          *II_valloc, *II_reallocf, *II_strndup, *II_strdup;
 
@@ -158,7 +159,8 @@ public:
 
   ProgramStateRef checkPointerEscape(ProgramStateRef State,
                                     const InvalidatedSymbols &Escaped,
-                                    const CallEvent *Call) const;
+                                    const CallEvent *Call,
+                                    PointerEscapeKind Kind) const;
 
   void printState(raw_ostream &Out, ProgramStateRef State,
                   const char *NL, const char *Sep) const;
@@ -224,6 +226,7 @@ private:
   static bool SummarizeValue(raw_ostream &os, SVal V);
   static bool SummarizeRegion(raw_ostream &os, const MemRegion *MR);
   void ReportBadFree(CheckerContext &C, SVal ArgVal, SourceRange range) const;
+  void ReportOffsetFree(CheckerContext &C, SVal ArgVal, SourceRange Range)const;
 
   /// Find the location of the allocation for Sym on the path leading to the
   /// exploded node N.
@@ -552,12 +555,12 @@ ProgramStateRef MallocChecker::MallocMemAux(CheckerContext &C,
   unsigned Count = C.blockCount();
   SValBuilder &svalBuilder = C.getSValBuilder();
   const LocationContext *LCtx = C.getPredecessor()->getLocationContext();
-  DefinedSVal RetVal =
-    cast<DefinedSVal>(svalBuilder.getConjuredHeapSymbolVal(CE, LCtx, Count));
+  DefinedSVal RetVal = svalBuilder.getConjuredHeapSymbolVal(CE, LCtx, Count)
+      .castAs<DefinedSVal>();
   state = state->BindExpr(CE, C.getLocationContext(), RetVal);
 
   // We expect the malloc functions to return a pointer.
-  if (!isa<Loc>(RetVal))
+  if (!RetVal.getAs<Loc>())
     return 0;
 
   // Fill the region with the initialization value.
@@ -568,12 +571,12 @@ ProgramStateRef MallocChecker::MallocMemAux(CheckerContext &C,
       dyn_cast_or_null<SymbolicRegion>(RetVal.getAsRegion());
   if (!R)
     return 0;
-  if (isa<DefinedOrUnknownSVal>(Size)) {
+  if (Optional<DefinedOrUnknownSVal> DefinedSize =
+          Size.getAs<DefinedOrUnknownSVal>()) {
     SValBuilder &svalBuilder = C.getSValBuilder();
     DefinedOrUnknownSVal Extent = R->getExtent(svalBuilder);
-    DefinedOrUnknownSVal DefinedSize = cast<DefinedOrUnknownSVal>(Size);
     DefinedOrUnknownSVal extentMatchesSize =
-        svalBuilder.evalEQ(state, Extent, DefinedSize);
+        svalBuilder.evalEQ(state, Extent, *DefinedSize);
 
     state = state->assume(extentMatchesSize, true);
     assert(state);
@@ -589,7 +592,7 @@ ProgramStateRef MallocChecker::MallocUpdateRefState(CheckerContext &C,
   SVal retVal = state->getSVal(CE, C.getLocationContext());
 
   // We expect the malloc functions to return a pointer.
-  if (!isa<Loc>(retVal))
+  if (!retVal.getAs<Loc>())
     return 0;
 
   SymbolRef Sym = retVal.getAsLocSymbol();
@@ -658,12 +661,12 @@ ProgramStateRef MallocChecker::FreeMemAux(CheckerContext &C,
                                           bool ReturnsNullOnFailure) const {
 
   SVal ArgVal = State->getSVal(ArgExpr, C.getLocationContext());
-  if (!isa<DefinedOrUnknownSVal>(ArgVal))
+  if (!ArgVal.getAs<DefinedOrUnknownSVal>())
     return 0;
-  DefinedOrUnknownSVal location = cast<DefinedOrUnknownSVal>(ArgVal);
+  DefinedOrUnknownSVal location = ArgVal.castAs<DefinedOrUnknownSVal>();
 
   // Check for null dereferences.
-  if (!isa<Loc>(location))
+  if (!location.getAs<Loc>())
     return 0;
 
   // The explicit NULL case, no operation is performed.
@@ -709,43 +712,55 @@ ProgramStateRef MallocChecker::FreeMemAux(CheckerContext &C,
     ReportBadFree(C, ArgVal, ArgExpr->getSourceRange());
     return 0;
   }
-  
-  const SymbolicRegion *SR = dyn_cast<SymbolicRegion>(R);
+
+  const SymbolicRegion *SrBase = dyn_cast<SymbolicRegion>(R->getBaseRegion());
   // Various cases could lead to non-symbol values here.
   // For now, ignore them.
-  if (!SR)
+  if (!SrBase)
     return 0;
 
-  SymbolRef Sym = SR->getSymbol();
-  const RefState *RS = State->get<RegionState>(Sym);
+  SymbolRef SymBase = SrBase->getSymbol();
+  const RefState *RsBase = State->get<RegionState>(SymBase);
   SymbolRef PreviousRetStatusSymbol = 0;
 
   // Check double free.
-  if (RS &&
-      (RS->isReleased() || RS->isRelinquished()) &&
-      !didPreviousFreeFail(State, Sym, PreviousRetStatusSymbol)) {
+  if (RsBase &&
+      (RsBase->isReleased() || RsBase->isRelinquished()) &&
+      !didPreviousFreeFail(State, SymBase, PreviousRetStatusSymbol)) {
 
     if (ExplodedNode *N = C.generateSink()) {
       if (!BT_DoubleFree)
         BT_DoubleFree.reset(
           new BugType("Double free", "Memory Error"));
-      BugReport *R = new BugReport(*BT_DoubleFree, 
-        (RS->isReleased() ? "Attempt to free released memory" : 
-                            "Attempt to free non-owned memory"), N);
+      BugReport *R = new BugReport(*BT_DoubleFree,
+        (RsBase->isReleased() ? "Attempt to free released memory"
+                              : "Attempt to free non-owned memory"),
+        N);
       R->addRange(ArgExpr->getSourceRange());
-      R->markInteresting(Sym);
+      R->markInteresting(SymBase);
       if (PreviousRetStatusSymbol)
         R->markInteresting(PreviousRetStatusSymbol);
-      R->addVisitor(new MallocBugVisitor(Sym));
+      R->addVisitor(new MallocBugVisitor(SymBase));
       C.emitReport(R);
     }
     return 0;
   }
 
-  ReleasedAllocated = (RS != 0);
+  // Check if the memory location being freed is the actual location
+  // allocated, or an offset.
+  RegionOffset Offset = R->getAsOffset();
+  if (RsBase && RsBase->isAllocated() &&
+      Offset.isValid() &&
+      !Offset.hasSymbolicOffset() &&
+      Offset.getOffset() != 0) {
+    ReportOffsetFree(C, ArgVal, ArgExpr->getSourceRange());
+    return 0;
+  }
+
+  ReleasedAllocated = (RsBase != 0);
 
   // Clean out the info on previous call to free return info.
-  State = State->remove<FreeReturnValue>(Sym);
+  State = State->remove<FreeReturnValue>(SymBase);
 
   // Keep track of the return value. If it is NULL, we will know that free 
   // failed.
@@ -753,23 +768,25 @@ ProgramStateRef MallocChecker::FreeMemAux(CheckerContext &C,
     SVal RetVal = C.getSVal(ParentExpr);
     SymbolRef RetStatusSymbol = RetVal.getAsSymbol();
     if (RetStatusSymbol) {
-      C.getSymbolManager().addSymbolDependency(Sym, RetStatusSymbol);
-      State = State->set<FreeReturnValue>(Sym, RetStatusSymbol);
+      C.getSymbolManager().addSymbolDependency(SymBase, RetStatusSymbol);
+      State = State->set<FreeReturnValue>(SymBase, RetStatusSymbol);
     }
   }
 
   // Normal free.
-  if (Hold)
-    return State->set<RegionState>(Sym, RefState::getRelinquished(ParentExpr));
-  return State->set<RegionState>(Sym, RefState::getReleased(ParentExpr));
+  if (Hold) {
+    return State->set<RegionState>(SymBase,
+                                   RefState::getRelinquished(ParentExpr));
+  }
+  return State->set<RegionState>(SymBase, RefState::getReleased(ParentExpr));
 }
 
 bool MallocChecker::SummarizeValue(raw_ostream &os, SVal V) {
-  if (nonloc::ConcreteInt *IntVal = dyn_cast<nonloc::ConcreteInt>(&V))
+  if (Optional<nonloc::ConcreteInt> IntVal = V.getAs<nonloc::ConcreteInt>())
     os << "an integer (" << IntVal->getValue() << ")";
-  else if (loc::ConcreteInt *ConstAddr = dyn_cast<loc::ConcreteInt>(&V))
+  else if (Optional<loc::ConcreteInt> ConstAddr = V.getAs<loc::ConcreteInt>())
     os << "a constant address (" << ConstAddr->getValue() << ")";
-  else if (loc::GotoLabel *Label = dyn_cast<loc::GotoLabel>(&V))
+  else if (Optional<loc::GotoLabel> Label = V.getAs<loc::GotoLabel>())
     os << "the address of the label '" << Label->getLabel()->getName() << "'";
   else
     return false;
@@ -890,6 +907,41 @@ void MallocChecker::ReportBadFree(CheckerContext &C, SVal ArgVal,
   }
 }
 
+void MallocChecker::ReportOffsetFree(CheckerContext &C, SVal ArgVal,
+                                     SourceRange Range) const {
+  ExplodedNode *N = C.generateSink();
+  if (N == NULL)
+    return;
+
+  if (!BT_OffsetFree)
+    BT_OffsetFree.reset(new BugType("Offset free", "Memory Error"));
+
+  SmallString<100> buf;
+  llvm::raw_svector_ostream os(buf);
+
+  const MemRegion *MR = ArgVal.getAsRegion();
+  assert(MR && "Only MemRegion based symbols can have offset free errors");
+
+  RegionOffset Offset = MR->getAsOffset();
+  assert((Offset.isValid() &&
+          !Offset.hasSymbolicOffset() &&
+          Offset.getOffset() != 0) &&
+         "Only symbols with a valid offset can have offset free errors");
+
+  int offsetBytes = Offset.getOffset() / C.getASTContext().getCharWidth();
+
+  os << "Argument to free() is offset by "
+     << offsetBytes
+     << " "
+     << ((abs(offsetBytes) > 1) ? "bytes" : "byte")
+     << " from the start of memory allocated by malloc()";
+
+  BugReport *R = new BugReport(*BT_OffsetFree, os.str(), N);
+  R->markInteresting(MR->getBaseRegion());
+  R->addRange(Range);
+  C.emitReport(R);
+}
+
 ProgramStateRef MallocChecker::ReallocMem(CheckerContext &C,
                                           const CallExpr *CE,
                                           bool FreesOnFail) const {
@@ -900,9 +952,9 @@ ProgramStateRef MallocChecker::ReallocMem(CheckerContext &C,
   const Expr *arg0Expr = CE->getArg(0);
   const LocationContext *LCtx = C.getLocationContext();
   SVal Arg0Val = state->getSVal(arg0Expr, LCtx);
-  if (!isa<DefinedOrUnknownSVal>(Arg0Val))
+  if (!Arg0Val.getAs<DefinedOrUnknownSVal>())
     return 0;
-  DefinedOrUnknownSVal arg0Val = cast<DefinedOrUnknownSVal>(Arg0Val);
+  DefinedOrUnknownSVal arg0Val = Arg0Val.castAs<DefinedOrUnknownSVal>();
 
   SValBuilder &svalBuilder = C.getSValBuilder();
 
@@ -916,9 +968,9 @@ ProgramStateRef MallocChecker::ReallocMem(CheckerContext &C,
 
   // Get the value of the size argument.
   SVal Arg1ValG = state->getSVal(Arg1, LCtx);
-  if (!isa<DefinedOrUnknownSVal>(Arg1ValG))
+  if (!Arg1ValG.getAs<DefinedOrUnknownSVal>())
     return 0;
-  DefinedOrUnknownSVal Arg1Val = cast<DefinedOrUnknownSVal>(Arg1ValG);
+  DefinedOrUnknownSVal Arg1Val = Arg1ValG.castAs<DefinedOrUnknownSVal>();
 
   // Compare the size argument to 0.
   DefinedOrUnknownSVal SizeZero =
@@ -1450,11 +1502,15 @@ bool MallocChecker::doesNotFreeMemory(const CallEvent *Call,
 
 ProgramStateRef MallocChecker::checkPointerEscape(ProgramStateRef State,
                                              const InvalidatedSymbols &Escaped,
-                                             const CallEvent *Call) const {
+                                             const CallEvent *Call,
+                                             PointerEscapeKind Kind) const {
   // If we know that the call does not free memory, keep tracking the top
   // level arguments.       
-  if (Call && doesNotFreeMemory(Call, State))
+  if ((Kind == PSK_DirectEscapeOnCall ||
+       Kind == PSK_IndirectEscapeOnCall) &&
+      doesNotFreeMemory(Call, State)) {
     return State;
+  }
 
   for (InvalidatedSymbols::const_iterator I = Escaped.begin(),
                                           E = Escaped.end();

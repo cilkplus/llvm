@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "clang/Lex/ModuleMap.h"
+#include "clang/Basic/CharInfo.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/FileManager.h"
@@ -36,7 +37,7 @@ using namespace clang;
 Module::ExportDecl 
 ModuleMap::resolveExport(Module *Mod, 
                          const Module::UnresolvedExportDecl &Unresolved,
-                         bool Complain) {
+                         bool Complain) const {
   // We may have just a wildcard.
   if (Unresolved.Id.empty()) {
     assert(Unresolved.Wildcard && "Invalid unresolved export");
@@ -107,26 +108,15 @@ static StringRef sanitizeFilenameAsIdentifier(StringRef Name,
   if (Name.empty())
     return Name;
 
-  // Check whether the filename is already an identifier; this is the common
-  // case.
-  bool isIdentifier = true;
-  for (unsigned I = 0, N = Name.size(); I != N; ++I) {
-    if (isalpha(Name[I]) || Name[I] == '_' || (isdigit(Name[I]) && I > 0))
-      continue;
-
-    isIdentifier = false;
-    break;
-  }
-
-  if (!isIdentifier) {
+  if (!isValidIdentifier(Name)) {
     // If we don't already have something with the form of an identifier,
     // create a buffer with the sanitized name.
     Buffer.clear();
-    if (isdigit(Name[0]))
+    if (isDigit(Name[0]))
       Buffer.push_back('_');
     Buffer.reserve(Buffer.size() + Name.size());
     for (unsigned I = 0, N = Name.size(); I != N; ++I) {
-      if (isalnum(Name[I]) || isspace(Name[I]))
+      if (isIdentifierBody(Name[I]))
         Buffer.push_back(Name[I]);
       else
         Buffer.push_back('_');
@@ -249,8 +239,8 @@ Module *ModuleMap::findModuleForHeader(const FileEntry *File) {
   return 0;
 }
 
-bool ModuleMap::isHeaderInUnavailableModule(const FileEntry *Header) {
-  HeadersMap::iterator Known = Headers.find(Header);
+bool ModuleMap::isHeaderInUnavailableModule(const FileEntry *Header) const {
+  HeadersMap::const_iterator Known = Headers.find(Header);
   if (Known != Headers.end())
     return !Known->second.isAvailable();
   
@@ -261,7 +251,7 @@ bool ModuleMap::isHeaderInUnavailableModule(const FileEntry *Header) {
   // Keep walking up the directory hierarchy, looking for a directory with
   // an umbrella header.
   do {    
-    llvm::DenseMap<const DirectoryEntry *, Module *>::iterator KnownDir
+    llvm::DenseMap<const DirectoryEntry *, Module *>::const_iterator KnownDir
       = UmbrellaDirs.find(Dir);
     if (KnownDir != UmbrellaDirs.end()) {
       Module *Found = KnownDir->second;
@@ -315,15 +305,16 @@ bool ModuleMap::isHeaderInUnavailableModule(const FileEntry *Header) {
   return false;
 }
 
-Module *ModuleMap::findModule(StringRef Name) {
-  llvm::StringMap<Module *>::iterator Known = Modules.find(Name);
+Module *ModuleMap::findModule(StringRef Name) const {
+  llvm::StringMap<Module *>::const_iterator Known = Modules.find(Name);
   if (Known != Modules.end())
     return Known->getValue();
   
   return 0;
 }
 
-Module *ModuleMap::lookupModuleUnqualified(StringRef Name, Module *Context) {
+Module *ModuleMap::lookupModuleUnqualified(StringRef Name,
+                                           Module *Context) const {
   for(; Context; Context = Context->Parent) {
     if (Module *Sub = lookupModuleQualified(Name, Context))
       return Sub;
@@ -332,7 +323,7 @@ Module *ModuleMap::lookupModuleUnqualified(StringRef Name, Module *Context) {
   return findModule(Name);
 }
 
-Module *ModuleMap::lookupModuleQualified(StringRef Name, Module *Context) {
+Module *ModuleMap::lookupModuleQualified(StringRef Name, Module *Context) const{
   if (!Context)
     return findModule(Name);
   
@@ -355,10 +346,10 @@ ModuleMap::findOrCreateModule(StringRef Name, Module *Parent, bool IsFramework,
 }
 
 bool ModuleMap::canInferFrameworkModule(const DirectoryEntry *ParentDir,
-                                        StringRef Name, bool &IsSystem) {
+                                        StringRef Name, bool &IsSystem) const {
   // Check whether we have already looked into the parent directory
   // for a module map.
-  llvm::DenseMap<const DirectoryEntry *, InferredDirectory>::iterator
+  llvm::DenseMap<const DirectoryEntry *, InferredDirectory>::const_iterator
     inferred = InferredDirectories.find(ParentDir);
   if (inferred == InferredDirectories.end())
     return false;
@@ -425,7 +416,7 @@ ModuleMap::inferFrameworkModule(StringRef ModuleName,
       if (const DirectoryEntry *ParentDir = FileMgr.getDirectory(Parent)) {
         // Check whether we have already looked into the parent directory
         // for a module map.
-        llvm::DenseMap<const DirectoryEntry *, InferredDirectory>::iterator
+        llvm::DenseMap<const DirectoryEntry *, InferredDirectory>::const_iterator
           inferred = InferredDirectories.find(ParentDir);
         if (inferred == InferredDirectories.end()) {
           // We haven't looked here before. Load a module map, if there is
@@ -570,7 +561,7 @@ void ModuleMap::addHeader(Module *Mod, const FileEntry *Header,
 }
 
 const FileEntry *
-ModuleMap::getContainingModuleMapFile(Module *Module) {
+ModuleMap::getContainingModuleMapFile(Module *Module) const {
   if (Module->DefinitionLoc.isInvalid() || !SourceMgr)
     return 0;
 

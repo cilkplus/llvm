@@ -34,13 +34,17 @@ enum TokenType {
   TT_ConditionalExpr,
   TT_CtorInitializerColon,
   TT_ImplicitStringLiteral,
+  TT_InheritanceColon,
   TT_LineComment,
+  TT_ObjCArrayLiteral,
   TT_ObjCBlockLParen,
   TT_ObjCDecl,
-  TT_ObjCMethodSpecifier,
+  TT_ObjCForIn,
   TT_ObjCMethodExpr,
+  TT_ObjCMethodSpecifier,
   TT_ObjCProperty,
-  TT_OverloadedOperator,
+  TT_ObjCSelectorName,
+  TT_OverloadedOperatorLParen,
   TT_PointerOrReference,
   TT_PureVirtualSpecifier,
   TT_RangeBasedForLoopColon,
@@ -66,10 +70,12 @@ enum LineType {
 class AnnotatedToken {
 public:
   explicit AnnotatedToken(const FormatToken &FormatTok)
-      : FormatTok(FormatTok), Type(TT_Unknown), SpaceRequiredBefore(false),
+      : FormatTok(FormatTok), Type(TT_Unknown), SpacesRequiredBefore(0),
         CanBreakBefore(false), MustBreakBefore(false),
         ClosesTemplateDeclaration(false), MatchingParen(NULL),
-        ParameterCount(1), Parent(NULL) {
+        ParameterCount(0), BindingStrength(0), SplitPenalty(0),
+        LongestObjCSelectorName(0), Parent(NULL), FakeLParens(0),
+        FakeRParens(0) {
   }
 
   bool is(tok::TokenKind Kind) const { return FormatTok.Tok.is(Kind); }
@@ -83,7 +89,7 @@ public:
 
   TokenType Type;
 
-  bool SpaceRequiredBefore;
+  unsigned SpacesRequiredBefore;
   bool CanBreakBefore;
   bool MustBreakBefore;
 
@@ -101,11 +107,25 @@ public:
   /// \brief The total length of the line up to and including this token.
   unsigned TotalLength;
 
+  // FIXME: Come up with a 'cleaner' concept.
+  /// \brief The binding strength of a token. This is a combined value of
+  /// operator precedence, parenthesis nesting, etc.
+  unsigned BindingStrength;
+
   /// \brief Penalty for inserting a line break before this token.
   unsigned SplitPenalty;
 
+  /// \brief If this is the first ObjC selector name in an ObjC method
+  /// definition or call, this contains the length of the longest name.
+  unsigned LongestObjCSelectorName;
+
   std::vector<AnnotatedToken> Children;
   AnnotatedToken *Parent;
+
+  /// \brief Insert this many fake ( before this token for correct indentation.
+  unsigned FakeLParens;
+  /// \brief Insert this many fake ) after this token for correct indentation.
+  unsigned FakeRParens;
 
   const AnnotatedToken *getPreviousNoneComment() const {
     AnnotatedToken *Tok = Parent;
@@ -161,66 +181,33 @@ inline prec::Level getPrecedence(const AnnotatedToken &Tok) {
 class TokenAnnotator {
 public:
   TokenAnnotator(const FormatStyle &Style, SourceManager &SourceMgr, Lexer &Lex,
-                 AnnotatedLine &Line)
-      : Style(Style), SourceMgr(SourceMgr), Lex(Lex), Line(Line) {
+                 IdentifierInfo &Ident_in)
+      : Style(Style), SourceMgr(SourceMgr), Lex(Lex), Ident_in(Ident_in) {
   }
 
-  void annotate();
-  void calculateExtraInformation(AnnotatedToken &Current);
+  void annotate(AnnotatedLine &Line);
+  void calculateFormattingInformation(AnnotatedLine &Line);
 
 private:
   /// \brief Calculate the penalty for splitting before \c Tok.
-  unsigned splitPenalty(const AnnotatedToken &Tok);
+  unsigned splitPenalty(const AnnotatedLine &Line, const AnnotatedToken &Tok);
 
-  void determineTokenTypes(AnnotatedToken &Current, bool IsExpression,
-                           bool LookForFunctionName);
-
-  /// \brief Starting from \p Current, this searches backwards for an
-  /// identifier which could be the start of a function name and marks it.
-  void findFunctionName(AnnotatedToken *Current);
-
-  /// \brief Returns the previous token ignoring comments.
-  const AnnotatedToken *getPreviousToken(const AnnotatedToken &Tok) {
-    const AnnotatedToken *PrevToken = Tok.Parent;
-    while (PrevToken != NULL && PrevToken->is(tok::comment))
-      PrevToken = PrevToken->Parent;
-    return PrevToken;
-  }
-
-  /// \brief Returns the next token ignoring comments.
-  const AnnotatedToken *getNextToken(const AnnotatedToken &Tok) {
-    if (Tok.Children.empty())
-      return NULL;
-    const AnnotatedToken *NextToken = &Tok.Children[0];
-    while (NextToken->is(tok::comment)) {
-      if (NextToken->Children.empty())
-        return NULL;
-      NextToken = &NextToken->Children[0];
-    }
-    return NextToken;
-  }
-
-  /// \brief Return the type of the given token assuming it is * or &.
-  TokenType determineStarAmpUsage(const AnnotatedToken &Tok, bool IsExpression);
-
-  TokenType determinePlusMinusCaretUsage(const AnnotatedToken &Tok);
-
-  /// \brief Determine whether ++/-- are pre- or post-increments/-decrements.
-  TokenType determineIncrementUsage(const AnnotatedToken &Tok);
-
-  bool spaceRequiredBetween(const AnnotatedToken &Left,
+  bool spaceRequiredBetween(const AnnotatedLine &Line,
+                            const AnnotatedToken &Left,
                             const AnnotatedToken &Right);
 
-  bool spaceRequiredBefore(const AnnotatedToken &Tok);
+  bool spaceRequiredBefore(const AnnotatedLine &Line,
+                           const AnnotatedToken &Tok);
 
-  bool canBreakBefore(const AnnotatedToken &Right);
+  bool canBreakBefore(const AnnotatedLine &Line, const AnnotatedToken &Right);
 
-  FormatStyle Style;
+  const FormatStyle &Style;
   SourceManager &SourceMgr;
   Lexer &Lex;
-  AnnotatedLine &Line;
-};
 
+  // Contextual keywords:
+  IdentifierInfo &Ident_in;
+};
 
 } // end namespace format
 } // end namespace clang

@@ -5,7 +5,8 @@ BUILT_SOURCES = Attrs.inc AttrImpl.inc AttrDump.inc \
                 CommentNodes.inc CommentHTMLTags.inc \
                 CommentHTMLTagsProperties.inc \
                 CommentHTMLNamedCharacterReferences.inc \
-                CommentCommandInfo.inc
+                CommentCommandInfo.inc \
+                CommentCommandList.inc
 
 TABLEGEN_INC_FILES_COMMON = 1
 
@@ -64,4 +65,9 @@ $(ObjDir)/CommentCommandInfo.inc.tmp : $(PROJ_SRC_DIR)/CommentCommands.td \
                                               $(CLANG_TBLGEN) $(ObjDir)/.dir
 	$(Echo) "Building Clang comment command info with tblgen"
 	$(Verb) $(ClangTableGen) -gen-clang-comment-command-info -o $(call SYSPATH, $@) $<
+
+$(ObjDir)/CommentCommandList.inc.tmp : $(PROJ_SRC_DIR)/CommentCommands.td \
+                                              $(CLANG_TBLGEN) $(ObjDir)/.dir
+	$(Echo) "Building Clang list of comment commands with tblgen"
+	$(Verb) $(ClangTableGen) -gen-clang-comment-command-list -o $(call SYSPATH, $@) $<
 

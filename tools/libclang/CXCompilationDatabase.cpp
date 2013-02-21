@@ -4,7 +4,6 @@
 
 using namespace clang;
 using namespace clang::tooling;
-using namespace clang::cxstring;
 
 extern "C" {
 
@@ -110,7 +109,7 @@ clang_CompileCommand_getDirectory(CXCompileCommand CCmd)
     return cxstring::createNull();
 
   CompileCommand *cmd = static_cast<CompileCommand *>(CCmd);
-  return createCXString(cmd->Directory.c_str(), /*DupString=*/false);
+  return cxstring::createRef(cmd->Directory.c_str());
 }
 
 unsigned
@@ -133,7 +132,7 @@ clang_CompileCommand_getArg(CXCompileCommand CCmd, unsigned Arg)
   if (Arg >= Cmd->CommandLine.size())
     return cxstring::createNull();
 
-  return createCXString(Cmd->CommandLine[Arg].c_str(), /*DupString=*/false);
+  return cxstring::createRef(Cmd->CommandLine[Arg].c_str());
 }
 
 

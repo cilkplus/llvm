@@ -1705,15 +1705,17 @@ static llvm::Constant *createARCRuntimeFunction(CodeGenModule &CGM,
                                                 StringRef fnName) {
   llvm::Constant *fn = CGM.CreateRuntimeFunction(type, fnName);
 
-  // If the target runtime doesn't naturally support ARC, emit weak
-  // references to the runtime support library.  We don't really
-  // permit this to fail, but we need a particular relocation style.
   if (llvm::Function *f = dyn_cast<llvm::Function>(fn)) {
-    if (!CGM.getLangOpts().ObjCRuntime.hasNativeARC())
+    // If the target runtime doesn't naturally support ARC, emit weak
+    // references to the runtime support library.  We don't really
+    // permit this to fail, but we need a particular relocation style.
+    if (!CGM.getLangOpts().ObjCRuntime.hasNativeARC()) {
       f->setLinkage(llvm::Function::ExternalWeakLinkage);
-    // set nonlazybind attribute for these APIs for performance.
-    if (fnName == "objc_retain" || fnName  == "objc_release")
+    } else if (fnName == "objc_retain" || fnName  == "objc_release") {
+      // If we have Native ARC, set nonlazybind attribute for these APIs for
+      // performance.
       f->addFnAttr(llvm::Attribute::NonLazyBind);
+    }
   }
 
   return fn;
@@ -2495,12 +2497,10 @@ static TryEmitResult tryEmitARCRetainPseudoObject(CodeGenFunction &CGF,
 
 static TryEmitResult
 tryEmitARCRetainScalarExpr(CodeGenFunction &CGF, const Expr *e) {
-  // Look through cleanups.
-  if (const ExprWithCleanups *cleanups = dyn_cast<ExprWithCleanups>(e)) {
-    CGF.enterFullExpression(cleanups);
-    CodeGenFunction::RunCleanupsScope scope(CGF);
-    return tryEmitARCRetainScalarExpr(CGF, cleanups->getSubExpr());
-  }
+  // We should *never* see a nested full-expression here, because if
+  // we fail to emit at +1, our caller must not retain after we close
+  // out the full-expression.
+  assert(!isa<ExprWithCleanups>(e));
 
   // The desired result type, if it differs from the type of the
   // ultimate opaque expression.
@@ -2652,6 +2652,13 @@ static llvm::Value *emitARCRetainLoadOfScalar(CodeGenFunction &CGF,
 /// best-effort attempt to peephole expressions that naturally produce
 /// retained objects.
 llvm::Value *CodeGenFunction::EmitARCRetainScalarExpr(const Expr *e) {
+  // The retain needs to happen within the full-expression.
+  if (const ExprWithCleanups *cleanups = dyn_cast<ExprWithCleanups>(e)) {
+    enterFullExpression(cleanups);
+    RunCleanupsScope scope(*this);
+    return EmitARCRetainScalarExpr(cleanups->getSubExpr());
+  }
+
   TryEmitResult result = tryEmitARCRetainScalarExpr(*this, e);
   llvm::Value *value = result.getPointer();
   if (!result.getInt())
@@ -2661,6 +2668,13 @@ llvm::Value *CodeGenFunction::EmitARCRetainScalarExpr(const Expr *e) {
 
 llvm::Value *
 CodeGenFunction::EmitARCRetainAutoreleaseScalarExpr(const Expr *e) {
+  // The retain needs to happen within the full-expression.
+  if (const ExprWithCleanups *cleanups = dyn_cast<ExprWithCleanups>(e)) {
+    enterFullExpression(cleanups);
+    RunCleanupsScope scope(*this);
+    return EmitARCRetainAutoreleaseScalarExpr(cleanups->getSubExpr());
+  }
+
   TryEmitResult result = tryEmitARCRetainScalarExpr(*this, e);
   llvm::Value *value = result.getPointer();
   if (result.getInt())
@@ -2692,17 +2706,7 @@ llvm::Value *CodeGenFunction::EmitObjCThrowOperand(const Expr *expr) {
   // In ARC, retain and autorelease the expression.
   if (getLangOpts().ObjCAutoRefCount) {
     // Do so before running any cleanups for the full-expression.
-    // tryEmitARCRetainScalarExpr does make an effort to do things
-    // inside cleanups, but there are crazy cases like
-    //   @throw A().foo;
-    // where a full retain+autorelease is required and would
-    // otherwise happen after the destructor for the temporary.
-    if (const ExprWithCleanups *ewc = dyn_cast<ExprWithCleanups>(expr)) {
-      enterFullExpression(ewc);
-      expr = ewc->getSubExpr();
-    }
-
-    CodeGenFunction::RunCleanupsScope cleanups(*this);
+    // EmitARCRetainAutoreleaseScalarExpr does this for us.
     return EmitARCRetainAutoreleaseScalarExpr(expr);
   }
 

@@ -811,9 +811,15 @@ static void ParseHeaderSearchArgs(HeaderSearchOptions &Opts, ArgList &Args) {
   if (const Arg *A = Args.getLastArg(OPT_stdlib_EQ))
     Opts.UseLibcxx = (strcmp(A->getValue(), "libc++") == 0);
   Opts.ResourceDir = Args.getLastArgValue(OPT_resource_dir);
-  Opts.ModuleCachePath = Args.getLastArgValue(OPT_fmodule_cache_path);
+  Opts.ModuleCachePath = Args.getLastArgValue(OPT_fmodules_cache_path);
   Opts.DisableModuleHash = Args.hasArg(OPT_fdisable_module_hash);
-  
+
+  for (arg_iterator it = Args.filtered_begin(OPT_fmodules_ignore_macro),
+       ie = Args.filtered_end(); it != ie; ++it) {
+    StringRef MacroDef = (*it)->getValue();
+    Opts.ModulesIgnoreMacros.insert(MacroDef.split('=').first);
+  }
+
   // Add -I..., -F..., and -index-header-map options in order.
   bool IsIndexHeaderMap = false;
   for (arg_iterator it = Args.filtered_begin(OPT_I, OPT_F, 
@@ -995,6 +1001,24 @@ void CompilerInvocation::setLangDefaults(LangOptions &Opts, InputKind IK,
   Opts.DollarIdents = !Opts.AsmPreprocessor;
 }
 
+/// Attempt to parse a visibility value out of the given argument.
+static Visibility parseVisibility(Arg *arg, ArgList &args,
+                                  DiagnosticsEngine &diags) {
+  StringRef value = arg->getValue();
+  if (value == "default") {
+    return DefaultVisibility;
+  } else if (value == "hidden") {
+    return HiddenVisibility;
+  } else if (value == "protected") {
+    // FIXME: diagnose if target does not support protected visibility
+    return ProtectedVisibility;
+  }
+
+  diags.Report(diag::err_drv_invalid_value)
+    << arg->getAsString(args) << value;
+  return DefaultVisibility;
+}
+
 static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
                           DiagnosticsEngine &Diags) {
   // FIXME: Cleanup per-file based stuff.
@@ -1126,17 +1150,19 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   if (Args.hasArg(OPT_fdelayed_template_parsing))
     Opts.DelayedTemplateParsing = 1;
 
-  StringRef Vis = Args.getLastArgValue(OPT_fvisibility, "default");
-  if (Vis == "default")
-    Opts.setVisibilityMode(DefaultVisibility);
-  else if (Vis == "hidden")
-    Opts.setVisibilityMode(HiddenVisibility);
-  else if (Vis == "protected")
-    // FIXME: diagnose if target does not support protected visibility
-    Opts.setVisibilityMode(ProtectedVisibility);
-  else
-    Diags.Report(diag::err_drv_invalid_value)
-      << Args.getLastArg(OPT_fvisibility)->getAsString(Args) << Vis;
+  // The value-visibility mode defaults to "default".
+  if (Arg *visOpt = Args.getLastArg(OPT_fvisibility)) {
+    Opts.setValueVisibilityMode(parseVisibility(visOpt, Args, Diags));
+  } else {
+    Opts.setValueVisibilityMode(DefaultVisibility);
+  }
+
+  // The type-visibility mode defaults to the value-visibility mode.
+  if (Arg *typeVisOpt = Args.getLastArg(OPT_ftype_visibility)) {
+    Opts.setTypeVisibilityMode(parseVisibility(typeVisOpt, Args, Diags));
+  } else {
+    Opts.setTypeVisibilityMode(Opts.getValueVisibilityMode());
+  }
 
   if (Args.hasArg(OPT_fvisibility_inlines_hidden))
     Opts.InlineVisibilityHidden = 1;
@@ -1350,8 +1376,7 @@ static void ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
   Opts.MacroIncludes = Args.getAllArgValues(OPT_imacros);
 
   // Add the ordered list of -includes.
-  for (arg_iterator it = Args.filtered_begin(OPT_include, OPT_include_pch,
-                                             OPT_include_pth),
+  for (arg_iterator it = Args.filtered_begin(OPT_include),
          ie = Args.filtered_end(); it != ie; ++it) {
     const Arg *A = *it;
     Opts.Includes.push_back(A->getValue());
@@ -1606,6 +1631,7 @@ std::string CompilerInvocation::getModuleHash() const {
 
   // Extend the signature with preprocessor options.
   const PreprocessorOptions &ppOpts = getPreprocessorOpts();
+  const HeaderSearchOptions &hsOpts = getHeaderSearchOpts();
   code = hash_combine(code, ppOpts.UsePredefines, ppOpts.DetailedRecord);
 
   std::vector<StringRef> MacroDefs;
@@ -1613,11 +1639,19 @@ std::string CompilerInvocation::getModuleHash() const {
             I = getPreprocessorOpts().Macros.begin(),
          IEnd = getPreprocessorOpts().Macros.end();
        I != IEnd; ++I) {
+    // If we're supposed to ignore this macro for the purposes of modules,
+    // don't put it into the hash.
+    if (!hsOpts.ModulesIgnoreMacros.empty()) {
+      // Check whether we're ignoring this macro.
+      StringRef MacroDef = I->first;
+      if (hsOpts.ModulesIgnoreMacros.count(MacroDef.split('=').first))
+        continue;
+    }
+
     code = hash_combine(code, I->first, I->second);
   }
 
   // Extend the signature with the sysroot.
-  const HeaderSearchOptions &hsOpts = getHeaderSearchOpts();
   code = hash_combine(code, hsOpts.Sysroot, hsOpts.UseBuiltinIncludes,
                       hsOpts.UseStandardSystemIncludes,
                       hsOpts.UseStandardCXXIncludes,
