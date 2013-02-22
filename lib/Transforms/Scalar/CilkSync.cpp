@@ -105,10 +105,10 @@ namespace {
     DenseMap<Value*, CilkCFGNode*> InstrToCilkCFG;
     SmallVector<CilkCFGNode*, 4> CilkCalls;
 
-    /// \brief Cache of previously visited CilkCFG nodes
+    /// \brief Cache of previously visited CilkCFG nodes.
     SmallPtrSet<const void*, 8> Visited;
 
-    /// \brief The Cilk stack frame in the function
+    /// \brief The Cilk stack frame in the function.
     const Value *StackFrame;
 
   private:
@@ -200,13 +200,16 @@ CilkCFGNode *ElideCilkSync::analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode) {
   while (I) {
     // Build Cilk-only CFG
     CilkCFGNode *Parent = CurNode;
-    if (insertOrUpdateCilkCFG(I, Parent, CurNode)) {
-      CilkCalls.push_back(CurNode);
-      if (!RootNode)
-        RootNode = CurNode;
-    } else {
+
+    // Already visited this basic block so we can skip
+    // remaining cilk calls if any
+    if (!insertOrUpdateCilkCFG(I, Parent, CurNode))
       break;
-    }
+
+    // Add a new CFG node for this cilk call
+    CilkCalls.push_back(CurNode);
+    if (!RootNode)
+      RootNode = CurNode;
 
     // Compute gen/kill sets for each sync and spawn. The Cilk stack frame
     // is the "expression"
@@ -219,12 +222,10 @@ CilkCFGNode *ElideCilkSync::analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode) {
       // In(B) = all stack frames
       CurNode->SFInfo.In = StackFrame;
       updateOut(CurNode->SFInfo);
-    } else {
+    } else if (IsKill)
       // In(Start) = empty
       // Out(Start) = Gen(Start)
-      if (IsKill)
-        CurNode->SFInfo.Out = CurNode->SFInfo.Gen;
-    }
+      CurNode->SFInfo.Out = CurNode->SFInfo.Gen;
 
     I = getNextInstr(BBI, IsKill);
   }
@@ -350,12 +351,12 @@ bool ElideCilkSync::insertOrUpdateCilkCFG(Value *V,
     NewNode = It->second;
     NewNode->addPred(Parent);
     return false;
-  } else {
-    // Never saw this instruction/BB before, create a new node
-    NewNode = new CilkCFGNode(V, Parent);
-    InstrToCilkCFG[V] = NewNode;
-    return true;
   }
+
+  // Never saw this instruction/BB before, create a new node
+  NewNode = new CilkCFGNode(V, Parent);
+  InstrToCilkCFG[V] = NewNode;
+  return true;
 }
 
 /// \brief Sets StackFrame to the unique Cilk stack frame in the given
@@ -383,8 +384,7 @@ bool ElideCilkSync::findAllStackFrames(const Function *F) {
 }
 
 /// \brief Returns the stack frame argument passed to the call to CilkFn.
-const Value *ElideCilkSync::getStackFrame(const CallInst *CilkFn) const
-{
+const Value *ElideCilkSync::getStackFrame(const CallInst *CilkFn) const {
   assert(CilkFn->getNumArgOperands() > 0 &&
          "Cilk function must at least 1 argument");
   return CilkFn->getArgOperand(0);
