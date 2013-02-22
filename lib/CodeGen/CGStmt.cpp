@@ -1732,12 +1732,12 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
   // Initialize the captured struct
   AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
   LValue SlotLV = MakeAddrLValue(Slot.getAddr(), RecordTy,
-                                     Slot.getAlignment());
+                                 Slot.getAlignment());
 
   RecordDecl::field_iterator CurField = RD->field_begin();
   for (CapturedStmt::capture_const_iterator I = S.capture_begin(),
                                             E = S.capture_end();
-                                            I != E; ++I, ++CurField) {
+       I != E; ++I, ++CurField) {
     LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
     ArrayRef<VarDecl *> ArrayIndexes;
     EmitInitializerForField(*CurField, LV, I->getCopyExpr(), ArrayIndexes);

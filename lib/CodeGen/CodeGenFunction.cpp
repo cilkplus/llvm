@@ -73,11 +73,8 @@ CodeGenFunction::~CodeGenFunction() {
   if (FirstBlockInfo)
     destroyBlockInfos(FirstBlockInfo);
 
-  if (CurCGCilkImplicitSyncInfo)
-    delete CurCGCilkImplicitSyncInfo;
-
-  if (CurCGCapturedStmtInfo)
-    delete CurCGCapturedStmtInfo;
+  delete CurCGCilkImplicitSyncInfo;
+  delete CurCGCapturedStmtInfo;
 }
 
 
@@ -194,10 +191,9 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
     if (FD && FD->isParallelRegion()) {
       EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
       popCatchScope();
-      if (CatchScope.hasEHBranches()) {
+      if (CatchScope.hasEHBranches())
         CGM.getCilkPlusRuntime().EmitCilkHelperCatch(
           CatchScope.getHandler(0).Block, *this);
-      }
     }
   }
 

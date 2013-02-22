@@ -1716,7 +1716,6 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
           LValue LV
             = MakeNaturalAlignAddrLValue(CurCGCapturedStmtInfo->getThisValue(),
                                          TagType);
-          
           return EmitLValueForField(LV, FD);
         }
       }

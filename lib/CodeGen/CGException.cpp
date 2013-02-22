@@ -467,11 +467,9 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   EmitAnyExprToExn(*this, E->getSubExpr(), ExceptionPtr);
 
   // Emit an implicit sync if necessary for a spawning function.
-  if (getLangOpts().CilkPlus) {
-    if (CurCGCilkImplicitSyncInfo &&
-        CurCGCilkImplicitSyncInfo->needsImplicitSync(E))
-      CGM.getCilkPlusRuntime().EmitCilkSync(*this);
-  }
+  if (CurCGCilkImplicitSyncInfo &&
+      CurCGCilkImplicitSyncInfo->needsImplicitSync(E))
+    CGM.getCilkPlusRuntime().EmitCilkSync(*this);
 
   // Now throw the exception.
   llvm::Constant *TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, 

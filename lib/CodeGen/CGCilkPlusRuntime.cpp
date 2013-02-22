@@ -1500,20 +1500,6 @@ public:
 /// - a try-block needs an implicit sync on exit,
 /// - a throw expression needs an implicit sync prior to throw.
 ///
-/// TODO: This analysis does not remove all unnecessary implicit syncs.
-/// For example,
-/// \code
-/// void fib(int n) {
-///   if (n < 2) return n;
-///   int x = _Cilk_spawn fib(n - 1);
-///   int y = fib(n - 2);
-///   _Cilk_sync;
-///   return x + y;
-/// }
-/// \endcode
-/// The implicit sync for this function could be eilded. However, it will
-/// still be kept by the current analysis.
-///
 void CGCilkImplicitSyncInfo::analyze() {
   assert(CGF.getLangOpts().CilkPlus && "Not compiling a cilk plus program");
   const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
