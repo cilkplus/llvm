@@ -2053,17 +2053,7 @@ enum CXCursorKind {
    */
   CXCursor_DeclStmt                      = 231,
 
-  /** \brief A syncing statement from the Cilk Plus extensions to C/C++
-    */
-  CXCursor_CilkSyncStmt                  = 232,
-
-  /** \brief A Spawn statement from the Cilk Plus extensions to C/C++
-    */
-  CXCursor_CilkSpawnStmt                 = 233,
-
-  CXCursor_CilkSpawnCapturedStmt         = 234,
-
-  CXCursor_LastStmt                      = CXCursor_CilkSpawnCapturedStmt,
+  CXCursor_LastStmt                      = CXCursor_DeclStmt,
 
   /**
    * \brief Cursor that represents the translation unit itself.

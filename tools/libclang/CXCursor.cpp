@@ -486,15 +486,9 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     break;
 
   case Stmt::CilkSyncStmtClass:
-    K = CXCursor_CilkSyncStmt;
-    break;
-
   case Stmt::CilkSpawnStmtClass:
-    K = CXCursor_CilkSpawnStmt;
-    break;
-
   case Stmt::CilkSpawnCapturedStmtClass:
-    K = CXCursor_CilkSpawnCapturedStmt;
+    K = CXCursor_UnexposedStmt;
     break;
   }
   

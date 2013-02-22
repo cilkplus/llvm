@@ -3729,12 +3729,6 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("CXXAccessSpecifier");
   case CXCursor_ModuleImportDecl:
     return cxstring::createRef("ModuleImport");
-  case CXCursor_CilkSyncStmt:
-    return cxstring::createRef("CilkSyncStmt");
-  case CXCursor_CilkSpawnStmt:
-    return cxstring::createRef("CilkSpawnStmt");
-  case CXCursor_CilkSpawnCapturedStmt:
-    return cxstring::createRef("CilkSpawnCapturedStmt");
   }
 
   llvm_unreachable("Unhandled CXCursorKind");
