@@ -201,8 +201,8 @@ CilkCFGNode *ElideCilkSync::analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode) {
     // Build Cilk-only CFG
     CilkCFGNode *Parent = CurNode;
 
-    // Already visited this basic block so we can skip
-    // remaining cilk calls if any
+    // Already visited this basic block so we can skip the remaining
+    // Cilk calls, since they are already successors
     if (!insertOrUpdateCilkCFG(I, Parent, CurNode))
       break;
 
@@ -222,10 +222,7 @@ CilkCFGNode *ElideCilkSync::analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode) {
       // In(B) = all stack frames
       CurNode->SFInfo.In = StackFrame;
       updateOut(CurNode->SFInfo);
-    } else if (IsKill)
-      // In(Start) = empty
-      // Out(Start) = Gen(Start)
-      CurNode->SFInfo.Out = CurNode->SFInfo.Gen;
+    }
 
     I = getNextInstr(BBI, IsKill);
   }
