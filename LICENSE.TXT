@@ -95,3 +95,4 @@ licenses, and/or restrictions:
 Program             Directory
 -------             ---------
 mach_override       lib/interception/mach_override
+Cilk Plus Runtime   lib/cilk
