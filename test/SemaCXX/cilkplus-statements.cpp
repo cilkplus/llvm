@@ -368,6 +368,7 @@ struct W {
   W();
   W(const W&);
   W(W&&);
+  ~W();
 };
 
 W makew();
@@ -389,6 +390,8 @@ void test11() {
   W w1 = W(_Cilk_spawn makew());  // expected-error {{_Cilk_spawn is not at statement level}}
   W w2 = W(_Cilk_spawn makewref()); // expected-error {{_Cilk_spawn is not at statement level}}
   W w3 = W(_Cilk_spawn makewrefref()); // expected-error {{_Cilk_spawn is not at statement level}}
+  W &&w4 = _Cilk_spawn makew();
+  const W &w5 = _Cilk_spawn makew();
 }
 
 }

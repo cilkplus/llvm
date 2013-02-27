@@ -425,6 +425,8 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
       RHS = E->getSubExpr();
     else if (MaterializeTemporaryExpr *E = dyn_cast<MaterializeTemporaryExpr>(RHS))
       RHS = E->GetTemporaryExpr();
+    else if (CXXBindTemporaryExpr *E = dyn_cast<CXXBindTemporaryExpr>(RHS))
+      RHS = E->getSubExpr();
     else if (CXXConstructExpr *E = dyn_cast<CXXConstructExpr>(RHS)) {
       // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
       // so handle it the same way as CXXFunctionalCastExpr
