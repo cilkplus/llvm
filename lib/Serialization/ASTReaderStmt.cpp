@@ -1555,11 +1555,6 @@ void ASTStmtReader::VisitCilkSyncStmt(CilkSyncStmt *S) {
   S->SyncLoc = ReadSourceLocation(Record, Idx);
 }
 
-void ASTStmtReader::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
-  VisitStmt(S);
-  S->setSubStmt(Reader.ReadSubStmt());
-}
-
 void ASTStmtReader::VisitCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
   VisitStmt(S);
   S->setSubStmt(Reader.ReadSubStmt());
@@ -2246,10 +2241,6 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case STMT_CILKSYNC:
       S = new (Context) CilkSyncStmt(Empty);
-      break;
-
-    case STMT_CILKSPAWN:
-      S = new (Context) CilkSpawnStmt(Empty);
       break;
 
     case STMT_CILKSPAWN_CAPTURED:

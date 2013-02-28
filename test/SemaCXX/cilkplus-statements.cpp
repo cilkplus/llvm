@@ -394,6 +394,14 @@ void test11() {
   const W &w5 = _Cilk_spawn makew();
 }
 
+void test_spawn_initialize() {
+  static int a1 = _Cilk_spawn foo();   // expected-error{{cannot spawn initialize a 'static' variable}}
+  register int a2 = _Cilk_spawn foo(); // OK
+
+  static W w1 = _Cilk_spawn makew();   // expected-error{{cannot spawn initialize a 'static' variable}}
+  register W w2 = _Cilk_spawn makew(); // OK
+}
+
 }
 
 namespace unsupported_spawn_calls {

@@ -9374,12 +9374,6 @@ TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
 
 template<typename Derived>
 StmtResult
-TreeTransform<Derived>::TransformCilkSpawnStmt(CilkSpawnStmt *S) {
-  return Owned(S);
-}
-
-template<typename Derived>
-StmtResult
 TreeTransform<Derived>::TransformCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
   return Owned(S);
 }

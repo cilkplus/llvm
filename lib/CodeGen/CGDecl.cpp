@@ -766,11 +766,34 @@ static bool shouldUseMemSetPlusStoresToInitialize(llvm::Constant *Init,
          canEmitInitWithFewStoresAfterMemset(Init, StoreBudget);
 }
 
+/// EmitCaptureReceiverDecl - Emit allocation and cleanup code for
+/// a receiver declaration in a captured statement. The initialization
+/// is emitted in the helper function.
+void CodeGenFunction::EmitCaptureReceiverDecl(const VarDecl &D) {
+#ifndef NDEBUG
+  const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CurFuncDecl);
+  assert(FD && FD->isSpawning() && "unexpected function declaration");
+#endif
+  AutoVarEmission Emission = EmitAutoVarAlloca(D);
+  setCaptureReceiverAddr(&D, Emission.Address);
+  EmitAutoVarCleanups(Emission);
+}
 
 /// EmitAutoVarDecl - Emit code and set up an entry in LocalDeclMap for a
 /// variable declaration with auto, register, or no storage class specifier.
 /// These turn into simple stack objects, or GlobalValues depending on target.
 void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
+  if (getLangOpts().CilkPlus && CurCGCapturedStmtInfo) {
+    // Do initialization if this decl is inside the helper function.
+    if (CurCGCapturedStmtInfo->isReceiverDecl(&D)) {
+      AutoVarEmission Emission(D);
+      Emission.Alignment = getContext().getDeclAlign(&D);
+      Emission.Address = CurCGCapturedStmtInfo->getReceiverAddr();
+      EmitAutoVarInit(Emission);
+      return;
+    }
+  }
+
   AutoVarEmission emission = EmitAutoVarAlloca(D);
   EmitAutoVarInit(emission);
   EmitAutoVarCleanups(emission);
@@ -1597,6 +1620,10 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
   // The captured record (passed as the first parameter) is the base address.
   if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isThisParmVarDecl(&D))
     CurCGCapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
+
+  // The address of the receiver decl is passed as the second parameter.
+  if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isReceiverParmVarDecl(&D))
+    CurCGCapturedStmtInfo->setReceiverAddr(Builder.CreateLoad(DeclPtr));
 
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {

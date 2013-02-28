@@ -1912,40 +1912,6 @@ public:
   child_range children() { return child_range(); }
 };
 
-/// \brief This represents a _Cilk_spawn statement.
-class CilkSpawnStmt : public Stmt {
-  Stmt *SubStmt;
-
-  friend class ASTStmtReader;
-public:
-  CilkSpawnStmt(Stmt *S) : Stmt(CilkSpawnStmtClass), SubStmt(S) {
-    assert(S && "null spawn");
-  }
-
-  explicit CilkSpawnStmt(EmptyShell E) : Stmt(CilkSpawnStmtClass, E) {}
-
-  Stmt *getSubStmt() { return SubStmt; }
-  const Stmt *getSubStmt() const { return SubStmt; }
-  void setSubStmt(Stmt *S) { SubStmt = S; }
-
-  SourceLocation getLocStart() const LLVM_READONLY {
-    return SubStmt->getLocStart();
-  }
-  SourceLocation getLocEnd() const LLVM_READONLY {
-    return SubStmt->getLocEnd();
-  }
-  SourceRange getSourceRange() const LLVM_READONLY;
-
-  static bool classof(const Stmt *T) {
-    return T->getStmtClass() == CilkSpawnStmtClass;
-  }
-  static bool classof(CilkSpawnStmt *) { return true; }
-
-  child_range children() {
-    return child_range(&SubStmt, &SubStmt + 1);
-  }
-};
-
 // \brief the base class for capturing a statement into a seperate function
 class CapturedStmt : public Stmt {
 public:

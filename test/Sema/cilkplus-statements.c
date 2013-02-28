@@ -96,3 +96,9 @@ void test3() {
   int x = 0, y = 1;
   _Cilk_spawn __sync_fetch_and_add(&x, y); // expected-error {{builtin function cannot be spawned}}
 }
+
+void test4() {
+  auto int x = _Cilk_spawn foo(); // OK
+  register int y = _Cilk_spawn foo(); // OK
+  extern int z = _Cilk_spawn foo(); // expected-error{{'extern' variable cannot have an initializer}}
+}

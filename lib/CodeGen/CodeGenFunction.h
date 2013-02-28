@@ -594,7 +594,8 @@ public:
   class CGCapturedStmtInfo {
   public:
     CGCapturedStmtInfo()
-      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) { }
+      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0),
+        ReceiverParmVarDecl(0), ReceiverAddr(0), ReceiverDecl(0) { }
 
     void setThisValue(llvm::Value *V) { ThisValue = V; }
     llvm::Value *getThisValue() const { return ThisValue; }
@@ -611,6 +612,17 @@ public:
       return V == ThisParmVarDecl;
     }
 
+    bool isReceiverParmVarDecl(const VarDecl *V) const {
+      return V == ReceiverParmVarDecl;
+    }
+
+    bool isReceiverDecl(const VarDecl *V) const {
+      return V == ReceiverDecl;
+    }
+
+    llvm::Value *getReceiverAddr() const { return ReceiverAddr; }
+    void setReceiverAddr(llvm::Value *val) { ReceiverAddr = val; }
+
     void initCGCapturedStmtInfo(const CapturedStmt *S) {
       RecordDecl::field_iterator Field = S->getRecordDecl()->field_begin();
       for (CapturedStmt::capture_const_iterator I = S->capture_begin(),
@@ -625,6 +637,13 @@ public:
       const FunctionDecl *FD = S->getFunctionDecl();
       assert(FD && (FD->getNumParams() > 0) && "unexpected helper function");
       ThisParmVarDecl = FD->getParamDecl(0);
+
+      const Stmt *SubStmt = S->getSubStmt();
+      if (const DeclStmt *DS = dyn_cast<DeclStmt>(SubStmt)) {
+        assert(DS->isSingleDecl() && "single decl expected");
+        ReceiverParmVarDecl = FD->getParamDecl(1);
+        ReceiverDecl = cast<VarDecl>(DS->getSingleDecl());
+      }
     }
 
   private:
@@ -640,19 +659,25 @@ public:
 
     /// \brief The captured record parameter to the helper function
     const ParmVarDecl *ThisParmVarDecl;
-  };
 
-  /// \brief Whether a Cilk spawn statement is being emitted
-  //
-  /// FIXME: This is not used for captured statements; should be removed.
-  ///
-  bool EmittingCilkSpawn;
+    /// \brief The receiver parameter to the helper function.
+    const ParmVarDecl *ReceiverParmVarDecl;
+
+    /// \brief The address of the receiver.
+    llvm::Value *ReceiverAddr;
+
+    /// \brief The receiver declariation.
+    const VarDecl *ReceiverDecl;
+  };
 
   /// \brief Hold CodeGen info for captured statements
   CGCapturedStmtInfo *CurCGCapturedStmtInfo;
 
   /// \brief Information about implicit syncs used during code generation.
   CGCilkImplicitSyncInfo *CurCGCilkImplicitSyncInfo;
+
+  /// \brief The current receiver for a captured statement and its address.
+  std::pair<const VarDecl *, llvm::Value *> CurCaptureReceiver;
 
   /// BoundsChecking - Emit run-time bounds checks. Higher values mean
   /// potentially higher performance penalties.
@@ -2136,7 +2161,6 @@ public:
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
-  void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   void EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S);
   void EmitCapturedStmt(const CapturedStmt &S);
   //===--------------------------------------------------------------------===//
@@ -2638,15 +2662,6 @@ public:
   //===--------------------------------------------------------------------===//
   //                         Cilk Emission
   //===--------------------------------------------------------------------===//
-  /// EmitCilkSpawnPoint - Emit a call to a dummy function so that it can
-  /// be replaced later with a Cilk spawn runtime library call.
-  void EmitCilkSpawnPoint();
-
-  /// IsEmittingCilkSpawn - Return true if currently emitting a Cilk spawn.
-  bool IsEmittingCilkSpawn() const { return EmittingCilkSpawn; }
-
-  /// SetEmittingCilkSpawn - Set whether a Cilk spawn is being emitted.
-  void SetEmittingCilkSpawn(bool b) { EmittingCilkSpawn = b; }
 
   /// \brief Initialize the CGCapturedStmtInfo
   void SetCurCGCapturedStmtInfo(CGCapturedStmtInfo *Info) {
@@ -2658,6 +2673,24 @@ public:
 
   /// \brief Retrieve the current CGCapturedStmtInfo
   CGCapturedStmtInfo *GetCurCGCapturedStmtInfo() { return CurCGCapturedStmtInfo; }
+
+  /// \brief Record the receiver declaration for a captured statement.
+  void setCaptureReceiverDecl(const VarDecl *D) {
+    assert(D && "null receiver decl");
+    CurCaptureReceiver.first = D;
+    CurCaptureReceiver.second = 0;
+  }
+
+  /// \brief Set the receiver address for a captured statement.
+  void setCaptureReceiverAddr(const VarDecl *D, llvm::Value *Addr) {
+    assert(CurCaptureReceiver.first == D && "unexpected receiver");
+    CurCaptureReceiver.second = Addr;
+  }
+
+  /// \brief Emit the receiver declaration for a captured statement.
+  /// Only allocation and cleanup will be emitted, and initialization will be
+  /// emitted in the helper function.
+  void EmitCaptureReceiverDecl(const VarDecl &D);
 
   //===--------------------------------------------------------------------===//
   //                             Internal Helpers

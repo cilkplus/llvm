@@ -1024,10 +1024,6 @@ SEHFinallyStmt* SEHFinallyStmt::Create(ASTContext &C,
   return new(C)SEHFinallyStmt(Loc,Block);
 }
 
-SourceRange CilkSpawnStmt::getSourceRange() const {
-  return SubStmt->getSourceRange();
-}
-
 void CapturedStmt::setCaptures(ASTContext &Context,
                                const Capture *begin,
                                const Capture *end) {

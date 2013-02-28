@@ -2257,24 +2257,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   // If this call is a Cilk spawn call, then we need to emit the prologue
   // before emitting the real call.
-  //
-  // FIXME: Since current captured statements cannot handle variable
-  // initializations, emit a call to the Cilk spawn dummy function if
-  // the spawn is of the form
-  //
-  // T x = _Cilk_spawn func();
-  //
-  // This allows to remember the spawning point and replace it with the
-  // prologue after the function outlining via CodeExtractor.
-  //
-  if (IsCilkSpawnCall) {
-    assert((IsEmittingCilkSpawn() ||
-            GetCurCGCapturedStmtInfo()) && "dangling spawn call expression");
-    if (IsEmittingCilkSpawn())
-      EmitCilkSpawnPoint();
-    else
-      CGM.getCilkPlusRuntime().EmitCilkHelperPrologue(*this);
-  }
+  if (IsCilkSpawnCall)
+    CGM.getCilkPlusRuntime().EmitCilkHelperPrologue(*this);
 
   llvm::BasicBlock *InvokeDest = 0;
   if (!Attrs.hasAttribute(llvm::AttributeSet::FunctionIndex,

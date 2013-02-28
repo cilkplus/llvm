@@ -2730,8 +2730,9 @@ public:
   StmtResult ActOnCilkSpawnStmt(Stmt *S);
 
   RecordDecl *CreateCapturedStmtRecordDecl(FunctionDecl *&FD,
-                                             SourceLocation Loc,
-                                             IdentifierInfo *MangledName);
+                                           SourceLocation Loc,
+                                           IdentifierInfo *MangledName,
+                                           QualType ReceiverType = QualType());
   SmallVector<CapturedStmt::Capture, 4>
   buildCapturedStmtCaptureList(SmallVector<sema::CapturingScopeInfo::Capture, 4>
                                  &Candidates);

@@ -719,10 +719,6 @@ llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
   if (!CGM.getLangOpts().Exceptions)
     return 0;
 
-  // FIXME: enable emitting InvokeInst for _Cilk_spawn
-  if (IsEmittingCilkSpawn())
-    return 0;
-
   // Check the innermost scope for a cached landing pad.  If this is
   // a non-EH cleanup, we'll check enclosing scopes in EmitLandingPad.
   llvm::BasicBlock *LP = EHStack.begin()->getCachedLandingPad();

@@ -1296,7 +1296,6 @@ namespace clang {
 
       // Cilk Plus
       STMT_CILKSYNC,
-      STMT_CILKSPAWN,
       STMT_CILKSPAWN_CAPTURED
     };
 

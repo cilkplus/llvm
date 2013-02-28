@@ -6159,6 +6159,8 @@ def err_cannot_spawn_builtin: Error<
   "builtin function cannot be spawned">;
 def err_cannot_spawn_function: Error<
   "function cannot be spawned">;
+def err_cannot_init_static_variable: Error <
+  "cannot spawn initialize a 'static' variable">;
 } // end of sema category
 
 let CategoryName = "Related Result Type Issue" in {

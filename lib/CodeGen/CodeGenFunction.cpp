@@ -36,7 +36,6 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   : CodeGenTypeCache(cgm), CGM(cgm),
     Target(CGM.getContext().getTargetInfo()),
     Builder(cgm.getModule().getContext()),
-    EmittingCilkSpawn(false),
     CurCGCapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getSanOpts().Null |
@@ -1354,15 +1353,4 @@ llvm::Value *CodeGenFunction::EmitFieldAnnotations(const FieldDecl *D,
   }
 
   return V;
-}
-
-void CodeGenFunction::EmitCilkSpawnPoint() {
-  llvm::Module &M = CGM.getModule();
-  llvm::LLVMContext &Context = getLLVMContext();
-
-  llvm::Type *VoidTy = llvm::Type::getVoidTy(Context);
-  llvm::FunctionType *FunctionTy = llvm::FunctionType::get(VoidTy, false);
-  llvm::Value *SpawnFunc = M.getOrInsertFunction("__cilk_spawn_point",
-                                                 FunctionTy);
-  Builder.CreateCall(SpawnFunc);
 }

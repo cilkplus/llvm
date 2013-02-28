@@ -169,9 +169,6 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHTryStmtClass:
     // FIXME Not yet implemented
     break;
-  case Stmt::CilkSpawnStmtClass:
-    EmitCilkSpawnStmt(cast<CilkSpawnStmt>(*S));
-    break;
   case Stmt::CilkSpawnCapturedStmtClass:
     EmitCilkSpawnCapturedStmt(cast<CilkSpawnCapturedStmt>(*S));
     break;
@@ -1712,10 +1709,6 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
   }
 }
 
-void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
-  CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
-}
-
 void
 CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
   CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
@@ -1723,7 +1716,7 @@ CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
 
 void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
   const FunctionDecl *HelperDecl = S.getFunctionDecl();
-  assert((HelperDecl->getNumParams() == 1) && "only one argument expected");
+  assert((HelperDecl->getNumParams() >= 1) && "at least one argument expected");
   assert(HelperDecl->hasBody() && "missing function body");
 
   const RecordDecl *RD = S.getRecordDecl();
@@ -1744,8 +1737,14 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
   }
 
   // The first argument is the address of captured struct
-  llvm::SmallVector<llvm::Value *, 1> Args;
+  llvm::SmallVector<llvm::Value *, 2> Args;
   Args.push_back(SlotLV.getAddress());
+
+  // The second argument is the address of the receiver, if exists.
+  if (HelperDecl->getNumParams() >= 2) {
+    assert(CurCaptureReceiver.second && "no allocation yet");
+    Args.push_back(CurCaptureReceiver.second);
+  }
 
   CGM.getCaptureDeclMap().insert(
       std::pair<const FunctionDecl*,

@@ -27,7 +27,6 @@
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/CodeExtractor.h"
 
 namespace {
 
@@ -1027,105 +1026,6 @@ static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
 namespace clang {
 namespace CodeGen {
 
-/// \brief Emit code the the CilkSpawnStmt.
-///
-/// FIXME: This function creates helper functions using CodeExtractor
-/// which cannot handle exceptions, and should be removed as soon as
-/// captured statements can handle all use cases.
-///
-void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                      const CilkSpawnStmt &S) {
-  // Get the __cilkrts_stack_frame
-  Value *SF = LookupStackFrame(CGF);
-  assert(SF && "null stack frame unexpected");
-
-  BasicBlock *Entry = CGF.createBasicBlock("cilk.spawn.savestate"),
-             *Body = CGF.createBasicBlock("cilk.spawn.helpercall"),
-             *Exit  = CGF.createBasicBlock("cilk.spawn.continuation");
-
-  CGF.EmitBlock(Entry);
-
-  {
-    CGBuilderTy B(Entry);
-
-    // Need to save state before spawning
-    Value *C = EmitCilkSetJmp(B, SF, CGF);
-    C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
-    B.CreateCondBr(C, Body, Exit);
-  }
-
-  CGF.EmitBlock(Body);
-  {
-    CGF.SetEmittingCilkSpawn(true);
-    CGF.EmitStmt(S.getSubStmt());
-    CGF.SetEmittingCilkSpawn(false);
-  }
-  CGF.EmitBlock(Exit);
-
-  // Extract the spawn statement into a spawn helper function
-  RegionInfo RI;
-  DominatorTree DT;
-  Region R(Body, Exit, &RI, &DT);
-  Function *H = CodeExtractor(DT, *R.getNode(), false).extractCodeRegion();
-
-  if (!H)
-    CGF.ErrorUnsupported(&S,
-        "unsupported spawning call; cannot extract into a function");
-
-  H->addFnAttr(Attribute::NoInline);
-  H->setName("__cilk_spawn_helper");
-
-  // Add a __cilkrts_stack_frame to the helper
-  BasicBlock &BB = H->getEntryBlock();
-  CGBuilderTy Builder(&BB, BB.begin());
-
-  llvm::Type *SFTy = StackFrameBuilder::get(CGF.getLLVMContext());
-  Value *HelperSF = Builder.CreateAlloca(SFTy);
-
-  // Find the location to insert the init/detach call for the stack frame
-  Function *SpawnPointMarkerFn
-    = CGF.CGM.getModule().getFunction("__cilk_spawn_point");
-
-  if (!SpawnPointMarkerFn)
-    CGF.ErrorUnsupported(&S,
-        "unsupported spawning call; cannot find the spawning point");
-
-  CallInst *SpawnPointCall = 0;
-  for (llvm::Value::use_iterator UI = SpawnPointMarkerFn->use_begin(),
-                                 UE = SpawnPointMarkerFn->use_end();
-                                 UI != UE; ++UI) {
-    assert(isa<CallInst>(*UI) && "should be a call instruction");
-    CallInst *Call = cast<CallInst>(*UI);
-    if (Call->getParent()->getParent() == H) {
-      assert(!SpawnPointCall && "should not call multiple times");
-      SpawnPointCall = Call;
-    }
-  }
-  assert(SpawnPointCall && "should call __cilk_spawn_point");
-
-  {
-    CGBuilderTy B(SpawnPointCall);
-
-    // Initialize the stack frame and detach
-    B.CreateCall(GetCilkHelperPrologue(CGF), HelperSF);
-
-    // Cleanup the marker function
-    assert(SpawnPointCall->use_empty() && "should not have any use");
-    SpawnPointCall->eraseFromParent();
-    SpawnPointMarkerFn->eraseFromParent();
-  }
-
-  // Add a call to the epilogue right before the function returns
-  // We have to do this for all BasicBlocks that have a return statement
-  for (Function::iterator I = H->begin(), E = H->end(); I != E; ++I) {
-    if (!isa<ReturnInst>(I->getTerminator()))
-      continue;
-
-    CGBuilderTy B(&I->getInstList().back());
-    B.CreateCall(GetCilkHelperEpilogue(CGF), HelperSF);
-  }
-}
-
 /// \brief Emit code for a CilkSpawnCapturedStmt.
 void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
                                       const CilkSpawnCapturedStmt &S) {
@@ -1150,6 +1050,24 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
 
   CGF.EmitBlock(Body);
   {
+    // If this spawn initializes a variable, alloc this variable and
+    // set it as the current receiver.
+    if (const DeclStmt *DS = dyn_cast<DeclStmt>(S.getSubStmt())) {
+      assert(DS->isSingleDecl() && "single decl expected");
+      const VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
+      CGF.setCaptureReceiverDecl(VD);
+
+      switch (VD->getStorageClass()) {
+      case SC_None:
+      case SC_Auto:
+      case SC_Register:
+        CGF.EmitCaptureReceiverDecl(*VD);
+        break;
+      default:
+        CGF.CGM.ErrorUnsupported(VD, "unexpected stroage class for a receiver");
+      }
+    }
+
     // Emit call to the helper function
     CGF.EmitCapturedStmt(S);
   }
@@ -1357,7 +1275,6 @@ static CXXTryStmt *getEnclosingTryBlock(Stmt *S, const Stmt *Top,
                                         const ParentMap &PMap) {
   assert(S && "NULL Statement");
   assert((isa<CilkSpawnCapturedStmt>(S) ||
-          isa<CilkSpawnStmt>(S) ||
           isa<CXXThrowExpr>(S)) && "unexpected statement");
 
   while (true) {
@@ -1415,21 +1332,6 @@ public:
   bool TraverseBlockExpr(BlockExpr *E) { return true; }
 
   bool TraverseCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
-    CXXTryStmt *TS = getEnclosingTryBlock(S, Body, PMap);
-
-    // If a spawn statement is not enclosed by any try-block, then
-    // this function needs an implicit sync; otherwise, this try-block
-    // needs an implicit sync.
-    if (!TS)
-      NeedsSync = true;
-    else
-      TrySet.insert(TS);
-
-    return true;
-  }
-
-  // FIXME: Should be removed once CilkSpawnStmt is not in use.
-  bool TraverseCilkSpawnStmt(CilkSpawnStmt *S) {
     CXXTryStmt *TS = getEnclosingTryBlock(S, Body, PMap);
 
     // If a spawn statement is not enclosed by any try-block, then

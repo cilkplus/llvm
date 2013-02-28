@@ -302,6 +302,7 @@ public:
 void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
   DiagnoseCilkSpawnHelper D(*this, HasError);
 
+  VarDecl *LHS = 0;
   Expr *RHS = 0;
   switch (S->getStmtClass()) {
   case Stmt::CompoundStmtClass:
@@ -328,8 +329,10 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
     DeclStmt *DS = cast<DeclStmt>(S);
     if (DS->isSingleDecl() && isa<VarDecl>(DS->getSingleDecl())) {
       VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
-      if (VD->hasInit())
+      if (VD->hasInit()) {
+        LHS = VD;
         RHS = VD->getInit();
+      }
     } else
       D.TraverseStmt(DS);
     break;
@@ -415,6 +418,22 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
   }
 
   if (!RHS) return;
+
+  if (LHS) {
+    switch (LHS->getStorageClass()) {
+    case SC_None:
+    case SC_Auto:
+    case SC_Register:
+      break;
+    case SC_Static:
+      HasError = true;
+      Diag(LHS->getLocation(), diag::err_cannot_init_static_variable)
+        << LHS->getSourceRange();
+      break;
+    default:
+      llvm_unreachable("variable with an unexpected storage class");
+    }
+  }
 
   // assignment or initializer
   // - the RHS may be wrapped in casts and/or involve object constructors
@@ -515,8 +534,7 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       DiagnoseCilkSpawn(Elts[i], HasError);
       if (!Dependent && !HasError) {
         StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
-        if (!Spawn.isInvalid() && (isa<CilkSpawnStmt>(Spawn.get()) ||
-                                   isa<CilkSpawnCapturedStmt>(Spawn.get())))
+        if (!Spawn.isInvalid() && isa<CilkSpawnCapturedStmt>(Spawn.get()))
           Elts[i] = Spawn.take();
       }
     }
@@ -3135,8 +3153,8 @@ public:
 
 RecordDecl*
 Sema::CreateCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
-                                     IdentifierInfo *MangledName)
-{
+                                   IdentifierInfo *MangledName,
+                                   QualType ReceiverType) {
   DeclContext *DC = CurContext;
   while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
     DC = DC->getParent();
@@ -3148,35 +3166,63 @@ Sema::CreateCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
   RD->setImplicit();
   RD->startDefinition();
 
-  // The capture helper function returns void and takes a single argument,
-  // a pointer to the captured record.
-  {
-    QualType ParamType = Context.getPointerType(Context.getTagDeclType(RD));
+  // The capture helper function returns void and takes a a pointer to the
+  // captured record and a pointer to the receiver variable if necessary.
+  bool HasReceiver = !ReceiverType.isNull();
 
-    FunctionProtoType::ExtProtoInfo EPI;
-    QualType FunctionTy = Context.getFunctionType(Context.VoidTy,
-                                                  &ParamType, 1, EPI);
-
-    TypeSourceInfo *FunctionTyInfo
-      = Context.getTrivialTypeSourceInfo(FunctionTy);
-
-    FD = FunctionDecl::Create(Context, CurContext, SourceLocation(),
-                              SourceLocation(), MangledName, FunctionTy,
-                              FunctionTyInfo, SC_Static, SC_Static);
-
-    DC->addDecl(FD);
-
-    IdentifierInfo *IdThis = &PP.getIdentifierTable().get("this");
-    ParmVarDecl *Param
-      = ParmVarDecl::Create(Context, FD, SourceLocation(), SourceLocation(),
-                            IdThis, ParamType,
-                            Context.getTrivialTypeSourceInfo(ParamType),
-                            SC_None, SC_None, /* DefaultArg =*/0);
-    FD->setParams(Param);
-    FD->setImplicit(true);
-    FD->setUsed(true);
-    FD->setParallelRegion();
+  QualType CapParamType = Context.getPointerType(Context.getTagDeclType(RD));
+  QualType RecParamType;
+  if (HasReceiver) {
+    const Type *Ty = ReceiverType.getTypePtr();
+    if (Ty->isReferenceType()) {
+      QualType ETy = cast<ReferenceType>(Ty)->getPointeeType();
+      RecParamType = Context.getPointerType(Context.getPointerType(ETy));
+    } else
+      RecParamType = Context.getPointerType(ReceiverType);
   }
+
+  QualType FunctionTy;
+  if (HasReceiver) {
+    QualType ParamsType[2] = { CapParamType, RecParamType };
+    FunctionProtoType::ExtProtoInfo EPI;
+    FunctionTy = Context.getFunctionType(Context.VoidTy, ParamsType, 2, EPI);
+  } else {
+    FunctionProtoType::ExtProtoInfo EPI;
+    FunctionTy = Context.getFunctionType(Context.VoidTy, &CapParamType, 1, EPI);
+  }
+
+  TypeSourceInfo *FuncTyInfo = Context.getTrivialTypeSourceInfo(FunctionTy);
+  FD = FunctionDecl::Create(Context, CurContext, SourceLocation(),
+                            SourceLocation(), MangledName, FunctionTy,
+                            FuncTyInfo, SC_None, SC_None);
+  ParmVarDecl *CapParam = 0;
+  {
+    IdentifierInfo *IdThis = &PP.getIdentifierTable().get("this");
+    TypeSourceInfo *TyInfo = Context.getTrivialTypeSourceInfo(CapParamType);
+    CapParam = ParmVarDecl::Create(Context, FD, SourceLocation(),
+                                   SourceLocation(), IdThis, CapParamType,
+                                   TyInfo, SC_None, SC_None,
+                                   /* DefaultArg =*/0);
+  }
+
+  if (HasReceiver) {
+    IdentifierInfo *IdRec = &PP.getIdentifierTable().get("rec");
+    TypeSourceInfo *TyInfo = Context.getTrivialTypeSourceInfo(RecParamType);
+    ParmVarDecl *RecParam = ParmVarDecl::Create(Context, FD, SourceLocation(),
+                                                SourceLocation(), IdRec,
+                                                RecParamType,
+                                                TyInfo,
+                                                SC_None, SC_None,
+                                                /* DefaultArg =*/0);
+    ParmVarDecl *Params[2] = { CapParam, RecParam };
+    FD->setParams(Params);
+  } else
+    FD->setParams(CapParam);
+
+  FD->setImplicit(true);
+  FD->setUsed(true);
+  FD->setParallelRegion();
+  DC->addDecl(FD);
 
   return RD;
 }
@@ -3215,12 +3261,23 @@ static IdentifierInfo *GetMangledHelperName(Sema &S) {
   return &S.PP.getIdentifierTable().get((name + llvm::Twine(count++)).str());
 }
 
+static QualType GetReceiverType(ASTContext &Context, CilkSpawnCapturedStmt *S) {
+  Stmt *SubStmt = S->getSubStmt();
+  if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(SubStmt))
+    if (VarDecl *VD = cast<VarDecl>(DS->getSingleDecl()))
+      return Context.getCanonicalType(VD->getType());
+
+  return QualType();
+}
+
 static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
                                    CilkSpawnCapturedStmt *Spawn) {
   // Create a caputred recored decl and start its definition
   FunctionDecl *FD = 0;
+  QualType ReceiverType = GetReceiverType(S.Context, Spawn);
   RecordDecl *RD = S.CreateCapturedStmtRecordDecl(FD, SourceLocation(),
-                                                    GetMangledHelperName(S));
+                                                  GetMangledHelperName(S),
+                                                  ReceiverType);
 
   // Enter the capturing scope for this parallel region
   S.PushParallelRegionScope(CurScope, FD, RD);
@@ -3251,20 +3308,6 @@ static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
   S.PopFunctionScopeInfo();
 }
 
-// FIXME: Delete this function after captured statement implementation of
-// Cilk Spawn is completed.
-static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
-  if (!S)
-    return S;
-
-  SpawnHelper Helper;
-  Helper.TraverseStmt(S);
-  if (!Helper.hasSpawn())
-    return S;
-
-  return new (SemaRef.Context) CilkSpawnStmt(S);
-}
-
 static Stmt *tryCreateCilkSpawnCapturedStmt(Sema &SemaRef, Stmt *S) {
   if (!S)
     return S;
@@ -3293,11 +3336,6 @@ static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
     break;
   }
   case Stmt::DeclStmtClass:
-    // FIXME: Cannot handle variable declariations with _Cilk_spawn.
-    // Use the code extractor to handle this case, in which exceptions will
-    // be disabled locally.
-    S = tryCreateCilkSpawnStmt(SemaRef, S);
-    break;
   case Stmt::BinaryOperatorClass:
   case Stmt::ExprWithCleanupsClass:
   case Stmt::CallExprClass:
@@ -3325,7 +3363,7 @@ static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
     if (Stmt *Then = cast<IfStmt>(S)->getThen()) {
       BuildCilkSpawnStmt(SemaRef, Then);
       cast<IfStmt>(S)->setThen(Then);
-    } 
+    }
     if (Stmt *Else = cast<IfStmt>(S)->getElse()) {
       BuildCilkSpawnStmt(SemaRef, Else);
       cast<IfStmt>(S)->setElse(Else);
