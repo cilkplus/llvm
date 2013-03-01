@@ -188,11 +188,20 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   if (getLangOpts().Exceptions && getLangOpts().CilkPlus) {
     const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CurFuncDecl);
     if (FD && FD->isParallelRegion()) {
-      EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
-      popCatchScope();
+      EHScopeStack::iterator Catch = EHStack.begin();
+      for (EHScopeStack::iterator End = EHStack.end(); Catch != End; ++Catch)
+        if (isa<EHCatchScope>(*Catch)) break;
+
+      assert(Catch != EHStack.end() && "missing catch scope");
+      PopCleanupBlocks(EHStack.stabilize(Catch));
+
+      // There should be exactly one catch scope on top of the stack from the
+      // spawn-helper function.
+      EHCatchScope &CatchScope = cast<EHCatchScope>(*Catch);
       if (CatchScope.hasEHBranches())
         CGM.getCilkPlusRuntime().EmitCilkHelperCatch(
           CatchScope.getHandler(0).Block, *this);
+      popCatchScope();
     }
   }
 

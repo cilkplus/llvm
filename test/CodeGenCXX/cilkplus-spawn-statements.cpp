@@ -1,15 +1,38 @@
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK1 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK2 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK3 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK4 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK5 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK6 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK7 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK8 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK9 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK10 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK11 %s
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK-CILK12 %s
+// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o %t
+// RUN: FileCheck -check-prefix=CHECK-CILK1 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK2 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK3 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK4 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK5 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK6 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK7 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK8 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK9 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK10 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK11 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK12 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK13 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK14 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK15 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK16 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK17 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK18 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK19 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK20 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK21 --input-file=%t %s
+//
+// These two are expected to fail until assigning a temporary to a ref is
+// implemented in the _Cilk_spawn codegen.
+// RUN: not FileCheck -check-prefix=CHECK-CILK22 --input-file=%t %s
+// RUN: not FileCheck -check-prefix=CHECK-CILK23 --input-file=%t %s
+//
+// RUN: FileCheck -check-prefix=CHECK-CILK24 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK25 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK26 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK27 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK28 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK29 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK30 --input-file=%t %s
 
 /*
  *  A _Cilk_spawn can only appear in 3 places
@@ -343,4 +366,258 @@ namespace capture_array_by_value {
     // CHECK-CILK12: %struct.capture.{{.*}} = type { [3 x [5 x float]]* }
     // CHECK-CILK12: %struct.capture.{{.*}} = type { [11 x [7 x %struct.S]]* }
   }
+}
+
+namespace spawn_variable_initialization {
+
+template <typename T, int>
+T foo();
+template <typename T, int>
+T& lfoo();
+template <typename T, int>
+T&& rfoo();
+template <typename T, int>
+const T& cfoo();
+
+template <typename T, int x>
+void value_from_temp() {
+  T t = _Cilk_spawn foo<T, x>();
+}
+
+template <typename T, int x>
+void value_from_const_ref() {
+  T t = _Cilk_spawn cfoo<T, x>();
+}
+
+template <typename T, int x>
+void rvalue_ref_from_temp() {
+  T &&t = _Cilk_spawn foo<T, x>();
+}
+
+template <typename T, int x>
+void const_ref_from_temp() {
+  const T &t = _Cilk_spawn foo<T, x>();
+}
+
+template <typename T, int x>
+void lvalue_ref_from_lvalue_ref() {
+  T &t = _Cilk_spawn lfoo<T, x>();
+}
+
+template <typename T, int x>
+void rvalue_ref_from_rvalue_ref() {
+  T &&t = _Cilk_spawn rfoo<T, x>();
+}
+
+template <typename T, int x>
+void const_ref_from_const_ref() {
+  const T &t = _Cilk_spawn cfoo<T, x>();
+}
+
+struct Class {
+  Class();
+  Class(const Class&);
+  ~Class();
+};
+
+void test() {
+  value_from_temp<float, 1001>();
+  // CHECK-CILK13: define {{.*}}value_from_temp{{.*}}1001
+  // CHECK-CILK13:   alloca float, align
+  // CHECK-CILK13:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  //
+  // CHECK-CILK13: define internal void @[[Helper]]
+  // CHECK-CILK13:   call float @
+  // CHECK-CILK13-NEXT: store float %
+
+  value_from_const_ref<float, 1002>();
+  // CHECK-CILK14: define {{.*}}value_from_const_ref{{.*}}1002
+  // CHECK-CILK14:   alloca float, align
+  // CHECK-CILK14:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  //
+  // CHECK-CILK14: define internal void @[[Helper]]
+  // CHECK-CILK14:   call float* @
+  // CHECK-CILK14-NEXT: load float*
+  // CHECK-CILK14-NEXT: store float %
+
+  rvalue_ref_from_temp<float, 1003>();
+  // CHECK-CILK15: define {{.*}}rvalue_ref_from_temp{{.*}}1003
+  // CHECK-CILK15:   alloca float*, align
+  // CHECK-CILK15:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  //
+  // CHECK-CILK15: define internal void @[[Helper]]
+  // CHECK-CILK15:   call float @
+  // CHECK-CILK15-NEXT: store float %
+  // CHECK-CILK15-NEXT: store float* %
+
+  const_ref_from_temp<float, 1004>();
+  // CHECK-CILK16: define {{.*}}const_ref_from_temp{{.*}}1004
+  // CHECK-CILK16:   alloca float*, align
+  // CHECK-CILK16:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  //
+  // CHECK-CILK16: define internal void @[[Helper]]
+  // CHECK-CILK16:   call float @
+  // CHECK-CILK16-NEXT: store float %
+  // CHECK-CILK16-NEXT: store float* %
+
+  lvalue_ref_from_lvalue_ref<float, 1005>();
+  // CHECK-CILK17: define {{.*}}lvalue_ref_from_lvalue_ref{{.*}}1005
+  // CHECK-CILK17:   alloca float*, align
+  // CHECK-CILK17:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  //
+  // CHECK-CILK17: define internal void @[[Helper]]
+  // CHECK-CILK17:   call float* @
+  // CHECK-CILK17-NEXT: store float* %
+
+  rvalue_ref_from_rvalue_ref<float, 1006>();
+  // CHECK-CILK18: define {{.*}}rvalue_ref_from_rvalue_ref{{.*}}1006
+  // CHECK-CILK18:   alloca float*, align
+  // CHECK-CILK18:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  //
+  // CHECK-CILK18: define internal void @[[Helper]]
+  // CHECK-CILK18:   call float* @
+  // CHECK-CILK18-NEXT: store float* %
+
+  const_ref_from_const_ref<float, 1007>();
+  // CHECK-CILK19: define {{.*}}const_ref_from_const_ref{{.*}}1007
+  // CHECK-CILK19:   alloca float*, align
+  // CHECK-CILK19:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  //
+  // CHECK-CILK19: define internal void @[[Helper]]
+  // CHECK-CILK19:   call float* @
+  // CHECK-CILK19-NEXT: store float* %
+
+
+  // With destructor
+  value_from_temp<Class, 2001>();
+  // CHECK-CILK20: define {{.*}}value_from_temp{{.*}}2001
+  // CHECK-CILK20:   alloca %"struct.spawn_variable_initialization::Class", align
+  // CHECK-CILK20:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK20-NOT: define
+  // CHECK-CILK20:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]]
+  //
+  // CHECK-CILK20: define internal void @[[Helper]]
+  // CHECK-CILK20-NOT: call void @[[Destructor]]
+  // CHECK-CILK20:   ret
+
+  value_from_const_ref<Class, 2002>();
+  // CHECK-CILK21: define {{.*}}value_from_const_ref{{.*}}2002
+  // CHECK-CILK21:   alloca %"struct.spawn_variable_initialization::Class", align
+  // CHECK-CILK21:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK21-NOT: define
+  // CHECK-CILK21:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]]
+  //
+  // CHECK-CILK21: define internal void @[[Helper]]
+  // CHECK-CILK21-NOT: call void @[[Destructor]]
+  // CHECK-CILK21:   ret
+
+  rvalue_ref_from_temp<Class, 2003>();
+  // CHECK-CILK22: define {{.*}}rvalue_ref_from_temp{{.*}}2003
+  // CHECK-CILK22:   alloca %"struct.spawn_variable_initialization::Class"*, align
+  // CHECK-CILK22:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK22-NOT: define
+  // CHECK-CILK22:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]]
+  // CHECK-CILK22:   ret
+  //
+  // CHECK-CILK22: define internal void @[[Helper]]
+  // CHECK-CILK22-NOT: call void @[[Destructor]]
+  // CHECK-CILK22:   ret
+
+  const_ref_from_temp<Class, 2004>();
+  // CHECK-CILK23: define {{.*}}const_ref_from_temp{{.*}}2004
+  // CHECK-CILK23:   alloca %"struct.spawn_variable_initialization::Class"*, align
+  // CHECK-CILK23:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK23-NOT: define
+  // CHECK-CILK23:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]]
+  //
+  // CHECK-CILK23: define internal void @[[Helper]]
+  // CHECK-CILK23-NOT: call void @[[Destructor]]
+  // CHECK-CILK23:   ret
+
+  lvalue_ref_from_lvalue_ref<Class, 2005>();
+  // CHECK-CILK24: define {{.*}}lvalue_ref_from_lvalue_ref{{.*}}2005
+  // CHECK-CILK24:   alloca %"struct.spawn_variable_initialization::Class"*, align
+  // CHECK-CILK24:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK24-NOT: call void @{{.*}}ClassD
+  // CHECK-CILK24:   ret
+  //
+  // CHECK-CILK24: define internal void @[[Helper]]
+  // CHECK-CILK24-NOT: call void @{{.*}}ClassD
+  // CHECK-CILK24:   ret
+
+  rvalue_ref_from_rvalue_ref<Class, 2006>();
+  // CHECK-CILK25: define {{.*}}rvalue_ref_from_rvalue_ref{{.*}}2006
+  // CHECK-CILK25:   alloca %"struct.spawn_variable_initialization::Class"*, align
+  // CHECK-CILK25:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK25-NOT: call void @{{.*}}ClassD
+  // CHECK-CILK25:   ret
+  //
+  // CHECK-CILK25: define internal void @[[Helper]]
+  // CHECK-CILK25-NOT: call void @{{.*}}ClassD
+  // CHECK-CILK25:   ret
+
+  const_ref_from_const_ref<Class, 2007>();
+  // CHECK-CILK26: define {{.*}}const_ref_from_const_ref{{.*}}2007
+  // CHECK-CILK26:   alloca %"struct.spawn_variable_initialization::Class"*, align
+  // CHECK-CILK26:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK26-NOT: call void @{{.*}}ClassD
+  // CHECK-CILK26:   ret
+  //
+  // CHECK-CILK26: define internal void @[[Helper]]
+  // CHECK-CILK26-NOT: call void @{{.*}}ClassD
+  // CHECK-CILK26:   ret
+}
+
+struct Base {
+  Base();
+  virtual ~Base();
+};
+
+struct Derived : public Base {
+  Derived();
+  virtual ~Derived();
+};
+
+struct Class2 {
+  Class2(const Class &);
+};
+
+void test_implicit_conversions() {
+  double d = _Cilk_spawn foo<float, 3001>();
+  // CHECK-CILK27: define {{.*}}test_implicit_conversions
+  // CHECK-CILK27:   alloca double
+  // CHECK-CILK27:   call void @[[Helper:.*__cilk_spawn_helper.*capturePd[^)]*]](
+  //
+  // CHECK-CILK27: define internal void @[[Helper]]
+  // CHECK-CILK27:   call {{.*}}foo{{.*}}3001
+  // CHECK-CILK27-NEXT: fpext
+
+  void *p = _Cilk_spawn foo<int*, 3002>();
+  // CHECK-CILK28: define {{.*}}test_implicit_conversions
+  // CHECK-CILK28:   alloca i8*
+  // CHECK-CILK28:   call void @[[Helper:.*__cilk_spawn_helper.*capturePPv[^)]*]](
+  //
+  // CHECK-CILK28: define internal void @[[Helper]]
+  // CHECK-CILK28:   call {{.*}}foo{{.*}}3002
+  // CHECK-CILK28-NEXT: bitcast {{.*}} to i8*
+
+  const Base &b = _Cilk_spawn foo<Derived, 3003>();
+  // CHECK-CILK29: define {{.*}}test_implicit_conversions
+  // CHECK-CILK29:   alloca %"struct.spawn_variable_initialization::Base"*
+  // CHECK-CILK29:   call void @[[Helper:.*__cilk_spawn_helper.*capturePP.*Base[^)]*]](
+  //
+  // CHECK-CILK29: define internal void @[[Helper]]
+  // CHECK-CILK29:   call {{.*}}foo{{.*}}3003
+  // CHECK-CILK29-NEXT: bitcast
+
+  Class2 c = _Cilk_spawn foo<Class, 3004>();
+  // CHECK-CILK30: define {{.*}}test_implicit_conversions
+  // CHECK-CILK30:   alloca %"struct.spawn_variable_initialization::Class2"
+  // CHECK-CILK30:   call void @[[Helper:.*__cilk_spawn_helper.*captureP.*Class2[^)]*]](
+  //
+  // CHECK-CILK30: define internal void @[[Helper]]
+  // CHECK-CILK30:   call void @{{.*}}foo{{.*}}3004
+  // CHECK-CILK30-NEXT: call {{.*}}Class2C
+}
+
 }

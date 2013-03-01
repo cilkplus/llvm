@@ -1,9 +1,16 @@
-// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_PARENT %s
-// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F1 %s
-// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_HELPER_F2 %s
-// RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_IMPLICIT_SYNC %s
-// RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_SYNC_JUMP %s
-// RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o - | FileCheck -check-prefix=CHECK_MISC_IMP_SYNC %s
+// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o %t
+// RUN: FileCheck -check-prefix=CHECK_PARENT --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK_HELPER_F1 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK_HELPER_F2 --input-file=%t %s
+// RUN: %clang_cc1 -disable-llvm-optzns -std=c++11 -fcxx-exceptions -fexceptions -fcilkplus -emit-llvm %s -o %t-noopt
+// RUN: FileCheck -check-prefix=CHECK_IMPLICIT_SYNC --input-file=%t-noopt %s
+// RUN: FileCheck -check-prefix=CHECK_SYNC_JUMP --input-file=%t-noopt %s
+// RUN: FileCheck -check-prefix=CHECK_MISC_IMP_SYNC --input-file=%t-noopt %s
+// RUN: FileCheck -check-prefix=CHECK_INIT --input-file=%t-noopt %s
+//
+// This test is expected to fail until assigning a temporary to a ref is
+// implemented in the _Cilk_spawn codegen.
+// RUN: not FileCheck -check-prefix=CHECK_INIT_XFAIL --input-file=%t-noopt %s
 //
 namespace stack_frame_cleanup {
   extern void touch();
@@ -370,5 +377,67 @@ void entering_nested_try_block() {
   // CHECK_MISC_IMP_SYNC-NEXT: call void @__cilk_sync
   // CHECK_MISC_IMP_SYNC-NEXT: call void @_ZN4misc3bazEv
 }
+
+namespace spawn_variable_initialization {
+
+struct Class {
+  Class();
+  ~Class();
+};
+
+Class makeClass();
+
+void test_value() {
+  try {
+    Class c = _Cilk_spawn makeClass();
+  } catch (...) { }
+  // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_valueEv()
+  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_value
+  // CHECK_INIT-NOT: ret
+  //
+  // Normal exit:
+  // CHECK_INIT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT-NOT: ret
+  //
+  // Exceptional exit:
+  // CHECK_INIT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT: ret
+}
+
+void test_rvalue_ref() {
+  try {
+    Class &&c = _Cilk_spawn makeClass();
+  } catch (...) { }
+  // CHECK_INIT_XFAIL: define void @{{.*}}spawn_variable_initialization{{.*}}test_rvalue_refEv()
+  // CHECK_INIT_XFAIL: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_rvalue_ref
+  // CHECK_INIT_XFAIL-NOT: ret
+  //
+  // Normal exit:
+  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT_XFAIL-NOT: ret
+  //
+  // Exceptional exit:
+  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT_XFAIL: ret
+}
+
+void test_const_ref() {
+  try {
+    const Class &c = _Cilk_spawn makeClass();
+  } catch (...) { }
+  // CHECK_INIT_XFAIL: define void @{{.*}}spawn_variable_initialization{{.*}}test_const_refEv()
+  // CHECK_INIT_XFAIL: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_const_ref
+  // CHECK_INIT_XFAIL-NOT: }
+  //
+  // Normal exit:
+  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT_XFAIL-NOT: }
+  //
+  // Exceptional exit:
+  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT_XFAIL: }
+}
+
+} // namespace spawn_variable_initialization
 
 } // namespace
