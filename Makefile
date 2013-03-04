@@ -130,6 +130,8 @@ endef
 
 define PerPlatformConfig_template
 $(call Set,Tmp.Config,$(1))
+$(call Set,Tmp.Headers, \
+  $(call GetCNAVar,Headers,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch)))
 $(call Set,Tmp.ObjPath,$(ProjObjRoot)/$(Tmp.Name)/$(Tmp.Config))
 $(call Set,Tmp.SHARED_LIBRARY,$(strip \
   $(call GetCNAVar,SHARED_LIBRARY,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
@@ -161,8 +163,16 @@ $(Tmp.ObjPath)/libcompiler_rt.$(Tmp.LibrarySuffix): $(Tmp.Inputs) $(Tmp.ObjPath)
 .PRECIOUS: $(Tmp.ObjPath)/.dir
 
 # Per-Config Targets
-$(Tmp.Name)-$(Tmp.Config):: $(Tmp.ObjPath)/libcompiler_rt.$(Tmp.LibrarySuffix)
+$(Tmp.Name)-$(Tmp.Config):: $(Tmp.ObjPath)/libcompiler_rt.$(Tmp.LibrarySuffix) \
+	                          $(Tmp.ObjPath)/include
 .PHONY: $(Tmp.Name)-$(Tmp.Config)
+
+# Install headers
+$(Tmp.ObjPath)/include: $(if $(call strneq,,$(Tmp.Headers)), \
+	                           $(Tmp.ObjPath)/include/.dir $(Tmp.Headers))
+	$(if $(call strneq,,$(Tmp.Headers)),
+		$(Summary) "  Copying headers to $$@/"
+		$(Verb) $(CP) $(Tmp.Headers) $$@/)
 
 # Per-Config-Arch Libraries
 $(foreach arch,$(Tmp.ArchsToBuild),\
@@ -183,6 +193,8 @@ $(call Set,Tmp.ARFLAGS,$(strip \
   $(call GetCNAVar,ARFLAGS,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
 $(call Set,Tmp.CC,$(strip \
   $(call GetCNAVar,CC,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
+$(call Set,Tmp.LD,$(strip \
+  $(call GetCNAVar,LD,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
 $(call Set,Tmp.LDFLAGS,$(strip \
   $(call GetCNAVar,LDFLAGS,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
 $(call Set,Tmp.RANLIB,$(strip \
@@ -210,11 +222,11 @@ $(Tmp.ObjPath)/libcompiler_rt.a: $(Tmp.Inputs) $(Tmp.ObjPath)/.dir
 	$(Verb) $(Tmp.RANLIB) $(Tmp.RANLIBFLAGS) $$@
 $(Tmp.ObjPath)/libcompiler_rt.dylib: $(Tmp.Inputs) $(Tmp.ObjPath)/.dir
 	$(Summary) "  DYLIB:   $(Tmp.Name)/$(Tmp.Config)/$(Tmp.Arch): $$@"
-	$(Verb) $(Tmp.CC) -arch $(Tmp.Arch) -dynamiclib -o $$@ \
+	$(Verb) $(Tmp.LD) -arch $(Tmp.Arch) -dynamiclib -o $$@ \
 	  $(Tmp.Inputs) $(Tmp.LDFLAGS)
 $(Tmp.ObjPath)/libcompiler_rt.so: $(Tmp.Inputs) $(Tmp.ObjPath)/.dir
 	$(Summary) "  SO:   $(Tmp.Name)/$(Tmp.Config)/$(Tmp.Arch): $$@"
-	$(Verb) $(Tmp.CC) -shared -o $$@ \
+	$(Verb) $(Tmp.LD) -shared -o $$@ \
 	  $(Tmp.Inputs) $(Tmp.LDFLAGS)
 .PRECIOUS: $(Tmp.ObjPath)/.dir
 
@@ -235,6 +247,9 @@ $(call Set,Tmp.ObjPath,$(ProjObjRoot)/$(Tmp.Name)/$(Tmp.Config)/$(Tmp.Arch)/$(Tm
 $(call Set,Tmp.Dependencies,$($(Tmp.SubDirKey).Dependencies))
 $(call Set,Tmp.CC,$(strip \
   $(call GetCNAVar,CC,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
+$(call Set,Tmp.CXX,$(strip \
+  $(call GetCNAVar,CXX,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
+
 $(call Set,Tmp.KERNEL_USE,$(strip \
   $(call GetCNAVar,KERNEL_USE,$(Tmp.Key),$(Tmp.Config),$(Tmp.Arch))))
 $(call Set,Tmp.VISIBILITY_HIDDEN,$(strip \
@@ -258,7 +273,10 @@ $(Tmp.ObjPath)/%.o: $(Tmp.SrcPath)/%.c $(Tmp.Dependencies) $(Tmp.ObjPath)/.dir
 	$(Verb) $(Tmp.CC) $(COMMON_CFLAGS) $(Tmp.CFLAGS) -c -o $$@ $$<
 $(Tmp.ObjPath)/%.o: $(Tmp.SrcPath)/%.cc $(Tmp.Dependencies) $(Tmp.ObjPath)/.dir
 	$(Summary) "  COMPILE:   $(Tmp.Name)/$(Tmp.Config)/$(Tmp.Arch): $$<"
-	$(Verb) $(Tmp.CC) $(COMMON_CXXFLAGS) $(Tmp.CFLAGS) -c -o $$@ $$<
+	$(Verb) $(Tmp.CC) $(Tmp.CFLAGS) -c $(COMMON_CXXFLAGS) -o $$@ $$<
+$(Tmp.ObjPath)/%.o: $(Tmp.SrcPath)/%.cpp $(Tmp.Dependencies) $(Tmp.ObjPath)/.dir
+	$(Summary) "  COMPILE:   $(Tmp.Name)/$(Tmp.Config)/$(Tmp.Arch): $$<"
+	$(Verb) $(Tmp.CXX) $(Tmp.CFLAGS) -c -o $$@ $$<
 .PRECIOUS: $(Tmp.ObjPath)/.dir
 
 endef

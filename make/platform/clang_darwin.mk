@@ -76,6 +76,9 @@ UniversalArchs.asan_osx_dynamic := $(call CheckArches,i386 x86_64,asan_osx_dynam
 Configs += ubsan_osx
 UniversalArchs.ubsan_osx := $(call CheckArches,i386 x86_64,ubsan_osx)
 
+Configs += cilk_osx
+UniversalArchs.cilk_osx := $(call CheckArches,x86_64,cilk_osx)
+
 # Darwin 10.6 has a bug in cctools that makes it unable to use ranlib on our ARM
 # object files. If we are on that platform, strip out all ARM archs. We still
 # build the libraries themselves so that Clang can find them where it expects
@@ -161,6 +164,16 @@ CFLAGS.profile_ios.armv7f := $(CFLAGS) $(IOS_DEPLOYMENT_ARGS)
 CFLAGS.profile_ios.armv7k := $(CFLAGS) $(IOS_DEPLOYMENT_ARGS)
 CFLAGS.profile_ios.armv7s := $(CFLAGS) $(IOS_DEPLOYMENT_ARGS)
 
+CFLAGS.cilk_osx := -O3 -m64 -fcilkplus \
+                   -I$(ProjSrcRoot)/lib/cilk/include \
+                   -D_Cilk_spawn= -D_Cilk_sync= -D_Cilk_for=for \
+                   -D__CILKRTS_ABI_VERSION=1 -DIN_CILK_RUNTIME=1 \
+                   -D_DARWIN_C_SOURCE \
+                   -DBUILD_HOST=\"Darwin\" -DBUILD_USER=\"anonymous\"
+
+SHARED_LIBRARY.cilk_osx := 1
+LD.cilk_osx := $(CXX)
+
 # Configure the asan_osx_dynamic library to be built shared.
 SHARED_LIBRARY.asan_osx_dynamic := 1
 LDFLAGS.asan_osx_dynamic := -framework Foundation -lstdc++ -undefined dynamic_lookup
@@ -186,6 +199,8 @@ FUNCTIONS.asan_osx_dynamic := $(AsanFunctions) $(InterceptionFunctions) \
 
 FUNCTIONS.ubsan_osx := $(UbsanFunctions) $(UbsanCXXFunctions) \
                        $(SanitizerCommonFunctions)
+
+FUNCTIONS.cilk_osx := $(CilkrtsFunctions)
 
 CCKEXT_COMMON_FUNCTIONS := \
 	absvdi2 \
@@ -437,6 +452,8 @@ FUNCTIONS.cc_kext.x86_64 := \
 
 KERNEL_USE.cc_kext := 1
 KERNEL_USE.cc_kext_ios5 := 1
+
+Headers.cilk_osx := $(CilkHeaders)
 
 VISIBILITY_HIDDEN := 1
 

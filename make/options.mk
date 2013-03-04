@@ -8,6 +8,7 @@ CC := gcc
 
 # The compiler flags to use.
 CFLAGS := -Wall -Werror
+LD := $(CC)
 
 # The list of functions to include in the library.
 FUNCTIONS :=
