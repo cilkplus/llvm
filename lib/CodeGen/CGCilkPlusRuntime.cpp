@@ -1200,7 +1200,7 @@ void CGCilkPlusRuntime::EmitCilkHelperCatch(llvm::BasicBlock *Catch,
     CGF.Builder.CreateCall(BeginCatch, Exn);
 
     // finally { __cxa_end_catch() }
-    CodeGenFunction::LexicalScope cleanups(CGF, SourceRange());
+    CodeGenFunction::RunCleanupsScope Cleanups(CGF);
     CGF.EHStack.pushCleanup<CallFunctionCleanup>(NormalAndEHCleanup, EndCatch);
 
     // __cxa_rethrow()
@@ -1209,7 +1209,7 @@ void CGCilkPlusRuntime::EmitCilkHelperCatch(llvm::BasicBlock *Catch,
     // __cilk_helper_epilogue(sf);
     CGF.Builder.CreateCall(GetCilkHelperEpilogue(CGF), SF);
 
-    cleanups.ForceCleanup();
+    Cleanups.ForceCleanup();
     CGF.EmitBranchThroughCleanup(CGF.ReturnBlock);
   }
 

@@ -198,10 +198,11 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
       // There should be exactly one catch scope on top of the stack from the
       // spawn-helper function.
       EHCatchScope &CatchScope = cast<EHCatchScope>(*Catch);
+      llvm::BasicBlock *CatchBB = CatchScope.getHandler(0).Block;
+      popCatchScope();
       if (CatchScope.hasEHBranches())
         CGM.getCilkPlusRuntime().EmitCilkHelperCatch(
-          CatchScope.getHandler(0).Block, *this);
-      popCatchScope();
+          CatchBB, *this);
     }
   }
 
