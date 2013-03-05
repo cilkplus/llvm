@@ -101,6 +101,9 @@ namespace {
       AU.setPreservesCFG();
     }
 
+    // \brief Collect and cache sync and spawn functions in this module.
+    bool doInitialization(Module &M);
+
   private:
     DenseMap<Value*, CilkCFGNode*> InstrToCilkCFG;
     SmallVector<CilkCFGNode*, 4> CilkCalls;
@@ -110,6 +113,12 @@ namespace {
 
     /// \brief The Cilk stack frame in the function.
     const Value *StackFrame;
+
+    /// \brief Cache of sync functions, initialized by doInitialization.
+    SmallPtrSet<const Function*, 2> SyncFuncs;
+
+    /// \brief Cache of spawn functions, initialized by doInitialization.
+    SmallPtrSet<const Function*, 2> SpawnFuncs;
 
   private:
     CilkCFGNode *analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode);
@@ -121,19 +130,21 @@ namespace {
     bool insertOrUpdateCilkCFG(Value *V, CilkCFGNode *Parent,
                                CilkCFGNode *&NewNode);
 
-    StringRef getSyncFnName() const { return StringRef("__cilk_sync"); }
-    StringRef getSpawnHelperPrefix() const {
-      return StringRef("__cilk_spawn_helper");
-    }
-
     const Value *getStackFrame(const CallInst *CilkFn) const;
-    bool findAllStackFrames(const Function *F);
+    bool setStackFrame(const Function *F);
 
     const Function *getCalledFunction(const Instruction *I) const;
     bool isSpawn(const Instruction *I) const;
     bool isSync(const Instruction *I) const;
   };
 
+  NamedMDNode *getSyncMetadata(const Module &M) {
+    return M.getNamedMetadata("cilk.sync");
+  }
+
+  NamedMDNode *getSpawnMetadata(const Module &M) {
+    return M.getNamedMetadata("cilk.spawn");
+  }
 } // namespace
 
 char ElideCilkSync::ID = 0;
@@ -143,11 +154,38 @@ FunctionPass *llvm::createElideCilkSyncPass() {
   return new ElideCilkSync();
 }
 
+// \brief Collect and cache sync and spawn functions in this module.
+bool ElideCilkSync::doInitialization(Module &M) {
+  if (NamedMDNode *Syncs = getSyncMetadata(M)) {
+    for (unsigned I = 0, N = Syncs->getNumOperands(); I < N; ++I) {
+      MDNode *Node = Syncs->getOperand(I);
+      if (Node->getNumOperands() == 0)
+        continue;
+
+      if (Function *Sync = dyn_cast_or_null<Function>(Node->getOperand(0)))
+        SyncFuncs.insert(Sync);
+    }
+  }
+
+  if (NamedMDNode *Spawns = getSpawnMetadata(M)) {
+    for (unsigned I = 0, N = Spawns->getNumOperands(); I < N; ++I) {
+      MDNode *Node = Spawns->getOperand(I);
+      if (Node->getNumOperands() == 0)
+        continue;
+
+      if (Function *Spawn = dyn_cast_or_null<Function>(Node->getOperand(0)))
+        SpawnFuncs.insert(Spawn);
+    }
+  }
+
+  return true;
+}
+
 /// \brief Determine which syncs are redundant and remove
 /// them from the function.
 bool ElideCilkSync::runOnFunction(Function &F) {
   // Skip functions that do not have a sync
-  if (!findAllStackFrames(&F))
+  if (!setStackFrame(&F))
     return false;
 
   Visited.clear();
@@ -359,25 +397,29 @@ bool ElideCilkSync::insertOrUpdateCilkCFG(Value *V,
 /// \brief Sets StackFrame to the unique Cilk stack frame in the given
 /// function. Returns true if there is at least one stack frame,
 /// false otherwise.
-bool ElideCilkSync::findAllStackFrames(const Function *F) {
-  Function *SyncFn = F->getParent()->getFunction(getSyncFnName());
-  if (!SyncFn)
-    return false;
-
-  StackFrame = 0;
-  for (Value::use_iterator UI = SyncFn->use_begin();
-                           UI != SyncFn->use_end(); ++UI) {
-    assert(isa<CallInst>(*UI) && "sync use not a call instruction");
-    CallInst *I = cast<CallInst>(*UI);
-    if (I->getParent()->getParent() == F) {
-      const Value *CurStackFrame = getStackFrame(I);
-      assert((StackFrame == 0 || StackFrame == CurStackFrame) &&
-             "More than one stack frame in the function");
-      StackFrame = CurStackFrame;
+bool ElideCilkSync::setStackFrame(const Function *F) {
+  typedef SmallPtrSet<const Function *, 2>::iterator IterTy;
+  for (IterTy I = SyncFuncs.begin(), E = SyncFuncs.end(); I != E; ++I) {
+    StackFrame = 0;
+    for (Value::const_use_iterator UI = (*I)->use_begin(), UE = (*I)->use_end();
+                                   UI != UE; ++UI) {
+      assert(isa<CallInst>(*UI) && "sync use not a call instruction");
+      const CallInst *CI = cast<CallInst>(*UI);
+      if (CI->getParent()->getParent() == F) {
+        const Value *CurStackFrame = getStackFrame(CI);
+        assert((StackFrame == 0 || StackFrame == CurStackFrame) &&
+               "More than one stack frame in the function");
+        // Do not return immediately, continue to check if there are multiple
+        // stack frames in this function.
+        StackFrame = CurStackFrame;
+      }
     }
+
+    if (StackFrame)
+      return true;
   }
 
-  return StackFrame;
+  return false;
 }
 
 /// \brief Returns the stack frame argument passed to the call to CilkFn.
@@ -401,12 +443,10 @@ const Function *ElideCilkSync::getCalledFunction(const Instruction *I) const {
 
 /// \brief Returns true if I is a Cilk Spawn, false otherwise.
 bool ElideCilkSync::isSpawn(const Instruction *I) const {
-  const Function *Fn = getCalledFunction(I);
-  return Fn && Fn->getName().find(getSpawnHelperPrefix()) != StringRef::npos;
+  return SpawnFuncs.count(getCalledFunction(I));
 }
 
 /// \brief Returns true if I is a Cilk sync, false otherwise.
 bool ElideCilkSync::isSync(const Instruction *I) const {
-  const Function *Fn = getCalledFunction(I);
-  return Fn && Fn->getName() == getSyncFnName();
+  return SyncFuncs.count(getCalledFunction(I));
 }
