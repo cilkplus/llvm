@@ -288,6 +288,24 @@ static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
   return false;
 }
 
+/// \brief Register a sync function with a named metadata.
+static void registerSyncFunction(CodeGenFunction &CGF, llvm::Function *Fn) {
+  LLVMContext &Context = CGF.getLLVMContext();
+  llvm::NamedMDNode *SyncMetadata
+    = CGF.CGM.getModule().getOrInsertNamedMetadata("cilk.sync");
+
+  SyncMetadata->addOperand(llvm::MDNode::get(Context, Fn));
+}
+
+/// \brief Register a spawn helper function with a named metadata.
+static void registerSpawnFunction(CodeGenFunction &CGF, llvm::Function *Fn) {
+  LLVMContext &Context = CGF.getLLVMContext();
+  llvm::NamedMDNode *SpawnMetadata
+    = CGF.CGM.getModule().getOrInsertNamedMetadata("cilk.spawn");
+
+  SpawnMetadata->addOperand(llvm::MDNode::get(Context, Fn));
+}
+
 /// \brief Emit a call to the CILK_SETJMP function.
 static CallInst *EmitCilkSetJmp(CGBuilderTy &B, Value *SF,
                                 CodeGenFunction &CGF) {
@@ -657,6 +675,7 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   }
 
   Fn->addFnAttr(Attribute::AlwaysInline);
+  registerSyncFunction(CGF, Fn);
 
   return Fn;
 }
@@ -1070,6 +1089,10 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
 
     // Emit call to the helper function
     CGF.EmitCapturedStmt(S);
+
+    // Register the spawn helper function.
+    GlobalDecl GD(S.getFunctionDecl());
+    registerSpawnFunction(CGF, cast<Function>(CGF.CGM.GetAddrOfFunction(GD)));
   }
   CGF.EmitBlock(Exit);
 }
