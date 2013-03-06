@@ -44,6 +44,12 @@ FunctionPass *createElideCilkSyncPass();
 
 //===----------------------------------------------------------------------===//
 //
+// CilkStackFrameLateInit - Do late stack-frame initialization.
+//
+FunctionPass *createCilkStackFrameLateInitPass();
+
+//===----------------------------------------------------------------------===//
+//
 // DeadInstElimination - This pass quickly removes trivially dead instructions
 // without modifying the CFG of the function.  It is a BasicBlockPass, so it
 // runs efficiently when queued next to other BasicBlockPass's.

@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 #define DEBUG_TYPE "elide-cilk-sync"
 
+#include "CilkPlus.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/Dominators.h"
@@ -28,6 +29,7 @@
 #include <deque>
 
 using namespace llvm;
+using namespace llvm::cilkplus;
 
 STATISTIC(NumSyncsRemoved, "Number of Cilk syncs removed");
 
@@ -87,10 +89,10 @@ namespace {
     StackFrameInfo SFInfo;
   };
 
-  class ElideCilkSync : public FunctionPass {
+  class ElideCilkSync : public CilkFunctionPass {
   public:
     static char ID;
-    ElideCilkSync() : FunctionPass(ID) {
+    ElideCilkSync() : CilkFunctionPass(ID) {
       initializeFindUsedTypesPass(*PassRegistry::getPassRegistry());
     }
 
@@ -101,9 +103,6 @@ namespace {
       AU.setPreservesCFG();
     }
 
-    // \brief Collect and cache sync and spawn functions in this module.
-    bool doInitialization(Module &M);
-
   private:
     DenseMap<Value*, CilkCFGNode*> InstrToCilkCFG;
     SmallVector<CilkCFGNode*, 4> CilkCalls;
@@ -113,12 +112,6 @@ namespace {
 
     /// \brief The Cilk stack frame in the function.
     const Value *StackFrame;
-
-    /// \brief Cache of sync functions, initialized by doInitialization.
-    SmallPtrSet<const Function*, 2> SyncFuncs;
-
-    /// \brief Cache of spawn functions, initialized by doInitialization.
-    SmallPtrSet<const Function*, 2> SpawnFuncs;
 
   private:
     CilkCFGNode *analyzeSyncs(BasicBlock *BB, CilkCFGNode *CurNode);
@@ -132,19 +125,7 @@ namespace {
 
     const Value *getStackFrame(const CallInst *CilkFn) const;
     bool setStackFrame(const Function *F);
-
-    const Function *getCalledFunction(const Instruction *I) const;
-    bool isSpawn(const Instruction *I) const;
-    bool isSync(const Instruction *I) const;
   };
-
-  NamedMDNode *getSyncMetadata(const Module &M) {
-    return M.getNamedMetadata("cilk.sync");
-  }
-
-  NamedMDNode *getSpawnMetadata(const Module &M) {
-    return M.getNamedMetadata("cilk.spawn");
-  }
 } // namespace
 
 char ElideCilkSync::ID = 0;
@@ -152,33 +133,6 @@ INITIALIZE_PASS(ElideCilkSync, "elide-cilk-sync", "Elide Cilk Sync", false, fals
 
 FunctionPass *llvm::createElideCilkSyncPass() {
   return new ElideCilkSync();
-}
-
-// \brief Collect and cache sync and spawn functions in this module.
-bool ElideCilkSync::doInitialization(Module &M) {
-  if (NamedMDNode *Syncs = getSyncMetadata(M)) {
-    for (unsigned I = 0, N = Syncs->getNumOperands(); I < N; ++I) {
-      MDNode *Node = Syncs->getOperand(I);
-      if (Node->getNumOperands() == 0)
-        continue;
-
-      if (Function *Sync = dyn_cast_or_null<Function>(Node->getOperand(0)))
-        SyncFuncs.insert(Sync);
-    }
-  }
-
-  if (NamedMDNode *Spawns = getSpawnMetadata(M)) {
-    for (unsigned I = 0, N = Spawns->getNumOperands(); I < N; ++I) {
-      MDNode *Node = Spawns->getOperand(I);
-      if (Node->getNumOperands() == 0)
-        continue;
-
-      if (Function *Spawn = dyn_cast_or_null<Function>(Node->getOperand(0)))
-        SpawnFuncs.insert(Spawn);
-    }
-  }
-
-  return true;
 }
 
 /// \brief Determine which syncs are redundant and remove
@@ -427,26 +381,4 @@ const Value *ElideCilkSync::getStackFrame(const CallInst *CilkFn) const {
   assert(CilkFn->getNumArgOperands() > 0 &&
          "Cilk function must at least 1 argument");
   return CilkFn->getArgOperand(0);
-}
-
-/// \brief Returns the function called by a CallInstr or InvokeInstr, or null
-/// if the instruction is not one of these, or there is no function.
-const Function *ElideCilkSync::getCalledFunction(const Instruction *I) const {
-  Function *Fn = 0;
-  if (isa<CallInst>(I))
-    Fn = cast<CallInst>(I)->getCalledFunction();
-  else if (isa<InvokeInst>(I))
-    Fn = cast<InvokeInst>(I)->getCalledFunction();
-
-  return Fn;
-}
-
-/// \brief Returns true if I is a Cilk Spawn, false otherwise.
-bool ElideCilkSync::isSpawn(const Instruction *I) const {
-  return SpawnFuncs.count(getCalledFunction(I));
-}
-
-/// \brief Returns true if I is a Cilk sync, false otherwise.
-bool ElideCilkSync::isSync(const Instruction *I) const {
-  return SyncFuncs.count(getCalledFunction(I));
 }
