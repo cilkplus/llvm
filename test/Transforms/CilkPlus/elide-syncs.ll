@@ -478,6 +478,42 @@ eh.resume:                                        ; preds = %lpad3
   ; CHECK: resume { i8*, i32 }
 }
 
+;
+; Test where one predecessor of a sync is not a spawn/sync, but it can still be
+; elided.
+define void @test_non_cilk_branches(i1 %cond1, i1 %cond2) {
+  %sf = alloca %__cilkrts_stack_frame
+  %agg.captured = alloca %struct.capture
+  br i1 %cond1, label %if, label %done
+
+if:
+  call void @__cilk_spawn_helper(%struct.capture* %agg.captured)
+  br i1 %cond2, label %next, label %other
+
+next:
+  call void @__cilk_sync(%__cilkrts_stack_frame* %sf)
+  br label %done
+
+done:
+  call void @__cilk_sync(%__cilkrts_stack_frame* %sf)
+  ret void
+
+other:
+  call void @__cilk_sync(%__cilkrts_stack_frame* %sf)
+  ret void
+
+  ; CHECK: define void @test_non_cilk_branches
+  ; CHECK: call void @__cilk_spawn_helper
+  ; CHECK: call void @__cilk_sync
+
+  ; CHECK: done:
+  ; CHECK-NOT: call void @__cilk_sync
+  ; CHECK: ret void
+
+  ; CHECK: other:
+  ; CHECK-NEXT: call void @__cilk_sync
+}
+
 !cilk.spawn = !{!0, !1, !2}
 !cilk.sync = !{!3}
 
