@@ -18,7 +18,7 @@ using namespace llvm::cilkplus;
 
 /// \brief Collect and cache spawn, sync and parent prologue/epilogue functions
 /// in this module.
-bool CilkFunctionPass::doInitialization(Module &M) {
+bool CilkPass::doInitialization(Module &M) {
   ParentPrologue = M.getFunction("__cilk_parent_prologue");
   ParentEpilogue = M.getFunction("__cilk_parent_epilogue");
   SyncFuncs.clear();

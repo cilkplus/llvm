@@ -57,13 +57,18 @@ enum StackFrameMembers {
   parent_pedigree
 };
 
-class CilkStackFrameLateInit : public CilkFunctionPass {
+class CilkStackFrameLateInit : public CilkPass, public ModulePass {
 public:
   static char ID;
-  CilkStackFrameLateInit() : CilkFunctionPass(ID) {
+  CilkStackFrameLateInit() : ModulePass(ID) {
     initializeCilkStackFrameLateInitPass(*PassRegistry::getPassRegistry());
   }
 
+  virtual bool doInitialization(Module &M) {
+    return CilkPass::doInitialization(M);
+  }
+
+  bool runOnModule(Module &M);
   bool runOnFunction(Function &F);
 
   /// \brief This pass preserves the CFG.
@@ -102,6 +107,14 @@ private:
 };
 
 } // anonymous namespace
+
+bool CilkStackFrameLateInit::runOnModule(Module &M) {
+  bool Changed = false;
+  for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F)
+    if (!F->isDeclaration())
+      Changed |= runOnFunction(*F);
+  return Changed;
+}
 
 /// \brief Introduces a conditional version of Orig, by checking that sf->worker
 /// is not null before calling Orig.
@@ -190,7 +203,7 @@ bool CilkStackFrameLateInit::runOnFunction(Function &F) {
   // Precondition: the parent_prologue is called exactly once.
   if (hasMultipleInits(F, Init)) return Changed;
 
-  DT = &getAnalysis<DominatorTree>();
+  DT = &getAnalysis<DominatorTree>(F);
   computeExitBlocks(F);
 
   bool UnconditionalSpawn = false;
@@ -373,6 +386,6 @@ INITIALIZE_PASS_DEPENDENCY(DominatorTree)
 INITIALIZE_PASS_END(CilkStackFrameLateInit, "cilk-sf-late-init",
                     "Do late stack-frame initialization", false, false)
 
-FunctionPass *llvm::createCilkStackFrameLateInitPass() {
+Pass *llvm::createCilkStackFrameLateInitPass() {
   return new CilkStackFrameLateInit();
 }

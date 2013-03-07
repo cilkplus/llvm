@@ -514,10 +514,20 @@ other:
   ; CHECK-NEXT: call void @__cilk_sync
 }
 
+;
+; Do not elide a sync from inside a sync.
+define void @test_obey_metadata(%__cilkrts_stack_frame* %sf) {
+  call void @__cilk_sync(%__cilkrts_stack_frame* %sf)
+  ret void
+  ; CHECK: define void @test_obey_metadata
+  ; CHECK-NEXT: call void @__cilk_sync
+}
+
 !cilk.spawn = !{!0, !1, !2}
-!cilk.sync = !{!3}
+!cilk.sync = !{!3, !4}
 
 !0 = metadata !{void (%struct.capture*)* @__cilk_spawn_helper}
 !1 = metadata !{void (%struct.capture*)* @_Z21__cilk_spawn_helpermangled}
 !2 = metadata !{void (%struct.capture.0*)* @_Z21__cilk_spawn_helperV0PZ3fibiE7capture}
 !3 = metadata !{void (%__cilkrts_stack_frame*)* @__cilk_sync}
+!4 = metadata !{void (%__cilkrts_stack_frame*)* @test_obey_metadata}

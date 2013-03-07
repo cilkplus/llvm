@@ -46,7 +46,7 @@ FunctionPass *createElideCilkSyncPass();
 //
 // CilkStackFrameLateInit - Do late stack-frame initialization.
 //
-FunctionPass *createCilkStackFrameLateInitPass();
+Pass *createCilkStackFrameLateInitPass();
 
 //===----------------------------------------------------------------------===//
 //

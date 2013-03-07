@@ -93,11 +93,15 @@ namespace {
     StackFrameInfo SFInfo;
   };
 
-  class ElideCilkSync : public CilkFunctionPass {
+  class ElideCilkSync : public CilkPass, public FunctionPass {
   public:
     static char ID;
-    ElideCilkSync() : CilkFunctionPass(ID) {
+    ElideCilkSync() : FunctionPass(ID) {
       initializeFindUsedTypesPass(*PassRegistry::getPassRegistry());
+    }
+
+    virtual bool doInitialization(Module &M) {
+      return CilkPass::doInitialization(M);
     }
 
     bool runOnFunction(Function &F);
@@ -142,8 +146,9 @@ FunctionPass *llvm::createElideCilkSyncPass() {
 /// \brief Determine which syncs are redundant and remove
 /// them from the function.
 bool ElideCilkSync::runOnFunction(Function &F) {
-  // Skip functions that do not have a sync
-  if (!setStackFrame(&F))
+  // Skip functions that do not have a sync, or that are a sync themselves, such
+  // as a __cilk_conditional_sync.
+  if (!setStackFrame(&F) || SyncFuncs.count(&F))
     return false;
 
   Visited.clear();

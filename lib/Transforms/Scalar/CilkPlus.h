@@ -15,7 +15,6 @@
 #ifndef LLVM_TRANSFORMS_CILKPLUS_H
 #define LLVM_TRANSFORMS_CILKPLUS_H
 
-#include "llvm/Pass.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CallSite.h"
@@ -26,11 +25,9 @@ class Function;
 
 namespace cilkplus {
 
-class CilkFunctionPass : public FunctionPass {
+class CilkPass {
 public:
-  explicit CilkFunctionPass(char &ID) : FunctionPass(ID) { }
-
-  virtual bool doInitialization(Module &M);
+  bool doInitialization(Module &M);
 
   static const Function *getCalledFunction(const Instruction *I) {
     ImmutableCallSite CI(I);
