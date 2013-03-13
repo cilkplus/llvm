@@ -1755,14 +1755,6 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
   llvm::Function *H
     = dyn_cast<llvm::Function>(CGM.GetAddrOfFunction(GlobalDecl(HelperDecl)));
 
-  // The helper function *cannot* be inlined, as
-  // that would defeat the purpose of outlining it
-  // in the first place
-  H->addFnAttr(llvm::Attribute::NoInline);
-
-  // The helper function should be internal
-  H->setLinkage(llvm::Function::InternalLinkage);
-
   // Emit call to the helper function
   EmitCallOrInvoke(H, Args);
 }

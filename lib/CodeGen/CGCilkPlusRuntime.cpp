@@ -268,7 +268,8 @@ static void EmitSaveFloatingPointState(CGBuilderTy &B, Value *SF) {
 template <typename T>
 static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
                                 Function *&Fn, Function::LinkageTypes Linkage =
-                                               Function::InternalLinkage) {
+                                               Function::InternalLinkage,
+                                bool DoesNotThrow = true) {
   llvm::Module &Module = CGF.CGM.getModule();
   LLVMContext &Ctx = CGF.getLLVMContext();
 
@@ -282,6 +283,10 @@ static bool GetOrCreateFunction(const char *FnName, CodeGenFunction& CGF,
   // Otherwise we have to create it
   llvm::FunctionType *FTy = TypeBuilder<T, false>::get(Ctx);
   Fn = Function::Create(FTy, Linkage, FnName, &Module);
+
+  // Set nounwind if it does not throw.
+  if (DoesNotThrow)
+    Fn->setDoesNotThrow();
 
   // and let the caller know that the function is incomplete
   // and the body still needs to be added
@@ -1069,6 +1074,66 @@ static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
   return SF;
 }
 
+namespace {
+/// \brief Helper to find the spawn call.
+///
+/// This CallExpr should be cached into CilkSpawnCapturedStmt.
+///
+class FindSpawnCallExpr : public RecursiveASTVisitor<FindSpawnCallExpr> {
+public:
+  const CallExpr *Spawn;
+
+  explicit FindSpawnCallExpr(Stmt *Body) : Spawn(0) {
+    TraverseStmt(Body);
+  }
+
+  bool VisitCallExpr(CallExpr *E) {
+    if (E->isCilkSpawnCall()) {
+      Spawn = E;
+      return false; // exit
+    }
+
+    return true;
+  }
+
+  bool TraverseLambdaExpr(LambdaExpr *) { return true; }
+  bool TraverseBlockExpr(BlockExpr *) { return true; }
+};
+
+/// \brief Set attributes for the helper function.
+///
+/// The DoesNotThrow attribute should NOT be set during the semantic
+/// analysis, since codegen will try to compute this attribute by
+/// scanning the function body of the spawned function.
+void setHelperAttributes(CodeGenFunction &CGF,
+                         const CilkSpawnCapturedStmt &S,
+                         Function *Helper) {
+  FindSpawnCallExpr Finder(const_cast<Stmt *>(S.getSubStmt()));
+  assert(Finder.Spawn && "spawn call expected");
+
+  // Do not set for indirect spawn calls.
+  if (const FunctionDecl *FD = Finder.Spawn->getDirectCallee()) {
+    GlobalDecl GD(FD);
+    llvm::Constant *Addr = CGF.CGM.GetAddrOfFunction(GD);
+
+    // Strip off a bitcast if there is.
+    if (llvm::ConstantExpr *CE = dyn_cast<llvm::ConstantExpr>(Addr)) {
+      assert(CE->getOpcode() == llvm::Instruction::BitCast &&
+             "function pointer bitcast expected");
+      Addr = CE->getOperand(0);
+    }
+
+    Function *SpawnedFunc = dyn_cast<Function>(Addr);
+    if (SpawnedFunc && SpawnedFunc->doesNotThrow())
+      Helper->setDoesNotThrow();
+  }
+
+  // The helper function *cannot* be inlined.
+  Helper->addFnAttr(llvm::Attribute::NoInline);
+}
+
+} // anonymous
+
 namespace clang {
 namespace CodeGen {
 
@@ -1117,9 +1182,14 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     // Emit call to the helper function
     CGF.EmitCapturedStmt(S);
 
-    // Register the spawn helper function.
     GlobalDecl GD(S.getFunctionDecl());
-    registerSpawnFunction(CGF, cast<Function>(CGF.CGM.GetAddrOfFunction(GD)));
+    Function *Helper = cast<Function>(CGF.CGM.GetAddrOfFunction(GD));
+
+    // Register the spawn helper function.
+    registerSpawnFunction(CGF, Helper);
+
+    // Set other attributes.
+    setHelperAttributes(CGF, S, Helper);
   }
   CGF.EmitBlock(Exit);
 }
@@ -1231,9 +1301,9 @@ void CGCilkPlusRuntime::EmitCilkHelperCatch(llvm::BasicBlock *Catch,
   Function *BeginCatch = 0, *EndCatch = 0, *Rethrow = 0;
   Function::LinkageTypes Linkage = Function::ExternalLinkage;
   GetOrCreateFunction<void*(void*)>("__cxa_begin_catch", CGF, BeginCatch,
-                                    Linkage);
-  GetOrCreateFunction<void()>("__cxa_end_catch", CGF, EndCatch, Linkage);
-  GetOrCreateFunction<void()>("__cxa_rethrow", CGF, Rethrow, Linkage);
+                                    Linkage, false);
+  GetOrCreateFunction<void()>("__cxa_end_catch", CGF, EndCatch, Linkage, false);
+  GetOrCreateFunction<void()>("__cxa_rethrow", CGF, Rethrow, Linkage, false);
 
   CGF.EmitBlock(Catch);
   {
