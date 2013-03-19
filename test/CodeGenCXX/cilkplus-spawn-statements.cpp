@@ -20,12 +20,8 @@
 // RUN: FileCheck -check-prefix=CHECK-CILK19 --input-file=%t %s
 // RUN: FileCheck -check-prefix=CHECK-CILK20 --input-file=%t %s
 // RUN: FileCheck -check-prefix=CHECK-CILK21 --input-file=%t %s
-//
-// These two are expected to fail until assigning a temporary to a ref is
-// implemented in the _Cilk_spawn codegen.
-// RUN: not FileCheck -check-prefix=CHECK-CILK22 --input-file=%t %s
-// RUN: not FileCheck -check-prefix=CHECK-CILK23 --input-file=%t %s
-//
+// RUN: FileCheck -check-prefix=CHECK-CILK22 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK23 --input-file=%t %s
 // RUN: FileCheck -check-prefix=CHECK-CILK24 --input-file=%t %s
 // RUN: FileCheck -check-prefix=CHECK-CILK25 --input-file=%t %s
 // RUN: FileCheck -check-prefix=CHECK-CILK26 --input-file=%t %s
@@ -33,6 +29,7 @@
 // RUN: FileCheck -check-prefix=CHECK-CILK28 --input-file=%t %s
 // RUN: FileCheck -check-prefix=CHECK-CILK29 --input-file=%t %s
 // RUN: FileCheck -check-prefix=CHECK-CILK30 --input-file=%t %s
+// RUN: FileCheck -check-prefix=CHECK-CILK31 --input-file=%t %s
 
 /*
  *  A _Cilk_spawn can only appear in 3 places
@@ -443,9 +440,11 @@ void test() {
   rvalue_ref_from_temp<float, 1003>();
   // CHECK-CILK15: define {{.*}}rvalue_ref_from_temp{{.*}}1003
   // CHECK-CILK15:   alloca float*, align
+  // CHECK-CILK15:   alloca float, align
   // CHECK-CILK15:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK15: define internal void @[[Helper]]
+  // CHECK-CILK15-NOT: alloca float
   // CHECK-CILK15:   call float @
   // CHECK-CILK15-NEXT: store float %
   // CHECK-CILK15-NEXT: store float* %
@@ -453,9 +452,11 @@ void test() {
   const_ref_from_temp<float, 1004>();
   // CHECK-CILK16: define {{.*}}const_ref_from_temp{{.*}}1004
   // CHECK-CILK16:   alloca float*, align
+  // CHECK-CILK16:   alloca float, align
   // CHECK-CILK16:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK16: define internal void @[[Helper]]
+  // CHECK-CILK16-NOT: alloca float
   // CHECK-CILK16:   call float @
   // CHECK-CILK16-NEXT: store float %
   // CHECK-CILK16-NEXT: store float* %
@@ -514,23 +515,27 @@ void test() {
   rvalue_ref_from_temp<Class, 2003>();
   // CHECK-CILK22: define {{.*}}rvalue_ref_from_temp{{.*}}2003
   // CHECK-CILK22:   alloca %"struct.spawn_variable_initialization::Class"*, align
+  // CHECK-CILK22:   [[Tmp:%[0-9a-zA-Z_]*]] = alloca %"struct.spawn_variable_initialization::Class", align
   // CHECK-CILK22:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   // CHECK-CILK22-NOT: define
-  // CHECK-CILK22:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]]
+  // CHECK-CILK22:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]](%{{.*}}* [[Tmp]])
   // CHECK-CILK22:   ret
   //
   // CHECK-CILK22: define internal void @[[Helper]]
+  // CHECK-CILK22-NOT: alloca %"struct.spawn_variable_initialization::Class", align
   // CHECK-CILK22-NOT: call void @[[Destructor]]
   // CHECK-CILK22:   ret
 
   const_ref_from_temp<Class, 2004>();
   // CHECK-CILK23: define {{.*}}const_ref_from_temp{{.*}}2004
   // CHECK-CILK23:   alloca %"struct.spawn_variable_initialization::Class"*, align
+  // CHECK-CILK23:   [[Tmp:%[0-9a-zA-Z_]*]] = alloca %"struct.spawn_variable_initialization::Class", align
   // CHECK-CILK23:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   // CHECK-CILK23-NOT: define
-  // CHECK-CILK23:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]]
+  // CHECK-CILK23:   call void @[[Destructor:.*spawn_variable_initialization.ClassD1Ev]](%{{.*}}* [[Tmp]])
   //
   // CHECK-CILK23: define internal void @[[Helper]]
+  // CHECK-CILK23-NOT: alloca %"struct.spawn_variable_initialization::Class", align
   // CHECK-CILK23-NOT: call void @[[Destructor]]
   // CHECK-CILK23:   ret
 
@@ -586,7 +591,7 @@ void test_implicit_conversions() {
   double d = _Cilk_spawn foo<float, 3001>();
   // CHECK-CILK27: define {{.*}}test_implicit_conversions
   // CHECK-CILK27:   alloca double
-  // CHECK-CILK27:   call void @[[Helper:.*__cilk_spawn_helper.*capturePd[^)]*]](
+  // CHECK-CILK27:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
   //
   // CHECK-CILK27: define internal void @[[Helper]]
   // CHECK-CILK27:   call {{.*}}foo{{.*}}3001
@@ -595,7 +600,7 @@ void test_implicit_conversions() {
   void *p = _Cilk_spawn foo<int*, 3002>();
   // CHECK-CILK28: define {{.*}}test_implicit_conversions
   // CHECK-CILK28:   alloca i8*
-  // CHECK-CILK28:   call void @[[Helper:.*__cilk_spawn_helper.*capturePPv[^)]*]](
+  // CHECK-CILK28:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
   //
   // CHECK-CILK28: define internal void @[[Helper]]
   // CHECK-CILK28:   call {{.*}}foo{{.*}}3002
@@ -604,7 +609,7 @@ void test_implicit_conversions() {
   const Base &b = _Cilk_spawn foo<Derived, 3003>();
   // CHECK-CILK29: define {{.*}}test_implicit_conversions
   // CHECK-CILK29:   alloca %"struct.spawn_variable_initialization::Base"*
-  // CHECK-CILK29:   call void @[[Helper:.*__cilk_spawn_helper.*capturePP.*Base[^)]*]](
+  // CHECK-CILK29:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
   //
   // CHECK-CILK29: define internal void @[[Helper]]
   // CHECK-CILK29:   call {{.*}}foo{{.*}}3003
@@ -613,11 +618,33 @@ void test_implicit_conversions() {
   Class2 c = _Cilk_spawn foo<Class, 3004>();
   // CHECK-CILK30: define {{.*}}test_implicit_conversions
   // CHECK-CILK30:   alloca %"struct.spawn_variable_initialization::Class2"
-  // CHECK-CILK30:   call void @[[Helper:.*__cilk_spawn_helper.*captureP.*Class2[^)]*]](
+  // CHECK-CILK30:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
   //
   // CHECK-CILK30: define internal void @[[Helper]]
   // CHECK-CILK30:   call void @{{.*}}foo{{.*}}3004
   // CHECK-CILK30-NEXT: call {{.*}}Class2C
+}
+
+struct DiamondBase { virtual ~DiamondBase(); };
+struct DiamondA : public virtual DiamondBase { virtual ~DiamondA(); };
+struct DiamondB : public virtual DiamondBase { virtual ~DiamondB(); };
+struct DiamondC : public DiamondA, public DiamondB { virtual ~DiamondC(); };
+
+DiamondC make_DiamondC();
+
+void test_diamond_bind_temp() {
+  const DiamondBase& a = _Cilk_spawn make_DiamondC();
+  // CHECK-CILK31: define {{.*}}test_diamond_bind_temp
+  // CHECK-CILK31:   alloca %"struct.spawn_variable_initialization::DiamondBase"*, align
+  // CHECK-CILK31:   [[Tmp:%[0-9a-zA-Z_]*]] = alloca %"struct.spawn_variable_initialization::DiamondC", align
+  // CHECK-CILK31:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
+  // CHECK-CILK31-NOT: define
+  // CHECK-CILK31:   call void @[[Destructor:.*spawn_variable_initialization.DiamondCD1Ev]](%{{.*}}* [[Tmp]])
+  //
+  // CHECK-CILK31: define internal void @[[Helper]]
+  // CHECK-CILK31-NOT: alloca %"struct.spawn_variable_initialization::Diamond
+  // CHECK-CILK31-NOT: call void @[[Destructor]]
+  // CHECK-CILK31:   ret
 }
 
 }

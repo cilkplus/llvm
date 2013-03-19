@@ -8,10 +8,6 @@
 // RUN: FileCheck -check-prefix=CHECK_MISC_IMP_SYNC --input-file=%t-noopt %s
 // RUN: FileCheck -check-prefix=CHECK_INIT --input-file=%t-noopt %s
 //
-// This test is expected to fail until assigning a temporary to a ref is
-// implemented in the _Cilk_spawn codegen.
-// RUN: not FileCheck -check-prefix=CHECK_INIT_XFAIL --input-file=%t-noopt %s
-//
 namespace stack_frame_cleanup {
   extern void touch();
 
@@ -387,6 +383,8 @@ struct Class {
 
 Class makeClass();
 
+void maybeThrow();
+
 void test_value() {
   try {
     Class c = _Cilk_spawn makeClass();
@@ -407,35 +405,81 @@ void test_value() {
 void test_rvalue_ref() {
   try {
     Class &&c = _Cilk_spawn makeClass();
+    maybeThrow();
   } catch (...) { }
-  // CHECK_INIT_XFAIL: define void @{{.*}}spawn_variable_initialization{{.*}}test_rvalue_refEv()
-  // CHECK_INIT_XFAIL: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_rvalue_ref
-  // CHECK_INIT_XFAIL-NOT: ret
+  // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_rvalue_refEv()
+  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_rvalue_ref
+  // CHECK_INIT-NOT: ret
+  //
+  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}maybeThrow
   //
   // Normal exit:
-  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
-  // CHECK_INIT_XFAIL-NOT: ret
+  // CHECK_INIT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT-NOT: ret
   //
   // Exceptional exit:
-  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
-  // CHECK_INIT_XFAIL: ret
+  // CHECK_INIT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT: ret
 }
 
 void test_const_ref() {
   try {
     const Class &c = _Cilk_spawn makeClass();
+    maybeThrow();
   } catch (...) { }
-  // CHECK_INIT_XFAIL: define void @{{.*}}spawn_variable_initialization{{.*}}test_const_refEv()
-  // CHECK_INIT_XFAIL: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_const_ref
-  // CHECK_INIT_XFAIL-NOT: }
+  // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_const_refEv()
+  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_const_ref
+  // CHECK_INIT-NOT: ret
+  //
+  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}maybeThrow
   //
   // Normal exit:
-  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
-  // CHECK_INIT_XFAIL-NOT: }
+  // CHECK_INIT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT-NOT: ret
   //
   // Exceptional exit:
-  // CHECK_INIT_XFAIL: call void @{{.*}}ClassD1Ev
-  // CHECK_INIT_XFAIL: }
+  // CHECK_INIT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT: ret
+}
+
+// If the spawn itself fails, don't call the destructor
+void test_no_destruct_uninitialized() {
+  try {
+    Class &&c = _Cilk_spawn makeClass();
+  } catch (...) { }
+  // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_no_destruct_uninitialized
+  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_no_destruct_uninitialized
+  // CHECK_INIT-NOT: ret
+  //
+  // Normal exit:
+  // CHECK_INIT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT-NOT: ret
+  //
+  // Exceptional exit:
+  // CHECK_INIT-NOT: call void @{{.*}}ClassD1Ev
+  // CHECK_INIT: ret
+}
+
+struct Base {
+  virtual ~Base();
+};
+struct Derived : public Base {
+  ~Derived();
+};
+
+Derived makeDerived();
+
+void test_bind_to_base_type() {
+  try {
+    Base &&c = _Cilk_spawn makeDerived();
+  } catch (...) { }
+  // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_bind_to_base_type
+  // CHECK_INIT: alloca {{.*}}Base"*
+  // CHECK_INIT: alloca {{.*}}Derived"
+  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_bind_to_base_type
+  // CHECK_INIT-NOT: ret
+  //
+  // CHECK_INIT: call void @{{.*}}DerivedD1Ev
 }
 
 } // namespace spawn_variable_initialization

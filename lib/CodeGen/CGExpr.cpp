@@ -159,21 +159,21 @@ void CodeGenFunction::EmitAnyExprToMem(const Expr *E,
   }
 }
 
-static llvm::Value *
-CreateReferenceTemporary(CodeGenFunction &CGF, QualType Type,
-                         const NamedDecl *InitializedDecl) {
+llvm::Value *
+CodeGenFunction::CreateReferenceTemporary(QualType Type,
+                                          const NamedDecl *InitializedDecl) {
   if (const VarDecl *VD = dyn_cast_or_null<VarDecl>(InitializedDecl)) {
     if (VD->hasGlobalStorage()) {
       SmallString<256> Name;
       llvm::raw_svector_ostream Out(Name);
-      CGF.CGM.getCXXABI().getMangleContext().mangleReferenceTemporary(VD, Out);
+      CGM.getCXXABI().getMangleContext().mangleReferenceTemporary(VD, Out);
       Out.flush();
 
-      llvm::Type *RefTempTy = CGF.ConvertTypeForMem(Type);
+      llvm::Type *RefTempTy = ConvertTypeForMem(Type);
   
       // Create the reference temporary.
       llvm::GlobalValue *RefTemp =
-        new llvm::GlobalVariable(CGF.CGM.getModule(), 
+        new llvm::GlobalVariable(CGM.getModule(),
                                  RefTempTy, /*isConstant=*/false,
                                  llvm::GlobalValue::InternalLinkage,
                                  llvm::Constant::getNullValue(RefTempTy),
@@ -182,7 +182,15 @@ CreateReferenceTemporary(CodeGenFunction &CGF, QualType Type,
     }
   }
 
-  return CGF.CreateMemTemp(Type, "ref.tmp");
+  // In a captured statement, don't alloca the receiver temp; it is passed in.
+  if (CurCGCapturedStmtInfo &&
+      CurCGCapturedStmtInfo->isReceiverDecl(InitializedDecl)) {
+    assert(CurCGCapturedStmtInfo->getReceiverTmp() &&
+           "Expected receiver temporary in captured statement");
+    return CurCGCapturedStmtInfo->getReceiverTmp();
+  }
+
+  return CreateMemTemp(Type, "ref.tmp");
 }
 
 static llvm::Value *
@@ -226,9 +234,8 @@ EmitExprForReferenceBinding(CodeGenFunction &CGF, const Expr *E,
     RV = CGF.EmitLoadOfLValue(LV);
   } else {
     if (!ObjCARCReferenceLifetimeType.isNull()) {
-      ReferenceTemporary = CreateReferenceTemporary(CGF, 
-                                                  ObjCARCReferenceLifetimeType, 
-                                                    InitializedDecl);
+      ReferenceTemporary = CGF.CreateReferenceTemporary(
+                             ObjCARCReferenceLifetimeType, InitializedDecl);
       
       
       LValue RefTempDst = CGF.MakeAddrLValue(ReferenceTemporary, 
@@ -291,8 +298,8 @@ EmitExprForReferenceBinding(CodeGenFunction &CGF, const Expr *E,
     AggValueSlot AggSlot = AggValueSlot::ignored();
     if (CGF.hasAggregateLLVMType(E->getType()) &&
         !E->getType()->isAnyComplexType()) {
-      ReferenceTemporary = CreateReferenceTemporary(CGF, E->getType(), 
-                                                    InitializedDecl);
+      ReferenceTemporary = CGF.CreateReferenceTemporary(E->getType(),
+                                                        InitializedDecl);
       CharUnits Alignment = CGF.getContext().getTypeAlignInChars(E->getType());
       AggValueSlot::IsDestructed_t isDestructed
         = AggValueSlot::IsDestructed_t(InitializedDecl != 0);
@@ -343,7 +350,7 @@ EmitExprForReferenceBinding(CodeGenFunction &CGF, const Expr *E,
           // the object we're binding to.
           QualType T = Adjustment.Field->getType().getNonReferenceType()
                                                   .getUnqualifiedType();
-          Object = CreateReferenceTemporary(CGF, T, InitializedDecl);
+          Object = CGF.CreateReferenceTemporary(T, InitializedDecl);
           LValue TempLV = CGF.MakeAddrLValue(Object,
                                              Adjustment.Field->getType());
           CGF.EmitStoreThroughLValue(CGF.EmitLoadOfLValue(LV), TempLV);
@@ -367,8 +374,8 @@ EmitExprForReferenceBinding(CodeGenFunction &CGF, const Expr *E,
     return RV.getAggregateAddr();
 
   // Create a temporary variable that we can bind the reference to.
-  ReferenceTemporary = CreateReferenceTemporary(CGF, E->getType(), 
-                                                InitializedDecl);
+  ReferenceTemporary = CGF.CreateReferenceTemporary(E->getType(),
+                                                    InitializedDecl);
 
 
   unsigned Alignment =
@@ -401,6 +408,12 @@ CodeGenFunction::EmitReferenceBindingToExpr(const Expr *E,
     QualType Ty = E->getType();
     EmitTypeCheck(TCK_ReferenceBinding, E->getExprLoc(), Value, Ty);
   }
+
+  // If we are inside a Cilk spawn helper, then the cleanups for the destructor
+  // are emitted in the spawning function, rather than the helper.
+  if (CurCGCapturedStmtInfo)
+    return RValue::get(Value);
+
   if (!ReferenceTemporaryDtor && ObjCARCReferenceLifetimeType.isNull())
     return RValue::get(Value);
   

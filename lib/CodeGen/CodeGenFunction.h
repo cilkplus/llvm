@@ -594,8 +594,9 @@ public:
   class CGCapturedStmtInfo {
   public:
     CGCapturedStmtInfo()
-      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0),
-        ReceiverParmVarDecl(0), ReceiverAddr(0), ReceiverDecl(0) { }
+      : ThisValue(0), CXXThisFieldDecl(0), ReceiverFieldDecl(0),
+        ReceiverTmpFieldDecl(0), ThisParmVarDecl(0),
+        ReceiverAddr(0), ReceiverTmp(0), ReceiverDecl(0) { }
 
     void setThisValue(llvm::Value *V) { ThisValue = V; }
     llvm::Value *getThisValue() const { return ThisValue; }
@@ -607,31 +608,42 @@ public:
 
     bool isCXXThisExprCaptured() const { return CXXThisFieldDecl != 0; }
     FieldDecl *getThisFieldDecl() const { return CXXThisFieldDecl; }
+    FieldDecl *getReceiverFieldDecl() const { return ReceiverFieldDecl; }
+    FieldDecl *getReceiverTmpFieldDecl() const { return ReceiverTmpFieldDecl; }
 
-    bool isThisParmVarDecl(const VarDecl *V) const {
+    bool isThisParmVarDecl(const NamedDecl *V) const {
       return V == ThisParmVarDecl;
     }
 
-    bool isReceiverParmVarDecl(const VarDecl *V) const {
-      return V == ReceiverParmVarDecl;
-    }
-
-    bool isReceiverDecl(const VarDecl *V) const {
+    bool isReceiverDecl(const NamedDecl *V) const {
       return V == ReceiverDecl;
     }
 
     llvm::Value *getReceiverAddr() const { return ReceiverAddr; }
     void setReceiverAddr(llvm::Value *val) { ReceiverAddr = val; }
 
+    llvm::Value *getReceiverTmp() const { return ReceiverTmp; }
+    void setReceiverTmp(llvm::Value *val) { ReceiverTmp = val; }
+
     void initCGCapturedStmtInfo(const CapturedStmt *S) {
       RecordDecl::field_iterator Field = S->getRecordDecl()->field_begin();
       for (CapturedStmt::capture_const_iterator I = S->capture_begin(),
                                                 E = S->capture_end();
                                                 I != E; ++I, ++Field) {
-        if (I->capturesThis())
+        switch (I->getCaptureKind()) {
+        case CapturedStmt::LCK_This:
           CXXThisFieldDecl = *Field;
-        else
+          break;
+        case CapturedStmt::LCK_Receiver:
+          ReceiverFieldDecl = *Field;
+          break;
+        case CapturedStmt::LCK_ReceiverTmp:
+          ReceiverTmpFieldDecl = *Field;
+          break;
+        default:
           CaptureFields[I->getCapturedVar()] = *Field;
+          break;
+        }
       }
 
       const FunctionDecl *FD = S->getFunctionDecl();
@@ -641,7 +653,6 @@ public:
       const Stmt *SubStmt = S->getSubStmt();
       if (const DeclStmt *DS = dyn_cast<DeclStmt>(SubStmt)) {
         assert(DS->isSingleDecl() && "single decl expected");
-        ReceiverParmVarDecl = FD->getParamDecl(1);
         ReceiverDecl = cast<VarDecl>(DS->getSingleDecl());
       }
     }
@@ -654,17 +665,23 @@ public:
     /// argument of the parallel region function.
     llvm::Value *ThisValue;
 
-    /// \brief Captured 'this' type
+    /// \brief Captured field for 'this'.
     FieldDecl *CXXThisFieldDecl;
 
-    /// \brief The captured record parameter to the helper function
-    const ParmVarDecl *ThisParmVarDecl;
+    /// \brief Captured field for the receiver.
+    FieldDecl *ReceiverFieldDecl;
 
-    /// \brief The receiver parameter to the helper function.
-    const ParmVarDecl *ReceiverParmVarDecl;
+    /// \brief Captured field for the receiver temporary.
+    FieldDecl *ReceiverTmpFieldDecl;
+
+    /// \brief The captured record parameter to the helper function.
+    const ParmVarDecl *ThisParmVarDecl;
 
     /// \brief The address of the receiver.
     llvm::Value *ReceiverAddr;
+
+    /// \brief The address of the receiver temporary.
+    llvm::Value *ReceiverTmp;
 
     /// \brief The receiver declariation.
     const VarDecl *ReceiverDecl;
@@ -675,9 +692,6 @@ public:
 
   /// \brief Information about implicit syncs used during code generation.
   CGCilkImplicitSyncInfo *CurCGCilkImplicitSyncInfo;
-
-  /// \brief The current receiver for a captured statement and its address.
-  std::pair<const VarDecl *, llvm::Value *> CurCaptureReceiver;
 
   /// BoundsChecking - Emit run-time bounds checks. Higher values mean
   /// potentially higher performance penalties.
@@ -1707,6 +1721,10 @@ public:
   /// appropriate alignment.
   llvm::AllocaInst *CreateMemTemp(QualType T, const Twine &Name = "tmp");
 
+  /// \brief Create a temporary for InitializedDecl.
+  llvm::Value *CreateReferenceTemporary(QualType Type,
+                                        const NamedDecl *InitializedDecl);
+
   /// CreateAggTemp - Create a temporary memory object for the given
   /// aggregate type.
   AggValueSlot CreateAggTemp(QualType T, const Twine &Name = "tmp") {
@@ -2673,19 +2691,6 @@ public:
 
   /// \brief Retrieve the current CGCapturedStmtInfo
   CGCapturedStmtInfo *GetCurCGCapturedStmtInfo() { return CurCGCapturedStmtInfo; }
-
-  /// \brief Record the receiver declaration for a captured statement.
-  void setCaptureReceiverDecl(const VarDecl *D) {
-    assert(D && "null receiver decl");
-    CurCaptureReceiver.first = D;
-    CurCaptureReceiver.second = 0;
-  }
-
-  /// \brief Set the receiver address for a captured statement.
-  void setCaptureReceiverAddr(const VarDecl *D, llvm::Value *Addr) {
-    assert(CurCaptureReceiver.first == D && "unexpected receiver");
-    CurCaptureReceiver.second = Addr;
-  }
 
   /// \brief Emit the receiver declaration for a captured statement.
   /// Only allocation and cleanup will be emitted, and initialization will be

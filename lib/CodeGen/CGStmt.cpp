@@ -1714,6 +1714,27 @@ CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
   CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
 }
 
+static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
+                                       llvm::Value *ReceiverTmp,
+                                       QualType InitTy) {
+  const RecordType *RT = InitTy->getBaseElementTypeUnsafe()->getAs<RecordType>();
+  if (!RT)
+    return;
+
+  CXXRecordDecl *ClassDecl = cast<CXXRecordDecl>(RT->getDecl());
+  if (ClassDecl->hasTrivialDestructor())
+    return;
+
+  // If required, push a cleanup to destroy the temporary.
+  const CXXDestructorDecl *Dtor = ClassDecl->getDestructor();
+  if (InitTy->isArrayType())
+    CGF.pushDestroy(NormalAndEHCleanup, ReceiverTmp,
+                    InitTy, &CodeGenFunction::destroyCXXObject,
+                    CGF.getLangOpts().Exceptions);
+  else
+    CGF.PushDestructorCleanup(Dtor, ReceiverTmp);
+}
+
 void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
   const FunctionDecl *HelperDecl = S.getFunctionDecl();
   assert((HelperDecl->getNumParams() >= 1) && "at least one argument expected");
@@ -1721,6 +1742,9 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
 
   const RecordDecl *RD = S.getRecordDecl();
   QualType RecordTy = getContext().getRecordType(RD);
+
+  QualType InitTy;
+  llvm::Value *ReceiverTmp = 0;
 
   // Initialize the captured struct
   AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
@@ -1733,18 +1757,25 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
        I != E; ++I, ++CurField) {
     LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
     ArrayRef<VarDecl *> ArrayIndexes;
-    EmitInitializerForField(*CurField, LV, I->getCopyExpr(), ArrayIndexes);
+
+    switch (I->getCaptureKind()) {
+    case CapturedStmt::LCK_Receiver:
+      EmitStoreOfScalar(GetAddrOfLocalVar(I->getCapturedVar()), LV, true);
+      break;
+    case CapturedStmt::LCK_ReceiverTmp: {
+      InitTy = CurField->getType()->getPointeeType();
+      ReceiverTmp = CreateMemTemp(InitTy);
+      EmitStoreOfScalar(ReceiverTmp, LV, true);
+    } break;
+    default:
+      EmitInitializerForField(*CurField, LV, I->getCopyExpr(), ArrayIndexes);
+      break;
+    }
   }
 
   // The first argument is the address of captured struct
-  llvm::SmallVector<llvm::Value *, 2> Args;
+  llvm::SmallVector<llvm::Value *, 1> Args;
   Args.push_back(SlotLV.getAddress());
-
-  // The second argument is the address of the receiver, if exists.
-  if (HelperDecl->getNumParams() >= 2) {
-    assert(CurCaptureReceiver.second && "no allocation yet");
-    Args.push_back(CurCaptureReceiver.second);
-  }
 
   CGM.getCaptureDeclMap().insert(
       std::pair<const FunctionDecl*,
@@ -1757,4 +1788,9 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
 
   // Emit call to the helper function
   EmitCallOrInvoke(H, Args);
+
+  // If this spawn binds a temporary to a reference, then destroy the
+  // temporary at the end of the reference's lifetime.
+  if (ReceiverTmp)
+    maybeCleanupBoundTemporary(*this, ReceiverTmp, InitTy);
 }

@@ -1147,7 +1147,6 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     if (const DeclStmt *DS = dyn_cast<DeclStmt>(S.getSubStmt())) {
       assert(DS->isSingleDecl() && "single decl expected");
       const VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
-      CGF.setCaptureReceiverDecl(VD);
 
       switch (VD->getStorageClass()) {
       case SC_None:
@@ -1163,6 +1162,7 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     // Emit call to the helper function
     CGF.EmitCapturedStmt(S);
 
+    // Register the spawn helper function.
     GlobalDecl GD(S.getFunctionDecl());
     Function *Helper = cast<Function>(CGF.CGM.GetAddrOfFunction(GD));
 

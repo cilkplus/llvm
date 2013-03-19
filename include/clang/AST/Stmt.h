@@ -1917,65 +1917,47 @@ class CapturedStmt : public Stmt {
 public:
   enum CaptureKind {
     LCK_This,
-    LCK_ByCopy,
-    LCK_ByRef
-  };
-
-  enum {
-    /// \brief Flag used by the Capture class to indicate that the given
-    /// capture was implicit.
-    Capture_Implicit = 0x01,
-
-    /// \brief Flag used by the Capture class to indciate that the
-    /// given capture was by-copy.
-    Capture_ByCopy = 0x02
+    LCK_ByRef,
+    LCK_Receiver,
+    LCK_ReceiverTmp
   };
 
   /// \brief Describes the capture of either a variable or 'this'.
   class Capture {
-    llvm::PointerIntPair<VarDecl *, 2> VarAndBits;
+    VarDecl *Var;
+    CaptureKind Kind;
     Expr *CopyExpr;
+
   public:
     /// \brief Create a new capture.
-    ///
     Capture(CaptureKind Kind, Expr *E, VarDecl *Var = 0)
-      : VarAndBits(Var, 0), CopyExpr(E) {
-       unsigned Bits = Capture_Implicit;
-
+      : Var(Var), Kind(Kind), CopyExpr(E) {
        switch (Kind) {
        case LCK_This: 
          assert(Var == 0 && "'this' capture cannot have a variable!");
          break;
-       case LCK_ByCopy:
-         Bits |= Capture_ByCopy;
-         // Fall through 
        case LCK_ByRef:
          assert(Var && "capture must have a variable!");
          break;
+       case LCK_Receiver:
+       case LCK_ReceiverTmp:
+         assert(Var != 0 && "receiver capture must have a variable!");
+         break;
        }
-       VarAndBits.setInt(Bits);
     }
 
     /// \brief Determine the kind of capture.
-    CaptureKind getCaptureKind() const {
-      if (capturesThis())
-        return LCK_This;
-
-      return (VarAndBits.getInt() & Capture_ByCopy)? LCK_ByCopy : LCK_ByRef;
-    }
+    CaptureKind getCaptureKind() const { return Kind; }
 
     /// \brief Determine whether this capture handles the C++ 'this'  pointer.
-    bool capturesThis() const { return VarAndBits.getPointer() == 0; }
-
-    /// \brief Determine whether this capture handles a variable.
-    bool capturesVariable() const { return VarAndBits.getPointer() != 0; }
+    bool capturesThis() const { return Var == 0; }
 
     /// \brief Retrieve the declaration of the local variable being captured.
     ///
     /// This operation is only valid if this capture does not capture 'this'.
     VarDecl *getCapturedVar() const { 
       assert(!capturesThis() && "No variable available for 'this' capture");
-      return VarAndBits.getPointer();
+      return Var;
     }
 
     Expr *getCopyExpr() const { return CopyExpr; }

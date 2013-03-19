@@ -1383,10 +1383,21 @@ void ASTDumper::VisitCapturedStmt(const CapturedStmt *Node) {
                                       E = Node->capture_end(); I != E; ++I) {
     IndentScope Indent(*this);
     OS << "Capture ";
-    if (I->capturesThis())
+    switch (I->getCaptureKind()) {
+    case CapturedStmt::LCK_This:
       OS << "this";
-    else
+      break;
+    case CapturedStmt::LCK_Receiver:
+      OS << "receiver ";
       dumpDeclRef(I->getCapturedVar());
+      break;
+    case CapturedStmt::LCK_ReceiverTmp:
+      OS << "receiver temp for ";
+      dumpDeclRef(I->getCapturedVar());
+      break;
+    default:
+      dumpDeclRef(I->getCapturedVar());
+    }
   }
 }
 

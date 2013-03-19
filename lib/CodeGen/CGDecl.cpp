@@ -775,7 +775,6 @@ void CodeGenFunction::EmitCaptureReceiverDecl(const VarDecl &D) {
   assert(FD && FD->isSpawning() && "unexpected function declaration");
 #endif
   AutoVarEmission Emission = EmitAutoVarAlloca(D);
-  setCaptureReceiverAddr(&D, Emission.Address);
   EmitAutoVarCleanups(Emission);
 }
 
@@ -1618,12 +1617,25 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
   DMEntry = DeclPtr;
 
   // The captured record (passed as the first parameter) is the base address.
-  if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isThisParmVarDecl(&D))
-    CurCGCapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
+  if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isThisParmVarDecl(&D)) {
+    llvm::Value *This = Builder.CreateLoad(DeclPtr);
+    CurCGCapturedStmtInfo->setThisValue(This);
 
-  // The address of the receiver decl is passed as the second parameter.
-  if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isReceiverParmVarDecl(&D))
-    CurCGCapturedStmtInfo->setReceiverAddr(Builder.CreateLoad(DeclPtr));
+    // If there is a receiver, it is stored in a field of the captured record.
+    if (FieldDecl *RecFD = CurCGCapturedStmtInfo->getReceiverFieldDecl()) {
+      QualType TagType = getContext().getTagDeclType(RecFD->getParent());
+
+      LValue LV = MakeNaturalAlignAddrLValue(This, TagType);
+      CurCGCapturedStmtInfo->setReceiverAddr(
+        Builder.CreateLoad(EmitLValueForField(LV, RecFD).getAddress()));
+
+      // Similarly for the receiver temporary.
+      if (FieldDecl *RecTmpFD = CurCGCapturedStmtInfo->getReceiverTmpFieldDecl()) {
+        CurCGCapturedStmtInfo->setReceiverTmp(
+          Builder.CreateLoad(EmitLValueForField(LV, RecTmpFD).getAddress()));
+      }
+    }
+  }
 
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {
