@@ -31,50 +31,24 @@ using namespace clang::driver;
 using namespace clang::driver::toolchains;
 using namespace clang;
 
-Windows::Windows(const Driver &D, const llvm::Triple& Triple)
-  : ToolChain(D, Triple) {
+Windows::Windows(const Driver &D, const llvm::Triple& Triple,
+                 const ArgList &Args)
+  : ToolChain(D, Triple, Args) {
 }
 
-Tool &Windows::SelectTool(const Compilation &C, const JobAction &JA,
-                          const ActionList &Inputs) const {
-  Action::ActionClass Key;
-  if (getDriver().ShouldUseClangCompiler(C, JA, getTriple()))
-    Key = Action::AnalyzeJobClass;
-  else
-    Key = JA.getKind();
-
-  bool UseIntegratedAs = C.getArgs().hasFlag(options::OPT_integrated_as,
-                                             options::OPT_no_integrated_as,
-                                             IsIntegratedAssemblerDefault());
-
-  Tool *&T = Tools[Key];
-  if (!T) {
-    switch (Key) {
-    case Action::InputClass:
-    case Action::BindArchClass:
-    case Action::LipoJobClass:
-    case Action::DsymutilJobClass:
-    case Action::VerifyJobClass:
-    case Action::SplitDebugJobClass:
-      llvm_unreachable("Invalid tool kind.");
-    case Action::PreprocessJobClass:
-    case Action::PrecompileJobClass:
-    case Action::AnalyzeJobClass:
-    case Action::MigrateJobClass:
-    case Action::CompileJobClass:
-      T = new tools::Clang(*this); break;
-    case Action::AssembleJobClass:
-      if (!UseIntegratedAs && getTriple().getEnvironment() == llvm::Triple::MachO)
-        T = new tools::darwin::Assemble(*this);
-      else
-        T = new tools::ClangAs(*this);
-      break;
-    case Action::LinkJobClass:
-      T = new tools::visualstudio::Link(*this); break;
-    }
+Tool *Windows::constructTool(Action::ActionClass AC) const {
+  switch (AC) {
+  case Action::AssembleJobClass:
+    if (getTriple().getEnvironment() == llvm::Triple::MachO)
+      return new tools::darwin::Assemble(*this);
+    // There no assembler we can use on windows other than the integrated
+    // assembler, so we ignore -no-integrated-as.
+    return new tools::ClangAs(*this);
+  case Action::LinkJobClass:
+    return new tools::visualstudio::Link(*this);
+  default:
+    return ToolChain::constructTool(AC);
   }
-
-  return *T;
 }
 
 bool Windows::IsIntegratedAssemblerDefault() const {

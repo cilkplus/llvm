@@ -88,6 +88,11 @@ class [[]] [[]] final_class_another
 
 [[]] struct with_init_declarators {} init_declarator;
 [[]] struct no_init_declarators; // expected-error {{an attribute list cannot appear here}}
+template<typename> [[]] struct no_init_declarators_template; // expected-error {{an attribute list cannot appear here}}
+void fn_with_structs() {
+  [[]] struct with_init_declarators {} init_declarator;
+  [[]] struct no_init_declarators; // expected-error {{an attribute list cannot appear here}}
+}
 [[]];
 struct ctordtor {
   [[]] ctordtor();
@@ -274,4 +279,5 @@ int v4[2][[gnu::unused]]; // expected-warning {{attribute 'unused' ignored}}
 int v5()[[gnu::unused]]; // expected-warning {{attribute 'unused' ignored}}
 
 [[attribute_declaration]]; // expected-warning {{unknown attribute 'attribute_declaration' ignored}}
-[[noreturn]]; // expected-error {{'noreturn' attribute cannot be used in an attribute declaration}}
+[[noreturn]]; // expected-error {{'noreturn' attribute only applies to functions and methods}}
+[[carries_dependency]]; // expected-error {{'carries_dependency' attribute only applies to functions, methods, and parameters}}

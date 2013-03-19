@@ -585,7 +585,7 @@ void ScalarExprEmitter::EmitFloatConversionCheck(Value *OrigSrc,
   } else {
     // Floating-point to integer or floating-point to floating-point. This has
     // undefined behavior if the source is +-Inf, NaN, or doesn't fit into the
-    // destination type.
+    // destination type (after truncation to an integer for float-to-integer).
     const llvm::fltSemantics &SrcSema =
       CGF.getContext().getFloatTypeSemantics(OrigSrcType);
     APFloat MaxSrc(SrcSema, APFloat::uninitialized);
@@ -600,14 +600,22 @@ void ScalarExprEmitter::EmitFloatConversionCheck(Value *OrigSrc,
           APFloat::opOverflow)
         // Don't need an overflow check for lower bound. Just check for
         // -Inf/NaN.
-        MinSrc = APFloat::getLargest(SrcSema, true);
+        MinSrc = APFloat::getInf(SrcSema, true);
+      else
+        // Find the largest value which is too small to represent (before
+        // truncation toward zero).
+        MinSrc.subtract(APFloat(SrcSema, 1), APFloat::rmTowardNegative);
 
       APSInt Max = APSInt::getMaxValue(Width, Unsigned);
       if (MaxSrc.convertFromAPInt(Max, !Unsigned, APFloat::rmTowardZero) &
           APFloat::opOverflow)
         // Don't need an overflow check for upper bound. Just check for
         // +Inf/NaN.
-        MaxSrc = APFloat::getLargest(SrcSema, false);
+        MaxSrc = APFloat::getInf(SrcSema, false);
+      else
+        // Find the smallest value which is too large to represent (before
+        // truncation toward zero).
+        MaxSrc.add(APFloat(SrcSema, 1), APFloat::rmTowardPositive);
     } else {
       const llvm::fltSemantics &DstSema =
         CGF.getContext().getFloatTypeSemantics(DstType);
@@ -634,11 +642,19 @@ void ScalarExprEmitter::EmitFloatConversionCheck(Value *OrigSrc,
       MaxSrc.convert(Sema, APFloat::rmTowardZero, &IsInexact);
     }
 
-    llvm::Value *GE =
-      Builder.CreateFCmpOGE(Src, llvm::ConstantFP::get(VMContext, MinSrc));
-    llvm::Value *LE =
-      Builder.CreateFCmpOLE(Src, llvm::ConstantFP::get(VMContext, MaxSrc));
-    Check = Builder.CreateAnd(GE, LE);
+    if (isa<llvm::IntegerType>(DstTy)) {
+      llvm::Value *GE =
+        Builder.CreateFCmpOGT(Src, llvm::ConstantFP::get(VMContext, MinSrc));
+      llvm::Value *LE =
+        Builder.CreateFCmpOLT(Src, llvm::ConstantFP::get(VMContext, MaxSrc));
+      Check = Builder.CreateAnd(GE, LE);
+    } else {
+      llvm::Value *GE =
+        Builder.CreateFCmpOGE(Src, llvm::ConstantFP::get(VMContext, MinSrc));
+      llvm::Value *LE =
+        Builder.CreateFCmpOLE(Src, llvm::ConstantFP::get(VMContext, MaxSrc));
+      Check = Builder.CreateAnd(GE, LE);
+    }
   }
 
   // FIXME: Provide a SourceLocation.
@@ -775,7 +791,7 @@ Value *ScalarExprEmitter::
 EmitComplexToScalarConversion(CodeGenFunction::ComplexPairTy Src,
                               QualType SrcTy, QualType DstTy) {
   // Get the source element type.
-  SrcTy = SrcTy->getAs<ComplexType>()->getElementType();
+  SrcTy = SrcTy->castAs<ComplexType>()->getElementType();
 
   // Handle conversions to bool first, they are special: comparisons against 0.
   if (DstTy->isBooleanType()) {
@@ -986,7 +1002,12 @@ Value *ScalarExprEmitter::VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
   // integer value.
   Value *Base = Visit(E->getBase());
   Value *Idx  = Visit(E->getIdx());
-  bool IdxSigned = E->getIdx()->getType()->isSignedIntegerOrEnumerationType();
+  QualType IdxTy = E->getIdx()->getType();
+
+  if (CGF.SanOpts->Bounds)
+    CGF.EmitBoundsCheck(E, E->getBase(), Idx, IdxTy, /*Accessed*/true);
+
+  bool IdxSigned = IdxTy->isSignedIntegerOrEnumerationType();
   Idx = Builder.CreateIntCast(Idx, CGF.Int32Ty, IdxSigned, "vecidxcast");
   return Builder.CreateExtractElement(Base, Idx, "vecext");
 }
@@ -1439,21 +1460,60 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
                                            bool isInc, bool isPre) {
   
   QualType type = E->getSubExpr()->getType();
-  llvm::Value *value = EmitLoadOfLValue(LV);
-  llvm::Value *input = value;
   llvm::PHINode *atomicPHI = 0;
+  llvm::Value *value;
+  llvm::Value *input;
 
   int amount = (isInc ? 1 : -1);
 
   if (const AtomicType *atomicTy = type->getAs<AtomicType>()) {
+    type = atomicTy->getValueType();
+    if (isInc && type->isBooleanType()) {
+      llvm::Value *True = CGF.EmitToMemory(Builder.getTrue(), type);
+      if (isPre) {
+        Builder.Insert(new llvm::StoreInst(True,
+              LV.getAddress(), LV.isVolatileQualified(),
+              LV.getAlignment().getQuantity(),
+              llvm::SequentiallyConsistent));
+        return Builder.getTrue();
+      }
+      // For atomic bool increment, we just store true and return it for
+      // preincrement, do an atomic swap with true for postincrement
+        return Builder.CreateAtomicRMW(llvm::AtomicRMWInst::Xchg,
+            LV.getAddress(), True, llvm::SequentiallyConsistent);
+    }
+    // Special case for atomic increment / decrement on integers, emit
+    // atomicrmw instructions.  We skip this if we want to be doing overflow
+    // checking, and fall into the slow path with the atomic cmpxchg loop.  
+    if (!type->isBooleanType() && type->isIntegerType() &&
+        !(type->isUnsignedIntegerType() &&
+         CGF.SanOpts->UnsignedIntegerOverflow) &&
+        CGF.getLangOpts().getSignedOverflowBehavior() !=
+         LangOptions::SOB_Trapping) {
+      llvm::AtomicRMWInst::BinOp aop = isInc ? llvm::AtomicRMWInst::Add :
+        llvm::AtomicRMWInst::Sub;
+      llvm::Instruction::BinaryOps op = isInc ? llvm::Instruction::Add :
+        llvm::Instruction::Sub;
+      llvm::Value *amt = CGF.EmitToMemory(
+          llvm::ConstantInt::get(ConvertType(type), 1, true), type);
+      llvm::Value *old = Builder.CreateAtomicRMW(aop,
+          LV.getAddress(), amt, llvm::SequentiallyConsistent);
+      return isPre ? Builder.CreateBinOp(op, old, amt) : old;
+    }
+    value = EmitLoadOfLValue(LV);
+    input = value;
+    // For every other atomic operation, we need to emit a load-op-cmpxchg loop
     llvm::BasicBlock *startBB = Builder.GetInsertBlock();
     llvm::BasicBlock *opBB = CGF.createBasicBlock("atomic_op", CGF.CurFn);
+    value = CGF.EmitToMemory(value, type);
     Builder.CreateBr(opBB);
     Builder.SetInsertPoint(opBB);
     atomicPHI = Builder.CreatePHI(value->getType(), 2);
     atomicPHI->addIncoming(value, startBB);
-    type = atomicTy->getValueType();
     value = atomicPHI;
+  } else {
+    value = EmitLoadOfLValue(LV);
+    input = value;
   }
 
   // Special case of integer increment that we have to check first: bool++.
@@ -1591,7 +1651,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
     llvm::BasicBlock *opBB = Builder.GetInsertBlock();
     llvm::BasicBlock *contBB = CGF.createBasicBlock("atomic_cont", CGF.CurFn);
     llvm::Value *old = Builder.CreateAtomicCmpXchg(LV.getAddress(), atomicPHI,
-        value, llvm::SequentiallyConsistent);
+        CGF.EmitToMemory(value, type), llvm::SequentiallyConsistent);
     atomicPHI->addIncoming(old, opBB);
     llvm::Value *success = Builder.CreateICmpEQ(old, atomicPHI);
     Builder.CreateCondBr(success, contBB, opBB);
@@ -1858,49 +1918,73 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
     return LValue();
   }
 
-  LValue LHSLV;
-
-  // Cilk Plus needs the LHS evaluated first to handle cases such as
-  // array[f()] = _Cilk_spawn foo();
-  // This evaluation order requirement implies that _Cilk_spawn cannot
-  // spawn Objective C block calls
-  if (CGF.getLangOpts().CilkPlus) {
-    assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
-           "Cilk Plus does not support Objective-C");
-
-    // Load/convert the LHS.
-    LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
-    OpInfo.LHS = EmitLoadOfLValue(LHSLV);
-
-    OpInfo.RHS = Visit(E->getRHS());
-
-  // Otherwise emit the RHS first. __block variables need to have the rhs
-  // evaluated first, plus this should improve codegen a little.
-  } else {
-    OpInfo.RHS = Visit(E->getRHS());
-
-    // Load/convert the LHS.
-    LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
-    OpInfo.LHS = EmitLoadOfLValue(LHSLV);
-  }
-
+  // Emit the RHS first.  __block variables need to have the rhs evaluated
+  // first, plus this should improve codegen a little.
+  OpInfo.RHS = Visit(E->getRHS());
   OpInfo.Ty = E->getComputationResultType();
   OpInfo.Opcode = E->getOpcode();
   OpInfo.FPContractable = false;
   OpInfo.E = E;
+  // Load/convert the LHS.
+  LValue LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
+
 
   llvm::PHINode *atomicPHI = 0;
-  if (LHSTy->isAtomicType()) {
+  if (const AtomicType *atomicTy = LHSTy->getAs<AtomicType>()) {
+    QualType type = atomicTy->getValueType();
+    if (!type->isBooleanType() && type->isIntegerType() &&
+         !(type->isUnsignedIntegerType() &&
+          CGF.SanOpts->UnsignedIntegerOverflow) &&
+         CGF.getLangOpts().getSignedOverflowBehavior() !=
+          LangOptions::SOB_Trapping) {
+      llvm::AtomicRMWInst::BinOp aop = llvm::AtomicRMWInst::BAD_BINOP;
+      switch (OpInfo.Opcode) {
+        // We don't have atomicrmw operands for *, %, /, <<, >>
+        case BO_MulAssign: case BO_DivAssign:
+        case BO_RemAssign:
+        case BO_ShlAssign:
+        case BO_ShrAssign:
+          break;
+        case BO_AddAssign:
+          aop = llvm::AtomicRMWInst::Add;
+          break;
+        case BO_SubAssign:
+          aop = llvm::AtomicRMWInst::Sub;
+          break;
+        case BO_AndAssign:
+          aop = llvm::AtomicRMWInst::And;
+          break;
+        case BO_XorAssign:
+          aop = llvm::AtomicRMWInst::Xor;
+          break;
+        case BO_OrAssign:
+          aop = llvm::AtomicRMWInst::Or;
+          break;
+        default:
+          llvm_unreachable("Invalid compound assignment type");
+      }
+      if (aop != llvm::AtomicRMWInst::BAD_BINOP) {
+        llvm::Value *amt = CGF.EmitToMemory(EmitScalarConversion(OpInfo.RHS,
+              E->getRHS()->getType(), LHSTy), LHSTy);
+        Builder.CreateAtomicRMW(aop, LHSLV.getAddress(), amt,
+            llvm::SequentiallyConsistent);
+        return LHSLV;
+      }
+    }
     // FIXME: For floating point types, we should be saving and restoring the
     // floating point environment in the loop.
     llvm::BasicBlock *startBB = Builder.GetInsertBlock();
     llvm::BasicBlock *opBB = CGF.createBasicBlock("atomic_op", CGF.CurFn);
+    OpInfo.LHS = EmitLoadOfLValue(LHSLV);
+    OpInfo.LHS = CGF.EmitToMemory(OpInfo.LHS, type);
     Builder.CreateBr(opBB);
     Builder.SetInsertPoint(opBB);
     atomicPHI = Builder.CreatePHI(OpInfo.LHS->getType(), 2);
     atomicPHI->addIncoming(OpInfo.LHS, startBB);
     OpInfo.LHS = atomicPHI;
   }
+  else
+    OpInfo.LHS = EmitLoadOfLValue(LHSLV);
 
   OpInfo.LHS = EmitScalarConversion(OpInfo.LHS, LHSTy,
                                     E->getComputationLHSType());
@@ -1915,7 +1999,7 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
     llvm::BasicBlock *opBB = Builder.GetInsertBlock();
     llvm::BasicBlock *contBB = CGF.createBasicBlock("atomic_cont", CGF.CurFn);
     llvm::Value *old = Builder.CreateAtomicCmpXchg(LHSLV.getAddress(), atomicPHI,
-        Result, llvm::SequentiallyConsistent);
+        CGF.EmitToMemory(Result, LHSTy), llvm::SequentiallyConsistent);
     atomicPHI->addIncoming(old, opBB);
     llvm::Value *success = Builder.CreateICmpEQ(old, atomicPHI);
     Builder.CreateCondBr(success, contBB, opBB);
@@ -2106,9 +2190,14 @@ Value *ScalarExprEmitter::EmitOverflowCheckedBinOp(const BinOpInfo &Ops) {
 
   // Call the handler with the two arguments, the operation, and the size of
   // the result.
-  llvm::Value *handlerResult = Builder.CreateCall4(handler, lhs, rhs,
-      Builder.getInt8(OpID),
-      Builder.getInt8(cast<llvm::IntegerType>(opTy)->getBitWidth()));
+  llvm::Value *handlerArgs[] = {
+    lhs,
+    rhs,
+    Builder.getInt8(OpID),
+    Builder.getInt8(cast<llvm::IntegerType>(opTy)->getBitWidth())
+  };
+  llvm::Value *handlerResult =
+    CGF.EmitNounwindRuntimeCall(handler, handlerArgs);
 
   // Truncate the result back to the desired size.
   handlerResult = Builder.CreateTrunc(handlerResult, opTy);
@@ -2153,6 +2242,10 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
   // If this is subtraction, negate the index.
   if (isSubtraction)
     index = CGF.Builder.CreateNeg(index, "idx.neg");
+
+  if (CGF.SanOpts->Bounds)
+    CGF.EmitBoundsCheck(op.E, pointerOperand, index, indexOperand->getType(),
+                        /*Accessed*/ false);
 
   const PointerType *pointerType
     = pointerOperand->getType()->getAs<PointerType>();
@@ -2418,13 +2511,17 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
   if (CGF.SanOpts->Shift && !CGF.getLangOpts().OpenCL &&
       isa<llvm::IntegerType>(Ops.LHS->getType())) {
     llvm::Value *WidthMinusOne = GetWidthMinusOneValue(Ops.LHS, RHS);
-    // FIXME: Emit the branching explicitly rather than emitting the check
-    // twice.
-    EmitBinOpCheck(Builder.CreateICmpULE(RHS, WidthMinusOne), Ops);
+    llvm::Value *Valid = Builder.CreateICmpULE(RHS, WidthMinusOne);
 
     if (Ops.Ty->hasSignedIntegerRepresentation()) {
+      llvm::BasicBlock *Orig = Builder.GetInsertBlock();
+      llvm::BasicBlock *Cont = CGF.createBasicBlock("cont");
+      llvm::BasicBlock *CheckBitsShifted = CGF.createBasicBlock("check");
+      Builder.CreateCondBr(Valid, CheckBitsShifted, Cont);
+
       // Check whether we are shifting any non-zero bits off the top of the
       // integer.
+      CGF.EmitBlock(CheckBitsShifted);
       llvm::Value *BitsShiftedOff =
         Builder.CreateLShr(Ops.LHS,
                            Builder.CreateSub(WidthMinusOne, RHS, "shl.zeros",
@@ -2439,8 +2536,15 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
         BitsShiftedOff = Builder.CreateLShr(BitsShiftedOff, One);
       }
       llvm::Value *Zero = llvm::ConstantInt::get(BitsShiftedOff->getType(), 0);
-      EmitBinOpCheck(Builder.CreateICmpEQ(BitsShiftedOff, Zero), Ops);
+      llvm::Value *SecondCheck = Builder.CreateICmpEQ(BitsShiftedOff, Zero);
+      CGF.EmitBlock(Cont);
+      llvm::PHINode *P = Builder.CreatePHI(Valid->getType(), 2);
+      P->addIncoming(Valid, Orig);
+      P->addIncoming(SecondCheck, CheckBitsShifted);
+      Valid = P;
     }
+
+    EmitBinOpCheck(Valid, Ops);
   }
   // OpenCL 6.3j: shift values are effectively % word size of LHS.
   if (CGF.getLangOpts().OpenCL)
@@ -3086,7 +3190,7 @@ Value *ScalarExprEmitter::VisitAtomicExpr(AtomicExpr *E) {
 /// EmitScalarExpr - Emit the computation of the specified expression of scalar
 /// type, ignoring the result.
 Value *CodeGenFunction::EmitScalarExpr(const Expr *E, bool IgnoreResultAssign) {
-  assert(E && !hasAggregateLLVMType(E->getType()) &&
+  assert(E && hasScalarEvaluationKind(E->getType()) &&
          "Invalid scalar expression to emit");
 
   if (isa<CXXDefaultArgExpr>(E))
@@ -3102,7 +3206,7 @@ Value *CodeGenFunction::EmitScalarExpr(const Expr *E, bool IgnoreResultAssign) {
 /// specified destination type, both of which are LLVM scalar types.
 Value *CodeGenFunction::EmitScalarConversion(Value *Src, QualType SrcTy,
                                              QualType DstTy) {
-  assert(!hasAggregateLLVMType(SrcTy) && !hasAggregateLLVMType(DstTy) &&
+  assert(hasScalarEvaluationKind(SrcTy) && hasScalarEvaluationKind(DstTy) &&
          "Invalid scalar expression to emit");
   return ScalarExprEmitter(*this).EmitScalarConversion(Src, SrcTy, DstTy);
 }
@@ -3113,7 +3217,7 @@ Value *CodeGenFunction::EmitScalarConversion(Value *Src, QualType SrcTy,
 Value *CodeGenFunction::EmitComplexToScalarConversion(ComplexPairTy Src,
                                                       QualType SrcTy,
                                                       QualType DstTy) {
-  assert(SrcTy->isAnyComplexType() && !hasAggregateLLVMType(DstTy) &&
+  assert(SrcTy->isAnyComplexType() && hasScalarEvaluationKind(DstTy) &&
          "Invalid complex -> scalar conversion");
   return ScalarExprEmitter(*this).EmitComplexToScalarConversion(Src, SrcTy,
                                                                 DstTy);

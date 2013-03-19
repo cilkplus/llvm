@@ -828,7 +828,7 @@ Controlling Code Generation
 Clang provides a number of ways to control code generation. The options
 are listed below.
 
-**-fsanitize=check1,check2**
+**-fsanitize=check1,check2,...**
    Turn on runtime checks for various forms of undefined or suspicious
    behavior.
 
@@ -842,6 +842,8 @@ are listed below.
       ``-fsanitize=address``:
       :doc:`AddressSanitizer`, a memory error
       detector.
+   -  ``-fsanitize=init-order``: Make AddressSanitizer check for
+      dynamic initialization order problems. Implied by ``-fsanitize=address``.
    -  ``-fsanitize=address-full``: AddressSanitizer with all the
       experimental features listed below.
    -  ``-fsanitize=integer``: Enables checks for undefined or
@@ -917,8 +919,6 @@ are listed below.
    Experimental features of AddressSanitizer (not ready for widespread
    use, require explicit ``-fsanitize=address``):
 
-   -  ``-fsanitize=init-order``: Check for dynamic initialization order
-      problems.
    -  ``-fsanitize=use-after-return``: Check for use-after-return
       errors (accessing local variable after the function exit).
    -  ``-fsanitize=use-after-scope``: Check for use-after-scope errors
@@ -1177,6 +1177,11 @@ features <http://clang.llvm.org/cxx_status.html>`_ are also implemented.
 
 Controlling implementation limits
 ---------------------------------
+
+.. option:: -fbracket-depth=N
+
+  Sets the limit for nested parentheses, brackets, and braces to N.  The
+  default is 256.
 
 .. option:: -fconstexpr-depth=N
 

@@ -73,6 +73,15 @@ void testBranchReversed(void *p) {
   *casted = 1; // expected-warning {{Dereference of null pointer}}
 }
 
+void testMultipleStore(void *p) {
+  int *casted = 0;
+  casted = dynCastToInt(p);
+  *casted = 1;
+#ifndef SUPPRESSED
+  // expected-warning@-2 {{Dereference of null pointer}}
+#endif
+}
+
 
 // --------------------------
 // "Suppression suppression"
@@ -181,4 +190,51 @@ void testAlwaysReturnNull(void *input) {
   // expected-warning@-2 {{Dereference of null pointer}}
 #endif
 }
+
+int derefArg(int *p) {
+	return *p;
+#ifndef SUPPRESSED
+  // expected-warning@-2 {{Dereference of null pointer}}
+#endif
+}
+void ternaryArg(char cond) {
+	static int x;
+	derefArg(cond ? &x : getNull());
+}
+
+int derefArgCast(char *p) {
+	return *p;
+#ifndef SUPPRESSED
+  // expected-warning@-2 {{Dereference of null pointer}}
+#endif
+}
+void ternaryArgCast(char cond) {
+	static int x;
+	derefArgCast((char*)((unsigned)cond ? &x : getNull()));
+}
+
+int derefAssignment(int *p) {
+	return *p;
+#ifndef SUPPRESSED
+  // expected-warning@-2 {{Dereference of null pointer}}
+#endif
+}
+void ternaryAssignment(char cond) {
+  static int x;
+  int *p = cond ? &x : getNull();
+  derefAssignment(p);
+}
+
+int *retNull(char cond) {
+  static int x;
+  return cond ? &x : getNull();
+}
+int ternaryRetNull(char cond) {
+  int *p = retNull(cond);
+  return *p;
+#ifndef SUPPRESSED
+  // expected-warning@-2 {{Dereference of null pointer}}
+#endif
+}
+
 

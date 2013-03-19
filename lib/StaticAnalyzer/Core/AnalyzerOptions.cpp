@@ -74,7 +74,7 @@ AnalyzerOptions::mayInlineCXXMemberFunction(CXXInlineableMemberKind K) {
     static const char *ModeKey = "c++-inlining";
     
     StringRef ModeStr(Config.GetOrCreateValue(ModeKey,
-                                              "methods").getValue());
+                                              "constructors").getValue());
 
     CXXInlineableMemberKind &MutableMode =
       const_cast<CXXInlineableMemberKind &>(CXXMemberInliningMode);
@@ -150,6 +150,12 @@ bool AnalyzerOptions::shouldAvoidSuppressingNullArgumentPaths() {
   return getBooleanOption(AvoidSuppressingNullArgumentPaths,
                           "avoid-suppressing-null-argument-paths",
                           /* Default = */ false);
+}
+
+bool AnalyzerOptions::shouldSuppressInlinedDefensiveChecks() {
+  return getBooleanOption(SuppressInlinedDefensiveChecks,
+                          "suppress-inlined-defensive-checks",
+                          /* Default = */ true);
 }
 
 int AnalyzerOptions::getOptionAsInteger(StringRef Name, int DefaultVal) {

@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Tools.h"
 #include "clang/Driver/ToolChain.h"
 #include "clang/Basic/ObjCRuntime.h"
 #include "clang/Driver/Action.h"
@@ -21,15 +22,26 @@
 using namespace clang::driver;
 using namespace clang;
 
-ToolChain::ToolChain(const Driver &D, const llvm::Triple &T)
-  : D(D), Triple(T) {
+ToolChain::ToolChain(const Driver &D, const llvm::Triple &T,
+                     const ArgList &A)
+  : D(D), Triple(T), Args(A) {
 }
 
 ToolChain::~ToolChain() {
+  // Free tool implementations.
+  for (llvm::DenseMap<unsigned, Tool*>::iterator
+       it = Tools.begin(), ie = Tools.end(); it != ie; ++it)
+    delete it->second;
 }
 
 const Driver &ToolChain::getDriver() const {
  return D;
+}
+
+bool ToolChain::useIntegratedAs() const {
+  return Args.hasFlag(options::OPT_integrated_as,
+                      options::OPT_no_integrated_as,
+                      IsIntegratedAssemblerDefault());
 }
 
 std::string ToolChain::getDefaultUniversalArchName() const {
@@ -49,6 +61,47 @@ std::string ToolChain::getDefaultUniversalArchName() const {
 
 bool ToolChain::IsUnwindTablesDefault() const {
   return false;
+}
+
+Tool *ToolChain::constructTool(Action::ActionClass AC) const {
+  switch (AC) {
+  case Action::InputClass:
+  case Action::BindArchClass:
+  case Action::AssembleJobClass:
+  case Action::LinkJobClass:
+  case Action::LipoJobClass:
+  case Action::DsymutilJobClass:
+  case Action::VerifyJobClass:
+    llvm_unreachable("Invalid tool kind.");
+
+  case Action::CompileJobClass:
+  case Action::PrecompileJobClass:
+  case Action::PreprocessJobClass:
+  case Action::AnalyzeJobClass:
+  case Action::MigrateJobClass:
+    return new tools::Clang(*this);
+  }
+}
+
+Tool &ToolChain::SelectTool(const JobAction &JA) const {
+  Action::ActionClass Key;
+  if (getDriver().ShouldUseClangCompiler(JA))
+    Key = Action::AnalyzeJobClass;
+  else
+    Key = JA.getKind();
+
+  Tool *&T = Tools[Key];
+  if (T)
+    return *T;
+
+  if (getDriver().ShouldUseClangCompiler(JA))
+    T = new tools::Clang(*this);
+  else if (Key == Action::AssembleJobClass && useIntegratedAs())
+    T = new tools::ClangAs(*this);
+  else
+    T = constructTool(Key);
+
+  return *T;
 }
 
 std::string ToolChain::GetFilePath(const char *Name) const {
@@ -109,16 +162,17 @@ static const char *getARMTargetCPU(const ArgList &Args,
     .Case("armv6j", "arm1136j-s")
     .Cases("armv6z", "armv6zk", "arm1176jzf-s")
     .Case("armv6t2", "arm1156t2-s")
+    .Cases("armv6m", "armv6-m", "cortex-m0")
     .Cases("armv7", "armv7a", "armv7-a", "cortex-a8")
     .Cases("armv7l", "armv7-l", "cortex-a8")
     .Cases("armv7f", "armv7-f", "cortex-a9-mp")
     .Cases("armv7s", "armv7-s", "swift")
-    .Cases("armv7r", "armv7-r", "cortex-r4", "cortex-r5")
+    .Cases("armv7r", "armv7-r", "cortex-r4")
     .Cases("armv7m", "armv7-m", "cortex-m3")
+    .Cases("armv7em", "armv7e-m", "cortex-m4")
     .Case("ep9312", "ep9312")
     .Case("iwmmxt", "iwmmxt")
     .Case("xscale", "xscale")
-    .Cases("armv6m", "armv6-m", "cortex-m0")
     // If all else failed, return the most base CPU LLVM supports.
     .Default("arm7tdmi");
 }
@@ -141,10 +195,12 @@ static const char *getLLVMArchSuffixForARM(StringRef CPU) {
     .Cases("arm1136j-s",  "arm1136jf-s",  "arm1176jz-s", "v6")
     .Cases("arm1176jzf-s",  "mpcorenovfp",  "mpcore", "v6")
     .Cases("arm1156t2-s",  "arm1156t2f-s", "v6t2")
-    .Cases("cortex-a8", "cortex-a9", "cortex-a15", "v7")
-    .Case("cortex-m3", "v7m")
-    .Case("cortex-m4", "v7m")
+    .Cases("cortex-a5", "cortex-a7", "cortex-a8", "v7")
+    .Cases("cortex-a9", "cortex-a15", "v7")
+    .Case("cortex-r5", "v7r")
     .Case("cortex-m0", "v6m")
+    .Case("cortex-m3", "v7m")
+    .Case("cortex-m4", "v7em")
     .Case("cortex-a9-mp", "v7f")
     .Case("swift", "v7s")
     .Default("");
@@ -166,7 +222,8 @@ std::string ToolChain::ComputeLLVMTriple(const ArgList &Args,
     // FIXME: Thumb should just be another -target-feaure, not in the triple.
     StringRef Suffix =
       getLLVMArchSuffixForARM(getARMTargetCPU(Args, Triple));
-    bool ThumbDefault = (Suffix.startswith("v7") && getTriple().isOSDarwin());
+    bool ThumbDefault = Suffix.startswith("v6m") ||
+      (Suffix.startswith("v7") && getTriple().isOSDarwin());
     std::string ArchName = "arm";
 
     // Assembly files should start in ARM mode.

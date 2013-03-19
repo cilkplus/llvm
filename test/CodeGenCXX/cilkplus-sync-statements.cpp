@@ -156,7 +156,7 @@ void test6() {
   test6_anchor();
   // Elide the function implicit sync
   //
-  // CHECK: call void @_Z12test6_anchorv() nounwind
+  // CHECK: call void @_Z12test6_anchorv()
   // CHECK-NOT:  call void @__cilkrts_sync
 }
 

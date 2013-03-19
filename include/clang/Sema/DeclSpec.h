@@ -821,6 +821,20 @@ public:
     IK_ImplicitSelfParam
   } Kind;
 
+  struct OFI {
+    /// \brief The kind of overloaded operator.
+    OverloadedOperatorKind Operator;
+
+    /// \brief The source locations of the individual tokens that name
+    /// the operator, e.g., the "new", "[", and "]" tokens in 
+    /// operator new []. 
+    ///
+    /// Different operators have different numbers of tokens in their name,
+    /// up to three. Any remaining source locations in this array will be
+    /// set to an invalid value for operators with fewer than three tokens.
+    unsigned SymbolLocations[3];
+  };
+
   /// \brief Anonymous union that holds extra data associated with the
   /// parsed unqualified-id.
   union {
@@ -830,19 +844,7 @@ public:
     
     /// \brief When Kind == IK_OperatorFunctionId, the overloaded operator
     /// that we parsed.
-    struct {
-      /// \brief The kind of overloaded operator.
-      OverloadedOperatorKind Operator;
-      
-      /// \brief The source locations of the individual tokens that name
-      /// the operator, e.g., the "new", "[", and "]" tokens in 
-      /// operator new []. 
-      ///
-      /// Different operators have different numbers of tokens in their name,
-      /// up to three. Any remaining source locations in this array will be
-      /// set to an invalid value for operators with fewer than three tokens.
-      unsigned SymbolLocations[3];
-    } OperatorFunctionId;
+    struct OFI OperatorFunctionId;
     
     /// \brief When Kind == IK_ConversionFunctionId, the type that the 
     /// conversion function names.
@@ -1435,6 +1437,9 @@ struct DeclaratorChunk {
     return I;
   }
 
+  bool isParen() const {
+    return Kind == Paren;
+  }
 };
 
 /// \brief Described the kind of function definition (if any) provided for
@@ -1796,33 +1801,41 @@ public:
     return DeclTypeInfo[i];
   }
 
-  void DropFirstTypeObject()
-  {
+  void DropFirstTypeObject() {
     assert(!DeclTypeInfo.empty() && "No type chunks to drop.");
     DeclTypeInfo.front().destroy();
     DeclTypeInfo.erase(DeclTypeInfo.begin());
+  }
+
+  /// Return the innermost (closest to the declarator) chunk of this
+  /// declarator that is not a parens chunk, or null if there are no
+  /// non-parens chunks.
+  const DeclaratorChunk *getInnermostNonParenChunk() const {
+    for (unsigned i = 0, i_end = DeclTypeInfo.size(); i < i_end; ++i) {
+      if (!DeclTypeInfo[i].isParen())
+        return &DeclTypeInfo[i];
+    }
+    return 0;
+  }
+
+  /// Return the outermost (furthest from the declarator) chunk of
+  /// this declarator that is not a parens chunk, or null if there are
+  /// no non-parens chunks.
+  const DeclaratorChunk *getOutermostNonParenChunk() const {
+    for (unsigned i = DeclTypeInfo.size(), i_end = 0; i != i_end; --i) {
+      if (!DeclTypeInfo[i-1].isParen())
+        return &DeclTypeInfo[i-1];
+    }
+    return 0;
   }
 
   /// isArrayOfUnknownBound - This method returns true if the declarator
   /// is a declarator for an array of unknown bound (looking through
   /// parentheses).
   bool isArrayOfUnknownBound() const {
-    for (unsigned i = 0, i_end = DeclTypeInfo.size(); i < i_end; ++i) {
-      switch (DeclTypeInfo[i].Kind) {
-      case DeclaratorChunk::Paren:
-        continue;
-      case DeclaratorChunk::Function:
-      case DeclaratorChunk::Pointer:
-      case DeclaratorChunk::Reference:
-      case DeclaratorChunk::BlockPointer:
-      case DeclaratorChunk::MemberPointer:
-        return false;
-      case DeclaratorChunk::Array:
-        return !DeclTypeInfo[i].Arr.NumElts;
-      }
-      llvm_unreachable("Invalid type chunk");
-    }
-    return false;
+    const DeclaratorChunk *chunk = getInnermostNonParenChunk();
+    return (chunk && chunk->Kind == DeclaratorChunk::Array &&
+            !chunk->Arr.NumElts);
   }
 
   /// isFunctionDeclarator - This method returns true if the declarator
@@ -1879,16 +1892,12 @@ public:
   /// isn't a function declarator, if the type specifier refers to a function
   /// type. This routine checks for both cases.
   bool isDeclarationOfFunction() const;
-  
-  /// \brief Return true if a function declarator at this position would be a
-  /// function declaration.
-  bool isFunctionDeclaratorAFunctionDeclaration() const {
+
+  /// \brief Return true if this declaration appears in a context where a
+  /// function declarator would be a function declaration.
+  bool isFunctionDeclarationContext() const {
     if (getDeclSpec().getStorageClassSpec() == DeclSpec::SCS_typedef)
       return false;
-
-    for (unsigned I = 0, N = getNumTypeObjects(); I != N; ++I)
-      if (getTypeObject(I).Kind != DeclaratorChunk::Paren)
-        return false;
 
     switch (Context) {
     case FileContext:
@@ -1916,6 +1925,19 @@ public:
       return false;
     }
     llvm_unreachable("unknown context kind!");
+  }
+  
+  /// \brief Return true if a function declarator at this position would be a
+  /// function declaration.
+  bool isFunctionDeclaratorAFunctionDeclaration() const {
+    if (!isFunctionDeclarationContext())
+      return false;
+
+    for (unsigned I = 0, N = getNumTypeObjects(); I != N; ++I)
+      if (getTypeObject(I).Kind != DeclaratorChunk::Paren)
+        return false;
+
+    return true;
   }
 
   /// takeAttributes - Takes attributes from the given parsed-attributes

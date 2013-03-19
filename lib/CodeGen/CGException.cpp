@@ -365,8 +365,7 @@ namespace {
     llvm::Value *exn;
     FreeException(llvm::Value *exn) : exn(exn) {}
     void Emit(CodeGenFunction &CGF, Flags flags) {
-      CGF.Builder.CreateCall(getFreeExceptionFn(CGF.CGM), exn)
-        ->setDoesNotThrow();
+      CGF.EmitNounwindRuntimeCall(getFreeExceptionFn(CGF.CGM), exn);
     }
   };
 }
@@ -423,15 +422,8 @@ llvm::Value *CodeGenFunction::getSelectorFromSlot() {
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   if (!E->getSubExpr()) {
-    if (getInvokeDest()) {
-      Builder.CreateInvoke(getReThrowFn(CGM),
-                           getUnreachableBlock(),
-                           getInvokeDest())
-        ->setDoesNotReturn();
-    } else {
-      Builder.CreateCall(getReThrowFn(CGM))->setDoesNotReturn();
-      Builder.CreateUnreachable();
-    }
+    EmitNoreturnRuntimeCallOrInvoke(getReThrowFn(CGM),
+                                    ArrayRef<llvm::Value*>());
 
     // throw is an expression, and the expression emitters expect us
     // to leave ourselves at a valid insertion point.
@@ -459,10 +451,9 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
 
   llvm::Constant *AllocExceptionFn = getAllocateExceptionFn(CGM);
   llvm::CallInst *ExceptionPtr =
-    Builder.CreateCall(AllocExceptionFn,
-                       llvm::ConstantInt::get(SizeTy, TypeSize),
-                       "exception");
-  ExceptionPtr->setDoesNotThrow();
+    EmitNounwindRuntimeCall(AllocExceptionFn,
+                            llvm::ConstantInt::get(SizeTy, TypeSize),
+                            "exception");
   
   EmitAnyExprToExn(*this, E->getSubExpr(), ExceptionPtr);
 
@@ -488,18 +479,8 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   }
   if (!Dtor) Dtor = llvm::Constant::getNullValue(Int8PtrTy);
 
-  if (getInvokeDest()) {
-    llvm::InvokeInst *ThrowCall =
-      Builder.CreateInvoke3(getThrowFn(CGM),
-                            getUnreachableBlock(), getInvokeDest(),
-                            ExceptionPtr, TypeInfo, Dtor);
-    ThrowCall->setDoesNotReturn();
-  } else {
-    llvm::CallInst *ThrowCall =
-      Builder.CreateCall3(getThrowFn(CGM), ExceptionPtr, TypeInfo, Dtor);
-    ThrowCall->setDoesNotReturn();
-    Builder.CreateUnreachable();
-  }
+  llvm::Value *args[] = { ExceptionPtr, TypeInfo, Dtor };
+  EmitNoreturnRuntimeCallOrInvoke(getThrowFn(CGM), args);
 
   // throw is an expression, and the expression emitters expect us
   // to leave ourselves at a valid insertion point.
@@ -569,7 +550,7 @@ static void emitFilterDispatchBlock(CodeGenFunction &CGF,
   // according to the last landing pad the exception was thrown
   // into.  Seriously.
   llvm::Value *exn = CGF.getExceptionFromSlot();
-  CGF.Builder.CreateCall(getUnexpectedFn(CGF.CGM), exn)
+  CGF.EmitRuntimeCall(getUnexpectedFn(CGF.CGM), exn)
     ->setDoesNotReturn();
   CGF.Builder.CreateUnreachable();
 }
@@ -949,11 +930,11 @@ namespace {
 
     void Emit(CodeGenFunction &CGF, Flags flags) {
       if (!MightThrow) {
-        CGF.Builder.CreateCall(getEndCatchFn(CGF.CGM))->setDoesNotThrow();
+        CGF.EmitNounwindRuntimeCall(getEndCatchFn(CGF.CGM));
         return;
       }
 
-      CGF.EmitCallOrInvoke(getEndCatchFn(CGF.CGM));
+      CGF.EmitRuntimeCallOrInvoke(getEndCatchFn(CGF.CGM));
     }
   };
 }
@@ -965,12 +946,12 @@ namespace {
 static llvm::Value *CallBeginCatch(CodeGenFunction &CGF,
                                    llvm::Value *Exn,
                                    bool EndMightThrow) {
-  llvm::CallInst *Call = CGF.Builder.CreateCall(getBeginCatchFn(CGF.CGM), Exn);
-  Call->setDoesNotThrow();
+  llvm::CallInst *call =
+    CGF.EmitNounwindRuntimeCall(getBeginCatchFn(CGF.CGM), Exn);
 
   CGF.EHStack.pushCleanup<CallEndCatch>(NormalAndEHCleanup, EndMightThrow);
 
-  return Call;
+  return call;
 }
 
 /// A "special initializer" callback for initializing a catch
@@ -1045,10 +1026,9 @@ static void InitCatchParam(CodeGenFunction &CGF,
     return;
   }
 
-  // Non-aggregates (plus complexes).
-  bool IsComplex = false;
-  if (!CGF.hasAggregateLLVMType(CatchType) ||
-      (IsComplex = CatchType->isAnyComplexType())) {
+  // Scalars and complexes.
+  TypeEvaluationKind TEK = CGF.getEvaluationKind(CatchType);
+  if (TEK != TEK_Aggregate) {
     llvm::Value *AdjustedExn = CallBeginCatch(CGF, Exn, false);
     
     // If the catch type is a pointer type, __cxa_begin_catch returns
@@ -1080,17 +1060,23 @@ static void InitCatchParam(CodeGenFunction &CGF,
     llvm::Type *PtrTy = LLVMCatchTy->getPointerTo(0); // addrspace 0 ok
     llvm::Value *Cast = CGF.Builder.CreateBitCast(AdjustedExn, PtrTy);
 
-    if (IsComplex) {
-      CGF.StoreComplexToAddr(CGF.LoadComplexFromAddr(Cast, /*volatile*/ false),
-                             ParamAddr, /*volatile*/ false);
-    } else {
-      unsigned Alignment =
-        CGF.getContext().getDeclAlign(&CatchParam).getQuantity();
-      llvm::Value *ExnLoad = CGF.Builder.CreateLoad(Cast, "exn.scalar");
-      CGF.EmitStoreOfScalar(ExnLoad, ParamAddr, /*volatile*/ false, Alignment,
-                            CatchType);
+    LValue srcLV = CGF.MakeNaturalAlignAddrLValue(Cast, CatchType);
+    LValue destLV = CGF.MakeAddrLValue(ParamAddr, CatchType,
+                                  CGF.getContext().getDeclAlign(&CatchParam));
+    switch (TEK) {
+    case TEK_Complex:
+      CGF.EmitStoreOfComplex(CGF.EmitLoadOfComplex(srcLV), destLV,
+                             /*init*/ true);
+      return;
+    case TEK_Scalar: {
+      llvm::Value *ExnLoad = CGF.EmitLoadOfScalar(srcLV);
+      CGF.EmitStoreOfScalar(ExnLoad, destLV, /*init*/ true);
+      return;
     }
-    return;
+    case TEK_Aggregate:
+      llvm_unreachable("evaluation kind filtered out!");
+    }
+    llvm_unreachable("bad evaluation kind");
   }
 
   assert(isa<RecordType>(CatchType) && "unexpected catch type!");
@@ -1110,8 +1096,7 @@ static void InitCatchParam(CodeGenFunction &CGF,
   // We have to call __cxa_get_exception_ptr to get the adjusted
   // pointer before copying.
   llvm::CallInst *rawAdjustedExn =
-    CGF.Builder.CreateCall(getGetExceptionPtrFn(CGF.CGM), Exn);
-  rawAdjustedExn->setDoesNotThrow();
+    CGF.EmitNounwindRuntimeCall(getGetExceptionPtrFn(CGF.CGM), Exn);
 
   // Cast that to the appropriate type.
   llvm::Value *adjustedExn = CGF.Builder.CreateBitCast(rawAdjustedExn, PtrTy);
@@ -1338,7 +1323,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // constructor function-try-block's catch handler (p14), so this
     // really only applies to destructors.
     if (doImplicitRethrow && HaveInsertPoint()) {
-      EmitCallOrInvoke(getReThrowFn(CGM));
+      EmitRuntimeCallOrInvoke(getReThrowFn(CGM));
       Builder.CreateUnreachable();
       Builder.ClearInsertionPoint();
     }
@@ -1370,7 +1355,7 @@ namespace {
         CGF.Builder.CreateLoad(ForEHVar, "finally.endcatch");
       CGF.Builder.CreateCondBr(ShouldEndCatch, EndCatchBB, CleanupContBB);
       CGF.EmitBlock(EndCatchBB);
-      CGF.EmitCallOrInvoke(EndCatchFn); // catch-all, so might throw
+      CGF.EmitRuntimeCallOrInvoke(EndCatchFn); // catch-all, so might throw
       CGF.EmitBlock(CleanupContBB);
     }
   };
@@ -1415,9 +1400,10 @@ namespace {
 
         CGF.EmitBlock(RethrowBB);
         if (SavedExnVar) {
-          CGF.EmitCallOrInvoke(RethrowFn, CGF.Builder.CreateLoad(SavedExnVar));
+          CGF.EmitRuntimeCallOrInvoke(RethrowFn,
+                                      CGF.Builder.CreateLoad(SavedExnVar));
         } else {
-          CGF.EmitCallOrInvoke(RethrowFn);
+          CGF.EmitRuntimeCallOrInvoke(RethrowFn);
         }
         CGF.Builder.CreateUnreachable();
 
@@ -1522,7 +1508,7 @@ void CodeGenFunction::FinallyInfo::exit(CodeGenFunction &CGF) {
     // If there's a begin-catch function, call it.
     if (BeginCatchFn) {
       exn = CGF.getExceptionFromSlot();
-      CGF.Builder.CreateCall(BeginCatchFn, exn)->setDoesNotThrow();
+      CGF.EmitNounwindRuntimeCall(BeginCatchFn, exn);
     }
 
     // If we need to remember the exception pointer to rethrow later, do so.
@@ -1589,12 +1575,15 @@ static llvm::Constant *getClangCallTerminateFn(CodeGenModule &CGM) {
     llvm::Value *exn = &*fn->arg_begin();
 
     // Call __cxa_begin_catch(exn).
-    builder.CreateCall(getBeginCatchFn(CGM), exn)->setDoesNotThrow();
+    llvm::CallInst *catchCall = builder.CreateCall(getBeginCatchFn(CGM), exn);
+    catchCall->setDoesNotThrow();
+    catchCall->setCallingConv(CGM.getRuntimeCC());
 
     // Call std::terminate().
     llvm::CallInst *termCall = builder.CreateCall(getTerminateFn(CGM));
     termCall->setDoesNotThrow();
     termCall->setDoesNotReturn();
+    termCall->setCallingConv(CGM.getRuntimeCC());
 
     // std::terminate cannot return.
     builder.CreateUnreachable();
@@ -1624,12 +1613,11 @@ llvm::BasicBlock *CodeGenFunction::getTerminateLandingPad() {
   if (useClangCallTerminate(CGM)) {
     // Extract out the exception pointer.
     llvm::Value *exn = Builder.CreateExtractValue(LPadInst, 0);
-    terminateCall = Builder.CreateCall(getClangCallTerminateFn(CGM), exn);
+    terminateCall = EmitNounwindRuntimeCall(getClangCallTerminateFn(CGM), exn);
   } else {
-    terminateCall = Builder.CreateCall(getTerminateFn(CGM));
+    terminateCall = EmitNounwindRuntimeCall(getTerminateFn(CGM));
   }
   terminateCall->setDoesNotReturn();
-  terminateCall->setDoesNotThrow();
   Builder.CreateUnreachable();
 
   // Restore the saved insertion state.
@@ -1648,9 +1636,8 @@ llvm::BasicBlock *CodeGenFunction::getTerminateHandler() {
   // end of the function by FinishFunction.
   TerminateHandler = createBasicBlock("terminate.handler");
   Builder.SetInsertPoint(TerminateHandler);
-  llvm::CallInst *TerminateCall = Builder.CreateCall(getTerminateFn(CGM));
+  llvm::CallInst *TerminateCall = EmitNounwindRuntimeCall(getTerminateFn(CGM));
   TerminateCall->setDoesNotReturn();
-  TerminateCall->setDoesNotThrow();
   Builder.CreateUnreachable();
 
   // Restore the saved insertion state.
@@ -1674,8 +1661,8 @@ llvm::BasicBlock *CodeGenFunction::getEHResumeBlock(bool isCleanup) {
   // anything on the EH stack which needs our help.
   const char *RethrowName = Personality.CatchallRethrowFn;
   if (RethrowName != 0 && !isCleanup) {
-    Builder.CreateCall(getCatchallRethrowFn(CGM, RethrowName),
-                       getExceptionFromSlot())
+    EmitRuntimeCall(getCatchallRethrowFn(CGM, RethrowName),
+                      getExceptionFromSlot())
       ->setDoesNotReturn();
   } else {
     switch (CleanupHackLevel) {
@@ -1683,8 +1670,8 @@ llvm::BasicBlock *CodeGenFunction::getEHResumeBlock(bool isCleanup) {
       // In mandatory-catchall mode, we need to use
       // _Unwind_Resume_or_Rethrow, or whatever the personality's
       // equivalent is.
-      Builder.CreateCall(getUnwindResumeOrRethrowFn(),
-                         getExceptionFromSlot())
+      EmitRuntimeCall(getUnwindResumeOrRethrowFn(),
+                        getExceptionFromSlot())
         ->setDoesNotReturn();
       break;
     case CHL_MandatoryCleanup: {
@@ -1708,7 +1695,7 @@ llvm::BasicBlock *CodeGenFunction::getEHResumeBlock(bool isCleanup) {
       // In an idealized mode where we don't have to worry about the
       // optimizer combining landing pads, we should just use
       // _Unwind_Resume (or the personality's equivalent).
-      Builder.CreateCall(getUnwindResumeFn(), getExceptionFromSlot())
+      EmitRuntimeCall(getUnwindResumeFn(), getExceptionFromSlot())
         ->setDoesNotReturn();
       break;
     }

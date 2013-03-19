@@ -158,9 +158,14 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
   if (!E)
     return;
   SourceLocation ExprLoc = E->IgnoreParens()->getExprLoc();
-  if (SourceMgr.isInSystemMacro(ExprLoc) ||
-      SourceMgr.isMacroBodyExpansion(ExprLoc))
-    return;
+  // In most cases, we don't want to warn if the expression is written in a
+  // macro body, or if the macro comes from a system header. If the offending
+  // expression is a call to a function with the warn_unused_result attribute,
+  // we warn no matter the location. Because of the order in which the various
+  // checks need to happen, we factor out the macro-related test here.
+  bool ShouldSuppress = 
+      SourceMgr.isMacroBodyExpansion(ExprLoc) ||
+      SourceMgr.isInSystemMacro(ExprLoc);
 
   const Expr *WarnExpr;
   SourceLocation Loc;
@@ -193,12 +198,16 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
       return;
 
     // If the callee has attribute pure, const, or warn_unused_result, warn with
-    // a more specific message to make it clear what is happening.
+    // a more specific message to make it clear what is happening. If the call
+    // is written in a macro body, only warn if it has the warn_unused_result
+    // attribute.
     if (const Decl *FD = CE->getCalleeDecl()) {
       if (FD->getAttr<WarnUnusedResultAttr>()) {
         Diag(Loc, diag::warn_unused_result) << R1 << R2;
         return;
       }
+      if (ShouldSuppress)
+        return;
       if (FD->getAttr<PureAttr>()) {
         Diag(Loc, diag::warn_unused_call) << R1 << R2 << "pure";
         return;
@@ -208,7 +217,10 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
         return;
       }
     }
-  } else if (const ObjCMessageExpr *ME = dyn_cast<ObjCMessageExpr>(E)) {
+  } else if (ShouldSuppress)
+    return;
+
+  if (const ObjCMessageExpr *ME = dyn_cast<ObjCMessageExpr>(E)) {
     if (getLangOpts().ObjCAutoRefCount && ME->isDelegateInitCall()) {
       Diag(Loc, diag::err_arc_unused_init_message) << R1;
       return;
@@ -2759,24 +2771,12 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
       Diag(ReturnLoc, DiagID) << getCurMethodDecl()->getDeclName() << 1/*meth*/;
     Result = new (Context) ReturnStmt(ReturnLoc);
   } else {
+    assert(RetValExp || FnRetType->isDependentType());
     const VarDecl *NRVOCandidate = 0;
     if (!FnRetType->isDependentType() && !RetValExp->isTypeDependent()) {
       // we have a non-void function with an expression, continue checking
 
-      if (!RelatedRetType.isNull()) {
-        // If we have a related result type, perform an extra conversion here.
-        // FIXME: The diagnostics here don't really describe what is happening.
-        InitializedEntity Entity =
-            InitializedEntity::InitializeTemporary(RelatedRetType);
-
-        ExprResult Res = PerformCopyInitialization(Entity, SourceLocation(),
-                                                   RetValExp);
-        if (Res.isInvalid()) {
-          // FIXME: Cleanup temporaries here, anyway?
-          return StmtError();
-        }
-        RetValExp = Res.takeAs<Expr>();
-      }
+      QualType RetType = (RelatedRetType.isNull() ? FnRetType : RelatedRetType);
 
       // C99 6.8.6.4p3(136): The return statement is not an assignment. The
       // overlap restriction of subclause 6.5.16.1 does not apply to the case of
@@ -2786,18 +2786,33 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
       // the C version of which boils down to CheckSingleAssignmentConstraints.
       NRVOCandidate = getCopyElisionCandidate(FnRetType, RetValExp, false);
       InitializedEntity Entity = InitializedEntity::InitializeResult(ReturnLoc,
-                                                                     FnRetType,
+                                                                     RetType,
                                                             NRVOCandidate != 0);
       ExprResult Res = PerformMoveOrCopyInitialization(Entity, NRVOCandidate,
-                                                       FnRetType, RetValExp);
+                                                       RetType, RetValExp);
       if (Res.isInvalid()) {
-        // FIXME: Cleanup temporaries here, anyway?
+        // FIXME: Clean up temporaries here anyway?
         return StmtError();
       }
-
       RetValExp = Res.takeAs<Expr>();
-      if (RetValExp)
-        CheckReturnStackAddr(RetValExp, FnRetType, ReturnLoc);
+
+      // If we have a related result type, we need to implicitly
+      // convert back to the formal result type.  We can't pretend to
+      // initialize the result again --- we might end double-retaining
+      // --- so instead we initialize a notional temporary; this can
+      // lead to less-than-great diagnostics, but this stage is much
+      // less likely to fail than the previous stage.
+      if (!RelatedRetType.isNull()) {
+        Entity = InitializedEntity::InitializeTemporary(FnRetType);
+        Res = PerformCopyInitialization(Entity, ReturnLoc, RetValExp);
+        if (Res.isInvalid()) {
+          // FIXME: Clean up temporaries here anyway?
+          return StmtError();
+        }
+        RetValExp = Res.takeAs<Expr>();
+      }
+
+      CheckReturnStackAddr(RetValExp, FnRetType, ReturnLoc);
     }
 
     if (RetValExp) {
@@ -3169,7 +3184,7 @@ Sema::CreateCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
 
   QualType FunctionTy;
   FunctionProtoType::ExtProtoInfo EPI;
-  FunctionTy = Context.getFunctionType(Context.VoidTy, &CapParamType, 1, EPI);
+  FunctionTy = Context.getFunctionType(Context.VoidTy, CapParamType, EPI);
 
   TypeSourceInfo *FuncTyInfo = Context.getTrivialTypeSourceInfo(FunctionTy);
   FD = FunctionDecl::Create(Context, CurContext, SourceLocation(),

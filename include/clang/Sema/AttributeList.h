@@ -44,8 +44,9 @@ struct AvailabilityChange {
   bool isValid() const { return !Version.empty(); }
 };
 
-/// AttributeList - Represents GCC's __attribute__ declaration. There are
-/// 4 forms of this construct...they are:
+/// AttributeList - Represents a syntactic attribute.
+///
+/// For a GNU attribute, there are four forms of this construct:
 ///
 /// 1: __attribute__(( const )). ParmName/Args/NumArgs will all be unused.
 /// 2: __attribute__(( mode(byte) )). ParmName used, Args/NumArgs unused.
@@ -72,6 +73,7 @@ private:
   SourceRange AttrRange;
   SourceLocation ScopeLoc;
   SourceLocation ParmLoc;
+  SourceLocation EllipsisLoc;
 
   /// The number of expression arguments this attribute has.
   /// The expressions themselves are stored after the object.
@@ -142,6 +144,14 @@ private:
     return *reinterpret_cast<const TypeTagForDatatypeData *>(this + 1);
   }
 
+  ParsedType &getTypeBuffer() {
+    return *reinterpret_cast<ParsedType *>(this + 1);
+  }
+
+  const ParsedType &getTypeBuffer() const {
+    return *reinterpret_cast<const ParsedType *>(this + 1);
+  }
+
   AttributeList(const AttributeList &) LLVM_DELETED_FUNCTION;
   void operator=(const AttributeList &) LLVM_DELETED_FUNCTION;
   void operator delete(void *) LLVM_DELETED_FUNCTION;
@@ -154,11 +164,11 @@ private:
                 IdentifierInfo *scopeName, SourceLocation scopeLoc,
                 IdentifierInfo *parmName, SourceLocation parmLoc,
                 Expr **args, unsigned numArgs,
-                Syntax syntaxUsed)
+                Syntax syntaxUsed, SourceLocation ellipsisLoc)
     : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
-      NumArgs(numArgs), SyntaxUsed(syntaxUsed), Invalid(false),
-      UsedAsTypeAttr(false), IsAvailability(false),
+      EllipsisLoc(ellipsisLoc), NumArgs(numArgs), SyntaxUsed(syntaxUsed),
+      Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
       IsTypeTagForDatatype(false), NextInPosition(0), NextInPool(0) {
     if (numArgs) memcpy(getArgsBuffer(), args, numArgs * sizeof(Expr*));
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
@@ -175,7 +185,7 @@ private:
                 const Expr *messageExpr,
                 Syntax syntaxUsed)
     : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
-      AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
+      AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc), EllipsisLoc(),
       NumArgs(0), SyntaxUsed(syntaxUsed),
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(true),
       IsTypeTagForDatatype(false),
@@ -196,13 +206,27 @@ private:
                 bool mustBeNull, Syntax syntaxUsed)
     : AttrName(attrName), ScopeName(scopeName), ParmName(argumentKindName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(argumentKindLoc),
-      NumArgs(0), SyntaxUsed(syntaxUsed),
+      EllipsisLoc(), NumArgs(0), SyntaxUsed(syntaxUsed),
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
       IsTypeTagForDatatype(true), NextInPosition(NULL), NextInPool(NULL) {
     TypeTagForDatatypeData &ExtraData = getTypeTagForDatatypeDataSlot();
     new (&ExtraData.MatchingCType) ParsedType(matchingCType);
     ExtraData.LayoutCompatible = layoutCompatible;
     ExtraData.MustBeNull = mustBeNull;
+    AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
+  }
+
+  /// Constructor for attributes with a single type argument.
+  AttributeList(IdentifierInfo *attrName, SourceRange attrRange,
+                IdentifierInfo *scopeName, SourceLocation scopeLoc,
+                IdentifierInfo *parmName, SourceLocation parmLoc,
+                ParsedType typeArg, Syntax syntaxUsed)
+      : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
+        AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
+        EllipsisLoc(), NumArgs(1), SyntaxUsed(syntaxUsed), Invalid(false),
+        UsedAsTypeAttr(false), IsAvailability(false),
+        IsTypeTagForDatatype(false), NextInPosition(0), NextInPool(0) {
+    new (&getTypeBuffer()) ParsedType(typeArg);
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
 
@@ -245,6 +269,9 @@ public:
 
   bool isUsedAsTypeAttr() const { return UsedAsTypeAttr; }
   void setUsedAsTypeAttr() { UsedAsTypeAttr = true; }
+
+  bool isPackExpansion() const { return EllipsisLoc.isValid(); }
+  SourceLocation getEllipsisLoc() const { return EllipsisLoc; }
 
   Kind getKind() const { return Kind(AttrKind); }
   static Kind getKind(const IdentifierInfo *Name, const IdentifierInfo *Scope,
@@ -345,6 +372,11 @@ public:
     assert(getKind() == AT_TypeTagForDatatype &&
            "Not a type_tag_for_datatype attribute");
     return getTypeTagForDatatypeDataSlot().MustBeNull;
+  }
+
+  const ParsedType &getTypeArg() const {
+    assert(getKind() == AT_VecTypeHint && "Not a type attribute");
+    return getTypeBuffer();
   }
 
   /// \brief Get an index into the attribute spelling list
@@ -459,13 +491,15 @@ public:
                         IdentifierInfo *scopeName, SourceLocation scopeLoc,
                         IdentifierInfo *parmName, SourceLocation parmLoc,
                         Expr **args, unsigned numArgs,
-                        AttributeList::Syntax syntax) {
+                        AttributeList::Syntax syntax,
+                        SourceLocation ellipsisLoc = SourceLocation()) {
     void *memory = allocate(sizeof(AttributeList)
                             + numArgs * sizeof(Expr*));
     return add(new (memory) AttributeList(attrName, attrRange,
                                           scopeName, scopeLoc,
                                           parmName, parmLoc,
-                                          args, numArgs, syntax));
+                                          args, numArgs, syntax,
+                                          ellipsisLoc));
   }
 
   AttributeList *create(IdentifierInfo *attrName, SourceRange attrRange,
@@ -501,6 +535,18 @@ public:
                                           argumentKindName, argumentKindLoc,
                                           matchingCType, layoutCompatible,
                                           mustBeNull, syntax));
+  }
+
+  AttributeList *createTypeAttribute(
+                    IdentifierInfo *attrName, SourceRange attrRange,
+                    IdentifierInfo *scopeName, SourceLocation scopeLoc,
+                    IdentifierInfo *parmName, SourceLocation parmLoc,
+                    ParsedType typeArg, AttributeList::Syntax syntaxUsed) {
+    void *memory = allocate(sizeof(AttributeList) + sizeof(void *));
+    return add(new (memory) AttributeList(attrName, attrRange,
+                                          scopeName, scopeLoc,
+                                          parmName, parmLoc,
+                                          typeArg, syntaxUsed));
   }
 };
 
@@ -599,10 +645,11 @@ public:
                         IdentifierInfo *scopeName, SourceLocation scopeLoc,
                         IdentifierInfo *parmName, SourceLocation parmLoc,
                         Expr **args, unsigned numArgs,
-                        AttributeList::Syntax syntax) {
+                        AttributeList::Syntax syntax,
+                        SourceLocation ellipsisLoc = SourceLocation()) {
     AttributeList *attr =
       pool.create(attrName, attrRange, scopeName, scopeLoc, parmName, parmLoc,
-                  args, numArgs, syntax);
+                  args, numArgs, syntax, ellipsisLoc);
     add(attr);
     return attr;
   }
@@ -639,6 +686,19 @@ public:
                                     argumentKindName, argumentKindLoc,
                                     matchingCType, layoutCompatible,
                                     mustBeNull, syntax);
+    add(attr);
+    return attr;
+  }
+
+  /// Add an attribute with a single type argument.
+  AttributeList *
+  addNewTypeAttr(IdentifierInfo *attrName, SourceRange attrRange,
+                 IdentifierInfo *scopeName, SourceLocation scopeLoc,
+                 IdentifierInfo *parmName, SourceLocation parmLoc,
+                 ParsedType typeArg, AttributeList::Syntax syntaxUsed) {
+    AttributeList *attr =
+        pool.createTypeAttribute(attrName, attrRange, scopeName, scopeLoc,
+                                 parmName, parmLoc, typeArg, syntaxUsed);
     add(attr);
     return attr;
   }

@@ -138,6 +138,11 @@ bool UnwrappedLineParser::parse() {
        I != E; ++I) {
     Callback.consumeUnwrappedLine(*I);
   }
+
+  // Create line with eof token.
+  pushToken(FormatTok);
+  Callback.consumeUnwrappedLine(*Line);
+
   return Error;
 }
 
@@ -571,7 +576,7 @@ void UnwrappedLineParser::parseLabel() {
   unsigned OldLineLevel = Line->Level;
   if (Line->Level > 0)
     --Line->Level;
-  if (FormatTok.Tok.is(tok::l_brace)) {
+  if (CommentsBeforeNextToken.empty() && FormatTok.Tok.is(tok::l_brace)) {
     parseBlock(/*MustBeDeclaration=*/ false);
     if (FormatTok.Tok.is(tok::kw_break))
       parseStructuralElement(); // "break;" after "}" goes on the same line.
@@ -776,14 +781,14 @@ void UnwrappedLineParser::addUnwrappedLine() {
   CurrentLines->push_back(*Line);
   Line->Tokens.clear();
   if (CurrentLines == &Lines && !PreprocessorDirectives.empty()) {
-    for (std::vector<UnwrappedLine>::iterator I = PreprocessorDirectives
-             .begin(), E = PreprocessorDirectives.end();
+    for (std::vector<UnwrappedLine>::iterator
+             I = PreprocessorDirectives.begin(),
+             E = PreprocessorDirectives.end();
          I != E; ++I) {
       CurrentLines->push_back(*I);
     }
     PreprocessorDirectives.clear();
   }
-
 }
 
 bool UnwrappedLineParser::eof() const {

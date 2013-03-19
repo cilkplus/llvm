@@ -1676,7 +1676,7 @@ public:
 /// This represents a Microsoft inline-assembly statement extension.
 ///
 class MSAsmStmt : public AsmStmt {
-  SourceLocation AsmLoc, LBraceLoc, EndLoc;
+  SourceLocation LBraceLoc, EndLoc;
   std::string AsmStr;
 
   unsigned NumAsmToks;

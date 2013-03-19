@@ -208,21 +208,26 @@ Parser::ParseSingleDeclarationAfterTemplate(
   // the template parameters.
   ParsingDeclSpec DS(*this, &DiagsFromTParams);
 
+  ParseDeclarationSpecifiers(DS, TemplateInfo, AS,
+                             getDeclSpecContextFromDeclaratorContext(Context));
+
+  if (Tok.is(tok::semi)) {
+    ProhibitAttributes(prefixAttrs);
+    DeclEnd = ConsumeToken();
+    Decl *Decl = Actions.ParsedFreeStandingDeclSpec(
+        getCurScope(), AS, DS,
+        TemplateInfo.TemplateParams ? *TemplateInfo.TemplateParams
+                                    : MultiTemplateParamsArg(),
+        TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation);
+    DS.complete(Decl);
+    return Decl;
+  }
+
   // Move the attributes from the prefix into the DS.
   if (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation)
     ProhibitAttributes(prefixAttrs);
   else
     DS.takeAttributesFrom(prefixAttrs);
-
-  ParseDeclarationSpecifiers(DS, TemplateInfo, AS,
-                             getDeclSpecContextFromDeclaratorContext(Context));
-
-  if (Tok.is(tok::semi)) {
-    DeclEnd = ConsumeToken();
-    Decl *Decl = Actions.ParsedFreeStandingDeclSpec(getCurScope(), AS, DS);
-    DS.complete(Decl);
-    return Decl;
-  }
 
   // Parse the declarator.
   ParsingDeclarator DeclaratorInfo(*this, DS, (Declarator::TheContext)Context);
@@ -1195,7 +1200,7 @@ Parser::ParseTemplateArgumentList(TemplateArgList &TemplateArgs) {
 ///       explicit-instantiation:
 ///         'extern' [opt] 'template' declaration
 ///
-/// Note that the 'extern' is a GNU extension and C++0x feature.
+/// Note that the 'extern' is a GNU extension and C++11 feature.
 Decl *Parser::ParseExplicitInstantiation(unsigned Context,
                                          SourceLocation ExternLoc,
                                          SourceLocation TemplateLoc,

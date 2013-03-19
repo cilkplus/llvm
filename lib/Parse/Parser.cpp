@@ -626,15 +626,11 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
     return DeclGroupPtrTy();
   case tok::semi:
     // Either a C++11 empty-declaration or attribute-declaration.
-    if (attrs.Range.isValid()) {
-      // FIXME: Add an AST representation for this.
-      Actions.ActOnAttributeDeclaration(attrs.getList());
-      return DeclGroupPtrTy();
-    }
-
+    SingleDecl = Actions.ActOnEmptyDeclaration(getCurScope(),
+                                               attrs.getList(),
+                                               Tok.getLocation());
     ConsumeExtraSemi(OutsideFunction);
-    // TODO: Invoke action for top-level semicolon.
-    return DeclGroupPtrTy();
+    break;
   case tok::r_brace:
     Diag(Tok, diag::err_extraneous_closing_brace);
     ConsumeBrace();
@@ -1878,7 +1874,9 @@ Parser::DeclGroupPtrTy Parser::ParseModuleImport(SourceLocation AtLoc) {
 }
 
 bool BalancedDelimiterTracker::diagnoseOverflow() {
-  P.Diag(P.Tok, diag::err_parser_impl_limit_overflow);
+  P.Diag(P.Tok, diag::err_bracket_depth_exceeded)
+    << P.getLangOpts().BracketDepth;
+  P.Diag(P.Tok, diag::note_bracket_depth);
   P.SkipUntil(tok::eof);
   return true;  
 }

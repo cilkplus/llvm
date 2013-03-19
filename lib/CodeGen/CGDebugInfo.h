@@ -32,6 +32,7 @@ namespace clang {
   class CXXMethodDecl;
   class VarDecl;
   class ObjCInterfaceDecl;
+  class ObjCIvarDecl;
   class ClassTemplateSpecializationDecl;
   class GlobalDecl;
 
@@ -59,6 +60,14 @@ class CGDebugInfo {
   
   /// TypeCache - Cache of previously constructed Types.
   llvm::DenseMap<void *, llvm::WeakVH> TypeCache;
+
+  /// ObjCInterfaceCache - Cache of previously constructed interfaces
+  /// which may change. Storing a pair of DIType and checksum.
+  llvm::DenseMap<void *, std::pair<llvm::WeakVH, unsigned > >
+    ObjCInterfaceCache;
+
+  /// RetainedTypes - list of interfaces we want to keep even if orphaned.
+  std::vector<void *> RetainedTypes;
 
   /// CompleteTypeCache - Cache of previously constructed complete RecordTypes.
   llvm::DenseMap<void *, llvm::WeakVH> CompletedTypeCache;
@@ -89,6 +98,7 @@ class CGDebugInfo {
   llvm::DenseMap<const Decl *, llvm::WeakVH> StaticDataMemberCache;
 
   /// Helper functions for getOrCreateType.
+  unsigned Checksum(const ObjCInterfaceDecl *InterfaceDecl);
   llvm::DIType CreateType(const BuiltinType *Ty);
   llvm::DIType CreateType(const ComplexType *Ty);
   llvm::DIType CreateQualifiedType(QualType Ty, llvm::DIFile F);
@@ -124,6 +134,7 @@ class CGDebugInfo {
                                      const Type *Ty, QualType PointeeTy,
                                      llvm::DIFile F);
 
+  llvm::Value *getCachedInterfaceTypeOrNull(const QualType Ty);
   llvm::DIType getOrCreateStructPtrType(StringRef Name, llvm::DIType &Cache);
 
   llvm::DISubprogram CreateCXXMemberFunction(const CXXMethodDecl *Method,
@@ -196,7 +207,9 @@ public:
 
   /// EmitLocation - Emit metadata to indicate a change in line/column
   /// information in the source file.
-  void EmitLocation(CGBuilderTy &Builder, SourceLocation Loc);
+  /// \param ForceColumnInfo  Assume DebugColumnInfo option is true.
+  void EmitLocation(CGBuilderTy &Builder, SourceLocation Loc,
+                    bool ForceColumnInfo = false);
 
   /// EmitFunctionStart - Emit a call to llvm.dbg.function.start to indicate
   /// start of a new function.
@@ -235,7 +248,8 @@ public:
   /// llvm.dbg.declare for the block-literal argument to a block
   /// invocation function.
   void EmitDeclareOfBlockLiteralArgVariable(const CGBlockInfo &block,
-                                            llvm::Value *addr,
+                                            llvm::Value *Arg,
+                                            llvm::Value *LocalAddr,
                                             CGBuilderTy &Builder);
 
   /// EmitGlobalVariable - Emit information about a global variable.
@@ -299,6 +313,10 @@ private:
   /// CreateTypeNode - Create type metadata for a source language type.
   llvm::DIType CreateTypeNode(QualType Ty, llvm::DIFile F);
 
+  /// getObjCInterfaceDecl - return the underlying ObjCInterfaceDecl
+  /// if Ty is an ObjCInterface or a pointer to one.
+  ObjCInterfaceDecl* getObjCInterfaceDecl(QualType Ty);
+
   /// CreateLimitedTypeNode - Create type metadata for a source language
   /// type, but only partial types for records.
   llvm::DIType CreateLimitedTypeNode(QualType Ty, llvm::DIFile F);
@@ -341,7 +359,8 @@ private:
 
   /// getColumnNumber - Get column number for the location. If location is 
   /// invalid then use current location.
-  unsigned getColumnNumber(SourceLocation Loc);
+  /// \param Force  Assume DebugColumnInfo option is true.
+  unsigned getColumnNumber(SourceLocation Loc, bool Force=false);
 };
 } // namespace CodeGen
 } // namespace clang

@@ -1609,8 +1609,7 @@ bool Sema::FindAllocationFunctions(SourceLocation StartLoc, SourceRange Range,
       EPI.Variadic = Proto->isVariadic();
 
       ExpectedFunctionType
-        = Context.getFunctionType(Context.VoidTy, ArgTypes.data(),
-                                  ArgTypes.size(), EPI);
+        = Context.getFunctionType(Context.VoidTy, ArgTypes, EPI);
     }
 
     for (LookupResult::iterator D = FoundDelete.begin(),
@@ -1912,7 +1911,7 @@ void Sema::DeclareGlobalAllocationFunction(DeclarationName Name,
                                 EST_BasicNoexcept : EST_DynamicNone;
   }
 
-  QualType FnType = Context.getFunctionType(Return, &Argument, 1, EPI);
+  QualType FnType = Context.getFunctionType(Return, Argument, EPI);
   FunctionDecl *Alloc =
     FunctionDecl::Create(Context, GlobalCtx, SourceLocation(),
                          SourceLocation(), Name,
@@ -5503,10 +5502,9 @@ ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
   if (DiagnoseUnexpandedParameterPack(FullExpr.get()))
     return ExprError();
 
-  // Top-level message sends default to 'id' when we're in a debugger.
+  // Top-level expressions default to 'id' when we're in a debugger.
   if (DiscardedValue && getLangOpts().DebuggerCastResultToId &&
-      FullExpr.get()->getType() == Context.UnknownAnyTy &&
-      isa<ObjCMessageExpr>(FullExpr.get())) {
+      FullExpr.get()->getType() == Context.UnknownAnyTy) {
     FullExpr = forceUnknownAnyToType(FullExpr.take(), Context.getObjCIdType());
     if (FullExpr.isInvalid())
       return ExprError();

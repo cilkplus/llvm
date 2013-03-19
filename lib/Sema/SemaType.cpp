@@ -150,6 +150,10 @@ namespace {
       return declarator;
     }
 
+    bool isProcessingDeclSpec() const {
+      return chunkIndex == declarator.getNumTypeObjects();
+    }
+
     unsigned getCurrentChunkIndex() const {
       return chunkIndex;
     }
@@ -160,8 +164,7 @@ namespace {
     }
 
     AttributeList *&getCurrentAttrListRef() const {
-      assert(chunkIndex <= declarator.getNumTypeObjects());
-      if (chunkIndex == declarator.getNumTypeObjects())
+      if (isProcessingDeclSpec())
         return getMutableDeclSpec().getAttributes().getListRef();
       return declarator.getTypeObject(chunkIndex).getAttrListRef();
     }
@@ -302,6 +305,66 @@ static bool handleObjCPointerTypeAttr(TypeProcessingState &state,
   return handleObjCOwnershipTypeAttr(state, attr, type);
 }
 
+/// Given the index of a declarator chunk, check whether that chunk
+/// directly specifies the return type of a function and, if so, find
+/// an appropriate place for it.
+///
+/// \param i - a notional index which the search will start
+///   immediately inside
+static DeclaratorChunk *maybeMovePastReturnType(Declarator &declarator,
+                                                unsigned i) {
+  assert(i <= declarator.getNumTypeObjects());
+
+  DeclaratorChunk *result = 0;
+
+  // First, look inwards past parens for a function declarator.
+  for (; i != 0; --i) {
+    DeclaratorChunk &fnChunk = declarator.getTypeObject(i-1);
+    switch (fnChunk.Kind) {
+    case DeclaratorChunk::Paren:
+      continue;
+
+    // If we find anything except a function, bail out.
+    case DeclaratorChunk::Pointer:
+    case DeclaratorChunk::BlockPointer:
+    case DeclaratorChunk::Array:
+    case DeclaratorChunk::Reference:
+    case DeclaratorChunk::MemberPointer:
+      return result;
+
+    // If we do find a function declarator, scan inwards from that,
+    // looking for a block-pointer declarator.
+    case DeclaratorChunk::Function:
+      for (--i; i != 0; --i) {
+        DeclaratorChunk &blockChunk = declarator.getTypeObject(i-1);
+        switch (blockChunk.Kind) {
+        case DeclaratorChunk::Paren:
+        case DeclaratorChunk::Pointer:
+        case DeclaratorChunk::Array:
+        case DeclaratorChunk::Function:
+        case DeclaratorChunk::Reference:
+        case DeclaratorChunk::MemberPointer:
+          continue;
+        case DeclaratorChunk::BlockPointer:
+          result = &blockChunk;
+          goto continue_outer;
+        }
+        llvm_unreachable("bad declarator chunk kind");
+      }
+
+      // If we run out of declarators doing that, we're done.
+      return result;
+    }
+    llvm_unreachable("bad declarator chunk kind");
+
+    // Okay, reconsider from our new point.
+  continue_outer: ;
+  }
+
+  // Ran out of chunks, bail out.
+  return result;
+}
+
 /// Given that an objc_gc attribute was written somewhere on a
 /// declaration *other* than on the declarator itself (for which, use
 /// distributeObjCPointerTypeAttrFromDeclarator), and given that it
@@ -311,22 +374,44 @@ static void distributeObjCPointerTypeAttr(TypeProcessingState &state,
                                           AttributeList &attr,
                                           QualType type) {
   Declarator &declarator = state.getDeclarator();
+
+  // Move it to the outermost normal or block pointer declarator.
   for (unsigned i = state.getCurrentChunkIndex(); i != 0; --i) {
     DeclaratorChunk &chunk = declarator.getTypeObject(i-1);
     switch (chunk.Kind) {
     case DeclaratorChunk::Pointer:
-    case DeclaratorChunk::BlockPointer:
+    case DeclaratorChunk::BlockPointer: {
+      // But don't move an ARC ownership attribute to the return type
+      // of a block.
+      DeclaratorChunk *destChunk = 0;
+      if (state.isProcessingDeclSpec() &&
+          attr.getKind() == AttributeList::AT_ObjCOwnership)
+        destChunk = maybeMovePastReturnType(declarator, i - 1);
+      if (!destChunk) destChunk = &chunk;
+
       moveAttrFromListToList(attr, state.getCurrentAttrListRef(),
-                             chunk.getAttrListRef());
+                             destChunk->getAttrListRef());
       return;
+    }
 
     case DeclaratorChunk::Paren:
     case DeclaratorChunk::Array:
       continue;
 
+    // We may be starting at the return type of a block.
+    case DeclaratorChunk::Function:
+      if (state.isProcessingDeclSpec() &&
+          attr.getKind() == AttributeList::AT_ObjCOwnership) {
+        if (DeclaratorChunk *dest = maybeMovePastReturnType(declarator, i)) {
+          moveAttrFromListToList(attr, state.getCurrentAttrListRef(),
+                                 dest->getAttrListRef());
+          return;
+        }
+      }
+      goto error;
+
     // Don't walk through these.
     case DeclaratorChunk::Reference:
-    case DeclaratorChunk::Function:
     case DeclaratorChunk::MemberPointer:
       goto error;
     }
@@ -1545,45 +1630,10 @@ QualType Sema::BuildExtVectorType(QualType T, Expr *ArraySize,
   return Context.getDependentSizedExtVectorType(T, ArraySize, AttrLoc);
 }
 
-/// \brief Build a function type.
-///
-/// This routine checks the function type according to C++ rules and
-/// under the assumption that the result type and parameter types have
-/// just been instantiated from a template. It therefore duplicates
-/// some of the behavior of GetTypeForDeclarator, but in a much
-/// simpler form that is only suitable for this narrow use case.
-///
-/// \param T The return type of the function.
-///
-/// \param ParamTypes The parameter types of the function. This array
-/// will be modified to account for adjustments to the types of the
-/// function parameters.
-///
-/// \param NumParamTypes The number of parameter types in ParamTypes.
-///
-/// \param Variadic Whether this is a variadic function type.
-///
-/// \param HasTrailingReturn Whether this function has a trailing return type.
-///
-/// \param Quals The cvr-qualifiers to be applied to the function type.
-///
-/// \param Loc The location of the entity whose type involves this
-/// function type or, if there is no such entity, the location of the
-/// type that will have function type.
-///
-/// \param Entity The name of the entity that involves the function
-/// type, if known.
-///
-/// \returns A suitable function type, if there are no
-/// errors. Otherwise, returns a NULL type.
 QualType Sema::BuildFunctionType(QualType T,
-                                 QualType *ParamTypes,
-                                 unsigned NumParamTypes,
-                                 bool Variadic, bool HasTrailingReturn,
-                                 unsigned Quals,
-                                 RefQualifierKind RefQualifier,
+                                 llvm::MutableArrayRef<QualType> ParamTypes,
                                  SourceLocation Loc, DeclarationName Entity,
-                                 FunctionType::ExtInfo Info) {
+                                 const FunctionProtoType::ExtProtoInfo &EPI) {
   if (T->isArrayType() || T->isFunctionType()) {
     Diag(Loc, diag::err_func_returning_array_function)
       << T->isFunctionType() << T;
@@ -1598,7 +1648,7 @@ QualType Sema::BuildFunctionType(QualType T,
   }
 
   bool Invalid = false;
-  for (unsigned Idx = 0; Idx < NumParamTypes; ++Idx) {
+  for (unsigned Idx = 0, Cnt = ParamTypes.size(); Idx < Cnt; ++Idx) {
     // FIXME: Loc is too inprecise here, should use proper locations for args.
     QualType ParamType = Context.getAdjustedParameterType(ParamTypes[Idx]);
     if (ParamType->isVoidType()) {
@@ -1617,14 +1667,7 @@ QualType Sema::BuildFunctionType(QualType T,
   if (Invalid)
     return QualType();
 
-  FunctionProtoType::ExtProtoInfo EPI;
-  EPI.Variadic = Variadic;
-  EPI.HasTrailingReturn = HasTrailingReturn;
-  EPI.TypeQuals = Quals;
-  EPI.RefQualifier = RefQualifier;
-  EPI.ExtInfo = Info;
-
-  return Context.getFunctionType(T, ParamTypes, NumParamTypes, EPI);
+  return Context.getFunctionType(T, ParamTypes, EPI);
 }
 
 /// \brief Build a member pointer type \c T Class::*.
@@ -2580,6 +2623,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
           // definition.
           S.Diag(FTI.ArgInfo[0].IdentLoc, diag::err_ident_list_in_fn_declaration);
           D.setInvalidType(true);
+          // Recover by creating a K&R-style function type.
+          T = Context.getFunctionNoProtoType(T);
           break;
         }
 
@@ -2699,7 +2744,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
                                       Exceptions,
                                       EPI);
 
-        T = Context.getFunctionType(T, ArgTys.data(), ArgTys.size(), EPI);
+        T = Context.getFunctionType(T, ArgTys, EPI);
       }
 
       break;
@@ -2839,8 +2884,9 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       EPI.RefQualifier = RQ_None;
 
       T = Context.getFunctionType(FnTy->getResultType(),
-                                  FnTy->arg_type_begin(),
-                                  FnTy->getNumArgs(), EPI);
+                                  ArrayRef<QualType>(FnTy->arg_type_begin(),
+                                                     FnTy->getNumArgs()),
+                                  EPI);
       // Rebuild any parens around the identifier in the function type.
       for (unsigned i = 0, e = D.getNumTypeObjects(); i != e; ++i) {
         if (D.getTypeObject(i).Kind != DeclaratorChunk::Paren)
@@ -3298,6 +3344,7 @@ namespace {
 
       TypeSourceInfo *TInfo = 0;
       Sema::GetTypeFromParser(DS.getRepAsType(), &TInfo);
+      assert(TInfo);
       TL.getValueLoc().initializeFullCopy(TInfo->getTypeLoc());
     }
 
@@ -3636,6 +3683,14 @@ static bool handleObjCOwnershipTypeAttr(TypeProcessingState &state,
     } else if (!type->isObjCRetainableType()) {
       return false;
     }
+
+    // Don't accept an ownership attribute in the declspec if it would
+    // just be the return type of a block pointer.
+    if (state.isProcessingDeclSpec()) {
+      Declarator &D = state.getDeclarator();
+      if (maybeMovePastReturnType(D, D.getNumTypeObjects()))
+        return false;
+    }
   }
 
   Sema &S = state.getSema();
@@ -3742,10 +3797,8 @@ static bool handleObjCOwnershipTypeAttr(TypeProcessingState &state,
   // Forbid __weak for class objects marked as
   // objc_arc_weak_reference_unavailable
   if (lifetime == Qualifiers::OCL_Weak) {
-    QualType T = type;
-    while (const PointerType *ptr = T->getAs<PointerType>())
-      T = ptr->getPointeeType();
-    if (const ObjCObjectPointerType *ObjT = T->getAs<ObjCObjectPointerType>()) {
+    if (const ObjCObjectPointerType *ObjT =
+          type->getAs<ObjCObjectPointerType>()) {
       if (ObjCInterfaceDecl *Class = ObjT->getInterfaceDecl()) {
         if (Class->isArcWeakrefUnavailable()) {
             S.Diag(AttrLoc, diag::err_arc_unsupported_weak_class);

@@ -361,7 +361,7 @@ void CodeGenFunction::GenerateThunk(llvm::Function *Fn,
   ReturnValueSlot Slot;
   if (!ResultType->isVoidType() &&
       FnInfo.getReturnInfo().getKind() == ABIArgInfo::Indirect &&
-      hasAggregateLLVMType(CurFnInfo->getReturnType()))
+      !hasScalarEvaluationKind(CurFnInfo->getReturnType()))
     Slot = ReturnValueSlot(ReturnValue, ResultType.isVolatileQualified());
   
   // Now emit our call.
@@ -813,8 +813,12 @@ CodeGenVTables::GenerateClassData(const CXXRecordDecl *RD) {
   EmitVTableDefinition(VTable, Linkage, RD);
 
   if (RD->getNumVBases()) {
-    llvm::GlobalVariable *VTT = GetAddrOfVTT(RD);
-    EmitVTTDefinition(VTT, Linkage, RD);
+    if (!CGM.getTarget().getCXXABI().isMicrosoft()) {
+      llvm::GlobalVariable *VTT = GetAddrOfVTT(RD);
+      EmitVTTDefinition(VTT, Linkage, RD);
+    } else {
+      // FIXME: Emit vbtables here.
+    }
   }
 
   // If this is the magic class __cxxabiv1::__fundamental_type_info,

@@ -214,6 +214,10 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
   SourceLocation ParmLoc;
   bool BuiltinType = false;
 
+  TypeResult T;
+  SourceRange TypeRange;
+  bool TypeParsed = false;
+
   switch (Tok.getKind()) {
   case tok::kw_char:
   case tok::kw_wchar_t:
@@ -232,12 +236,17 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
   case tok::kw_void:
   case tok::kw_typeof:
     // __attribute__(( vec_type_hint(char) ))
-    // FIXME: Don't just discard the builtin type token.
-    ConsumeToken();
     BuiltinType = true;
+    T = ParseTypeName(&TypeRange);
+    TypeParsed = true;
     break;
 
   case tok::identifier:
+    if (AttrName->isStr("vec_type_hint")) {
+      T = ParseTypeName(&TypeRange);
+      TypeParsed = true;
+      break;
+    }
     ParmName = Tok.getIdentifierInfo();
     ParmLoc = ConsumeToken();
     break;
@@ -247,8 +256,10 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
   }
 
   ExprVector ArgExprs;
+  bool isInvalid = false;
+  bool isParmType = false;
 
-  if (!BuiltinType &&
+  if (!BuiltinType && !AttrName->isStr("vec_type_hint") &&
       (ParmLoc.isValid() ? Tok.is(tok::comma) : Tok.isNot(tok::r_paren))) {
     // Eat the comma.
     if (ParmLoc.isValid())
@@ -283,17 +294,32 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
         Diag(Tok, diag::err_iboutletcollection_with_protocol);
       SkipUntil(tok::r_paren, false, true); // skip until ')'
     }
+  } else if (AttrName->isStr("vec_type_hint")) {
+    if (T.get() && !T.isInvalid())
+      isParmType = true;
+    else {
+      if (Tok.is(tok::identifier))
+        ConsumeToken();
+      if (TypeParsed)
+        isInvalid = true;
+    }
   }
 
   SourceLocation RParen = Tok.getLocation();
-  if (!ExpectAndConsume(tok::r_paren, diag::err_expected_rparen)) {
+  if (!ExpectAndConsume(tok::r_paren, diag::err_expected_rparen) &&
+      !isInvalid) {
     SourceLocation AttrLoc = ScopeLoc.isValid() ? ScopeLoc : AttrNameLoc;
-    AttributeList *attr =
-      Attrs.addNew(AttrName, SourceRange(AttrLoc, RParen),
-                   ScopeName, ScopeLoc, ParmName, ParmLoc,
-                   ArgExprs.data(), ArgExprs.size(), Syntax);
-    if (BuiltinType && attr->getKind() == AttributeList::AT_IBOutletCollection)
-      Diag(Tok, diag::err_iboutletcollection_builtintype);
+    if (isParmType) {
+      Attrs.addNewTypeAttr(AttrName, SourceRange(AttrLoc, RParen), ScopeName,
+                           ScopeLoc, ParmName, ParmLoc, T.get(), Syntax);
+    } else {
+      AttributeList *attr = Attrs.addNew(
+          AttrName, SourceRange(AttrLoc, RParen), ScopeName, ScopeLoc, ParmName,
+          ParmLoc, ArgExprs.data(), ArgExprs.size(), Syntax);
+      if (BuiltinType &&
+          attr->getKind() == AttributeList::AT_IBOutletCollection)
+        Diag(Tok, diag::err_iboutletcollection_builtintype);
+    }
   }
 }
 
@@ -1268,11 +1294,10 @@ Parser::DeclGroupPtrTy Parser::ParseDeclaration(StmtVector &Stmts,
 Parser::DeclGroupPtrTy
 Parser::ParseSimpleDeclaration(StmtVector &Stmts, unsigned Context,
                                SourceLocation &DeclEnd,
-                               ParsedAttributesWithRange &attrs,
+                               ParsedAttributesWithRange &Attrs,
                                bool RequireSemi, ForRangeInit *FRI) {
   // Parse the common declaration-specifiers piece.
   ParsingDeclSpec DS(*this);
-  DS.takeAttributesFrom(attrs);
 
   ParseDeclarationSpecifiers(DS, ParsedTemplateInfo(), AS_none,
                              getDeclSpecContextFromDeclaratorContext(Context));
@@ -1280,6 +1305,7 @@ Parser::ParseSimpleDeclaration(StmtVector &Stmts, unsigned Context,
   // C99 6.7.2.3p6: Handle "struct-or-union identifier;", "enum { X };"
   // declaration-specifiers init-declarator-list[opt] ';'
   if (Tok.is(tok::semi)) {
+    ProhibitAttributes(Attrs);
     DeclEnd = Tok.getLocation();
     if (RequireSemi) ConsumeToken();
     Decl *TheDecl = Actions.ParsedFreeStandingDeclSpec(getCurScope(), AS_none,
@@ -1288,6 +1314,7 @@ Parser::ParseSimpleDeclaration(StmtVector &Stmts, unsigned Context,
     return Actions.ConvertDeclToDeclGroup(TheDecl);
   }
 
+  DS.takeAttributesFrom(Attrs);
   return ParseDeclGroup(DS, Context, /*FunctionDefs=*/ false, &DeclEnd, FRI);
 }
 
@@ -2101,7 +2128,7 @@ ExprResult Parser::ParseAlignArgument(SourceLocation Start,
 /// [C++11] 'alignas' '(' type-id ...[opt] ')'
 /// [C++11] 'alignas' '(' assignment-expression ...[opt] ')'
 void Parser::ParseAlignmentSpecifier(ParsedAttributes &Attrs,
-                                     SourceLocation *endLoc) {
+                                     SourceLocation *EndLoc) {
   assert((Tok.is(tok::kw_alignas) || Tok.is(tok::kw__Alignas)) &&
          "Not an alignment-specifier!");
 
@@ -2120,19 +2147,13 @@ void Parser::ParseAlignmentSpecifier(ParsedAttributes &Attrs,
   }
 
   T.consumeClose();
-  if (endLoc)
-    *endLoc = T.getCloseLocation();
-
-  // FIXME: Handle pack-expansions here.
-  if (EllipsisLoc.isValid()) {
-    Diag(EllipsisLoc, diag::err_alignas_pack_exp_unsupported);
-    return;
-  }
+  if (EndLoc)
+    *EndLoc = T.getCloseLocation();
 
   ExprVector ArgExprs;
   ArgExprs.push_back(ArgExpr.release());
   Attrs.addNew(KWName, KWLoc, 0, KWLoc, 0, T.getOpenLocation(),
-               ArgExprs.data(), 1, AttributeList::AS_Keyword);
+               ArgExprs.data(), 1, AttributeList::AS_Keyword, EllipsisLoc);
 }
 
 /// ParseDeclarationSpecifiers
@@ -2202,7 +2223,7 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
 
     case tok::l_square:
     case tok::kw_alignas:
-      if (!isCXX11AttributeSpecifier())
+      if (!getLangOpts().CPlusPlus11 || !isCXX11AttributeSpecifier())
         goto DoneWithDeclSpec;
 
       ProhibitAttributes(attrs);
@@ -4812,12 +4833,14 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
       //   "pointer to cv-qualifier-seq X" between the optional cv-qualifer-seq
       //   and the end of the function-definition, member-declarator, or
       //   declarator.
+      // FIXME: currently, "static" case isn't handled correctly.
       bool IsCXX11MemberFunction =
         getLangOpts().CPlusPlus11 &&
-        (D.getContext() == Declarator::MemberContext ||
-         (D.getContext() == Declarator::FileContext &&
-          D.getCXXScopeSpec().isValid() &&
-          Actions.CurContext->isRecord()));
+        (D.getContext() == Declarator::MemberContext
+         ? !D.getDeclSpec().isFriendSpecified()
+         : D.getContext() == Declarator::FileContext &&
+           D.getCXXScopeSpec().isValid() &&
+           Actions.CurContext->isRecord());
       Sema::CXXThisScopeRAII ThisScope(Actions,
                                dyn_cast<CXXRecordDecl>(Actions.CurContext),
                                DS.getTypeQualifiers() |

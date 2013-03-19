@@ -1094,6 +1094,73 @@ QualType Sema::getMessageSendResultType(QualType ReceiverType,
   return ReceiverType;
 }
 
+/// Look for an ObjC method whose result type exactly matches the given type.
+static const ObjCMethodDecl *
+findExplicitInstancetypeDeclarer(const ObjCMethodDecl *MD,
+                                 QualType instancetype) {
+  if (MD->getResultType() == instancetype) return MD;
+
+  // For these purposes, a method in an @implementation overrides a
+  // declaration in the @interface.
+  if (const ObjCImplDecl *impl =
+        dyn_cast<ObjCImplDecl>(MD->getDeclContext())) {
+    const ObjCContainerDecl *iface;
+    if (const ObjCCategoryImplDecl *catImpl = 
+          dyn_cast<ObjCCategoryImplDecl>(impl)) {
+      iface = catImpl->getCategoryDecl();
+    } else {
+      iface = impl->getClassInterface();
+    }
+
+    const ObjCMethodDecl *ifaceMD = 
+      iface->getMethod(MD->getSelector(), MD->isInstanceMethod());
+    if (ifaceMD) return findExplicitInstancetypeDeclarer(ifaceMD, instancetype);
+  }
+
+  SmallVector<const ObjCMethodDecl *, 4> overrides;
+  MD->getOverriddenMethods(overrides);
+  for (unsigned i = 0, e = overrides.size(); i != e; ++i) {
+    if (const ObjCMethodDecl *result =
+          findExplicitInstancetypeDeclarer(overrides[i], instancetype))
+      return result;
+  }
+
+  return 0;
+}
+
+void Sema::EmitRelatedResultTypeNoteForReturn(QualType destType) {
+  // Only complain if we're in an ObjC method and the required return
+  // type doesn't match the method's declared return type.
+  ObjCMethodDecl *MD = dyn_cast<ObjCMethodDecl>(CurContext);
+  if (!MD || !MD->hasRelatedResultType() ||
+      Context.hasSameUnqualifiedType(destType, MD->getResultType()))
+    return;
+
+  // Look for a method overridden by this method which explicitly uses
+  // 'instancetype'.
+  if (const ObjCMethodDecl *overridden =
+        findExplicitInstancetypeDeclarer(MD, Context.getObjCInstanceType())) {
+    SourceLocation loc;
+    SourceRange range;
+    if (TypeSourceInfo *TSI = overridden->getResultTypeSourceInfo()) {
+      range = TSI->getTypeLoc().getSourceRange();
+      loc = range.getBegin();
+    }
+    if (loc.isInvalid())
+      loc = overridden->getLocation();
+    Diag(loc, diag::note_related_result_type_explicit)
+      << /*current method*/ 1 << range;
+    return;
+  }
+
+  // Otherwise, if we have an interesting method family, note that.
+  // This should always trigger if the above didn't.
+  if (ObjCMethodFamily family = MD->getMethodFamily())
+    Diag(MD->getLocation(), diag::note_related_result_type_family)
+      << /*current method*/ 1
+      << family;
+}
+
 void Sema::EmitRelatedResultTypeNote(const Expr *E) {
   E = E->IgnoreParenImpCasts();
   const ObjCMessageExpr *MsgSend = dyn_cast<ObjCMessageExpr>(E);
@@ -1135,10 +1202,16 @@ bool Sema::CheckMessageArgumentTypes(QualType ReceiverType,
       if (Args[i]->isTypeDependent())
         continue;
 
-      ExprResult Result = DefaultArgumentPromotion(Args[i]);
-      if (Result.isInvalid())
+      ExprResult result;
+      if (getLangOpts().DebuggerSupport) {
+        QualType paramTy; // ignored
+        result = checkUnknownAnyArg(lbrac, Args[i], paramTy);
+      } else {
+        result = DefaultArgumentPromotion(Args[i]);
+      }
+      if (result.isInvalid())
         return true;
-      Args[i] = Result.take();
+      Args[i] = result.take();
     }
 
     unsigned DiagID;
@@ -1199,14 +1272,17 @@ bool Sema::CheckMessageArgumentTypes(QualType ReceiverType,
     // If the parameter is __unknown_anytype, infer its type
     // from the argument.
     if (param->getType() == Context.UnknownAnyTy) {
-      QualType paramType = checkUnknownAnyArg(argExpr);
-      if (paramType.isNull()) {
+      QualType paramType;
+      ExprResult argE = checkUnknownAnyArg(lbrac, argExpr, paramType);
+      if (argE.isInvalid()) {
         IsError = true;
-        continue;
-      }
+      } else {
+        Args[i] = argE.take();
 
-      // Update the parameter type in-place.
-      param->setType(paramType);
+        // Update the parameter type in-place.
+        param->setType(paramType);
+      }
+      continue;
     }
 
     if (RequireCompleteType(argExpr->getSourceRange().getBegin(),
@@ -1552,8 +1628,15 @@ ActOnClassPropertyRefExpr(IdentifierInfo &receiverName,
 
       if (ObjCMethodDecl *CurMethod = tryCaptureObjCSelf(receiverNameLoc)) {
         if (CurMethod->isInstanceMethod()) {
-          QualType T = 
-            Context.getObjCInterfaceType(CurMethod->getClassInterface());
+          ObjCInterfaceDecl *Super =
+            CurMethod->getClassInterface()->getSuperClass();
+          if (!Super) {
+            // The current class does not have a superclass.
+            Diag(receiverNameLoc, diag::error_root_class_cannot_use_super)
+            << CurMethod->getClassInterface()->getIdentifier();
+            return ExprError();
+          }
+          QualType T = Context.getObjCInterfaceType(Super);
           T = Context.getObjCObjectPointerType(T);
         
           return HandleExprPropertyRefExpr(T->getAsObjCInterfacePointerType(),
@@ -2119,7 +2202,45 @@ ExprResult Sema::BuildInstanceMessage(Expr *Receiver,
       return ExprError();
     Receiver = Result.take();
     ReceiverType = Receiver->getType();
+
+    // If the receiver is an ObjC pointer, a block pointer, or an
+    // __attribute__((NSObject)) pointer, we don't need to do any
+    // special conversion in order to look up a receiver.
+    if (ReceiverType->isObjCRetainableType()) {
+      // do nothing
+    } else if (!getLangOpts().ObjCAutoRefCount &&
+               !Context.getObjCIdType().isNull() &&
+               (ReceiverType->isPointerType() || 
+                ReceiverType->isIntegerType())) {
+      // Implicitly convert integers and pointers to 'id' but emit a warning.
+      // But not in ARC.
+      Diag(Loc, diag::warn_bad_receiver_type)
+        << ReceiverType 
+        << Receiver->getSourceRange();
+      if (ReceiverType->isPointerType()) {
+        Receiver = ImpCastExprToType(Receiver, Context.getObjCIdType(), 
+                                     CK_CPointerToObjCPointerCast).take();
+      } else {
+        // TODO: specialized warning on null receivers?
+        bool IsNull = Receiver->isNullPointerConstant(Context,
+                                              Expr::NPC_ValueDependentIsNull);
+        CastKind Kind = IsNull ? CK_NullToPointer : CK_IntegralToPointer;
+        Receiver = ImpCastExprToType(Receiver, Context.getObjCIdType(),
+                                     Kind).take();
+      }
+      ReceiverType = Receiver->getType();
+    } else if (getLangOpts().CPlusPlus) {
+      ExprResult result = PerformContextuallyConvertToObjCPointer(Receiver);
+      if (result.isUsable()) {
+        Receiver = result.take();
+        ReceiverType = Receiver->getType();
+      }
+    }
   }
+
+  // There's a somewhat weird interaction here where we assume that we
+  // won't actually have a method unless we also don't need to do some
+  // of the more detailed type-checking on the receiver.
 
   if (!Method) {
     // Handle messages to id.
@@ -2256,48 +2377,11 @@ ExprResult Sema::BuildInstanceMessage(Expr *Receiver,
         }
         if (Method && DiagnoseUseOfDecl(Method, Loc, forwardClass))
           return ExprError();
-      } else if (!getLangOpts().ObjCAutoRefCount &&
-                 !Context.getObjCIdType().isNull() &&
-                 (ReceiverType->isPointerType() || 
-                  ReceiverType->isIntegerType())) {
-        // Implicitly convert integers and pointers to 'id' but emit a warning.
-        // But not in ARC.
-        Diag(Loc, diag::warn_bad_receiver_type)
-          << ReceiverType 
-          << Receiver->getSourceRange();
-        if (ReceiverType->isPointerType())
-          Receiver = ImpCastExprToType(Receiver, Context.getObjCIdType(), 
-                            CK_CPointerToObjCPointerCast).take();
-        else {
-          // TODO: specialized warning on null receivers?
-          bool IsNull = Receiver->isNullPointerConstant(Context,
-                                              Expr::NPC_ValueDependentIsNull);
-          CastKind Kind = IsNull ? CK_NullToPointer : CK_IntegralToPointer;
-          Receiver = ImpCastExprToType(Receiver, Context.getObjCIdType(),
-                                       Kind).take();
-        }
-        ReceiverType = Receiver->getType();
       } else {
-        ExprResult ReceiverRes;
-        if (getLangOpts().CPlusPlus)
-          ReceiverRes = PerformContextuallyConvertToObjCPointer(Receiver);
-        if (ReceiverRes.isUsable()) {
-          Receiver = ReceiverRes.take();
-          return BuildInstanceMessage(Receiver,
-                                      ReceiverType,
-                                      SuperLoc,
-                                      Sel,
-                                      Method,
-                                      LBracLoc,
-                                      SelectorLocs,
-                                      RBracLoc,
-                                      ArgsIn);
-        } else {
-          // Reject other random receiver types (e.g. structs).
-          Diag(Loc, diag::err_bad_receiver_type)
-            << ReceiverType << Receiver->getSourceRange();
-          return ExprError();
-        }
+        // Reject other random receiver types (e.g. structs).
+        Diag(Loc, diag::err_bad_receiver_type)
+          << ReceiverType << Receiver->getSourceRange();
+        return ExprError();
       }
     }
   }
@@ -2810,19 +2894,36 @@ static void addFixitForObjCARCConversion(Sema &S,
                                          SourceLocation afterLParen,
                                          QualType castType,
                                          Expr *castExpr,
+                                         Expr *realCast,
                                          const char *bridgeKeyword,
                                          const char *CFBridgeName) {
   // We handle C-style and implicit casts here.
   switch (CCK) {
   case Sema::CCK_ImplicitConversion:
   case Sema::CCK_CStyleCast:
+  case Sema::CCK_OtherCast:
     break;
   case Sema::CCK_FunctionalCast:
-  case Sema::CCK_OtherCast:
     return;
   }
 
   if (CFBridgeName) {
+    if (CCK == Sema::CCK_OtherCast) {
+      if (const CXXNamedCastExpr *NCE = dyn_cast<CXXNamedCastExpr>(realCast)) {
+        SourceRange range(NCE->getOperatorLoc(),
+                          NCE->getAngleBrackets().getEnd());
+        SmallString<32> BridgeCall;
+        
+        SourceManager &SM = S.getSourceManager();
+        char PrevChar = *SM.getCharacterData(range.getBegin().getLocWithOffset(-1));
+        if (Lexer::isIdentifierBodyChar(PrevChar, S.getLangOpts()))
+          BridgeCall += ' ';
+        
+        BridgeCall += CFBridgeName;
+        DiagB.AddFixItHint(FixItHint::CreateReplacement(range, BridgeCall));
+      }
+      return;
+    }
     Expr *castedE = castExpr;
     if (CStyleCastExpr *CCE = dyn_cast<CStyleCastExpr>(castedE))
       castedE = CCE->getSubExpr();
@@ -2854,6 +2955,16 @@ static void addFixitForObjCARCConversion(Sema &S,
 
   if (CCK == Sema::CCK_CStyleCast) {
     DiagB.AddFixItHint(FixItHint::CreateInsertion(afterLParen, bridgeKeyword));
+  } else if (CCK == Sema::CCK_OtherCast) {
+    if (const CXXNamedCastExpr *NCE = dyn_cast<CXXNamedCastExpr>(realCast)) {
+      std::string castCode = "(";
+      castCode += bridgeKeyword;
+      castCode += castType.getAsString();
+      castCode += ")";
+      SourceRange Range(NCE->getOperatorLoc(),
+                        NCE->getAngleBrackets().getEnd());
+      DiagB.AddFixItHint(FixItHint::CreateReplacement(Range, castCode));
+    }
   } else {
     std::string castCode = "(";
     castCode += bridgeKeyword;
@@ -2878,7 +2989,8 @@ static void addFixitForObjCARCConversion(Sema &S,
 static void
 diagnoseObjCARCConversion(Sema &S, SourceRange castRange,
                           QualType castType, ARCConversionTypeClass castACTC,
-                          Expr *castExpr, ARCConversionTypeClass exprACTC,
+                          Expr *castExpr, Expr *realCast,
+                          ARCConversionTypeClass exprACTC,
                           Sema::CheckedConversionKind CCK) {
   SourceLocation loc =
     (castRange.isValid() ? castRange.getBegin() : castExpr->getExprLoc());
@@ -2925,17 +3037,24 @@ diagnoseObjCARCConversion(Sema &S, SourceRange castRange,
     assert(CreateRule != ACC_bottom && "This cast should already be accepted.");
     if (CreateRule != ACC_plusOne)
     {
-      DiagnosticBuilder DiagB = S.Diag(noteLoc, diag::note_arc_bridge);
+      DiagnosticBuilder DiagB = 
+        (CCK != Sema::CCK_OtherCast) ? S.Diag(noteLoc, diag::note_arc_bridge)
+                              : S.Diag(noteLoc, diag::note_arc_cstyle_bridge);
+      
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
-                                   castType, castExpr, "__bridge ", 0);
+                                   castType, castExpr, realCast, "__bridge ", 0);
     }
     if (CreateRule != ACC_plusZero)
     {
-      DiagnosticBuilder DiagB = S.Diag(br ? castExpr->getExprLoc() : noteLoc,
-                                       diag::note_arc_bridge_transfer)
-        << castExprType << br;
+      DiagnosticBuilder DiagB =
+        (CCK == Sema::CCK_OtherCast && !br) ?
+          S.Diag(noteLoc, diag::note_arc_cstyle_bridge_transfer) << castExprType :
+          S.Diag(br ? castExpr->getExprLoc() : noteLoc,
+                 diag::note_arc_bridge_transfer)
+            << castExprType << br;
+      
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
-                                   castType, castExpr, "__bridge_transfer ",
+                                   castType, castExpr, realCast, "__bridge_transfer ",
                                    br ? "CFBridgingRelease" : 0);
     }
 
@@ -2958,17 +3077,23 @@ diagnoseObjCARCConversion(Sema &S, SourceRange castRange,
     assert(CreateRule != ACC_bottom && "This cast should already be accepted.");
     if (CreateRule != ACC_plusOne)
     {
-      DiagnosticBuilder DiagB = S.Diag(noteLoc, diag::note_arc_bridge);
+      DiagnosticBuilder DiagB =
+      (CCK != Sema::CCK_OtherCast) ? S.Diag(noteLoc, diag::note_arc_bridge)
+                               : S.Diag(noteLoc, diag::note_arc_cstyle_bridge);
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
-                                   castType, castExpr, "__bridge ", 0);
+                                   castType, castExpr, realCast, "__bridge ", 0);
     }
     if (CreateRule != ACC_plusZero)
     {
-      DiagnosticBuilder DiagB = S.Diag(br ? castExpr->getExprLoc() : noteLoc,
-                                       diag::note_arc_bridge_retained)
-        << castType << br;
+      DiagnosticBuilder DiagB =
+        (CCK == Sema::CCK_OtherCast && !br) ?
+          S.Diag(noteLoc, diag::note_arc_cstyle_bridge_retained) << castType :
+          S.Diag(br ? castExpr->getExprLoc() : noteLoc,
+                 diag::note_arc_bridge_retained)
+            << castType << br;
+      
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
-                                   castType, castExpr, "__bridge_retained ",
+                                   castType, castExpr, realCast, "__bridge_retained ",
                                    br ? "CFBridgingRetain" : 0);
     }
 
@@ -3065,7 +3190,7 @@ Sema::CheckObjCARCConversion(SourceRange castRange, QualType castType,
     return ACR_unbridged;
 
   diagnoseObjCARCConversion(*this, castRange, castType, castACTC,
-                            castExpr, exprACTC, CCK);
+                            castExpr, castExpr, exprACTC, CCK);
   return ACR_okay;
 }
 
@@ -3100,7 +3225,7 @@ void Sema::diagnoseARCUnbridgedCast(Expr *e) {
   assert(classifyTypeForARCConversion(castExpr->getType()) == ACTC_retainable);
 
   diagnoseObjCARCConversion(*this, castRange, castType, castACTC,
-                            castExpr, ACTC_retainable, CCK);
+                            castExpr, realCast, ACTC_retainable, CCK);
 }
 
 /// stripARCUnbridgedCast - Given an expression of ARCUnbridgedCast

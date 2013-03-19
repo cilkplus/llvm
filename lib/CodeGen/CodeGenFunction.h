@@ -79,6 +79,17 @@ namespace CodeGen {
   class BlockFlags;
   class BlockFieldFlags;
 
+/// The kind of evaluation to perform on values of a particular
+/// type.  Basically, is the code in CGExprScalar, CGExprComplex, or
+/// CGExprAgg?
+///
+/// TODO: should vectors maybe be split out into their own thing?
+enum TypeEvaluationKind {
+  TEK_Scalar,
+  TEK_Complex,
+  TEK_Aggregate
+};
+
 /// A branch fixup.  These are required when emitting a goto to a
 /// label which hasn't been emitted yet.  The goto is optimistically
 /// emitted as a branch to the basic block for the label, and (if it
@@ -899,7 +910,9 @@ public:
   class RunCleanupsScope {
     EHScopeStack::stable_iterator CleanupStackDepth;
     bool OldDidCallStackSave;
+  protected:
     bool PerformCleanup;
+  private:
 
     RunCleanupsScope(const RunCleanupsScope &) LLVM_DELETED_FUNCTION;
     void operator=(const RunCleanupsScope &) LLVM_DELETED_FUNCTION;
@@ -943,7 +956,6 @@ public:
 
   class LexicalScope: protected RunCleanupsScope {
     SourceRange Range;
-    bool PopDebugStack;
 
     LexicalScope(const LexicalScope &) LLVM_DELETED_FUNCTION;
     void operator=(const LexicalScope &) LLVM_DELETED_FUNCTION;
@@ -951,7 +963,7 @@ public:
   public:
     /// \brief Enter a new cleanup scope.
     explicit LexicalScope(CodeGenFunction &CGF, SourceRange Range)
-      : RunCleanupsScope(CGF), Range(Range), PopDebugStack(true) {
+      : RunCleanupsScope(CGF), Range(Range) {
       if (CGDebugInfo *DI = CGF.getDebugInfo())
         DI->EmitLexicalBlockStart(CGF.Builder, Range.getBegin());
     }
@@ -959,20 +971,20 @@ public:
     /// \brief Exit this cleanup scope, emitting any accumulated
     /// cleanups.
     ~LexicalScope() {
-      if (PopDebugStack) {
-        CGDebugInfo *DI = CGF.getDebugInfo();
-        if (DI) DI->EmitLexicalBlockEnd(CGF.Builder, Range.getEnd());
-      }
+      if (PerformCleanup) endLexicalScope();
     }
 
     /// \brief Force the emission of cleanups now, instead of waiting
     /// until this object is destroyed.
     void ForceCleanup() {
       RunCleanupsScope::ForceCleanup();
-      if (CGDebugInfo *DI = CGF.getDebugInfo()) {
+      endLexicalScope();
+    }
+
+  private:
+    void endLexicalScope() {
+      if (CGDebugInfo *DI = CGF.getDebugInfo())
         DI->EmitLexicalBlockEnd(CGF.Builder, Range.getEnd());
-        PopDebugStack = false;
-      }
     }
   };
 
@@ -1305,6 +1317,9 @@ private:
   /// Add a kernel metadata node to the named metadata node 'opencl.kernels'.
   /// In the kernel metadata node, reference the kernel function and metadata 
   /// nodes for its optional attribute qualifiers (OpenCL 1.1 6.7.2):
+  /// - A node for the vec_type_hint(<type>) qualifier contains string
+  ///   "vec_type_hint", an undefined value of the <type> data type,
+  ///   and a Boolean that is true if the <type> is integer and signed.
   /// - A node for the work_group_size_hint(X,Y,Z) qualifier contains string 
   ///   "work_group_size_hint", and three 32-bit integers X, Y and Z.
   /// - A node for the reqd_work_group_size(X,Y,Z) qualifier contains string 
@@ -1617,7 +1632,15 @@ public:
 
   /// hasAggregateLLVMType - Return true if the specified AST type will map into
   /// an aggregate LLVM type or is void.
-  static bool hasAggregateLLVMType(QualType T);
+  static TypeEvaluationKind getEvaluationKind(QualType T);
+
+  static bool hasScalarEvaluationKind(QualType T) {
+    return getEvaluationKind(T) == TEK_Scalar;
+  }
+
+  static bool hasAggregateEvaluationKind(QualType T) {
+    return getEvaluationKind(T) == TEK_Aggregate;
+  }
 
   /// createBasicBlock - Create an LLVM basic block.
   llvm::BasicBlock *createBasicBlock(const Twine &name = "",
@@ -1925,6 +1948,13 @@ public:
                                          const CXXRecordDecl *ClassDecl,
                                          const CXXRecordDecl *BaseClassDecl);
 
+  /// GetVTTParameter - Return the VTT parameter that should be passed to a
+  /// base constructor/destructor with virtual bases.
+  /// FIXME: VTTs are Itanium ABI-specific, so the definition should move
+  /// to ItaniumCXXABI.cpp together with all the references to VTT.
+  llvm::Value *GetVTTParameter(GlobalDecl GD, bool ForVirtualBase,
+                               bool Delegating);
+
   void EmitDelegateCXXConstructorCall(const CXXConstructorDecl *Ctor,
                                       CXXCtorType CtorType,
                                       const FunctionArgList &Args);
@@ -2016,6 +2046,12 @@ public:
   /// appropriate size and alignment for an object of type \p Type.
   void EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc, llvm::Value *V,
                      QualType Type, CharUnits Alignment = CharUnits::Zero());
+
+  /// \brief Emit a check that \p Base points into an array object, which
+  /// we can access at index \p Index. \p Accessed should be \c false if we
+  /// this expression is used as an lvalue, for instance in "&Arr[Idx]".
+  void EmitBoundsCheck(const Expr *E, const Expr *Base, llvm::Value *Index,
+                       QualType IndexType, bool Accessed);
 
   llvm::Value *EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
                                        bool isInc, bool isPre);
@@ -2222,6 +2258,15 @@ public:
   /// that the address will be used to access the object.
   LValue EmitCheckedLValue(const Expr *E, TypeCheckKind TCK);
 
+  RValue convertTempToRValue(llvm::Value *addr, QualType type);
+
+  void EmitAtomicInit(Expr *E, LValue lvalue);
+
+  RValue EmitAtomicLoad(LValue lvalue,
+                        AggValueSlot slot = AggValueSlot::ignored());
+
+  void EmitAtomicStore(RValue rvalue, LValue lvalue, bool isInit);
+
   /// EmitToMemory - Change a scalar value from its value
   /// representation to its in-memory representation.
   llvm::Value *EmitToMemory(llvm::Value *Value, QualType Ty);
@@ -2295,7 +2340,8 @@ public:
   LValue EmitObjCEncodeExprLValue(const ObjCEncodeExpr *E);
   LValue EmitPredefinedLValue(const PredefinedExpr *E);
   LValue EmitUnaryOpLValue(const UnaryOperator *E);
-  LValue EmitArraySubscriptExpr(const ArraySubscriptExpr *E);
+  LValue EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
+                                bool Accessed = false);
   LValue EmitExtVectorElementExpr(const ExtVectorElementExpr *E);
   LValue EmitMemberExpr(const MemberExpr *E);
   LValue EmitObjCIsaExpr(const ObjCIsaExpr *E);
@@ -2398,11 +2444,29 @@ public:
   RValue EmitCallExpr(const CallExpr *E,
                       ReturnValueSlot ReturnValue = ReturnValueSlot());
 
+  llvm::CallInst *EmitRuntimeCall(llvm::Value *callee,
+                                  const Twine &name = "");
+  llvm::CallInst *EmitRuntimeCall(llvm::Value *callee,
+                                  ArrayRef<llvm::Value*> args,
+                                  const Twine &name = "");
+  llvm::CallInst *EmitNounwindRuntimeCall(llvm::Value *callee,
+                                          const Twine &name = "");
+  llvm::CallInst *EmitNounwindRuntimeCall(llvm::Value *callee,
+                                          ArrayRef<llvm::Value*> args,
+                                          const Twine &name = "");
+
   llvm::CallSite EmitCallOrInvoke(llvm::Value *Callee,
                                   ArrayRef<llvm::Value *> Args,
                                   const Twine &Name = "");
   llvm::CallSite EmitCallOrInvoke(llvm::Value *Callee,
                                   const Twine &Name = "");
+  llvm::CallSite EmitRuntimeCallOrInvoke(llvm::Value *callee,
+                                         ArrayRef<llvm::Value*> args,
+                                         const Twine &name = "");
+  llvm::CallSite EmitRuntimeCallOrInvoke(llvm::Value *callee,
+                                         const Twine &name = "");
+  void EmitNoreturnRuntimeCallOrInvoke(llvm::Value *callee,
+                                       ArrayRef<llvm::Value*> args);
 
   llvm::Value *BuildVirtualCall(const CXXMethodDecl *MD, llvm::Value *This,
                                 llvm::Type *Ty);
@@ -2494,14 +2558,14 @@ public:
   llvm::Value *EmitARCRetainAutorelease(QualType type, llvm::Value *value);
   llvm::Value *EmitARCRetainAutoreleaseNonBlock(llvm::Value *value);
   llvm::Value *EmitARCStoreStrong(LValue lvalue, llvm::Value *value,
-                                  bool ignored);
+                                  bool resultIgnored);
   llvm::Value *EmitARCStoreStrongCall(llvm::Value *addr, llvm::Value *value,
-                                      bool ignored);
+                                      bool resultIgnored);
   llvm::Value *EmitARCRetain(QualType type, llvm::Value *value);
   llvm::Value *EmitARCRetainNonBlock(llvm::Value *value);
   llvm::Value *EmitARCRetainBlock(llvm::Value *value, bool mandatory);
-  void EmitARCDestroyStrong(llvm::Value *addr, bool precise);
-  void EmitARCRelease(llvm::Value *value, bool precise);
+  void EmitARCDestroyStrong(llvm::Value *addr, ARCPreciseLifetime_t precise);
+  void EmitARCRelease(llvm::Value *value, ARCPreciseLifetime_t precise);
   llvm::Value *EmitARCAutorelease(llvm::Value *value);
   llvm::Value *EmitARCAutoreleaseReturnValue(llvm::Value *value);
   llvm::Value *EmitARCRetainAutoreleaseReturnValue(llvm::Value *value);
@@ -2583,16 +2647,15 @@ public:
                                 bool IgnoreReal = false,
                                 bool IgnoreImag = false);
 
-  /// EmitComplexExprIntoAddr - Emit the computation of the specified expression
-  /// of complex type, storing into the specified Value*.
-  void EmitComplexExprIntoAddr(const Expr *E, llvm::Value *DestAddr,
-                               bool DestIsVolatile);
+  /// EmitComplexExprIntoLValue - Emit the given expression of complex
+  /// type and place its result into the specified l-value.
+  void EmitComplexExprIntoLValue(const Expr *E, LValue dest, bool isInit);
 
-  /// StoreComplexToAddr - Store a complex number into the specified address.
-  void StoreComplexToAddr(ComplexPairTy V, llvm::Value *DestAddr,
-                          bool DestIsVolatile);
-  /// LoadComplexFromAddr - Load a complex number from the specified address.
-  ComplexPairTy LoadComplexFromAddr(llvm::Value *SrcAddr, bool SrcIsVolatile);
+  /// EmitStoreOfComplex - Store a complex number into the specified l-value.
+  void EmitStoreOfComplex(ComplexPairTy V, LValue dest, bool isInit);
+
+  /// EmitLoadOfComplex - Load a complex number from the specified l-value.
+  ComplexPairTy EmitLoadOfComplex(LValue src);
 
   /// CreateStaticVarDecl - Create a zero-initialized LLVM global for
   /// a static local variable.

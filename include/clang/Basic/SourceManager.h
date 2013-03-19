@@ -447,7 +447,7 @@ public:
 ///
 /// The cache structure is complex enough to be worth breaking out of
 /// SourceManager.
-class IsBeforeInTranslationUnitCache {
+class InBeforeInTUCacheEntry {
   /// \brief The FileID's of the cached query.
   ///
   /// If these match up with a subsequent query, the result can be reused.
@@ -469,7 +469,6 @@ class IsBeforeInTranslationUnitCache {
   /// random token in the parent.
   unsigned LCommonOffset, RCommonOffset;
 public:
-
   /// \brief Return true if the currently cached values match up with
   /// the specified LHS/RHS query.
   ///
@@ -588,13 +587,13 @@ class SourceManager : public RefCountedBase<SourceManager> {
   ///
   /// Positive FileIDs are indexes into this table. Entry 0 indicates an invalid
   /// expansion.
-  std::vector<SrcMgr::SLocEntry> LocalSLocEntryTable;
+  SmallVector<SrcMgr::SLocEntry, 0> LocalSLocEntryTable;
 
   /// \brief The table of SLocEntries that are loaded from other modules.
   ///
   /// Negative FileIDs are indexes into this table. To get from ID to an index,
   /// use (-ID - 2).
-  mutable std::vector<SrcMgr::SLocEntry> LoadedSLocEntryTable;
+  mutable SmallVector<SrcMgr::SLocEntry, 0> LoadedSLocEntryTable;
 
   /// \brief The starting offset of the next local SLocEntry.
   ///
@@ -647,8 +646,21 @@ class SourceManager : public RefCountedBase<SourceManager> {
   // Statistics for -print-stats.
   mutable unsigned NumLinearScans, NumBinaryProbes;
 
-  // Cache results for the isBeforeInTranslationUnit method.
-  mutable IsBeforeInTranslationUnitCache IsBeforeInTUCache;
+  /// The key value into the IsBeforeInTUCache table.
+  typedef std::pair<FileID, FileID> IsBeforeInTUCacheKey;
+
+  /// The IsBeforeInTranslationUnitCache is a mapping from FileID pairs
+  /// to cache results.
+  typedef llvm::DenseMap<IsBeforeInTUCacheKey, InBeforeInTUCacheEntry>
+          InBeforeInTUCache;
+
+  /// Cache results for the isBeforeInTranslationUnit method.
+  mutable InBeforeInTUCache IBTUCache;
+  mutable InBeforeInTUCacheEntry IBTUCacheOverflow;
+
+  /// Return the cache entry for comparing the given file IDs
+  /// for isBeforeInTranslationUnit.
+  InBeforeInTUCacheEntry &getInBeforeInTUCache(FileID LFID, FileID RFID) const;
 
   // Cache for the "fake" buffer used for error-recovery purposes.
   mutable llvm::MemoryBuffer *FakeBufferForRecovery;

@@ -476,18 +476,16 @@ getLocationForCaller(const StackFrameContext *SFC,
   CFGElement Source = Block[SFC->getIndex()];
 
   switch (Source.getKind()) {
-  case CFGElement::Invalid:
-    llvm_unreachable("Invalid CFGElement");
   case CFGElement::Statement:
-    return PathDiagnosticLocation(cast<CFGStmt>(Source).getStmt(),
+    return PathDiagnosticLocation(Source.castAs<CFGStmt>().getStmt(),
                                   SM, CallerCtx);
   case CFGElement::Initializer: {
-    const CFGInitializer &Init = cast<CFGInitializer>(Source);
+    const CFGInitializer &Init = Source.castAs<CFGInitializer>();
     return PathDiagnosticLocation(Init.getInitializer()->getInit(),
                                   SM, CallerCtx);
   }
   case CFGElement::AutomaticObjectDtor: {
-    const CFGAutomaticObjDtor &Dtor = cast<CFGAutomaticObjDtor>(Source);
+    const CFGAutomaticObjDtor &Dtor = Source.castAs<CFGAutomaticObjDtor>();
     return PathDiagnosticLocation::createEnd(Dtor.getTriggerStmt(),
                                              SM, CallerCtx);
   }
@@ -583,29 +581,24 @@ PathDiagnosticLocation
                                  const SourceManager &SMng) {
 
   const Stmt* S = 0;
-  if (const BlockEdge *BE = dyn_cast<BlockEdge>(&P)) {
+  if (Optional<BlockEdge> BE = P.getAs<BlockEdge>()) {
     const CFGBlock *BSrc = BE->getSrc();
     S = BSrc->getTerminatorCondition();
-  }
-  else if (const StmtPoint *SP = dyn_cast<StmtPoint>(&P)) {
+  } else if (Optional<StmtPoint> SP = P.getAs<StmtPoint>()) {
     S = SP->getStmt();
-    if (isa<PostStmtPurgeDeadSymbols>(P))
+    if (P.getAs<PostStmtPurgeDeadSymbols>())
       return PathDiagnosticLocation::createEnd(S, SMng, P.getLocationContext());
-  }
-  else if (const PostImplicitCall *PIE = dyn_cast<PostImplicitCall>(&P)) {
+  } else if (Optional<PostImplicitCall> PIE = P.getAs<PostImplicitCall>()) {
     return PathDiagnosticLocation(PIE->getLocation(), SMng);
-  }
-  else if (const CallEnter *CE = dyn_cast<CallEnter>(&P)) {
+  } else if (Optional<CallEnter> CE = P.getAs<CallEnter>()) {
     return getLocationForCaller(CE->getCalleeContext(),
                                 CE->getLocationContext(),
                                 SMng);
-  }
-  else if (const CallExitEnd *CEE = dyn_cast<CallExitEnd>(&P)) {
+  } else if (Optional<CallExitEnd> CEE = P.getAs<CallExitEnd>()) {
     return getLocationForCaller(CEE->getCalleeContext(),
                                 CEE->getLocationContext(),
                                 SMng);
-  }
-  else {
+  } else {
     llvm_unreachable("Unexpected ProgramPoint");
   }
 
@@ -622,13 +615,13 @@ PathDiagnosticLocation
 
   while (NI) {
     ProgramPoint P = NI->getLocation();
-    if (const StmtPoint *PS = dyn_cast<StmtPoint>(&P)) {
+    if (Optional<StmtPoint> PS = P.getAs<StmtPoint>()) {
       S = PS->getStmt();
-      if (isa<PostStmtPurgeDeadSymbols>(P))
+      if (P.getAs<PostStmtPurgeDeadSymbols>())
         return PathDiagnosticLocation::createEnd(S, SM,
                                                  NI->getLocationContext());
       break;
-    } else if (const BlockEdge *BE = dyn_cast<BlockEdge>(&P)) {
+    } else if (Optional<BlockEdge> BE = P.getAs<BlockEdge>()) {
       S = BE->getSrc()->getTerminator();
       break;
     }
@@ -998,11 +991,10 @@ StackHintGenerator::~StackHintGenerator() {}
 
 std::string StackHintGeneratorForSymbol::getMessage(const ExplodedNode *N){
   ProgramPoint P = N->getLocation();
-  const CallExitEnd *CExit = dyn_cast<CallExitEnd>(&P);
-  assert(CExit && "Stack Hints should be constructed at CallExitEnd points.");
+  CallExitEnd CExit = P.castAs<CallExitEnd>();
 
   // FIXME: Use CallEvent to abstract this over all calls.
-  const Stmt *CallSite = CExit->getCalleeContext()->getCallSite();
+  const Stmt *CallSite = CExit.getCalleeContext()->getCallSite();
   const CallExpr *CE = dyn_cast_or_null<CallExpr>(CallSite);
   if (!CE)
     return "";

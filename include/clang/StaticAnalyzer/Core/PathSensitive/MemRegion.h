@@ -651,9 +651,11 @@ public:
     }
 
     bool operator==(const referenced_vars_iterator &I) const {
+      assert((R == 0) == (I.R == 0));
       return I.R == R;
     }
     bool operator!=(const referenced_vars_iterator &I) const {
+      assert((R == 0) == (I.R == 0));
       return I.R != R;
     }
     referenced_vars_iterator &operator++() {
@@ -949,6 +951,9 @@ class ObjCIvarRegion : public DeclRegion {
 public:
   const ObjCIvarDecl *getDecl() const;
   QualType getValueType() const;
+
+  bool canPrintPretty() const;
+  void printPretty(raw_ostream &os) const;
 
   void dumpToStream(raw_ostream &os) const;
 

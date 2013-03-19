@@ -797,7 +797,7 @@ namespace PR14342 {
   X<int, (signed char)-1> x = X<long, -1>();
   X<int, 3UL> y = X<int, 2>();
   // CHECK-ELIDE-NOTREE: error: no viable conversion from 'X<long, [...]>' to 'X<int, [...]>'
-  // CHECK-ELIDE-NOTREE: error: no viable conversion from 'X<[...], 2>' to 'X<[...], 3UL>'
+  // CHECK-ELIDE-NOTREE: error: no viable conversion from 'X<[...], 2>' to 'X<[...], 3>'
 }
 
 namespace PR14489 {
@@ -866,6 +866,40 @@ namespace rdar12931988 {
     // CHECK-ELIDE-NOTREE: no viable overloaded '='
     // CHECK-ELIDE-NOTREE: no known conversion from 'Y<template rdar12931988::B::X>' to 'Y<template rdar12931988::A::X>'
     ya = yb;
+  }
+}
+
+namespace ValueDecl {
+  int int1, int2, default_int;
+  template <const int& T = default_int>
+  struct S {};
+
+  typedef S<int1> T1;
+  typedef S<int2> T2;
+  typedef S<> TD;
+
+  void test() {
+    T1 t1;
+    T2 t2;
+    TD td;
+
+    t1 = t2;
+    // CHECK-ELIDE-NOTREE: no viable overloaded '='
+    // CHECK-ELIDE-NOTREE: no known conversion from 'S<int2>' to 'S<int1>'
+
+    t2 = t1;
+    // CHECK-ELIDE-NOTREE: no viable overloaded '='
+    // CHECK-ELIDE-NOTREE: no known conversion from 'S<int1>' to 'S<int2>'
+
+    td = t1;
+    // TODO: Find out why (default) isn't printed on second template.
+    // CHECK-ELIDE-NOTREE: no viable overloaded '='
+    // CHECK-ELIDE-NOTREE: no known conversion from 'S<int1>' to 'S<default_int>'
+
+    t2 = td;
+    // CHECK-ELIDE-NOTREE: no viable overloaded '='
+    // CHECK-ELIDE-NOTREE: no known conversion from 'S<(default) default_int>' to 'S<int2>'
+
   }
 }
 

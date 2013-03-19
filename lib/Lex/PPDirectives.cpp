@@ -143,15 +143,14 @@ void Preprocessor::ReadMacroName(Token &MacroNameTok, char isDefineUndef) {
       Diag(MacroNameTok, diag::err_pp_macro_not_identifier);
     // Fall through on error.
   } else if (isDefineUndef && II->getPPKeywordID() == tok::pp_defined) {
-    // Error if defining "defined": C99 6.10.8.4.
+    // Error if defining "defined": C99 6.10.8/4, C++ [cpp.predefined]p4.
     Diag(MacroNameTok, diag::err_defined_macro_name);
-  } else if (isDefineUndef && II->hasMacroDefinition() &&
+  } else if (isDefineUndef == 2 && II->hasMacroDefinition() &&
              getMacroInfo(II)->isBuiltinMacro()) {
-    // Error if defining "__LINE__" and other builtins: C99 6.10.8.4.
-    if (isDefineUndef == 1)
-      Diag(MacroNameTok, diag::pp_redef_builtin_macro);
-    else
-      Diag(MacroNameTok, diag::pp_undef_builtin_macro);
+    // Warn if undefining "__LINE__" and other builtins, per C99 6.10.8/4
+    // and C++ [cpp.predefined]p4], but allow it as an extension.
+    Diag(MacroNameTok, diag::ext_pp_undef_builtin_macro);
+    return;
   } else {
     // Okay, we got a good identifier node.  Return it.
     return;
@@ -258,7 +257,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation IfTokenLoc,
     // directive mode.  Tell the lexer this so any newlines we see will be
     // converted into an EOD token (this terminates the macro).
     CurPPLexer->ParsingPreprocessorDirective = true;
-    if (CurLexer) CurLexer->SetCommentRetentionState(false);
+    if (CurLexer) CurLexer->SetKeepWhitespaceMode(false);
 
 
     // Read the next token, the directive flavor.
@@ -1925,10 +1924,14 @@ void Preprocessor::HandleDefineDirective(Token &DefineTok) {
       if (!OtherMI->isUsed() && OtherMI->isWarnIfUnused())
         Diag(OtherMI->getDefinitionLoc(), diag::pp_macro_not_used);
 
+      // Warn if defining "__LINE__" and other builtins, per C99 6.10.8/4 and 
+      // C++ [cpp.predefined]p4, but allow it as an extension.
+      if (OtherMI->isBuiltinMacro())
+        Diag(MacroNameTok, diag::ext_pp_redef_builtin_macro);
       // Macros must be identical.  This means all tokens and whitespace
       // separation must be the same.  C99 6.10.3.2.
-      if (!OtherMI->isAllowRedefinitionsWithoutWarning() &&
-          !MI->isIdenticalTo(*OtherMI, *this)) {
+      else if (!OtherMI->isAllowRedefinitionsWithoutWarning() &&
+               !MI->isIdenticalTo(*OtherMI, *this)) {
         Diag(MI->getDefinitionLoc(), diag::ext_pp_macro_redef)
           << MacroNameTok.getIdentifierInfo();
         Diag(OtherMI->getDefinitionLoc(), diag::note_previous_definition);
@@ -1938,7 +1941,7 @@ void Preprocessor::HandleDefineDirective(Token &DefineTok) {
       WarnUnusedMacroLocs.erase(OtherMI->getDefinitionLoc());
   }
 
-  setMacroDirective(MacroNameTok.getIdentifierInfo(), MI);
+  MacroDirective *MD = setMacroDirective(MacroNameTok.getIdentifierInfo(), MI);
 
   assert(!MI->isUsed());
   // If we need warning for not using the macro, add its location in the
@@ -1952,7 +1955,7 @@ void Preprocessor::HandleDefineDirective(Token &DefineTok) {
 
   // If the callbacks want to know, tell them about the macro definition.
   if (Callbacks)
-    Callbacks->MacroDefined(MacroNameTok, MI);
+    Callbacks->MacroDefined(MacroNameTok, MD);
 }
 
 /// HandleUndefDirective - Implements \#undef.
@@ -1977,7 +1980,7 @@ void Preprocessor::HandleUndefDirective(Token &UndefTok) {
   // If the callbacks want to know, tell them about the macro #undef.
   // Note: no matter if the macro was defined or not.
   if (Callbacks)
-    Callbacks->MacroUndefined(MacroNameTok, MI);
+    Callbacks->MacroUndefined(MacroNameTok, MD);
 
   // If the macro is not defined, this is a noop undef, just return.
   if (MI == 0) return;
@@ -2035,7 +2038,8 @@ void Preprocessor::HandleIfdefDirective(Token &Result, bool isIfndef,
   CheckEndOfDirective(isIfndef ? "ifndef" : "ifdef");
 
   IdentifierInfo *MII = MacroNameTok.getIdentifierInfo();
-  MacroInfo *MI = getMacroInfo(MII);
+  MacroDirective *MD = getMacroDirective(MII);
+  MacroInfo *MI = MD ? MD->getInfo() : 0;
 
   if (CurPPLexer->getConditionalStackDepth() == 0) {
     // If the start of a top-level #ifdef and if the macro is not defined,
@@ -2055,9 +2059,9 @@ void Preprocessor::HandleIfdefDirective(Token &Result, bool isIfndef,
 
   if (Callbacks) {
     if (isIfndef)
-      Callbacks->Ifndef(DirectiveTok.getLocation(), MacroNameTok, MI);
+      Callbacks->Ifndef(DirectiveTok.getLocation(), MacroNameTok, MD);
     else
-      Callbacks->Ifdef(DirectiveTok.getLocation(), MacroNameTok, MI);
+      Callbacks->Ifdef(DirectiveTok.getLocation(), MacroNameTok, MD);
   }
 
   // Should we include the stuff contained by this directive?
@@ -2078,7 +2082,6 @@ void Preprocessor::HandleIfdefDirective(Token &Result, bool isIfndef,
 ///
 void Preprocessor::HandleIfDirective(Token &IfToken,
                                      bool ReadAnyTokensBeforeDirective) {
-  SaveAndRestore<bool> PPDir(ParsingIfOrElifDirective, true);
   ++NumIf;
 
   // Parse and evaluate the conditional expression.
@@ -2170,7 +2173,6 @@ void Preprocessor::HandleElseDirective(Token &Result) {
 /// HandleElifDirective - Implements the \#elif directive.
 ///
 void Preprocessor::HandleElifDirective(Token &ElifToken) {
-  SaveAndRestore<bool> PPDir(ParsingIfOrElifDirective, true);
   ++NumElse;
 
   // #elif directive in a non-skipping conditional... start skipping.

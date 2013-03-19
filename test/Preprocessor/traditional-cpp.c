@@ -5,7 +5,13 @@
 /*
  RUN: %clang_cc1 -traditional-cpp %s -E -o %t
  RUN: FileCheck -strict-whitespace < %t %s
+ RUN: %clang_cc1 -traditional-cpp %s -E -C | FileCheck -check-prefix=CHECK-COMMENTS %s
 */
+
+/* -traditional-cpp should eliminate all C89 comments. */
+/* CHECK-NOT: /*
+ * CHECK-COMMENTS: {{^}}/* -traditional-cpp should eliminate all C89 comments. *{{/$}}
+ */
 
 /* CHECK: {{^}}foo // bar{{$}}
  */
@@ -61,4 +67,24 @@ foo2!
 bracket2(spaces)
 /* If this were working, this check would be on.
  * CHECK-NOT: {{^}}>>>  spaces  <<<{{$}}
+ */
+
+
+/* Check that #if 0 blocks work as expected */
+#if 0
+#error "this is not an error"
+
+#if 1
+a b c in skipped block
+#endif
+
+/* Comments are whitespace too */
+
+#endif
+/* CHECK-NOT: {{^}}a b c in skipped block{{$}}
+ * CHECK-NOT: {{^}}/* Comments are whitespace too
+ */
+
+Preserve URLs: http://clang.llvm.org
+/* CHECK: {{^}}Preserve URLs: http://clang.llvm.org{{$}}
  */

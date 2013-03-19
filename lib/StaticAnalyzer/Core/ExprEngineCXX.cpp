@@ -30,32 +30,43 @@ void ExprEngine::CreateCXXTemporaryObject(const MaterializeTemporaryExpr *ME,
   ProgramStateRef state = Pred->getState();
   const LocationContext *LCtx = Pred->getLocationContext();
 
-  // Bind the temporary object to the value of the expression. Then bind
-  // the expression to the location of the object.
   SVal V = state->getSVal(tempExpr, LCtx);
 
   // If the value is already a CXXTempObjectRegion, it is fine as it is.
   // Otherwise, create a new CXXTempObjectRegion, and copy the value into it.
+  // This is an optimization for when an rvalue is constructed and then
+  // immediately materialized.
   const MemRegion *MR = V.getAsRegion();
-  if (!MR || !isa<CXXTempObjectRegion>(MR)) {
-    const MemRegion *R =
-      svalBuilder.getRegionManager().getCXXTempObjectRegion(ME, LCtx);
-
-    SVal L = loc::MemRegionVal(R);
-    state = state->bindLoc(L, V);
-    V = L;
+  if (const CXXTempObjectRegion *TR =
+        dyn_cast_or_null<CXXTempObjectRegion>(MR)) {
+    if (getContext().hasSameUnqualifiedType(TR->getValueType(), ME->getType()))
+      state = state->BindExpr(ME, LCtx, V);
   }
 
-  Bldr.generateNode(ME, Pred, state->BindExpr(ME, LCtx, V));
+  if (state == Pred->getState())
+    state = createTemporaryRegionIfNeeded(state, LCtx, tempExpr, ME);
+  Bldr.generateNode(ME, Pred, state);
 }
 
+// FIXME: This is the sort of code that should eventually live in a Core
+// checker rather than as a special case in ExprEngine.
 void ExprEngine::performTrivialCopy(NodeBuilder &Bldr, ExplodedNode *Pred,
-                                    const CXXConstructorCall &Call) {
-  const CXXConstructExpr *CtorExpr = Call.getOriginExpr();
-  assert(CtorExpr->getConstructor()->isCopyOrMoveConstructor());
-  assert(CtorExpr->getConstructor()->isTrivial());
+                                    const CallEvent &Call) {
+  SVal ThisVal;
+  bool AlwaysReturnsLValue;
+  if (const CXXConstructorCall *Ctor = dyn_cast<CXXConstructorCall>(&Call)) {
+    assert(Ctor->getDecl()->isTrivial());
+    assert(Ctor->getDecl()->isCopyOrMoveConstructor());
+    ThisVal = Ctor->getCXXThisVal();
+    AlwaysReturnsLValue = false;
+  } else {
+    assert(cast<CXXMethodDecl>(Call.getDecl())->isTrivial());
+    assert(cast<CXXMethodDecl>(Call.getDecl())->getOverloadedOperator() ==
+           OO_Equal);
+    ThisVal = cast<CXXInstanceCall>(Call).getCXXThisVal();
+    AlwaysReturnsLValue = true;
+  }
 
-  SVal ThisVal = Call.getCXXThisVal();
   const LocationContext *LCtx = Pred->getLocationContext();
 
   ExplodedNodeSet Dst;
@@ -63,17 +74,24 @@ void ExprEngine::performTrivialCopy(NodeBuilder &Bldr, ExplodedNode *Pred,
 
   SVal V = Call.getArgSVal(0);
 
-  // Make sure the value being copied is not unknown.
+  // If the value being copied is not unknown, load from its location to get
+  // an aggregate rvalue.
   if (Optional<Loc> L = V.getAs<Loc>())
     V = Pred->getState()->getSVal(*L);
+  else
+    assert(V.isUnknown());
 
-  evalBind(Dst, CtorExpr, Pred, ThisVal, V, true);
+  const Expr *CallExpr = Call.getOriginExpr();
+  evalBind(Dst, CallExpr, Pred, ThisVal, V, true);
 
-  PostStmt PS(CtorExpr, LCtx);
+  PostStmt PS(CallExpr, LCtx);
   for (ExplodedNodeSet::iterator I = Dst.begin(), E = Dst.end();
        I != E; ++I) {
     ProgramStateRef State = (*I)->getState();
-    State = bindReturnValue(Call, LCtx, State);
+    if (AlwaysReturnsLValue)
+      State = State->BindExpr(CallExpr, LCtx, ThisVal);
+    else
+      State = bindReturnValue(Call, LCtx, State);
     Bldr.generateNode(PS, State, *I);
   }
 }
@@ -96,7 +114,7 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
       CFGElement Next = (*B)[currStmtIdx+1];
 
       // Is this a constructor for a local variable?
-      if (const CFGStmt *StmtElem = dyn_cast<CFGStmt>(&Next)) {
+      if (Optional<CFGStmt> StmtElem = Next.getAs<CFGStmt>()) {
         if (const DeclStmt *DS = dyn_cast<DeclStmt>(StmtElem->getStmt())) {
           if (const VarDecl *Var = dyn_cast<VarDecl>(DS->getSingleDecl())) {
             if (Var->getInit()->IgnoreImplicit() == CE) {
@@ -119,7 +137,7 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
       }
       
       // Is this a constructor for a member?
-      if (const CFGInitializer *InitElem = dyn_cast<CFGInitializer>(&Next)) {
+      if (Optional<CFGInitializer> InitElem = Next.getAs<CFGInitializer>()) {
         const CXXCtorInitializer *Init = InitElem->getInitializer();
         assert(Init->isAnyMemberInitializer());
 

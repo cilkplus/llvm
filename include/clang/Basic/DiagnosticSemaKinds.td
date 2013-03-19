@@ -254,19 +254,20 @@ def note_using_decl_constructor_conflict_previous_ctor : Note<
   "previous constructor">;
 def note_using_decl_constructor_conflict_previous_using : Note<
   "previously inherited here">;
+def warn_using_decl_constructor_ellipsis : Warning<
+  "inheriting constructor does not inherit ellipsis">,
+  InGroup<DiagGroup<"inherited-variadic-ctor">>;
+def note_using_decl_constructor_ellipsis : Note<
+  "constructor declared with ellipsis here">;
 def err_using_decl_can_not_refer_to_class_member : Error<
   "using declaration can not refer to class member">;
 def err_using_decl_can_not_refer_to_namespace : Error<
   "using declaration can not refer to namespace">;
 def err_using_decl_constructor : Error<
   "using declaration can not refer to a constructor">;
-def err_using_decl_constructor_unsupported : Error<
-  "inheriting constructors are not supported">;
-// FIXME: Replace the above error with this warning if support for
-//        inheriting constructors is implemented.
-//def warn_cxx98_compat_using_decl_constructor : Warning<
-//  "inheriting constructors are incompatible with C++98">,
-//  InGroup<CXX98Compat>, DefaultIgnore;
+def warn_cxx98_compat_using_decl_constructor : Warning<
+  "inheriting constructors are incompatible with C++98">,
+  InGroup<CXX98Compat>, DefaultIgnore;
 def err_using_decl_destructor : Error<
   "using declaration can not refer to a destructor">;
 def err_using_decl_template_id : Error<
@@ -410,6 +411,8 @@ def err_main_arg_wrong : Error<"%select{first|second|third|fourth}0 "
     "platform-specific data}0) must be of type %1">;
 
 /// parser diagnostics
+def ext_no_declarators : ExtWarn<"declaration does not declare anything">,
+  InGroup<MissingDeclarations>;
 def ext_typedef_without_a_name : ExtWarn<"typedef requires a name">,
   InGroup<MissingDeclarations>;
 def err_typedef_not_identifier : Error<"typedef name must be an identifier">;
@@ -666,6 +669,15 @@ def warn_auto_synthesizing_protocol_property :Warning<
   "auto property synthesis will not synthesize property"
   " declared in a protocol">,
   InGroup<DiagGroup<"objc-protocol-property-synthesis">>;
+def warn_no_autosynthesis_shared_ivar_property : Warning <
+  "auto property synthesis will not synthesize property "
+  "'%0' because it cannot share an ivar with another synthesized property">,
+  InGroup<ObjCNoPropertyAuthoSynthesis>;
+def warn_no_autosynthesis_property : Warning<
+  "auto property synthesis will not synthesize property "
+  "'%0' because it is 'readwrite' but it will be synthesized 'readonly' "
+  "via another property">,
+  InGroup<ObjCNoPropertyAuthoSynthesis>;
 def warn_autosynthesis_property_ivar_match :Warning<
   "autosynthesized property %0 will use %select{|synthesized}1 instance variable "
   "%2, not existing instance variable %3">,
@@ -1090,13 +1102,16 @@ def note_field_decl : Note<"member is declared here">;
 def note_ivar_decl : Note<"instance variable is declared here">;
 def note_bitfield_decl : Note<"bit-field is declared here">;
 def note_previous_decl : Note<"%0 declared here">;
+def note_implicit_param_decl : Note<"%0 is an implicit parameter">;
 def note_member_synthesized_at : Note<
   "implicit default %select{constructor|copy constructor|move constructor|copy "
   "assignment operator|move assignment operator|destructor}0 for %1 first "
   "required here">;
+def note_inhctor_synthesized_at : Note<
+  "inheriting constructor for %0 first required here">;
 def err_missing_default_ctor : Error<
-  "%select{|implicit default }0constructor for %1 must explicitly initialize "
-  "the %select{base class|member}2 %3 which does not have a default "
+  "%select{|implicit default |inheriting }0constructor for %1 must explicitly "
+  "initialize the %select{base class|member}2 %3 which does not have a default "
   "constructor">;
 
 def err_illegal_union_or_anon_struct_member : Error<
@@ -1651,9 +1666,16 @@ def err_attribute_argument_not_int : Error<
 def err_aligned_attribute_argument_not_int : Error<
   "'aligned' attribute requires integer constant">;
 def err_alignas_attribute_wrong_decl_type : Error<
-  "%0 attribute cannot be applied to a %select{"
+  "'%select{alignas|_Alignas}0' attribute cannot be applied to a %select{"
   "function parameter|variable with 'register' storage class|"
   "'catch' variable|bit-field}1">;
+def err_alignas_missing_on_definition : Error<
+  "'%select{alignas|_Alignas}0' must be specified on definition if it is "
+  "specified on any declaration">;
+def note_alignas_on_declaration : Note<
+  "declared with '%select{alignas|_Alignas}0' attribute here">;
+def err_alignas_mismatch : Error<
+  "redeclaration has different alignment requirement (%1 vs %0)">;
 def err_alignas_underaligned : Error<
   "requested alignment is less than minimum alignment of %1 for type %0">;
 def err_attribute_first_argument_not_int_or_bool : Error<
@@ -1664,6 +1686,8 @@ def err_attribute_argument_outof_range : Error<
 def err_init_priority_object_attr : Error<
   "can only use 'init_priority' attribute on file-scope definitions "
   "of objects of class type">;
+def err_attribute_argument_vec_type_hint : Error<
+  "invalid attribute argument %0 - expecting a vector or vectorizable scalar type">;
 def err_attribute_argument_n_not_int : Error<
   "'%0' attribute requires parameter %1 to be an integer constant">;
 def err_attribute_argument_n_not_string : Error<
@@ -1721,6 +1745,8 @@ def err_as_qualified_auto_decl : Error<
   "automatic variable qualified with an address space">;
 def err_arg_with_address_space : Error<
   "parameter may not be qualified with an address space">;
+def err_field_with_address_space : Error<
+  "field may not be qualified with an address space">;
 def err_attr_objc_ownership_redundant : Error<
   "the type %0 is already explicitly ownership-qualified">;
 def err_attribute_not_string : Error<
@@ -1890,7 +1916,7 @@ def err_cconv_knr : Error<
   "function with no prototype cannot use %0 calling convention">;
 def err_cconv_varargs : Error<
   "variadic function cannot use %0 calling convention">;
-def err_regparm_mismatch : Error<"function declared with with regparm(%0) "
+def err_regparm_mismatch : Error<"function declared with regparm(%0) "
   "attribute was previously declared "
   "%plural{0:without the regparm|:with the regparm(%1)}1 attribute">;
 def err_returns_retained_mismatch : Error<
@@ -1908,8 +1934,6 @@ def warn_attribute_not_on_decl : Warning<
   "%0 attribute ignored when parsing type">, InGroup<IgnoredAttributes>;
 def err_base_specifier_attribute : Error<
   "%0 attribute cannot be applied to a base specifier">;
-def err_attribute_declaration : Error<
-  "%0 attribute cannot be used in an attribute declaration">;
 
 // Availability attribute
 def warn_availability_unknown_platform : Warning<
@@ -2131,6 +2155,8 @@ def warn_attribute_protected_visibility :
   Warning<"target does not support 'protected' visibility; using 'default'">,
   InGroup<DiagGroup<"unsupported-visibility">>;
 def err_mismatched_visibility: Error<"visibility does not match previous declaration">;
+def warn_attribute_unknown_endian : Warning<"unknown endian '%0'">,
+  InGroup<IgnoredAttributes>;
 def note_previous_attribute : Note<"previous attribute is here">;
 def err_unknown_machine_mode : Error<"unknown machine mode %0">;
 def err_unsupported_machine_mode : Error<"unsupported machine mode %0">;
@@ -2253,8 +2279,8 @@ def err_uninitialized_member_for_assign : Error<
   "non-static %select{reference|const}1 member %2 can't use default "
   "assignment operator">;
 def err_uninitialized_member_in_ctor : Error<
-  "%select{|implicit default }0constructor for %1 must explicitly initialize "
-  "the %select{reference|const}2 member %3">;
+  "%select{|implicit default |inheriting }0constructor for %1 must explicitly "
+  "initialize the %select{reference|const}2 member %3">;
 def err_default_arg_makes_ctor_special : Error<
   "addition of default argument on redeclaration makes this constructor a "
   "%select{default|copy|move}0 constructor">;
@@ -3118,9 +3144,9 @@ def warn_cxx98_compat_template_outside_of_template : Warning<
   InGroup<CXX98Compat>, DefaultIgnore;
 
 def err_non_type_template_in_nested_name_specifier : Error<
-  "qualified name refers into a specialization of function template '%0'">;
+  "qualified name refers into a specialization of function template %0">;
 def err_template_id_not_a_type : Error<
-  "template name refers to non-type template '%0'">;
+  "template name refers to non-type template %0">;
 def note_template_declared_here : Note<
   "%select{function template|class template|type alias template|template template parameter}0 "
   "%1 declared here">;
@@ -3853,11 +3879,19 @@ def err_arc_cast_requires_bridge : Error<
   "requires a bridged cast">;
 def note_arc_bridge : Note<
   "use __bridge to convert directly (no change in ownership)">;
+def note_arc_cstyle_bridge : Note<
+  "use __bridge with C-style cast to convert directly (no change in ownership)">;
 def note_arc_bridge_transfer : Note<
   "use %select{__bridge_transfer|CFBridgingRelease call}1 to transfer "
   "ownership of a +1 %0 into ARC">;
+def note_arc_cstyle_bridge_transfer : Note<
+  "use __bridge_transfer with C-style cast to transfer "
+  "ownership of a +1 %0 into ARC">;
 def note_arc_bridge_retained : Note<
   "use %select{__bridge_retained|CFBridgingRetain call}1 to make an "
+  "ARC object available as a +1 %0">;
+def note_arc_cstyle_bridge_retained : Note<
+  "use __bridge_retained with C-style cast to make an "
   "ARC object available as a +1 %0">;
 
 } // ARC Casting category
@@ -3906,16 +3940,17 @@ def err_atomic_specifier_bad_type : Error<
   "%1 %select{||||||which is not trivially copyable}0">;
 
 // Expressions.
-def ext_sizeof_function_type : Extension<
-  "invalid application of 'sizeof' to a function type">, InGroup<PointerArith>;
-def ext_sizeof_void_type : Extension<
-  "invalid application of '%select{sizeof|__alignof|vec_step}0' to a void "
+def ext_sizeof_alignof_function_type : Extension<
+  "invalid application of '%select{sizeof|alignof|vec_step}0' to a "
+  "function type">, InGroup<PointerArith>;
+def ext_sizeof_alignof_void_type : Extension<
+  "invalid application of '%select{sizeof|alignof|vec_step}0' to a void "
   "type">, InGroup<PointerArith>;
 def err_sizeof_alignof_incomplete_type : Error<
-  "invalid application of '%select{sizeof|__alignof|vec_step}0' to an "
+  "invalid application of '%select{sizeof|alignof|vec_step}0' to an "
   "incomplete type %1">;
 def err_sizeof_alignof_bitfield : Error<
-  "invalid application of '%select{sizeof|__alignof}0' to bit-field">;
+  "invalid application of '%select{sizeof|alignof}0' to bit-field">;
 def err_vecstep_non_scalar_vector_type : Error<
   "'vec_step' requires built-in scalar or vector type, %0 invalid">;
 def err_offsetof_incomplete_type : Error<
@@ -4148,7 +4183,13 @@ def err_typecheck_sclass_fscope : Error<
   "illegal storage class on file-scoped variable">;
 def err_unsupported_global_register : Error<
   "global register variables are not supported">;
-def warn_standalone_specifier : Warning<"'%0' ignored on this declaration">;
+def warn_standalone_specifier : Warning<"'%0' ignored on this declaration">,
+  InGroup<MissingDeclarations>;
+def ext_standalone_specifier : ExtWarn<"'%0' is not permitted on a declaration "
+  "of a type">, InGroup<MissingDeclarations>;
+def err_standalone_class_nested_name_specifier : Error<
+  "forward declaration of %select{class|struct|interface|union|enum}0 cannot "
+  "have a nested name specifier">;
 def err_typecheck_sclass_func : Error<"illegal storage class on function">;
 def err_static_block_func : Error<
   "function declared in block scope cannot have 'static' storage class">;
@@ -6172,15 +6213,19 @@ def warn_related_result_type_compatibility_class : Warning<
 def warn_related_result_type_compatibility_protocol : Warning<
   "protocol method is expected to return an instance of the implementing "
   "class, but is declared to return %0">;
-def note_related_result_type_overridden_family : Note<
-  "overridden method is part of the '%select{|alloc|copy|init|mutableCopy|"
-  "new|autorelease|dealloc|finalize|release|retain|retainCount|self}0' method "
-  "family">;
+def note_related_result_type_family : Note<
+  "%select{overridden|current}0 method is part of the '%select{|alloc|copy|init|"
+  "mutableCopy|new|autorelease|dealloc|finalize|release|retain|retainCount|"
+  "self}1' method family%select{| and is expected to return an instance of its "
+  "class type}0">;
 def note_related_result_type_overridden : Note<
   "overridden method returns an instance of its class type">;
 def note_related_result_type_inferred : Note<
   "%select{class|instance}0 method %1 is assumed to return an instance of "
   "its receiver type (%2)">;
+def note_related_result_type_explicit : Note<
+  "%select{overridden|current}0 method is explicitly declared 'instancetype'"
+  "%select{| and is expected to return an instance of its class type}0">;
 
 }
 

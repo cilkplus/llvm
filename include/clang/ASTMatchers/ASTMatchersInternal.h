@@ -35,13 +35,13 @@
 #ifndef LLVM_CLANG_AST_MATCHERS_AST_MATCHERS_INTERNAL_H
 #define LLVM_CLANG_AST_MATCHERS_AST_MATCHERS_INTERNAL_H
 
-#include "clang/AST/Decl.h"
+#include "clang/AST/ASTTypeTraits.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/Decl.h"
 #include "clang/AST/ExprCXX.h"
-#include "clang/AST/Stmt.h"
 #include "clang/AST/StmtCXX.h"
+#include "clang/AST/Stmt.h"
 #include "clang/AST/Type.h"
-#include "clang/ASTMatchers/ASTTypeTraits.h"
 #include "llvm/ADT/VariadicFunction.h"
 #include "llvm/Support/type_traits.h"
 #include <map>
@@ -355,14 +355,57 @@ inline Matcher<T> makeMatcher(MatcherInterface<T> *Implementation) {
 
 /// \brief Metafunction to determine if type T has a member called getDecl.
 template <typename T> struct has_getDecl {
-  typedef char yes[1];
-  typedef char no[2];
+  struct Default { int getDecl; };
+  struct Derived : T, Default { };
 
-  template <typename TestType>
-  static yes &test(char[sizeof(&TestType::getDecl)]);
-  template <typename> static no &test(...);
+  template<typename C, C> struct CheckT;
 
-  static bool const value = sizeof(test<T>(0)) == sizeof(yes);
+  // If T::getDecl exists, an ambiguity arises and CheckT will
+  // not be instantiable. This makes f(...) the only available
+  // overload.
+  template<typename C>
+  static char (&f(CheckT<int Default::*, &C::getDecl>*))[1];
+  template<typename C> static char (&f(...))[2];
+
+  static bool const value = sizeof(f<Derived>(0)) == 2;
+};
+
+/// \brief Matches overloaded operators with a specific name.
+///
+/// The type argument ArgT is not used by this matcher but is used by
+/// PolymorphicMatcherWithParam1 and should be StringRef.
+template <typename T, typename ArgT>
+class HasOverloadedOperatorNameMatcher : public SingleNodeMatcherInterface<T> {
+  TOOLING_COMPILE_ASSERT((llvm::is_same<T, CXXOperatorCallExpr>::value ||
+                          llvm::is_same<T, CXXMethodDecl>::value),
+                         unsupported_class_for_matcher);
+  TOOLING_COMPILE_ASSERT((llvm::is_same<ArgT, StringRef>::value),
+                         argument_type_must_be_StringRef);
+public:
+  explicit HasOverloadedOperatorNameMatcher(const StringRef Name)
+      : SingleNodeMatcherInterface<T>(), Name(Name) {}
+
+  virtual bool matchesNode(const T &Node) const LLVM_OVERRIDE {
+    return matchesSpecialized(Node);
+  }
+
+private:
+
+  /// \brief CXXOperatorCallExpr exist only for calls to overloaded operators
+  /// so this function returns true if the call is to an operator of the given
+  /// name.
+  bool matchesSpecialized(const CXXOperatorCallExpr &Node) const {
+    return getOperatorSpelling(Node.getOperator()) == Name;
+  }
+
+  /// \brief Returns true only if CXXMethodDecl represents an overloaded
+  /// operator and has the given operator name.
+  bool matchesSpecialized(const CXXMethodDecl &Node) const {
+    return Node.isOverloadedOperator() &&
+           getOperatorSpelling(Node.getOverloadedOperator()) == Name;
+  }
+
+  std::string Name;
 };
 
 /// \brief Matches declarations for QualType and CallExpr.
@@ -404,6 +447,15 @@ private:
     if (const EnumType *AsEnum = dyn_cast<EnumType>(Node.getTypePtr()))
       return matchesDecl(AsEnum->getDecl(), Finder, Builder);
     return matchesDecl(Node->getAsCXXRecordDecl(), Finder, Builder);
+  }
+
+  /// \brief Gets the TemplateDecl from a TemplateSpecializationType
+  /// and returns whether the inner matches on it.
+  bool matchesSpecialized(const TemplateSpecializationType &Node,
+                          ASTMatchFinder *Finder,
+                          BoundNodesTreeBuilder *Builder) const {
+    return matchesDecl(Node.getTemplateName().getAsTemplateDecl(),
+                       Finder, Builder);
   }
 
   /// \brief Extracts the Decl of the callee of a CallExpr and returns whether

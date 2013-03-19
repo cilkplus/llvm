@@ -160,7 +160,7 @@ static Value *EmitFAbs(CodeGenFunction &CGF, Value *V, QualType ValTy) {
                                                    false);
   llvm::Value *Fn = CGF.CGM.CreateRuntimeFunction(FT, FnName);
 
-  return CGF.Builder.CreateCall(Fn, V, "abs");
+  return CGF.EmitNounwindRuntimeCall(Fn, V, "abs");
 }
 
 static RValue emitLibraryCall(CodeGenFunction &CGF, const FunctionDecl *Fn,
@@ -1500,9 +1500,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
   ErrorUnsupported(E, "builtin function");
 
   // Unknown builtin, for now just dump it out and return undef.
-  if (hasAggregateLLVMType(E->getType()))
-    return RValue::getAggregate(CreateMemTemp(E->getType()));
-  return RValue::get(llvm::UndefValue::get(ConvertType(E->getType())));
+  return GetUndefRValue(E->getType());
 }
 
 Value *CodeGenFunction::EmitTargetBuiltinExpr(unsigned BuiltinID,
@@ -1639,7 +1637,7 @@ Value *CodeGenFunction::EmitARMBuiltinExpr(unsigned BuiltinID,
     llvm::Type *Ty = CGM.getTypes().ConvertType(FD->getType());
     llvm::FunctionType *FTy = cast<llvm::FunctionType>(Ty);
     StringRef Name = FD->getName();
-    return Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name), Ops);
+    return EmitNounwindRuntimeCall(CGM.CreateRuntimeFunction(FTy, Name), Ops);
   }
 
   if (BuiltinID == ARM::BI__builtin_arm_ldrexd) {

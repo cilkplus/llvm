@@ -8,8 +8,7 @@
 // FIXME: When we only emit each type once, use [[INT]] more below.
 // CHECK: @[[LINE_100:.*]] = private unnamed_addr global {{.*}}, i32 100, i32 5 {{.*}} @[[INT]], i64 4, i8 1
 // CHECK: @[[LINE_200:.*]] = {{.*}}, i32 200, i32 10 {{.*}}, i64 4, i8 0
-// CHECK: @[[LINE_300_A:.*]] = {{.*}}, i32 300, i32 12 {{.*}} @{{.*}}, {{.*}} @{{.*}}
-// CHECK: @[[LINE_300_B:.*]] = {{.*}}, i32 300, i32 12 {{.*}} @{{.*}}, {{.*}} @{{.*}}
+// CHECK: @[[LINE_300:.*]] = {{.*}}, i32 300, i32 12 {{.*}} @{{.*}}, {{.*}} @{{.*}}
 // CHECK: @[[LINE_400:.*]] = {{.*}}, i32 400, i32 12 {{.*}} @{{.*}}, {{.*}} @{{.*}}
 // CHECK: @[[LINE_500:.*]] = {{.*}}, i32 500, i32 10 {{.*}} @{{.*}}, i64 4, i8 0 }
 // CHECK: @[[LINE_600:.*]] = {{.*}}, i32 600, i32 3 {{.*}} @{{.*}}, i64 4, i8 1 }
@@ -58,7 +57,7 @@ void foo() {
   // CHECK:      %[[ARG:.*]] = ptrtoint {{.*}} %[[PTR]] to i64
   // CHECK-NEXT: call void @__ubsan_handle_type_mismatch(i8* bitcast ({{.*}} @[[LINE_100]] to i8*), i64 %[[ARG]])
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW:#[0-9]+]]
   // CHECK-TRAP-NEXT: unreachable
 
   // With -fsanitize=null, only perform the null check.
@@ -89,7 +88,7 @@ int bar(int *a) {
   // CHECK:      %[[ARG:.*]] = ptrtoint
   // CHECK-NEXT: call void @__ubsan_handle_type_mismatch(i8* bitcast ({{.*}} @[[LINE_200]] to i8*), i64 %[[ARG]])
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
 
 #line 200
@@ -106,35 +105,36 @@ int addr_space(int __attribute__((address_space(256))) *a) {
 // CHECK-TRAP: @lsh_overflow
 int lsh_overflow(int a, int b) {
   // CHECK:      %[[INBOUNDS:.*]] = icmp ule i32 %[[RHS:.*]], 31
-  // CHECK-NEXT: br i1 %[[INBOUNDS]]
+  // CHECK-NEXT: br i1 %[[INBOUNDS]], label %[[CHECKBB:.*]], label %[[CONTBB:.*]]
 
   // CHECK-TRAP:      %[[INBOUNDS:.*]] = icmp ule i32 %[[RHS:.*]], 31
-  // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
-
-  // FIXME: Only emit one trap block here.
-  // CHECK:      %[[ARG1:.*]] = zext
-  // CHECK-NEXT: %[[ARG2:.*]] = zext
-  // CHECK-NEXT: call void @__ubsan_handle_shift_out_of_bounds(i8* bitcast ({{.*}} @[[LINE_300_A]] to i8*), i64 %[[ARG1]], i64 %[[ARG2]])
-
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
-  // CHECK-TRAP-NEXT: unreachable
+  // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]], label %[[CHECKBB:.*]], label %[[CONTBB:.*]]
 
   // CHECK:      %[[SHIFTED_OUT_WIDTH:.*]] = sub nuw nsw i32 31, %[[RHS]]
   // CHECK-NEXT: %[[SHIFTED_OUT:.*]] = lshr i32 %[[LHS:.*]], %[[SHIFTED_OUT_WIDTH]]
   // CHECK-NEXT: %[[NO_OVERFLOW:.*]] = icmp eq i32 %[[SHIFTED_OUT]], 0
-  // CHECK-NEXT: br i1 %[[NO_OVERFLOW]], {{.*}} !prof ![[WEIGHT_MD]]
+  // CHECK-NEXT: br label %[[CONTBB]]
 
   // CHECK-TRAP:      %[[SHIFTED_OUT_WIDTH:.*]] = sub nuw nsw i32 31, %[[RHS]]
   // CHECK-TRAP-NEXT: %[[SHIFTED_OUT:.*]] = lshr i32 %[[LHS:.*]], %[[SHIFTED_OUT_WIDTH]]
   // CHECK-TRAP-NEXT: %[[NO_OVERFLOW:.*]] = icmp eq i32 %[[SHIFTED_OUT]], 0
-  // CHECK-TRAP-NEXT: br i1 %[[NO_OVERFLOW]]
+  // CHECK-TRAP-NEXT: br label %[[CONTBB]]
+
+  // CHECK:      %[[VALID:.*]] = phi i1 [ %[[INBOUNDS]], {{.*}} ], [ %[[NO_OVERFLOW]], %[[CHECKBB]] ]
+  // CHECK-NEXT: br i1 %[[VALID]], {{.*}} !prof ![[WEIGHT_MD]]
+
+  // CHECK-TRAP:      %[[VALID:.*]] = phi i1 [ %[[INBOUNDS]], {{.*}} ], [ %[[NO_OVERFLOW]], %[[CHECKBB]] ]
+  // CHECK-TRAP-NEXT: br i1 %[[VALID]]
+
 
   // CHECK:      %[[ARG1:.*]] = zext
   // CHECK-NEXT: %[[ARG2:.*]] = zext
-  // CHECK-NEXT: call void @__ubsan_handle_shift_out_of_bounds(i8* bitcast ({{.*}} @[[LINE_300_B]] to i8*), i64 %[[ARG1]], i64 %[[ARG2]])
+  // CHECK-NEXT: call void @__ubsan_handle_shift_out_of_bounds(i8* bitcast ({{.*}} @[[LINE_300]] to i8*), i64 %[[ARG1]], i64 %[[ARG2]])
+  // CHECK-NOT:  call void @__ubsan_handle_shift_out_of_bounds
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
-  // CHECK-TRAP-NEXT: unreachable
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
+  // CHECK-TRAP:      unreachable
+  // CHECK-TRAP-NOT:  call void @llvm.trap()
 
   // CHECK:      %[[RET:.*]] = shl i32 %[[LHS]], %[[RHS]]
   // CHECK-NEXT: ret i32 %[[RET]]
@@ -158,7 +158,7 @@ int rsh_inbounds(int a, int b) {
   // CHECK-NEXT: %[[ARG2:.*]] = zext
   // CHECK-NEXT: call void @__ubsan_handle_shift_out_of_bounds(i8* bitcast ({{.*}} @[[LINE_400]] to i8*), i64 %[[ARG1]], i64 %[[ARG2]])
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
 
   // CHECK:      %[[RET:.*]] = ashr i32 %[[LHS]], %[[RHS]]
@@ -175,7 +175,7 @@ int rsh_inbounds(int a, int b) {
 int load(int *p) {
   // CHECK: call void @__ubsan_handle_type_mismatch(i8* bitcast ({{.*}} @[[LINE_500]] to i8*), i64 %{{.*}})
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
 #line 500
   return *p;
@@ -186,7 +186,7 @@ int load(int *p) {
 void store(int *p, int q) {
   // CHECK: call void @__ubsan_handle_type_mismatch(i8* bitcast ({{.*}} @[[LINE_600]] to i8*), i64 %{{.*}})
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
 #line 600
   *p = q;
@@ -199,7 +199,7 @@ struct S { int k; };
 int *member_access(struct S *p) {
   // CHECK: call void @__ubsan_handle_type_mismatch(i8* bitcast ({{.*}} @[[LINE_700]] to i8*), i64 %{{.*}})
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
 #line 700
   return &p->k;
@@ -212,7 +212,7 @@ int signed_overflow(int a, int b) {
   // CHECK-NEXT: %[[ARG2:.*]] = zext
   // CHECK-NEXT: call void @__ubsan_handle_add_overflow(i8* bitcast ({{.*}} @[[LINE_800]] to i8*), i64 %[[ARG1]], i64 %[[ARG2]])
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
 #line 800
   return a + b;
@@ -259,7 +259,7 @@ float int_float_overflow(unsigned __int128 n) {
   // CHECK-TRAP: %[[INBOUNDS:.*]] = icmp ule i128 %{{.*}}, -20282409603651670423947251286016
   // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
   return n;
 }
@@ -277,7 +277,7 @@ void int_fp16_overflow(int n, __fp16 *p) {
   // CHECK-TRAP: %[[INBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
   // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
   *p = n;
 }
@@ -285,17 +285,17 @@ void int_fp16_overflow(int n, __fp16 *p) {
 // CHECK: @float_int_overflow
 // CHECK-TRAP: @float_int_overflow
 int float_int_overflow(float f) {
-  // CHECK: %[[GE:.*]] = fcmp oge float %[[F:.*]], 0xC1E0000000000000
-  // CHECK: %[[LE:.*]] = fcmp ole float %[[F]], 0x41DFFFFFE0000000
+  // CHECK: %[[GE:.*]] = fcmp ogt float %[[F:.*]], 0xC1E0000020000000
+  // CHECK: %[[LE:.*]] = fcmp olt float %[[F]], 0x41E0000000000000
   // CHECK: and i1 %[[GE]], %[[LE]]
   // CHECK: call void @__ubsan_handle_float_cast_overflow(
 
-  // CHECK-TRAP: %[[GE:.*]] = fcmp oge float %[[F:.*]], 0xC1E0000000000000
-  // CHECK-TRAP: %[[LE:.*]] = fcmp ole float %[[F]], 0x41DFFFFFE0000000
+  // CHECK-TRAP: %[[GE:.*]] = fcmp ogt float %[[F:.*]], 0xC1E0000020000000
+  // CHECK-TRAP: %[[LE:.*]] = fcmp olt float %[[F]], 0x41E0000000000000
   // CHECK-TRAP: %[[INBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
   // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
   return f;
 }
@@ -303,17 +303,17 @@ int float_int_overflow(float f) {
 // CHECK: @float_uint_overflow
 // CHECK-TRAP: @float_uint_overflow
 unsigned float_uint_overflow(float f) {
-  // CHECK: %[[GE:.*]] = fcmp oge float %[[F:.*]], 0.{{0*}}e+00
-  // CHECK: %[[LE:.*]] = fcmp ole float %[[F]], 0x41EFFFFFE0000000
+  // CHECK: %[[GE:.*]] = fcmp ogt float %[[F:.*]], -1.{{0*}}e+00
+  // CHECK: %[[LE:.*]] = fcmp olt float %[[F]], 0x41F0000000000000
   // CHECK: and i1 %[[GE]], %[[LE]]
   // CHECK: call void @__ubsan_handle_float_cast_overflow(
 
-  // CHECK-TRAP: %[[GE:.*]] = fcmp oge float %[[F:.*]], 0.{{0*}}e+00
-  // CHECK-TRAP: %[[LE:.*]] = fcmp ole float %[[F]], 0x41EFFFFFE0000000
+  // CHECK-TRAP: %[[GE:.*]] = fcmp ogt float %[[F:.*]], -1.{{0*}}e+00
+  // CHECK-TRAP: %[[LE:.*]] = fcmp olt float %[[F]], 0x41F0000000000000
   // CHECK-TRAP: %[[INBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
   // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
   return f;
 }
@@ -321,17 +321,17 @@ unsigned float_uint_overflow(float f) {
 // CHECK: @fp16_char_overflow
 // CHECK-TRAP: @fp16_char_overflow
 signed char fp16_char_overflow(__fp16 *p) {
-  // CHECK: %[[GE:.*]] = fcmp oge float %[[F:.*]], -1.28{{0*}}e+02
-  // CHECK: %[[LE:.*]] = fcmp ole float %[[F]], 1.27{{0*}}e+02
+  // CHECK: %[[GE:.*]] = fcmp ogt float %[[F:.*]], -1.29{{0*}}e+02
+  // CHECK: %[[LE:.*]] = fcmp olt float %[[F]], 1.28{{0*}}e+02
   // CHECK: and i1 %[[GE]], %[[LE]]
   // CHECK: call void @__ubsan_handle_float_cast_overflow(
 
-  // CHECK-TRAP: %[[GE:.*]] = fcmp oge float %[[F:.*]], -1.28{{0*}}e+02
-  // CHECK-TRAP: %[[LE:.*]] = fcmp ole float %[[F]], 1.27{{0*}}e+02
+  // CHECK-TRAP: %[[GE:.*]] = fcmp ogt float %[[F:.*]], -1.29{{0*}}e+02
+  // CHECK-TRAP: %[[LE:.*]] = fcmp olt float %[[F]], 1.28{{0*}}e+02
   // CHECK-TRAP: %[[INBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
   // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
   return *p;
 }
@@ -349,7 +349,7 @@ float float_float_overflow(double f) {
   // CHECK-TRAP: %[[INBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
   // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
 
-  // CHECK-TRAP:      call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
   return f;
 }
@@ -381,7 +381,7 @@ int int_divide_overflow(int a, int b) {
   // CHECK-TRAP:          %[[OK:.*]] = and i1 %[[ZERO]], %[[OVER]]
   // CHECK-TRAP:          br i1 %[[OK]]
 
-  // CHECK-TRAP: call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP: call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP: unreachable
   return a / b;
 
@@ -399,9 +399,11 @@ _Bool sour_bool(_Bool *p) {
   // CHECK-TRAP: %[[OK:.*]] = icmp ule i8 {{.*}}, 1
   // CHECK-TRAP: br i1 %[[OK]]
 
-  // CHECK-TRAP: call void @llvm.trap() noreturn nounwind
+  // CHECK-TRAP: call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP: unreachable
   return *p;
 }
 
 // CHECK: ![[WEIGHT_MD]] = metadata !{metadata !"branch_weights", i32 1048575, i32 1}
+
+// CHECK-TRAP: attributes [[NR_NUW]] = { noreturn nounwind }

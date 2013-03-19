@@ -547,7 +547,7 @@ ExprResult Sema::UsualUnaryConversions(Expr *E) {
   // First, convert to an r-value.
   ExprResult Res = DefaultFunctionArrayLvalueConversion(E);
   if (Res.isInvalid())
-    return Owned(E);
+    return ExprError();
   E = Res.take();
 
   QualType Ty = E->getType();
@@ -598,7 +598,7 @@ ExprResult Sema::DefaultArgumentPromotion(Expr *E) {
 
   ExprResult Res = UsualUnaryConversions(E);
   if (Res.isInvalid())
-    return Owned(E);
+    return ExprError();
   E = Res.take();
 
   // If this is a 'float' or '__fp16' (CVR qualified or typedef) promote to
@@ -1672,9 +1672,13 @@ bool Sema::DiagnoseEmptyLookup(Scope *S, CXXScopeSpec &SS, LookupResult &R,
             << SS.getRange()
             << FixItHint::CreateReplacement(Corrected.getCorrectionRange(),
                                             CorrectedStr);
-        if (ND)
-          Diag(ND->getLocation(), diag::note_previous_decl)
-            << CorrectedQuotedStr;
+
+        unsigned diag = isa<ImplicitParamDecl>(ND)
+          ? diag::note_implicit_param_decl
+          : diag::note_previous_decl;
+
+        Diag(ND->getLocation(), diag)
+          << CorrectedQuotedStr;
 
         // Tell the callee to try to recover.
         return false;
@@ -3008,16 +3012,17 @@ static bool CheckExtensionTraitOperandType(Sema &S, QualType T,
                                            SourceRange ArgRange,
                                            UnaryExprOrTypeTrait TraitKind) {
   // C99 6.5.3.4p1:
-  if (T->isFunctionType()) {
-    // alignof(function) is allowed as an extension.
-    if (TraitKind == UETT_SizeOf)
-      S.Diag(Loc, diag::ext_sizeof_function_type) << ArgRange;
+  if (T->isFunctionType() &&
+      (TraitKind == UETT_SizeOf || TraitKind == UETT_AlignOf)) {
+    // sizeof(function)/alignof(function) is allowed as an extension.
+    S.Diag(Loc, diag::ext_sizeof_alignof_function_type)
+      << TraitKind << ArgRange;
     return false;
   }
 
   // Allow sizeof(void)/alignof(void) as an extension.
   if (T->isVoidType()) {
-    S.Diag(Loc, diag::ext_sizeof_void_type) << TraitKind << ArgRange;
+    S.Diag(Loc, diag::ext_sizeof_alignof_void_type) << TraitKind << ArgRange;
     return false;
   }
 
@@ -3337,33 +3342,56 @@ static bool checkArithmeticOnObjCPointer(Sema &S,
 }
 
 ExprResult
-Sema::ActOnArraySubscriptExpr(Scope *S, Expr *Base, SourceLocation LLoc,
-                              Expr *Idx, SourceLocation RLoc) {
+Sema::ActOnArraySubscriptExpr(Scope *S, Expr *base, SourceLocation lbLoc,
+                              Expr *idx, SourceLocation rbLoc) {
   // Since this might be a postfix expression, get rid of ParenListExprs.
-  ExprResult Result = MaybeConvertParenListExprToParenExpr(S, Base);
-  if (Result.isInvalid()) return ExprError();
-  Base = Result.take();
+  if (isa<ParenListExpr>(base)) {
+    ExprResult result = MaybeConvertParenListExprToParenExpr(S, base);
+    if (result.isInvalid()) return ExprError();
+    base = result.take();
+  }
 
-  Expr *LHSExp = Base, *RHSExp = Idx;
+  // Handle any non-overload placeholder types in the base and index
+  // expressions.  We can't handle overloads here because the other
+  // operand might be an overloadable type, in which case the overload
+  // resolution for the operator overload should get the first crack
+  // at the overload.
+  if (base->getType()->isNonOverloadPlaceholderType()) {
+    ExprResult result = CheckPlaceholderExpr(base);
+    if (result.isInvalid()) return ExprError();
+    base = result.take();
+  }
+  if (idx->getType()->isNonOverloadPlaceholderType()) {
+    ExprResult result = CheckPlaceholderExpr(idx);
+    if (result.isInvalid()) return ExprError();
+    idx = result.take();
+  }
 
+  // Build an unanalyzed expression if either operand is type-dependent.
   if (getLangOpts().CPlusPlus &&
-      (LHSExp->isTypeDependent() || RHSExp->isTypeDependent())) {
-    return Owned(new (Context) ArraySubscriptExpr(LHSExp, RHSExp,
+      (base->isTypeDependent() || idx->isTypeDependent())) {
+    return Owned(new (Context) ArraySubscriptExpr(base, idx,
                                                   Context.DependentTy,
                                                   VK_LValue, OK_Ordinary,
-                                                  RLoc));
+                                                  rbLoc));
   }
 
+  // Use C++ overloaded-operator rules if either operand has record
+  // type.  The spec says to do this if either type is *overloadable*,
+  // but enum types can't declare subscript operators or conversion
+  // operators, so there's nothing interesting for overload resolution
+  // to do if there aren't any record types involved.
+  //
+  // ObjC pointers have their own subscripting logic that is not tied
+  // to overload resolution and so should not take this path.
   if (getLangOpts().CPlusPlus &&
-      (LHSExp->getType()->isRecordType() ||
-       LHSExp->getType()->isEnumeralType() ||
-       RHSExp->getType()->isRecordType() ||
-       RHSExp->getType()->isEnumeralType()) &&
-      !LHSExp->getType()->isObjCObjectPointerType()) {
-    return CreateOverloadedArraySubscriptExpr(LLoc, RLoc, Base, Idx);
+      (base->getType()->isRecordType() ||
+       (!base->getType()->isObjCObjectPointerType() &&
+        idx->getType()->isRecordType()))) {
+    return CreateOverloadedArraySubscriptExpr(lbLoc, rbLoc, base, idx);
   }
 
-  return CreateBuiltinArraySubscriptExpr(Base, LLoc, Idx, RLoc);
+  return CreateBuiltinArraySubscriptExpr(base, lbLoc, idx, rbLoc);
 }
 
 ExprResult
@@ -3780,6 +3808,7 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc,
 
       Arg = ArgE.takeAs<Expr>();
     } else {
+      assert(FDecl && "can't use default arguments without a known callee");
       Param = FDecl->getParamDecl(i);
 
       ExprResult ArgExpr =
@@ -3808,11 +3837,8 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc,
     if (Proto->getResultType() == Context.UnknownAnyTy &&
         FDecl && FDecl->isExternC()) {
       for (unsigned i = ArgIx; i != NumArgs; ++i) {
-        ExprResult arg;
-        if (isa<ExplicitCastExpr>(Args[i]->IgnoreParens()))
-          arg = DefaultFunctionArrayLvalueConversion(Args[i]);
-        else
-          arg = DefaultVariadicArgumentPromotion(Args[i], CallType, FDecl);
+        QualType paramType; // ignored
+        ExprResult arg = checkUnknownAnyArg(CallLoc, Args[i], paramType);
         Invalid |= arg.isInvalid();
         AllArgs.push_back(arg.take());
       }
@@ -9461,8 +9487,7 @@ void Sema::ActOnBlockArguments(SourceLocation CaretLoc, Declarator &ParamInfo,
     FunctionProtoType::ExtProtoInfo EPI;
     EPI.HasTrailingReturn = false;
     EPI.TypeQuals |= DeclSpec::TQ_const;
-    T = Context.getFunctionType(Context.DependentTy, /*Args=*/0, /*NumArgs=*/0,
-                                EPI);
+    T = Context.getFunctionType(Context.DependentTy, ArrayRef<QualType>(), EPI);
     Sig = Context.getTrivialTypeSourceInfo(T);
   }
   
@@ -9641,7 +9666,7 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
     if (isa<FunctionNoProtoType>(FTy)) {
       FunctionProtoType::ExtProtoInfo EPI;
       EPI.ExtInfo = Ext;
-      BlockTy = Context.getFunctionType(RetTy, 0, 0, EPI);
+      BlockTy = Context.getFunctionType(RetTy, ArrayRef<QualType>(), EPI);
 
     // Otherwise, if we don't need to change anything about the function type,
     // preserve its sugar structure.
@@ -9655,17 +9680,18 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
       FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
       EPI.TypeQuals = 0; // FIXME: silently?
       EPI.ExtInfo = Ext;
-      BlockTy = Context.getFunctionType(RetTy,
-                                        FPT->arg_type_begin(),
-                                        FPT->getNumArgs(),
-                                        EPI);
+      BlockTy =
+        Context.getFunctionType(RetTy,
+                                ArrayRef<QualType>(FPT->arg_type_begin(),
+                                                   FPT->getNumArgs()),
+                                EPI);
     }
 
   // If we don't have a function type, just build one from nothing.
   } else {
     FunctionProtoType::ExtProtoInfo EPI;
     EPI.ExtInfo = FunctionType::ExtInfo().withNoReturn(NoReturn);
-    BlockTy = Context.getFunctionType(RetTy, 0, 0, EPI);
+    BlockTy = Context.getFunctionType(RetTy, ArrayRef<QualType>(), EPI);
   }
 
   DiagnoseUnusedParameters(BSI->TheDecl->param_begin(),
@@ -10013,6 +10039,9 @@ bool Sema::DiagnoseAssignmentResult(AssignConvertType ConvTy,
 
   if (CheckInferredResultType)
     EmitRelatedResultTypeNote(SrcExpr);
+
+  if (Action == AA_Returning && ConvTy == IncompatiblePointer)
+    EmitRelatedResultTypeNoteForReturn(DstType);
   
   if (Complained)
     *Complained = true;
@@ -10476,6 +10505,9 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func) {
         if (!Constructor->isUsed(false))
           DefineImplicitMoveConstructor(Loc, Constructor);
       }
+    } else if (Constructor->getInheritedConstructor()) {
+      if (!Constructor->isUsed(false))
+        DefineInheritingConstructor(Loc, Constructor);
     }
 
     MarkVTableUsed(Loc, Constructor->getParent());
@@ -10570,7 +10602,7 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func) {
 
   // Keep track of used but undefined functions.
   if (!Func->isDefined()) {
-    if (Func->getLinkage() != ExternalLinkage)
+    if (mightHaveNonExternalLinkage(Func))
       UndefinedButUsed.insert(std::make_pair(Func->getCanonicalDecl(), Loc));
     else if (Func->getMostRecentDecl()->isInlined() &&
              (LangOpts.CPlusPlus || !LangOpts.GNUInline) &&
@@ -11875,10 +11907,11 @@ ExprResult RebuildUnknownAnyExpr::VisitCallExpr(CallExpr *E) {
 
   // Rebuild the function type, replacing the result type with DestType.
   if (const FunctionProtoType *Proto = dyn_cast<FunctionProtoType>(FnType))
-    DestType = S.Context.getFunctionType(DestType,
-                                         Proto->arg_type_begin(),
-                                         Proto->getNumArgs(),
-                                         Proto->getExtProtoInfo());
+    DestType =
+      S.Context.getFunctionType(DestType,
+                                ArrayRef<QualType>(Proto->arg_type_begin(),
+                                                   Proto->getNumArgs()),
+                                Proto->getExtProtoInfo());
   else
     DestType = S.Context.getFunctionNoProtoType(DestType,
                                                 FnType->getExtInfo());
@@ -12040,20 +12073,27 @@ ExprResult Sema::forceUnknownAnyToType(Expr *E, QualType ToType) {
   return RebuildUnknownAnyExpr(*this, ToType).Visit(E);
 }
 
-QualType Sema::checkUnknownAnyArg(Expr *&arg) {
-  // Filter out placeholders.
-  ExprResult argR = CheckPlaceholderExpr(arg);
-  if (argR.isInvalid()) return QualType();
-  arg = argR.take();
-
-  // If the argument is an explicit cast, use that exact type as the
-  // effective parameter type.
-  if (ExplicitCastExpr *castArg = dyn_cast<ExplicitCastExpr>(arg)) {
-    return castArg->getTypeAsWritten();
+ExprResult Sema::checkUnknownAnyArg(SourceLocation callLoc,
+                                    Expr *arg, QualType &paramType) {
+  // If the syntactic form of the argument is not an explicit cast of
+  // any sort, just do default argument promotion.
+  ExplicitCastExpr *castArg = dyn_cast<ExplicitCastExpr>(arg->IgnoreParens());
+  if (!castArg) {
+    ExprResult result = DefaultArgumentPromotion(arg);
+    if (result.isInvalid()) return ExprError();
+    paramType = result.get()->getType();
+    return result;
   }
 
-  // Otherwise, try to pass by value.
-  return arg->getType().getUnqualifiedType();
+  // Otherwise, use the type that was written in the explicit cast.
+  assert(!arg->hasPlaceholderType());
+  paramType = castArg->getTypeAsWritten();
+
+  // Copy-initialize a parameter of that type.
+  InitializedEntity entity =
+    InitializedEntity::InitializeParameter(Context, paramType,
+                                           /*consumed*/ false);
+  return PerformCopyInitialization(entity, callLoc, Owned(arg));
 }
 
 static ExprResult diagnoseUnknownAnyExpr(Sema &S, Expr *E) {

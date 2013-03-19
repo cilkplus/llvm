@@ -60,6 +60,64 @@ bool TemplateDeclInstantiator::SubstQualifier(const TagDecl *OldDecl,
 // Include attribute instantiation code.
 #include "clang/Sema/AttrTemplateInstantiate.inc"
 
+static void instantiateDependentAlignedAttr(
+    Sema &S, const MultiLevelTemplateArgumentList &TemplateArgs,
+    const AlignedAttr *Aligned, Decl *New, bool IsPackExpansion) {
+  if (Aligned->isAlignmentExpr()) {
+    // The alignment expression is a constant expression.
+    EnterExpressionEvaluationContext Unevaluated(S, Sema::ConstantEvaluated);
+    ExprResult Result = S.SubstExpr(Aligned->getAlignmentExpr(), TemplateArgs);
+    if (!Result.isInvalid())
+      S.AddAlignedAttr(Aligned->getLocation(), New, Result.takeAs<Expr>(),
+                       Aligned->getSpellingListIndex(), IsPackExpansion);
+  } else {
+    TypeSourceInfo *Result = S.SubstType(Aligned->getAlignmentType(),
+                                         TemplateArgs, Aligned->getLocation(),
+                                         DeclarationName());
+    if (Result)
+      S.AddAlignedAttr(Aligned->getLocation(), New, Result,
+                       Aligned->getSpellingListIndex(), IsPackExpansion);
+  }
+}
+
+static void instantiateDependentAlignedAttr(
+    Sema &S, const MultiLevelTemplateArgumentList &TemplateArgs,
+    const AlignedAttr *Aligned, Decl *New) {
+  if (!Aligned->isPackExpansion()) {
+    instantiateDependentAlignedAttr(S, TemplateArgs, Aligned, New, false);
+    return;
+  }
+
+  SmallVector<UnexpandedParameterPack, 2> Unexpanded;
+  if (Aligned->isAlignmentExpr())
+    S.collectUnexpandedParameterPacks(Aligned->getAlignmentExpr(),
+                                      Unexpanded);
+  else
+    S.collectUnexpandedParameterPacks(Aligned->getAlignmentType()->getTypeLoc(),
+                                      Unexpanded);
+  assert(!Unexpanded.empty() && "Pack expansion without parameter packs?");
+
+  // Determine whether we can expand this attribute pack yet.
+  bool Expand = true, RetainExpansion = false;
+  Optional<unsigned> NumExpansions;
+  // FIXME: Use the actual location of the ellipsis.
+  SourceLocation EllipsisLoc = Aligned->getLocation();
+  if (S.CheckParameterPacksForExpansion(EllipsisLoc, Aligned->getRange(),
+                                        Unexpanded, TemplateArgs, Expand,
+                                        RetainExpansion, NumExpansions))
+    return;
+
+  if (!Expand) {
+    Sema::ArgumentPackSubstitutionIndexRAII SubstIndex(S, -1);
+    instantiateDependentAlignedAttr(S, TemplateArgs, Aligned, New, true);
+  } else {
+    for (unsigned I = 0; I != *NumExpansions; ++I) {
+      Sema::ArgumentPackSubstitutionIndexRAII SubstIndex(S, I);
+      instantiateDependentAlignedAttr(S, TemplateArgs, Aligned, New, false);
+    }
+  }
+}
+
 void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
                             const Decl *Tmpl, Decl *New,
                             LateInstantiatedAttrVec *LateAttrs,
@@ -69,31 +127,13 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
     const Attr *TmplAttr = *i;
 
     // FIXME: This should be generalized to more than just the AlignedAttr.
-    if (const AlignedAttr *Aligned = dyn_cast<AlignedAttr>(TmplAttr)) {
-      if (Aligned->isAlignmentDependent()) {
-        if (Aligned->isAlignmentExpr()) {
-          // The alignment expression is a constant expression.
-          EnterExpressionEvaluationContext Unevaluated(*this,
-                                                       Sema::ConstantEvaluated);
-
-          ExprResult Result = SubstExpr(Aligned->getAlignmentExpr(),
-                                        TemplateArgs);
-          if (!Result.isInvalid())
-            AddAlignedAttr(Aligned->getLocation(), New, Result.takeAs<Expr>(),
-                           Aligned->getSpellingListIndex());
-        } else {
-          TypeSourceInfo *Result = SubstType(Aligned->getAlignmentType(),
-                                             TemplateArgs,
-                                             Aligned->getLocation(),
-                                             DeclarationName());
-          if (Result)
-            AddAlignedAttr(Aligned->getLocation(), New, Result,
-                           Aligned->getSpellingListIndex());
-        }
-        continue;
-      }
+    const AlignedAttr *Aligned = dyn_cast<AlignedAttr>(TmplAttr);
+    if (Aligned && Aligned->isAlignmentDependent()) {
+      instantiateDependentAlignedAttr(*this, TemplateArgs, Aligned, New);
+      continue;
     }
 
+    assert(!TmplAttr->isPackExpansion());
     if (TmplAttr->isLateParsed() && LateAttrs) {
       // Late parsed attributes must be instantiated and attached after the
       // enclosing class has been instantiated.  See Sema::InstantiateClass.
@@ -189,9 +229,9 @@ Decl *TemplateDeclInstantiator::InstantiateTypedefNameDecl(TypedefNameDecl *D,
   // tag decl, re-establish that relationship for the new typedef.
   if (const TagType *oldTagType = D->getUnderlyingType()->getAs<TagType>()) {
     TagDecl *oldTag = oldTagType->getDecl();
-    if (oldTag->getTypedefNameForAnonDecl() == D) {
+    if (oldTag->getTypedefNameForAnonDecl() == D && !Invalid) {
       TagDecl *newTag = DI->getType()->castAs<TagType>()->getDecl();
-      assert(!newTag->getIdentifier() && !newTag->getTypedefNameForAnonDecl());
+      assert(!newTag->hasNameForLinkage());
       newTag->setTypedefNameForAnonDecl(Typedef);
     }
   }
@@ -322,6 +362,11 @@ Decl *TemplateDeclInstantiator::VisitVarDecl(VarDecl *D) {
     Var->setReferenced(D->isReferenced());
   }
 
+  SemaRef.InstantiateAttrs(TemplateArgs, D, Var, LateAttrs, StartingScope);
+
+  if (Var->hasAttrs())
+    SemaRef.CheckAlignasUnderalignment(Var);
+
   // FIXME: In theory, we could have a previous declaration for variables that
   // are not static data members.
   // FIXME: having to fake up a LookupResult is dumb.
@@ -345,10 +390,6 @@ Decl *TemplateDeclInstantiator::VisitVarDecl(VarDecl *D) {
     if (Owner->isFunctionOrMethod())
       SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, Var);
   }
-  SemaRef.InstantiateAttrs(TemplateArgs, D, Var, LateAttrs, StartingScope);
-
-  if (Var->hasAttrs())
-    SemaRef.CheckAlignasUnderalignment(Var);
 
   // Link instantiations of static data members back to the template from
   // which they were instantiated.
@@ -1049,8 +1090,8 @@ static QualType adjustFunctionTypeForInstantiation(ASTContext &Context,
   FunctionProtoType::ExtProtoInfo NewEPI = NewFunc->getExtProtoInfo();
   NewEPI.ExtInfo = OrigFunc->getExtInfo();
   return Context.getFunctionType(NewFunc->getResultType(),
-                                 NewFunc->arg_type_begin(),
-                                 NewFunc->getNumArgs(),
+                                 ArrayRef<QualType>(NewFunc->arg_type_begin(),
+                                                    NewFunc->getNumArgs()),
                                  NewEPI);
 }
 
@@ -2544,8 +2585,8 @@ static void InstantiateExceptionSpec(Sema &SemaRef, FunctionDecl *New,
   EPI.NoexceptExpr = NoexceptExpr;
 
   New->setType(SemaRef.Context.getFunctionType(NewProto->getResultType(),
-                                               NewProto->arg_type_begin(),
-                                               NewProto->getNumArgs(),
+                                  ArrayRef<QualType>(NewProto->arg_type_begin(),
+                                                     NewProto->getNumArgs()),
                                                EPI));
 }
 
@@ -2563,8 +2604,8 @@ void Sema::InstantiateExceptionSpec(SourceLocation PointOfInstantiation,
     FunctionProtoType::ExtProtoInfo EPI = Proto->getExtProtoInfo();
     EPI.ExceptionSpecType = EST_None;
     Decl->setType(Context.getFunctionType(Proto->getResultType(),
-                                          Proto->arg_type_begin(),
-                                          Proto->getNumArgs(),
+                                    ArrayRef<QualType>(Proto->arg_type_begin(),
+                                                       Proto->getNumArgs()),
                                           EPI));
     return;
   }
@@ -2644,8 +2685,8 @@ TemplateDeclInstantiator::InitFunctionInstantiation(FunctionDecl *New,
       EPI.ExceptionSpecDecl = New;
       EPI.ExceptionSpecTemplate = ExceptionSpecTemplate;
       New->setType(SemaRef.Context.getFunctionType(NewProto->getResultType(),
-                                                   NewProto->arg_type_begin(),
-                                                   NewProto->getNumArgs(),
+                                  ArrayRef<QualType>(NewProto->arg_type_begin(),
+                                                     NewProto->getNumArgs()),
                                                    EPI));
     } else {
       ::InstantiateExceptionSpec(SemaRef, New, Proto, TemplateArgs);
@@ -2933,7 +2974,18 @@ void Sema::InstantiateStaticDataMemberDefinition(
   if (TSK == TSK_ExplicitInstantiationDeclaration)
     return;
 
-  Consumer.HandleCXXStaticMemberVarInstantiation(Var);
+  // Make sure to pass the instantiated variable to the consumer at the end.
+  struct PassToConsumerRAII {
+    ASTConsumer &Consumer;
+    VarDecl *Var;
+
+    PassToConsumerRAII(ASTConsumer &Consumer, VarDecl *Var)
+      : Consumer(Consumer), Var(Var) { }
+
+    ~PassToConsumerRAII() {
+      Consumer.HandleCXXStaticMemberVarInstantiation(Var);
+    }
+  } PassToConsumerRAII(Consumer, Var);
 
   // If we already have a definition, we're done.
   if (VarDecl *Def = Var->getDefinition()) {
@@ -2970,12 +3022,11 @@ void Sema::InstantiateStaticDataMemberDefinition(
   previousContext.pop();
 
   if (Var) {
+    PassToConsumerRAII.Var = Var;
     MemberSpecializationInfo *MSInfo = OldVar->getMemberSpecializationInfo();
     assert(MSInfo && "Missing member specialization information?");
     Var->setTemplateSpecializationKind(MSInfo->getTemplateSpecializationKind(),
                                        MSInfo->getPointOfInstantiation());
-    DeclGroupRef DG(Var);
-    Consumer.HandleTopLevelDecl(DG);
   }
   Local.Exit();
   

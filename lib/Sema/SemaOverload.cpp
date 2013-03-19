@@ -974,24 +974,11 @@ static bool canBeOverloaded(const FunctionDecl &D) {
   if (D.isMain())
     return false;
 
-  // FIXME: Users assume they know the mangling of static functions
-  // declared in extern "C" contexts. For now just disallow overloading these
-  // functions so that we can avoid mangling them.
-  const DeclContext *DC = D.getDeclContext();
-  if (!DC->isRecord() &&
-      D.getFirstDeclaration()->getDeclContext()->isExternCContext())
-    return false;
-
   return true;
 }
 
-bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
-                      bool UseUsingDeclRules) {
-  // If both of the functions are extern "C", then they are not
-  // overloads.
-  if (!canBeOverloaded(*Old) && !canBeOverloaded(*New))
-    return false;
-
+static bool shouldTryToOverload(Sema &S, FunctionDecl *New, FunctionDecl *Old,
+                                bool UseUsingDeclRules) {
   FunctionTemplateDecl *OldTemplate = Old->getDescribedFunctionTemplate();
   FunctionTemplateDecl *NewTemplate = New->getDescribedFunctionTemplate();
 
@@ -1002,8 +989,8 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
     return true;
 
   // Is the function New an overload of the function Old?
-  QualType OldQType = Context.getCanonicalType(Old->getType());
-  QualType NewQType = Context.getCanonicalType(New->getType());
+  QualType OldQType = S.Context.getCanonicalType(Old->getType());
+  QualType NewQType = S.Context.getCanonicalType(New->getType());
 
   // Compare the signatures (C++ 1.3.10) of the two functions to
   // determine whether they are overloads. If we find any mismatch
@@ -1024,7 +1011,7 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
   if (OldQType != NewQType &&
       (OldType->getNumArgs() != NewType->getNumArgs() ||
        OldType->isVariadic() != NewType->isVariadic() ||
-       !FunctionArgTypesAreEqual(OldType, NewType)))
+       !S.FunctionArgTypesAreEqual(OldType, NewType)))
     return true;
 
   // C++ [temp.over.link]p4:
@@ -1040,9 +1027,9 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
   // However, we don't consider either of these when deciding whether
   // a member introduced by a shadow declaration is hidden.
   if (!UseUsingDeclRules && NewTemplate &&
-      (!TemplateParameterListsAreEqual(NewTemplate->getTemplateParameters(),
-                                       OldTemplate->getTemplateParameters(),
-                                       false, TPL_TemplateMatch) ||
+      (!S.TemplateParameterListsAreEqual(NewTemplate->getTemplateParameters(),
+                                         OldTemplate->getTemplateParameters(),
+                                         false, S.TPL_TemplateMatch) ||
        OldType->getResultType() != NewType->getResultType()))
     return true;
 
@@ -1068,9 +1055,9 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
         //     declarations with the same name, the same parameter-type-list, and
         //     the same template parameter lists cannot be overloaded if any of
         //     them, but not all, have a ref-qualifier (8.3.5).
-        Diag(NewMethod->getLocation(), diag::err_ref_qualifier_overload)
+        S.Diag(NewMethod->getLocation(), diag::err_ref_qualifier_overload)
           << NewMethod->getRefQualifier() << OldMethod->getRefQualifier();
-        Diag(OldMethod->getLocation(), diag::note_previous_declaration);
+        S.Diag(OldMethod->getLocation(), diag::note_previous_declaration);
       }
       return true;
     }
@@ -1088,6 +1075,19 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
 
   // The signatures match; this is not an overload.
   return false;
+}
+
+bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
+                      bool UseUsingDeclRules) {
+  if (!shouldTryToOverload(*this, New, Old, UseUsingDeclRules))
+    return false;
+
+  // If both of the functions are extern "C", then they are not
+  // overloads.
+  if (!canBeOverloaded(*Old) && !canBeOverloaded(*New))
+    return false;
+
+  return true;
 }
 
 /// \brief Checks availability of the function depending on the current
@@ -1675,11 +1675,7 @@ static bool IsStandardConversion(Sema &S, Expr* From, QualType ToType,
     CanonTo = S.Context.getCanonicalType(ToType);
     if (CanonFrom.getLocalUnqualifiedType()
                                        == CanonTo.getLocalUnqualifiedType() &&
-        (CanonFrom.getLocalCVRQualifiers() != CanonTo.getLocalCVRQualifiers()
-         || CanonFrom.getObjCGCAttr() != CanonTo.getObjCGCAttr()
-         || CanonFrom.getObjCLifetime() != CanonTo.getObjCLifetime()
-         || (CanonFrom->isSamplerT() && 
-           CanonFrom.getAddressSpace() != CanonTo.getAddressSpace()))) {
+        CanonFrom.getLocalQualifiers() != CanonTo.getLocalQualifiers()) {
       FromType = ToType;
       CanonFrom = CanonTo;
     }

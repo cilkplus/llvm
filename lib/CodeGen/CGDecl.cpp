@@ -83,6 +83,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::StaticAssert: // static_assert(X, ""); [C++0x]
   case Decl::Label:        // __label__ x;
   case Decl::Import:
+  case Decl::Empty:
     // None of these decls require codegen support.
     return;
 
@@ -626,7 +627,7 @@ void CodeGenFunction::EmitScalarInit(const Expr *init,
   if (accessedByInit && lifetime == Qualifiers::OCL_Strong) {
     llvm::Value *oldValue = EmitLoadOfScalar(lvalue);
     EmitStoreOfScalar(value, lvalue, /* isInitialization */ true);
-    EmitARCRelease(oldValue, /*precise*/ false);
+    EmitARCRelease(oldValue, ARCImpreciseLifetime);
     return;
   }
 
@@ -1136,21 +1137,33 @@ void CodeGenFunction::EmitExprAsInit(const Expr *init,
     if (capturedByInit)
       drillIntoBlockVariable(*this, lvalue, cast<VarDecl>(D));
     EmitStoreThroughLValue(rvalue, lvalue, true);
-  } else if (!hasAggregateLLVMType(type)) {
+    return;
+  }
+  switch (getEvaluationKind(type)) {
+  case TEK_Scalar:
     EmitScalarInit(init, D, lvalue, capturedByInit);
-  } else if (type->isAnyComplexType()) {
+    return;
+  case TEK_Complex: {
     ComplexPairTy complex = EmitComplexExpr(init);
     if (capturedByInit)
       drillIntoBlockVariable(*this, lvalue, cast<VarDecl>(D));
-    StoreComplexToAddr(complex, lvalue.getAddress(), lvalue.isVolatile());
-  } else {
-    // TODO: how can we delay here if D is captured by its initializer?
-    EmitAggExpr(init, AggValueSlot::forLValue(lvalue,
+    EmitStoreOfComplex(complex, lvalue, /*init*/ true);
+    return;
+  }
+  case TEK_Aggregate:
+    if (type->isAtomicType()) {
+      EmitAtomicInit(const_cast<Expr*>(init), lvalue);
+    } else {
+      // TODO: how can we delay here if D is captured by its initializer?
+      EmitAggExpr(init, AggValueSlot::forLValue(lvalue,
                                               AggValueSlot::IsDestructed,
                                          AggValueSlot::DoesNotNeedGCBarriers,
                                               AggValueSlot::IsNotAliased));
+    }
     MaybeEmitStdInitializerListCleanup(lvalue.getAddress(), init);
+    return;
   }
+  llvm_unreachable("bad evaluation kind");
 }
 
 /// Enter a destroy cleanup for the given local variable.
@@ -1499,12 +1512,15 @@ namespace {
   /// ns_consumed argument when we can't reasonably do that just by
   /// not doing the initial retain for a __block argument.
   struct ConsumeARCParameter : EHScopeStack::Cleanup {
-    ConsumeARCParameter(llvm::Value *param) : Param(param) {}
+    ConsumeARCParameter(llvm::Value *param,
+                        ARCPreciseLifetime_t precise)
+      : Param(param), Precise(precise) {}
 
     llvm::Value *Param;
+    ARCPreciseLifetime_t Precise;
 
     void Emit(CodeGenFunction &CGF, Flags flags) {
-      CGF.EmitARCRelease(Param, /*precise*/ false);
+      CGF.EmitARCRelease(Param, Precise);
     }
   };
 }
@@ -1519,17 +1535,29 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
 
   Arg->setName(D.getName());
 
+  QualType Ty = D.getType();
+
   // Use better IR generation for certain implicit parameters.
   if (isa<ImplicitParamDecl>(D)) {
     // The only implicit argument a block has is its literal.
     if (BlockInfo) {
       LocalDeclMap[&D] = Arg;
+      llvm::Value *LocalAddr = 0;
+      if (CGM.getCodeGenOpts().OptimizationLevel == 0) {
+        // Allocate a stack slot to let debug info survive the RA.
+        llvm::AllocaInst *Alloc = CreateTempAlloca(ConvertTypeForMem(Ty),
+                                                   D.getName() + ".addr");
+        Alloc->setAlignment(getContext().getDeclAlign(&D).getQuantity());
+        LValue lv = MakeAddrLValue(Alloc, Ty, getContext().getDeclAlign(&D));
+        EmitStoreOfScalar(Arg, lv, /* isInitialization */ true);
+        LocalAddr = Builder.CreateLoad(Alloc);
+      }
 
       if (CGDebugInfo *DI = getDebugInfo()) {
         if (CGM.getCodeGenOpts().getDebugInfo()
               >= CodeGenOptions::LimitedDebugInfo) {
           DI->setLocation(D.getLocation());
-          DI->EmitDeclareOfBlockLiteralArgVariable(*BlockInfo, Arg, Builder);
+          DI->EmitDeclareOfBlockLiteralArgVariable(*BlockInfo, Arg, LocalAddr, Builder);
         }
       }
 
@@ -1537,12 +1565,10 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
     }
   }
 
-  QualType Ty = D.getType();
-
   llvm::Value *DeclPtr;
   // If this is an aggregate or variable sized value, reuse the input pointer.
   if (!Ty->isConstantSizeType() ||
-      CodeGenFunction::hasAggregateLLVMType(Ty)) {
+      !CodeGenFunction::hasScalarEvaluationKind(Ty)) {
     DeclPtr = Arg;
   } else {
     // Otherwise, create a temporary to hold the value.
@@ -1594,8 +1620,12 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
         }
       } else {
         // Push the cleanup for a consumed parameter.
-        if (isConsumed)
-          EHStack.pushCleanup<ConsumeARCParameter>(getARCCleanupKind(), Arg);
+        if (isConsumed) {
+          ARCPreciseLifetime_t precise = (D.hasAttr<ObjCPreciseLifetimeAttr>()
+                                ? ARCPreciseLifetime : ARCImpreciseLifetime);
+          EHStack.pushCleanup<ConsumeARCParameter>(getARCCleanupKind(), Arg,
+                                                   precise);
+        }
 
         if (lt == Qualifiers::OCL_Weak) {
           EmitARCInitWeak(DeclPtr, Arg);

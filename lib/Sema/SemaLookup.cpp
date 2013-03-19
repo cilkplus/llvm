@@ -371,6 +371,12 @@ void LookupResult::resolveKind() {
     NamedDecl *D = Decls[I]->getUnderlyingDecl();
     D = cast<NamedDecl>(D->getCanonicalDecl());
 
+    // Ignore an invalid declaration unless it's the only one left.
+    if (D->isInvalidDecl() && I < N-1) {
+      Decls[I] = Decls[--N];
+      continue;
+    }
+
     // Redeclarations of types via typedef can occur both within a scope
     // and, through using declarations and directives, across scopes. There is
     // no ambiguity if they all refer to the same type, so unique based on the
@@ -716,7 +722,7 @@ static bool LookupDirect(Sema &S, LookupResult &R, const DeclContext *DC) {
     EPI.NumExceptions = 0;
     QualType ExpectedType
       = R.getSema().Context.getFunctionType(R.getLookupName().getCXXNameType(),
-                                            0, 0, EPI);
+                                            ArrayRef<QualType>(), EPI);
 
     // Perform template argument deduction against the type that we would
     // expect the function to have.
@@ -3727,6 +3733,17 @@ TypoCorrection Sema::CorrectTypo(const DeclarationNameInfo &TypoName,
   // instantiation.
   if (!ActiveTemplateInstantiations.empty())
     return TypoCorrection();
+
+  // Don't try to correct 'super'.
+  if (S && S->isInObjcMethodScope() && Typo == getSuperIdentifier())
+    return TypoCorrection();
+
+  // This is for testing.
+  if (Diags.getWarnOnSpellCheck()) {
+    unsigned DiagID = Diags.getCustomDiagID(DiagnosticsEngine::Warning,
+                                            "spell-checking initiated for %0");
+    Diag(TypoName.getLoc(), DiagID) << TypoName.getName();
+  }
 
   NamespaceSpecifierSet Namespaces(Context, CurContext, SS);
 

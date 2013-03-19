@@ -223,9 +223,9 @@ static bool visitPreprocessedEntitiesInRange(SourceRange R,
                                            PPRec, FID);
 }
 
-void CursorVisitor::visitFileRegion() {
+bool CursorVisitor::visitFileRegion() {
   if (RegionOfInterest.isInvalid())
-    return;
+    return false;
 
   ASTUnit *Unit = cxtu::getASTUnit(TU);
   SourceManager &SM = Unit->getSourceManager();
@@ -243,7 +243,7 @@ void CursorVisitor::visitFileRegion() {
 
   assert(Begin.first == End.first);
   if (Begin.second > End.second)
-    return;
+    return false;
   
   FileID File = Begin.first;
   unsigned Offset = Begin.second;
@@ -251,12 +251,15 @@ void CursorVisitor::visitFileRegion() {
 
   if (!VisitDeclsOnly && !VisitPreprocessorLast)
     if (visitPreprocessedEntitiesInRegion())
-      return; // visitation break.
+      return true; // visitation break.
 
-  visitDeclsFromFileRegion(File, Offset, Length);
+  if (visitDeclsFromFileRegion(File, Offset, Length))
+    return true; // visitation break.
 
   if (!VisitDeclsOnly && VisitPreprocessorLast)
-    visitPreprocessedEntitiesInRegion();
+    return visitPreprocessedEntitiesInRegion();
+
+  return false;
 }
 
 static bool isInLexicalContext(Decl *D, DeclContext *DC) {
@@ -271,7 +274,7 @@ static bool isInLexicalContext(Decl *D, DeclContext *DC) {
   return false;
 }
 
-void CursorVisitor::visitDeclsFromFileRegion(FileID File,
+bool CursorVisitor::visitDeclsFromFileRegion(FileID File,
                                              unsigned Offset, unsigned Length) {
   ASTUnit *Unit = cxtu::getASTUnit(TU);
   SourceManager &SM = Unit->getSourceManager();
@@ -286,7 +289,7 @@ void CursorVisitor::visitDeclsFromFileRegion(FileID File,
     bool Invalid = false;
     const SrcMgr::SLocEntry &SLEntry = SM.getSLocEntry(File, &Invalid);
     if (Invalid)
-      return;
+      return false;
 
     SourceLocation Outer;
     if (SLEntry.isFile())
@@ -294,7 +297,7 @@ void CursorVisitor::visitDeclsFromFileRegion(FileID File,
     else
       Outer = SLEntry.getExpansion().getExpansionLocStart();
     if (Outer.isInvalid())
-      return;
+      return false;
 
     llvm::tie(File, Offset) = SM.getDecomposedExpansionLoc(Outer);
     Length = 0;
@@ -337,11 +340,11 @@ void CursorVisitor::visitDeclsFromFileRegion(FileID File,
     }
 
     if (Visit(MakeCXCursor(D, TU, Range), /*CheckedRegionOfInterest=*/true))
-      break;
+      return true; // visitation break.
   }
 
   if (VisitedAtLeastOnce)
-    return;
+    return false;
 
   // No Decls overlapped with the range. Move up the lexical context until there
   // is a context that contains the range or we reach the translation unit
@@ -356,12 +359,14 @@ void CursorVisitor::visitDeclsFromFileRegion(FileID File,
       break;
 
     if (RangeCompare(SM, CurDeclRange, Range) == RangeOverlap) {
-      Visit(MakeCXCursor(D, TU, Range), /*CheckedRegionOfInterest=*/true);
-      break;
+      if (Visit(MakeCXCursor(D, TU, Range), /*CheckedRegionOfInterest=*/true))
+        return true; // visitation break.
     }
 
     DC = D->getLexicalDeclContext();
   }
+
+  return false;
 }
 
 bool CursorVisitor::visitPreprocessedEntitiesInRegion() {
@@ -3422,10 +3427,10 @@ CXString clang_getCursorDisplayName(CXCursor C) {
     if (TypeSourceInfo *TSInfo = ClassSpec->getTypeAsWritten())
       return cxstring::createDup(TSInfo->getType().getAsString(Policy));
     
-    SmallString<64> Str;
+    SmallString<128> Str;
     llvm::raw_svector_ostream OS(Str);
     OS << *ClassSpec;
-    OS << TemplateSpecializationType::PrintTemplateArgumentList(
+    TemplateSpecializationType::PrintTemplateArgumentList(OS,
                                       ClassSpec->getTemplateArgs().data(),
                                       ClassSpec->getTemplateArgs().size(),
                                                                 Policy);
@@ -4457,6 +4462,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
 
   // Declaration kinds that don't make any sense here, but are
   // nonetheless harmless.
+  case Decl::Empty:
   case Decl::TranslationUnit:
     break;
 
@@ -5978,20 +5984,26 @@ CXString clang_Module_getFullName(CXModule CXMod) {
   return cxstring::createDup(Mod->getFullModuleName());
 }
 
-unsigned clang_Module_getNumTopLevelHeaders(CXModule CXMod) {
-  if (!CXMod)
+unsigned clang_Module_getNumTopLevelHeaders(CXTranslationUnit TU,
+                                            CXModule CXMod) {
+  if (!TU || !CXMod)
     return 0;
   Module *Mod = static_cast<Module*>(CXMod);
-  return Mod->TopHeaders.size();
+  FileManager &FileMgr = cxtu::getASTUnit(TU)->getFileManager();
+  ArrayRef<const FileEntry *> TopHeaders = Mod->getTopHeaders(FileMgr);
+  return TopHeaders.size();
 }
 
-CXFile clang_Module_getTopLevelHeader(CXModule CXMod, unsigned Index) {
-  if (!CXMod)
+CXFile clang_Module_getTopLevelHeader(CXTranslationUnit TU,
+                                      CXModule CXMod, unsigned Index) {
+  if (!TU || !CXMod)
     return 0;
   Module *Mod = static_cast<Module*>(CXMod);
+  FileManager &FileMgr = cxtu::getASTUnit(TU)->getFileManager();
 
-  if (Index < Mod->TopHeaders.size())
-    return const_cast<FileEntry *>(Mod->TopHeaders[Index]);
+  ArrayRef<const FileEntry *> TopHeaders = Mod->getTopHeaders(FileMgr);
+  if (Index < TopHeaders.size())
+    return const_cast<FileEntry *>(TopHeaders[Index]);
 
   return 0;
 }
@@ -6386,11 +6398,25 @@ Logger &cxindex::Logger::operator<<(CXTranslationUnit TU) {
   if (TU) {
     if (ASTUnit *Unit = cxtu::getASTUnit(TU)) {
       LogOS << '<' << Unit->getMainFileName() << '>';
+      if (Unit->isMainFileAST())
+        LogOS << " (" << Unit->getASTFileName() << ')';
       return *this;
     }
   }
 
   LogOS << "<NULL TU>";
+  return *this;
+}
+
+Logger &cxindex::Logger::operator<<(const FileEntry *FE) {
+  *this << FE->getName();
+  return *this;
+}
+
+Logger &cxindex::Logger::operator<<(CXCursor cursor) {
+  CXString cursorName = clang_getCursorDisplayName(cursor);
+  *this << cursorName << "@" << clang_getCursorLocation(cursor);
+  clang_disposeString(cursorName);
   return *this;
 }
 

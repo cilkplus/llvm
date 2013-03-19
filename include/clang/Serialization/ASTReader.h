@@ -48,6 +48,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 
 namespace llvm {
   class MemoryBuffer;
@@ -236,6 +237,8 @@ public:
     Success,
     /// \brief The AST file itself appears corrupted.
     Failure,
+    /// \brief The AST file was missing.
+    Missing,
     /// \brief The AST file is out-of-date relative to its input files,
     /// and needs to be regenerated.
     OutOfDate,
@@ -924,11 +927,10 @@ private:
   /// \brief Reads a statement from the specified cursor.
   Stmt *ReadStmtFromStream(ModuleFile &F);
 
-  typedef llvm::PointerIntPair<const FileEntry *, 1, bool> InputFile;
-
   /// \brief Retrieve the file entry and 'overridden' bit for an input
   /// file in the given module file.
-  InputFile getInputFile(ModuleFile &F, unsigned ID, bool Complain = true);
+  serialization::InputFile getInputFile(ModuleFile &F, unsigned ID,
+                                        bool Complain = true);
 
   /// \brief Get a FileEntry out of stored-in-PCH filename, making sure we take
   /// into account all the necessary relocations.
@@ -950,6 +952,7 @@ private:
   ASTReadResult ReadASTCore(StringRef FileName, ModuleKind Type,
                             SourceLocation ImportLoc, ModuleFile *ImportedBy,
                             SmallVectorImpl<ImportedModule> &Loaded,
+                            off_t ExpectedSize, time_t ExpectedModTime,
                             unsigned ClientLoadCapabilities);
   ASTReadResult ReadControlBlock(ModuleFile &F,
                                  SmallVectorImpl<ImportedModule> &Loaded,
@@ -1136,6 +1139,7 @@ public:
   ~ASTReader();
 
   SourceManager &getSourceManager() const { return SourceMgr; }
+  FileManager &getFileManager() const { return FileMgr; }
 
   /// \brief Flags that indicate what kind of AST loading failures the client
   /// of the AST reader can directly handle.
@@ -1146,15 +1150,18 @@ public:
     /// \brief The client can't handle any AST loading failures.
     ARR_None = 0,
     /// \brief The client can handle an AST file that cannot load because it
+    /// is missing.
+    ARR_Missing = 0x1,
+    /// \brief The client can handle an AST file that cannot load because it
     /// is out-of-date relative to its input files.
-    ARR_OutOfDate = 0x1,
+    ARR_OutOfDate = 0x2,
     /// \brief The client can handle an AST file that cannot load because it
     /// was built with a different version of Clang.
-    ARR_VersionMismatch = 0x2,
+    ARR_VersionMismatch = 0x4,
     /// \brief The client can handle an AST file that cannot load because it's
     /// compiled configuration doesn't match that of the context it was
     /// loaded into.
-    ARR_ConfigurationMismatch = 0x4
+    ARR_ConfigurationMismatch = 0x8
   };
 
   /// \brief Load the AST file designated by the given file name.
