@@ -145,7 +145,9 @@ public:
   // the pointer type from the data layout.
   // FIXME: The default needs to be removed once all the code is updated.
   virtual MVT getPointerTy(uint32_t AS = 0) const { return PointerTy; }
-  virtual MVT getShiftAmountTy(EVT LHSTy) const;
+  virtual MVT getScalarShiftAmountTy(EVT LHSTy) const;
+
+  EVT getShiftAmountTy(EVT LHSTy) const;
 
   /// isSelectExpensive - Return true if the select operation is expensive for
   /// this target.
@@ -954,6 +956,13 @@ protected:
     assert((unsigned)VT.SimpleTy < array_lengthof(RegClassForVT));
     AvailableRegClasses.push_back(std::make_pair(VT, RC));
     RegClassForVT[VT.SimpleTy] = RC;
+  }
+
+  /// clearRegisterClasses - remove all register classes
+  void clearRegisterClasses() {
+    for (unsigned i = 0 ; i<array_lengthof(RegClassForVT); i++)
+      RegClassForVT[i] = 0;
+    AvailableRegClasses.clear();
   }
 
   /// findRepresentativeClass - Return the largest legal super-reg register class

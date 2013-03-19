@@ -349,59 +349,6 @@ AArch64FrameLowering::resolveFrameIndexReference(MachineFunction &MF,
   return TopOfFrameOffset - FrameRegPos;
 }
 
-/// Estimate and return the size of the frame.
-static unsigned estimateStackSize(MachineFunction &MF) {
-  // FIXME: Make generic? Really consider after upstreaming.  This code is now
-  // shared between PEI, ARM *and* here.
-  const MachineFrameInfo *MFI = MF.getFrameInfo();
-  const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
-  const TargetRegisterInfo *RegInfo = MF.getTarget().getRegisterInfo();
-  unsigned MaxAlign = MFI->getMaxAlignment();
-  int Offset = 0;
-
-  // This code is very, very similar to PEI::calculateFrameObjectOffsets().
-  // It really should be refactored to share code. Until then, changes
-  // should keep in mind that there's tight coupling between the two.
-
-  for (int i = MFI->getObjectIndexBegin(); i != 0; ++i) {
-    int FixedOff = -MFI->getObjectOffset(i);
-    if (FixedOff > Offset) Offset = FixedOff;
-  }
-  for (unsigned i = 0, e = MFI->getObjectIndexEnd(); i != e; ++i) {
-    if (MFI->isDeadObjectIndex(i))
-      continue;
-    Offset += MFI->getObjectSize(i);
-    unsigned Align = MFI->getObjectAlignment(i);
-    // Adjust to alignment boundary
-    Offset = (Offset+Align-1)/Align*Align;
-
-    MaxAlign = std::max(Align, MaxAlign);
-  }
-
-  if (MFI->adjustsStack() && TFI->hasReservedCallFrame(MF))
-    Offset += MFI->getMaxCallFrameSize();
-
-  // Round up the size to a multiple of the alignment.  If the function has
-  // any calls or alloca's, align to the target's StackAlignment value to
-  // ensure that the callee's frame or the alloca data is suitably aligned;
-  // otherwise, for leaf functions, align to the TransientStackAlignment
-  // value.
-  unsigned StackAlign;
-  if (MFI->adjustsStack() || MFI->hasVarSizedObjects() ||
-      (RegInfo->needsStackRealignment(MF) && MFI->getObjectIndexEnd() != 0))
-    StackAlign = TFI->getStackAlignment();
-  else
-    StackAlign = TFI->getTransientStackAlignment();
-
-  // If the frame pointer is eliminated, all frame offsets will be relative to
-  // SP not FP. Align to MaxAlign so this works.
-  StackAlign = std::max(StackAlign, MaxAlign);
-  unsigned AlignMask = StackAlign - 1;
-  Offset = (Offset + AlignMask) & ~uint64_t(AlignMask);
-
-  return (unsigned)Offset;
-}
-
 void
 AArch64FrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
                                                        RegScavenger *RS) const {
@@ -422,7 +369,7 @@ AArch64FrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
   // callee-save register for this purpose or allocate an extra spill slot.
 
   bool BigStack =
-    (RS && estimateStackSize(MF) >= TII.estimateRSStackLimit(MF))
+    (RS && MFI->estimateStackSize(MF) >= TII.estimateRSStackLimit(MF))
     || MFI->hasVarSizedObjects() // Access will be from X29: messes things up
     || (MFI->adjustsStack() && !hasReservedCallFrame(MF));
 
@@ -643,4 +590,44 @@ AArch64FrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
   // Of the various reasons for having a frame pointer, it's actually only
   // variable-sized objects that prevent reservation of a call frame.
   return !(hasFP(MF) && MFI->hasVarSizedObjects());
+}
+
+void
+AArch64FrameLowering::eliminateCallFramePseudoInstr(
+                                MachineFunction &MF,
+                                MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator MI) const {
+  const AArch64InstrInfo &TII =
+    *static_cast<const AArch64InstrInfo *>(MF.getTarget().getInstrInfo());
+  DebugLoc dl = MI->getDebugLoc();
+  int Opcode = MI->getOpcode();
+  bool IsDestroy = Opcode == TII.getCallFrameDestroyOpcode();
+  uint64_t CalleePopAmount = IsDestroy ? MI->getOperand(1).getImm() : 0;
+
+  if (!hasReservedCallFrame(MF)) {
+    unsigned Align = getStackAlignment();
+
+    int64_t Amount = MI->getOperand(0).getImm();
+    Amount = RoundUpToAlignment(Amount, Align);
+    if (!IsDestroy) Amount = -Amount;
+
+    // N.b. if CalleePopAmount is valid but zero (i.e. callee would pop, but it
+    // doesn't have to pop anything), then the first operand will be zero too so
+    // this adjustment is a no-op.
+    if (CalleePopAmount == 0) {
+      // FIXME: in-function stack adjustment for calls is limited to 12-bits
+      // because there's no guaranteed temporary register available. Mostly call
+      // frames will be allocated at the start of a function so this is OK, but
+      // it is a limitation that needs dealing with.
+      assert(Amount > -0xfff && Amount < 0xfff && "call frame too large");
+      emitSPUpdate(MBB, MI, dl, TII, AArch64::NoRegister, Amount);
+    }
+  } else if (CalleePopAmount != 0) {
+    // If the calling convention demands that the callee pops arguments from the
+    // stack, we want to add it back if we have a reserved call frame.
+    assert(CalleePopAmount < 0xfff && "call frame too large");
+    emitSPUpdate(MBB, MI, dl, TII, AArch64::NoRegister, -CalleePopAmount);
+  }
+
+  MBB.erase(MI);
 }

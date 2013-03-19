@@ -37,6 +37,13 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   /// PEI.
   bool MustSaveLR;
 
+  /// Does this function have any stack spills.
+  bool HasSpills;
+
+  /// Does this function spill using instructions with only r+r (not r+i)
+  /// forms.
+  bool HasNonRISpills;
+
   /// SpillsCR - Indicates whether CR is spilled in the current function.
   bool SpillsCR;
 
@@ -71,10 +78,15 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   /// register for parameter passing.
   unsigned VarArgsNumFPR;
 
+  /// CRSpillFrameIndex - FrameIndex for CR spill slot for 32-bit SVR4.
+  int CRSpillFrameIndex;
+
 public:
   explicit PPCFunctionInfo(MachineFunction &MF) 
     : FramePointerSaveIndex(0),
       ReturnAddrSaveIndex(0),
+      HasSpills(false),
+      HasNonRISpills(false),
       SpillsCR(false),
       LRStoreRequired(false),
       MinReservedArea(0),
@@ -83,7 +95,8 @@ public:
       VarArgsFrameIndex(0),
       VarArgsStackOffset(0),
       VarArgsNumGPR(0),
-      VarArgsNumFPR(0) {}
+      VarArgsNumFPR(0),
+      CRSpillFrameIndex(0) {}
 
   int getFramePointerSaveIndex() const { return FramePointerSaveIndex; }
   void setFramePointerSaveIndex(int Idx) { FramePointerSaveIndex = Idx; }
@@ -105,6 +118,12 @@ public:
   void setMustSaveLR(bool U) { MustSaveLR = U; }
   bool mustSaveLR() const    { return MustSaveLR; }
 
+  void setHasSpills()      { HasSpills = true; }
+  bool hasSpills() const   { return HasSpills; }
+
+  void setHasNonRISpills()    { HasNonRISpills = true; }
+  bool hasNonRISpills() const { return HasNonRISpills; }
+
   void setSpillsCR()       { SpillsCR = true; }
   bool isCRSpilled() const { return SpillsCR; }
 
@@ -125,6 +144,9 @@ public:
 
   unsigned getVarArgsNumFPR() const { return VarArgsNumFPR; }
   void setVarArgsNumFPR(unsigned Num) { VarArgsNumFPR = Num; }
+
+  int getCRSpillFrameIndex() const { return CRSpillFrameIndex; }
+  void setCRSpillFrameIndex(int idx) { CRSpillFrameIndex = idx; }
 };
 
 } // end of namespace llvm

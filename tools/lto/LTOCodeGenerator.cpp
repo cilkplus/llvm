@@ -47,6 +47,10 @@
 using namespace llvm;
 
 static cl::opt<bool>
+DisableOpt("disable-opt", cl::init(false),
+  cl::desc("Do not run any optimization passes"));
+
+static cl::opt<bool>
 DisableInline("disable-inlining", cl::init(false),
   cl::desc("Do not run the inliner pass"));
 
@@ -376,22 +380,24 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   // Enabling internalize here would use its AllButMain variant. It
   // keeps only main if it exists and does nothing for libraries. Instead
   // we create the pass ourselves with the symbol list provided by the linker.
-  PassManagerBuilder().populateLTOPassManager(passes,
+  if (!DisableOpt) {
+    PassManagerBuilder().populateLTOPassManager(passes,
                                               /*Internalize=*/false,
                                               !DisableInline,
                                               DisableGVNLoadPRE);
+  }
 
   // Make sure everything is still good.
   passes.add(createVerifierPass());
 
-  FunctionPassManager *codeGenPasses = new FunctionPassManager(mergedModule);
+  PassManager codeGenPasses;
 
-  codeGenPasses->add(new DataLayout(*_target->getDataLayout()));
-  _target->addAnalysisPasses(*codeGenPasses);
+  codeGenPasses.add(new DataLayout(*_target->getDataLayout()));
+  _target->addAnalysisPasses(codeGenPasses);
 
   formatted_raw_ostream Out(out);
 
-  if (_target->addPassesToEmitFile(*codeGenPasses, Out,
+  if (_target->addPassesToEmitFile(codeGenPasses, Out,
                                    TargetMachine::CGFT_ObjectFile)) {
     errMsg = "target file type not supported";
     return true;
@@ -401,15 +407,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   passes.run(*mergedModule);
 
   // Run the code generator, and write assembly file
-  codeGenPasses->doInitialization();
-
-  for (Module::iterator
-         it = mergedModule->begin(), e = mergedModule->end(); it != e; ++it)
-    if (!it->isDeclaration())
-      codeGenPasses->run(*it);
-
-  codeGenPasses->doFinalization();
-  delete codeGenPasses;
+  codeGenPasses.run(*mergedModule);
 
   return false; // success
 }

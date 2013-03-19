@@ -85,11 +85,11 @@ attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
 
-!0 = metadata !{i32 786449, i32 0, i32 4, metadata !"dwarf-public-names.cpp", metadata !"/usr2/kparzysz/s.hex/t", metadata !"clang version 3.3 (http://llvm.org/git/clang.git a09cd8103a6a719cb2628cdf0c91682250a17bd2) (http://llvm.org/git/llvm.git 47d03cec0afca0c01ae42b82916d1d731716cd20)", i1 true, i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !2, metadata !24} ; [ DW_TAG_compile_unit ] [/usr2/kparzysz/s.hex/t/dwarf-public-names.cpp] [DW_LANG_C_plus_plus]
+!0 = metadata !{i32 786449, i32 0, i32 4, metadata !4, metadata !"clang version 3.3 (http://llvm.org/git/clang.git a09cd8103a6a719cb2628cdf0c91682250a17bd2) (http://llvm.org/git/llvm.git 47d03cec0afca0c01ae42b82916d1d731716cd20)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !2, metadata !24, metadata !""} ; [ DW_TAG_compile_unit ] [/usr2/kparzysz/s.hex/t/dwarf-public-names.cpp] [DW_LANG_C_plus_plus]
 !1 = metadata !{i32 0}
 !2 = metadata !{metadata !3, metadata !18, metadata !19, metadata !20}
 !3 = metadata !{i32 786478, i32 0, null, metadata !"member_function", metadata !"member_function", metadata !"_ZN1C15member_functionEv", metadata !4, i32 9, metadata !5, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.C*)* @_ZN1C15member_functionEv, null, metadata !12, metadata !1, i32 9} ; [ DW_TAG_subprogram ] [line 9] [def] [member_function]
-!4 = metadata !{i32 786473, metadata !"dwarf-public-names.cpp", metadata !"/usr2/kparzysz/s.hex/t", null} ; [ DW_TAG_file_type ]
+!4 = metadata !{i32 786473, metadata !37} ; [ DW_TAG_file_type ]
 !5 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !6, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !6 = metadata !{null, metadata !7}
 !7 = metadata !{i32 786447, i32 0, metadata !"", i32 0, i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !8} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from C]
@@ -122,3 +122,4 @@ attributes #1 = { nounwind readnone }
 !34 = metadata !{i32 20, i32 0, metadata !19, null}
 !35 = metadata !{i32 25, i32 0, metadata !20, null}
 !36 = metadata !{i32 26, i32 0, metadata !20, null}
+!37 = metadata !{metadata !"dwarf-public-names.cpp", metadata !"/usr2/kparzysz/s.hex/t"}

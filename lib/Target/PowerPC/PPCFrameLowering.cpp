@@ -188,13 +188,26 @@ static bool spillsCR(const MachineFunction &MF) {
   return FuncInfo->isCRSpilled();
 }
 
+static bool hasSpills(const MachineFunction &MF) {
+  const PPCFunctionInfo *FuncInfo = MF.getInfo<PPCFunctionInfo>();
+  return FuncInfo->hasSpills();
+}
+
+static bool hasNonRISpills(const MachineFunction &MF) {
+  const PPCFunctionInfo *FuncInfo = MF.getInfo<PPCFunctionInfo>();
+  return FuncInfo->hasNonRISpills();
+}
+
 /// determineFrameLayout - Determine the size of the frame and maximum call
 /// frame size.
-void PPCFrameLowering::determineFrameLayout(MachineFunction &MF) const {
+unsigned PPCFrameLowering::determineFrameLayout(MachineFunction &MF,
+                                                bool UpdateMF,
+                                                bool UseEstimate) const {
   MachineFrameInfo *MFI = MF.getFrameInfo();
 
   // Get the number of bytes to allocate from the FrameInfo
-  unsigned FrameSize = MFI->getStackSize();
+  unsigned FrameSize =
+    UseEstimate ? MFI->estimateStackSize(MF) : MFI->getStackSize();
 
   // Get the alignments provided by the target, and the maximum alignment
   // (if any) of the fixed frame objects.
@@ -207,13 +220,14 @@ void PPCFrameLowering::determineFrameLayout(MachineFunction &MF) const {
   // to adjust the stack pointer (we fit in the Red Zone).  For 64-bit
   // SVR4, we also require a stack frame if we need to spill the CR,
   // since this spill area is addressed relative to the stack pointer.
+  // The 32-bit SVR4 ABI has no Red Zone. However, it can still generate
+  // stackless code if all local vars are reg-allocated.
   bool DisableRedZone = MF.getFunction()->getAttributes().
     hasAttribute(AttributeSet::FunctionIndex, Attribute::NoRedZone);
-  // FIXME SVR4 The 32-bit SVR4 ABI has no red zone.  However, it can
-  // still generate stackless code if all local vars are reg-allocated.
-  // Try: (FrameSize <= 224
-  //       || (FrameSize == 0 && Subtarget.isPPC32 && Subtarget.isSVR4ABI()))
   if (!DisableRedZone &&
+      (Subtarget.isPPC64() ||                      // 32-bit SVR4, no stack-
+       !Subtarget.isSVR4ABI() ||                   //   allocated locals.
+	FrameSize == 0) &&
       FrameSize <= 224 &&                          // Fits in red zone.
       !MFI->hasVarSizedObjects() &&                // No dynamic alloca.
       !MFI->adjustsStack() &&                      // No calls.
@@ -222,8 +236,9 @@ void PPCFrameLowering::determineFrameLayout(MachineFunction &MF) const {
 	&& spillsCR(MF)) &&
       (!ALIGN_STACK || MaxAlign <= TargetAlign)) { // No special alignment.
     // No need for frame
-    MFI->setStackSize(0);
-    return;
+    if (UpdateMF)
+      MFI->setStackSize(0);
+    return 0;
   }
 
   // Get the maximum call frame size of all the calls.
@@ -240,7 +255,8 @@ void PPCFrameLowering::determineFrameLayout(MachineFunction &MF) const {
     maxCallFrameSize = (maxCallFrameSize + AlignMask) & ~AlignMask;
 
   // Update maximum call frame size.
-  MFI->setMaxCallFrameSize(maxCallFrameSize);
+  if (UpdateMF)
+    MFI->setMaxCallFrameSize(maxCallFrameSize);
 
   // Include call frame size in total.
   FrameSize += maxCallFrameSize;
@@ -249,7 +265,10 @@ void PPCFrameLowering::determineFrameLayout(MachineFunction &MF) const {
   FrameSize = (FrameSize + AlignMask) & ~AlignMask;
 
   // Update frame info.
-  MFI->setStackSize(FrameSize);
+  if (UpdateMF)
+    MFI->setStackSize(FrameSize);
+
+  return FrameSize;
 }
 
 // hasFP - Return true if the specified function actually has a dedicated frame
@@ -310,11 +329,7 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
   MBBI = MBB.begin();
 
   // Work out frame sizes.
-  // FIXME: determineFrameLayout() may change the frame size. This should be
-  // moved upper, to some hook.
-  determineFrameLayout(MF);
-  unsigned FrameSize = MFI->getStackSize();
-
+  unsigned FrameSize = determineFrameLayout(MF);
   int NegFrameSize = -FrameSize;
 
   // Get processor type.
@@ -779,14 +794,15 @@ static bool MustSaveLR(const MachineFunction &MF, unsigned LR) {
 
 void
 PPCFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
-                                                   RegScavenger *RS) const {
+                                                   RegScavenger *) const {
   const TargetRegisterInfo *RegInfo = MF.getTarget().getRegisterInfo();
 
   //  Save and clear the LR state.
   PPCFunctionInfo *FI = MF.getInfo<PPCFunctionInfo>();
   unsigned LR = RegInfo->getRARegister();
   FI->setMustSaveLR(MustSaveLR(MF, LR));
-  MF.getRegInfo().setPhysRegUnused(LR);
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  MRI.setPhysRegUnused(LR);
 
   //  Save R31 if necessary
   int FPSI = FI->getFramePointerSaveIndex();
@@ -811,29 +827,24 @@ PPCFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
     MFI->CreateFixedObject(-1 * TCSPDelta, TCSPDelta, true);
   }
 
-  // Reserve a slot closest to SP or frame pointer if we have a dynalloc or
-  // a large stack, which will require scavenging a register to materialize a
-  // large offset.
-  // FIXME: this doesn't actually check stack size, so is a bit pessimistic
-  // FIXME: doesn't detect whether or not we need to spill vXX, which requires
-  //        r0 for now.
-
-  if (RegInfo->requiresRegisterScavenging(MF))
-    if (needsFP(MF) || spillsCR(MF)) {
-      const TargetRegisterClass *GPRC = &PPC::GPRCRegClass;
-      const TargetRegisterClass *G8RC = &PPC::G8RCRegClass;
-      const TargetRegisterClass *RC = isPPC64 ? G8RC : GPRC;
-      RS->setScavengingFrameIndex(MFI->CreateStackObject(RC->getSize(),
-                                                         RC->getAlignment(),
-                                                         false));
-    }
+  // For 32-bit SVR4, allocate the nonvolatile CR spill slot iff the 
+  // function uses CR 2, 3, or 4.
+  if (!isPPC64 && !isDarwinABI && 
+      (MRI.isPhysRegUsed(PPC::CR2) ||
+       MRI.isPhysRegUsed(PPC::CR3) ||
+       MRI.isPhysRegUsed(PPC::CR4))) {
+    int FrameIdx = MFI->CreateFixedObject((uint64_t)4, (int64_t)-4, true);
+    FI->setCRSpillFrameIndex(FrameIdx);
+  }
 }
 
-void PPCFrameLowering::processFunctionBeforeFrameFinalized(MachineFunction &MF)
-                                                                        const {
+void PPCFrameLowering::processFunctionBeforeFrameFinalized(MachineFunction &MF,
+                                                       RegScavenger *RS) const {
   // Early exit if not using the SVR4 ABI.
-  if (!Subtarget.isSVR4ABI())
+  if (!Subtarget.isSVR4ABI()) {
+    addScavengingSpillSlot(MF, RS);
     return;
+  }
 
   // Get callee saved register information.
   MachineFrameInfo *FFI = MF.getFrameInfo();
@@ -841,6 +852,7 @@ void PPCFrameLowering::processFunctionBeforeFrameFinalized(MachineFunction &MF)
 
   // Early exit if no callee saved registers are modified!
   if (CSI.empty() && !needsFP(MF)) {
+    addScavengingSpillSlot(MF, RS);
     return;
   }
 
@@ -1019,6 +1031,37 @@ void PPCFrameLowering::processFunctionBeforeFrameFinalized(MachineFunction &MF)
       FFI->setObjectOffset(FI, LowerBound + FFI->getObjectOffset(FI));
     }
   }
+
+  addScavengingSpillSlot(MF, RS);
+}
+
+void
+PPCFrameLowering::addScavengingSpillSlot(MachineFunction &MF,
+                                         RegScavenger *RS) const {
+  // Reserve a slot closest to SP or frame pointer if we have a dynalloc or
+  // a large stack, which will require scavenging a register to materialize a
+  // large offset.
+
+  // We need to have a scavenger spill slot for spills if the frame size is
+  // large. In case there is no free register for large-offset addressing,
+  // this slot is used for the necessary emergency spill. Also, we need the
+  // slot for dynamic stack allocations.
+
+  // The scavenger might be invoked if the frame offset does not fit into
+  // the 16-bit immediate. We don't know the complete frame size here
+  // because we've not yet computed callee-saved register spills or the
+  // needed alignment padding.
+  unsigned StackSize = determineFrameLayout(MF, false, true);
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  if (MFI->hasVarSizedObjects() || spillsCR(MF) || hasNonRISpills(MF) ||
+      (hasSpills(MF) && !isInt<16>(StackSize))) {
+    const TargetRegisterClass *GPRC = &PPC::GPRCRegClass;
+    const TargetRegisterClass *G8RC = &PPC::G8RCRegClass;
+    const TargetRegisterClass *RC = Subtarget.isPPC64() ? G8RC : GPRC;
+    RS->setScavengingFrameIndex(MFI->CreateStackObject(RC->getSize(),
+                                                       RC->getAlignment(),
+                                                       false));
+  }
 }
 
 bool 
@@ -1122,6 +1165,47 @@ restoreCRs(bool isPPC64, bool CR2Spilled, bool CR3Spilled, bool CR4Spilled,
   if (CR4Spilled)
     MBB.insert(MI, BuildMI(*MF, DL, TII.get(RestoreOp), PPC::CR4)
 	       .addReg(MoveReg));
+}
+
+void PPCFrameLowering::
+eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator I) const {
+  const PPCInstrInfo &TII =
+    *static_cast<const PPCInstrInfo*>(MF.getTarget().getInstrInfo());
+  if (MF.getTarget().Options.GuaranteedTailCallOpt &&
+      I->getOpcode() == PPC::ADJCALLSTACKUP) {
+    // Add (actually subtract) back the amount the callee popped on return.
+    if (int CalleeAmt =  I->getOperand(1).getImm()) {
+      bool is64Bit = Subtarget.isPPC64();
+      CalleeAmt *= -1;
+      unsigned StackReg = is64Bit ? PPC::X1 : PPC::R1;
+      unsigned TmpReg = is64Bit ? PPC::X0 : PPC::R0;
+      unsigned ADDIInstr = is64Bit ? PPC::ADDI8 : PPC::ADDI;
+      unsigned ADDInstr = is64Bit ? PPC::ADD8 : PPC::ADD4;
+      unsigned LISInstr = is64Bit ? PPC::LIS8 : PPC::LIS;
+      unsigned ORIInstr = is64Bit ? PPC::ORI8 : PPC::ORI;
+      MachineInstr *MI = I;
+      DebugLoc dl = MI->getDebugLoc();
+
+      if (isInt<16>(CalleeAmt)) {
+        BuildMI(MBB, I, dl, TII.get(ADDIInstr), StackReg)
+          .addReg(StackReg, RegState::Kill)
+          .addImm(CalleeAmt);
+      } else {
+        MachineBasicBlock::iterator MBBI = I;
+        BuildMI(MBB, MBBI, dl, TII.get(LISInstr), TmpReg)
+          .addImm(CalleeAmt >> 16);
+        BuildMI(MBB, MBBI, dl, TII.get(ORIInstr), TmpReg)
+          .addReg(TmpReg, RegState::Kill)
+          .addImm(CalleeAmt & 0xFFFF);
+        BuildMI(MBB, MBBI, dl, TII.get(ADDInstr), StackReg)
+          .addReg(StackReg, RegState::Kill)
+          .addReg(TmpReg);
+      }
+    }
+  }
+  // Simply discard ADJCALLSTACKDOWN, ADJCALLSTACKUP instructions.
+  MBB.erase(I);
 }
 
 bool 

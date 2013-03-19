@@ -132,13 +132,6 @@ class FNEG <RegisterClass rc> : AMDGPUShaderInst <
   [(set rc:$dst, (fneg rc:$src0))]
 >;
 
-def SHADER_TYPE : AMDGPUShaderInst <
-  (outs),
-  (ins i32imm:$type),
-  "SHADER_TYPE $type",
-  [(int_AMDGPU_shader_type imm:$type)]
->;
-
 } // usesCustomInserter = 1
 
 multiclass RegisterLoadStore <RegisterClass dstClass, Operand addrClass,
@@ -209,8 +202,8 @@ class Vector2_Build <ValueType vecType, RegisterClass vectorClass,
   (vecType (IMPLICIT_DEF)), elemClass:$sub0, sub0), elemClass:$sub1, sub1)
 >;
 
-class Vector_Build <ValueType vecType, RegisterClass vectorClass,
-                    ValueType elemType, RegisterClass elemClass> : Pat <
+class Vector4_Build <ValueType vecType, RegisterClass vectorClass,
+                     ValueType elemType, RegisterClass elemClass> : Pat <
   (vecType (build_vector (elemType elemClass:$x), (elemType elemClass:$y),
                          (elemType elemClass:$z), (elemType elemClass:$w))),
   (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG

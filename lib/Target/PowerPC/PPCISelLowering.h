@@ -329,7 +329,7 @@ namespace llvm {
     /// DAG node.
     virtual const char *getTargetNodeName(unsigned Opcode) const;
 
-    virtual MVT getShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
+    virtual MVT getScalarShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
 
     /// getSetCCResultType - Return the ISD::SETCC ValueType
     virtual EVT getSetCCResultType(EVT VT) const;
@@ -448,6 +448,10 @@ namespace llvm {
     getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign, 
                         bool IsMemset, bool ZeroMemset, bool MemcpyStrSrc,
                         MachineFunction &MF) const;
+
+    /// Is unaligned memory access allowed for the given type, and is it fast
+    /// relative to software emulation.
+    virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast = 0) const;
 
     /// isFMAFasterThanMulAndAdd - Return true if an FMA operation is faster than
     /// a pair of mul and add instructions. fmuladd intrinsics will be expanded to

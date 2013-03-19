@@ -148,20 +148,20 @@ symbol table entries. Here is an example of the "hello world" module:
 
 .. code-block:: llvm
 
-    ; Declare the string constant as a global constant. 
-    @.str = private unnamed_addr constant [13 x i8] c"hello world\0A\00" 
+    ; Declare the string constant as a global constant.
+    @.str = private unnamed_addr constant [13 x i8] c"hello world\0A\00"
 
-    ; External declaration of the puts function 
-    declare i32 @puts(i8* nocapture) nounwind 
+    ; External declaration of the puts function
+    declare i32 @puts(i8* nocapture) nounwind
 
     ; Definition of main function
-    define i32 @main() {   ; i32()*  
-      ; Convert [13 x i8]* to i8  *... 
+    define i32 @main() {   ; i32()*
+      ; Convert [13 x i8]* to i8  *...
       %cast210 = getelementptr [13 x i8]* @.str, i64 0, i64 0
 
-      ; Call puts function to write out the string to stdout. 
+      ; Call puts function to write out the string to stdout.
       call i32 @puts(i8* %cast210)
-      ret i32 0 
+      ret i32 0
     }
 
     ; Named metadata
@@ -720,6 +720,11 @@ Currently, only the following parameter attributes are defined:
     This indicates that the pointer parameter can be excised using the
     :ref:`trampoline intrinsics <int_trampoline>`. This is not a valid
     attribute for return values.
+``nobuiltin``
+    This indicates that the callee function at a call site is not
+    recognized as a built-in function. LLVM will retain the original call
+    and not replace it with equivalent code based on the semantics of the
+    built-in function.
 
 .. _gc:
 
@@ -788,9 +793,6 @@ example:
     define void @f() alwaysinline optsize { ... }
     define void @f() optsize { ... }
 
-``address_safety``
-    This attribute indicates that the address safety analysis is enabled
-    for this function.
 ``alignstack(<n>)``
     This attribute indicates that, when emitting the prologue and
     epilogue, the backend should forcibly align the stack pointer.
@@ -868,6 +870,15 @@ example:
     ``setjmp`` is an example of such a function. The compiler disables
     some optimizations (like tail calls) in the caller of these
     functions.
+``sanitize_address``
+    This attribute indicates that AddressSanitizer checks
+    (dynamic address safety analysis) are enabled for this function.
+``sanitize_memory``
+    This attribute indicates that MemorySanitizer checks (dynamic detection
+    of accesses to uninitialized memory) are enabled for this function.
+``sanitize_thread``
+    This attribute indicates that ThreadSanitizer checks
+    (dynamic thread safety analysis) are enabled for this function.
 ``ssp``
     This attribute indicates that the function should emit a stack
     smashing protector. It is in the form of a "canary" --- a random value
@@ -909,12 +920,6 @@ example:
     If a function that has an ``sspstrong`` attribute is inlined into a
     function that doesn't have an ``sspstrong`` attribute, then the
     resulting function will have an ``sspstrong`` attribute.
-``thread_safety``
-    This attribute indicates that the thread safety analysis is enabled
-    for this function.
-``uninitialized_checks``
-    This attribute indicates that the checks for uses of uninitialized
-    memory are enabled.
 ``uwtable``
     This attribute indicates that the ABI being targeted requires that
     an unwind table entry be produce for this function even if we can
@@ -2219,7 +2224,7 @@ The following is the syntax for constant expressions:
     won't fit in the floating point type, the results are undefined.
 ``ptrtoint (CST to TYPE)``
     Convert a pointer typed constant to the corresponding integer
-    constant ``TYPE`` must be an integer type. ``CST`` must be of
+    constant. ``TYPE`` must be an integer type. ``CST`` must be of
     pointer type. The ``CST`` value is zero extended, truncated, or
     unchanged to make it fit in ``TYPE``.
 ``inttoptr (CST to TYPE)``
@@ -2532,11 +2537,17 @@ guaranteed to be separate for each loop. The loop-level metadata is prefixed
 with ``llvm.loop``.
 
 The loop identifier metadata is implemented using a metadata that refers to
-itself as follows:
+itself to avoid merging it with any other identifier metadata, e.g.,
+during module linkage or function inlining. That is, each loop should refer
+to their own identification metadata even if they reside in separate functions.
+The following example contains loop identifier metadata for two separate loop
+constructs:
 
 .. code-block:: llvm
 
     !0 = metadata !{ metadata !0 }
+    !1 = metadata !{ metadata !1 }
+
 
 '``llvm.loop.parallel``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -2818,7 +2829,7 @@ For example, the following metadata section specifies two separate sets of
 linker options, presumably to link against ``libz`` and the ``Cocoa``
 framework::
 
-    !0 = metadata !{ i32 6, metadata !"Linker Options", 
+    !0 = metadata !{ i32 6, metadata !"Linker Options",
        metadata !{
           metadata !{ metadata !"-lz" },
           metadata !{ metadata !"-framework", metadata !"Cocoa" } } }
@@ -3986,7 +3997,7 @@ Example:
       <result> = lshr i32 4, 1   ; yields {i32}:result = 2
       <result> = lshr i32 4, 2   ; yields {i32}:result = 1
       <result> = lshr i8  4, 3   ; yields {i8}:result = 0
-      <result> = lshr i8 -2, 1   ; yields {i8}:result = 0x7FFFFFFF 
+      <result> = lshr i8 -2, 1   ; yields {i8}:result = 0x7FFFFFFF
       <result> = lshr i32 1, 32  ; undefined
       <result> = lshr <2 x i32> < i32 -2, i32 4>, < i32 1, i32 2>   ; yields: result=<2 x i32> < i32 0x7FFFFFFF, i32 1>
 

@@ -36,7 +36,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/Mangler.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
 using namespace llvm;
 using namespace dwarf;
 
@@ -743,8 +742,11 @@ static const char *getCOFFSectionPrefixForUniqueGlobal(SectionKind Kind) {
     return ".text$";
   if (Kind.isBSS ())
     return ".bss$";
-  if (Kind.isThreadLocal())
-    return ".tls$";
+  if (Kind.isThreadLocal()) {
+    // 'LLVM' is just an arbitary string to ensure that the section name gets
+    // sorted in between '.tls$AAA' and '.tls$ZZZ' by the linker.
+    return ".tls$LLVM";
+  }
   if (Kind.isWriteable())
     return ".data$";
   return ".rdata$";

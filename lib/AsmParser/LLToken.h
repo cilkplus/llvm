@@ -94,7 +94,7 @@ namespace lltok {
     // Attributes:
     kw_attributes,
     kw_alwaysinline,
-    kw_address_safety,
+    kw_sanitize_address,
     kw_byval,
     kw_inlinehint,
     kw_inreg,
@@ -102,6 +102,7 @@ namespace lltok {
     kw_naked,
     kw_nest,
     kw_noalias,
+    kw_nobuiltin,
     kw_nocapture,
     kw_noduplicate,
     kw_noimplicitfloat,
@@ -119,8 +120,8 @@ namespace lltok {
     kw_sspreq,
     kw_sspstrong,
     kw_sret,
-    kw_thread_safety,
-    kw_uninitialized_checks,
+    kw_sanitize_thread,
+    kw_sanitize_memory,
     kw_uwtable,
     kw_zeroext,
 

@@ -176,18 +176,42 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
     { ISD::MUL,     MVT::v8i32,    4 },
     { ISD::SUB,     MVT::v8i32,    4 },
     { ISD::ADD,     MVT::v8i32,    4 },
-    { ISD::MUL,     MVT::v4i64,    4 },
     { ISD::SUB,     MVT::v4i64,    4 },
     { ISD::ADD,     MVT::v4i64,    4 },
-    };
+    // A v4i64 multiply is custom lowered as two split v2i64 vectors that then
+    // are lowered as a series of long multiplies(3), shifts(4) and adds(2)
+    // Because we believe v4i64 to be a legal type, we must also include the
+    // split factor of two in the cost table. Therefore, the cost here is 18
+    // instead of 9.
+    { ISD::MUL,     MVT::v4i64,    18 },
+  };
 
   // Look for AVX1 lowering tricks.
-  if (ST->hasAVX()) {
-    int Idx = CostTableLookup<MVT>(AVX1CostTable, array_lengthof(AVX1CostTable), ISD,
-                          LT.second);
+  if (ST->hasAVX() && !ST->hasAVX2()) {
+    int Idx = CostTableLookup<MVT>(AVX1CostTable, array_lengthof(AVX1CostTable),
+                                   ISD, LT.second);
     if (Idx != -1)
       return LT.first * AVX1CostTable[Idx].Cost;
   }
+
+  // Custom lowering of vectors.
+  static const CostTblEntry<MVT> CustomLowered[] = {
+    // A v2i64/v4i64 and multiply is custom lowered as a series of long
+    // multiplies(3), shifts(4) and adds(2).
+    { ISD::MUL,     MVT::v2i64,    9 },
+    { ISD::MUL,     MVT::v4i64,    9 },
+  };
+  int Idx = CostTableLookup<MVT>(CustomLowered, array_lengthof(CustomLowered),
+                                 ISD, LT.second);
+  if (Idx != -1)
+    return LT.first * CustomLowered[Idx].Cost;
+
+  // Special lowering of v4i32 mul on sse2, sse3: Lower v4i32 mul as 2x shuffle,
+  // 2x pmuludq, 2x shuffle.
+  if (ISD == ISD::MUL && LT.second == MVT::v4i32 && ST->hasSSE2() &&
+      !ST->hasSSE41())
+    return 6;
+
   // Fallback to the default implementation.
   return TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty);
 }
@@ -233,8 +257,8 @@ unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
     { ISD::ZERO_EXTEND, MVT::v8i32, MVT::v8i1,  6 },
     { ISD::SIGN_EXTEND, MVT::v8i32, MVT::v8i1,  9 },
     { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i1,  8 },
-    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i8,  8 },
-    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i16, 8 },
+    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i8,  6 },
+    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i16, 6 },
     { ISD::TRUNCATE,    MVT::v8i32, MVT::v8i64, 3 },
   };
 

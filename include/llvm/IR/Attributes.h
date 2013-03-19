@@ -63,7 +63,6 @@ public:
   enum AttrKind {
     // IR-Level Attributes
     None,                  ///< No attributes have been set
-    AddressSafety,         ///< Address safety checking is on.
     Alignment,             ///< Alignment of parameter (5 bits)
                            ///< stored as log2 of alignment with +1 bias
                            ///< 0 means unaligned (different from align(1))
@@ -75,6 +74,7 @@ public:
     Naked,                 ///< Naked function
     Nest,                  ///< Nested function static chain
     NoAlias,               ///< Considered to not alias after call
+    NoBuiltin,             ///< Callee isn't recognized as a builtin
     NoCapture,             ///< Function creates no aliases of pointer
     NoDuplicate,           ///< Call cannot be duplicated
     NoImplicitFloat,       ///< Disable implicit floating point insts
@@ -97,8 +97,9 @@ public:
     StackProtectReq,       ///< Stack protection required.
     StackProtectStrong,    ///< Strong Stack protection.
     StructRet,             ///< Hidden pointer to structure to return
-    ThreadSafety,          ///< Thread safety checking is on.
-    UninitializedChecks,   ///< Checking for uses of uninitialized memory is on.
+    SanitizeAddress,       ///< AddressSanitizer is on.
+    SanitizeThread,        ///< ThreadSanitizer is on.
+    SanitizeMemory,        ///< MemorySanitizer is on.
     UWTable,               ///< Function must be in a unwind table
     ZExt,                  ///< Zero extended before/after call
 
@@ -225,11 +226,6 @@ private:
   explicit AttributeSet(AttributeSetImpl *LI) : pImpl(LI) {}
 public:
   AttributeSet() : pImpl(0) {}
-  AttributeSet(const AttributeSet &P) : pImpl(P.pImpl) {}
-  const AttributeSet &operator=(const AttributeSet &RHS) {
-    pImpl = RHS.pImpl;
-    return *this;
-  }
 
   //===--------------------------------------------------------------------===//
   // AttributeSet Construction and Mutation
@@ -245,6 +241,11 @@ public:
   /// attribute sets are immutable, this returns a new set.
   AttributeSet addAttribute(LLVMContext &C, unsigned Idx,
                             Attribute::AttrKind Attr) const;
+
+  /// \brief Add an attribute to the attribute set at the given index. Since
+  /// attribute sets are immutable, this returns a new set.
+  AttributeSet addAttribute(LLVMContext &C, unsigned Idx,
+                            StringRef Kind) const;
 
   /// \brief Add attributes to the attribute set at the given index. Since
   /// attribute sets are immutable, this returns a new set.
@@ -473,31 +474,7 @@ public:
   bool td_empty() const              { return TargetDepAttrs.empty(); }
 
   /// \brief Remove attributes that are used on functions only.
-  void removeFunctionOnlyAttrs() {
-    removeAttribute(Attribute::NoReturn)
-      .removeAttribute(Attribute::NoUnwind)
-      .removeAttribute(Attribute::ReadNone)
-      .removeAttribute(Attribute::ReadOnly)
-      .removeAttribute(Attribute::NoInline)
-      .removeAttribute(Attribute::AlwaysInline)
-      .removeAttribute(Attribute::OptimizeForSize)
-      .removeAttribute(Attribute::StackProtect)
-      .removeAttribute(Attribute::StackProtectReq)
-      .removeAttribute(Attribute::StackProtectStrong)
-      .removeAttribute(Attribute::NoRedZone)
-      .removeAttribute(Attribute::NoImplicitFloat)
-      .removeAttribute(Attribute::Naked)
-      .removeAttribute(Attribute::InlineHint)
-      .removeAttribute(Attribute::StackAlignment)
-      .removeAttribute(Attribute::UWTable)
-      .removeAttribute(Attribute::NonLazyBind)
-      .removeAttribute(Attribute::ReturnsTwice)
-      .removeAttribute(Attribute::AddressSafety)
-      .removeAttribute(Attribute::ThreadSafety)
-      .removeAttribute(Attribute::UninitializedChecks)
-      .removeAttribute(Attribute::MinSize)
-      .removeAttribute(Attribute::NoDuplicate);
-  }
+  void removeFunctionOnlyAttrs();
 
   bool operator==(const AttrBuilder &B);
   bool operator!=(const AttrBuilder &B) {

@@ -172,6 +172,17 @@ define double @fmul_distribute3(double %f1) {
 ; CHECK: fmul fast double %t2, 0x10000000000000
 }
 
+; ((X*C1) + C2) * C3 => (X * (C1*C3)) + (C2*C3) (i.e. distribution)
+define float @fmul_distribute4(float %f1) {
+  %t1 = fmul float %f1, 6.0e+3
+  %t2 = fsub float 2.0e+3, %t1
+  %t3 = fmul fast float %t2, 5.0e+3
+  ret float %t3
+; CHECK: @fmul_distribute4
+; CHECK: %1 = fmul fast float %f1, 3.000000e+07
+; CHECK: %t3 = fsub fast float 1.000000e+07, %1
+}
+
 ; C1/X * C2 => (C1*C2) / X
 define float @fmul2(float %f1) {
   %t1 = fdiv float 2.0e+3, %f1
@@ -338,4 +349,109 @@ define float @fdiv9(float %x) {
   ret float %t2
 ; CHECK: @fdiv9
 ; CHECK: fmul fast float %x, 5.000000e+00
+}
+
+; =========================================================================
+;
+;   Testing-cases about factorization
+;
+; =========================================================================
+; x*z + y*z => (x+y) * z
+define float @fact_mul1(float %x, float %y, float %z) {
+  %t1 = fmul fast float %x, %z
+  %t2 = fmul fast float %y, %z
+  %t3 = fadd fast float %t1, %t2
+  ret float %t3
+; CHECK: @fact_mul1
+; CHECK: fmul fast float %1, %z
+}
+
+; z*x + y*z => (x+y) * z
+define float @fact_mul2(float %x, float %y, float %z) {
+  %t1 = fmul fast float %z, %x
+  %t2 = fmul fast float %y, %z
+  %t3 = fsub fast float %t1, %t2
+  ret float %t3
+; CHECK: @fact_mul2
+; CHECK: fmul fast float %1, %z
+}
+
+; z*x - z*y => (x-y) * z
+define float @fact_mul3(float %x, float %y, float %z) {
+  %t2 = fmul fast float %z, %y
+  %t1 = fmul fast float %z, %x
+  %t3 = fsub fast float %t1, %t2
+  ret float %t3
+; CHECK: @fact_mul3
+; CHECK: fmul fast float %1, %z
+}
+
+; x*z - z*y => (x-y) * z
+define float @fact_mul4(float %x, float %y, float %z) {
+  %t1 = fmul fast float %x, %z
+  %t2 = fmul fast float %z, %y
+  %t3 = fsub fast float %t1, %t2
+  ret float %t3
+; CHECK: @fact_mul4
+; CHECK: fmul fast float %1, %z
+}
+
+; x/y + x/z, no xform
+define float @fact_div1(float %x, float %y, float %z) {
+  %t1 = fdiv fast float %x, %y
+  %t2 = fdiv fast float %x, %z
+  %t3 = fadd fast float %t1, %t2
+  ret float %t3
+; CHECK: fact_div1
+; CHECK: fadd fast float %t1, %t2
+}
+
+; x/y + z/x; no xform
+define float @fact_div2(float %x, float %y, float %z) {
+  %t1 = fdiv fast float %x, %y
+  %t2 = fdiv fast float %z, %x
+  %t3 = fadd fast float %t1, %t2
+  ret float %t3
+; CHECK: fact_div2
+; CHECK: fadd fast float %t1, %t2
+}
+
+; y/x + z/x => (y+z)/x
+define float @fact_div3(float %x, float %y, float %z) {
+  %t1 = fdiv fast float %y, %x
+  %t2 = fdiv fast float %z, %x
+  %t3 = fadd fast float %t1, %t2
+  ret float %t3
+; CHECK: fact_div3
+; CHECK: fdiv fast float %1, %x
+}
+
+; y/x - z/x => (y-z)/x
+define float @fact_div4(float %x, float %y, float %z) {
+  %t1 = fdiv fast float %y, %x
+  %t2 = fdiv fast float %z, %x
+  %t3 = fsub fast float %t1, %t2
+  ret float %t3
+; CHECK: fact_div4
+; CHECK: fdiv fast float %1, %x
+}
+
+; y/x - z/x => (y-z)/x is disabled if y-z is denormal.
+define float @fact_div5(float %x) {
+  %t1 = fdiv fast float 0x3810000000000000, %x
+  %t2 = fdiv fast float 0x3800000000000000, %x
+  %t3 = fadd fast float %t1, %t2
+  ret float %t3
+; CHECK: fact_div5
+; CHECK: fdiv fast float 0x3818000000000000, %x
+}
+
+; y/x - z/x => (y-z)/x is disabled if y-z is denormal.
+define float @fact_div6(float %x) {
+  %t1 = fdiv fast float 0x3810000000000000, %x
+  %t2 = fdiv fast float 0x3800000000000000, %x
+  %t3 = fsub fast float %t1, %t2
+  ret float %t3
+; CHECK: fact_div6
+; CHECK: %t3 = fsub fast float %t1, %t2
 }

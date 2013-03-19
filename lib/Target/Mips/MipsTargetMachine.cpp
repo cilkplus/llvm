@@ -54,7 +54,7 @@ MipsTargetMachine(const Target &T, StringRef TT,
                 "E-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32-S64")),
     InstrInfo(MipsInstrInfo::create(*this)),
     FrameLowering(MipsFrameLowering::create(*this, Subtarget)),
-    TLInfo(*this), TSInfo(*this), JITInfo() {
+    TLInfo(MipsTargetLowering::create(*this)), TSInfo(*this), JITInfo() {
 }
 
 void MipsebTargetMachine::anchor() { }
@@ -116,6 +116,8 @@ bool MipsPassConfig::addPreEmitPass() {
   // NOTE: long branch has not been implemented for mips16.
   if (TM.getSubtarget<MipsSubtarget>().hasStandardEncoding())
     addPass(createMipsLongBranchPass(TM));
+  if (TM.getSubtarget<MipsSubtarget>().inMips16Mode())
+    addPass(createMipsConstantIslandPass(TM));
 
   return true;
 }

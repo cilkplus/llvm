@@ -88,7 +88,7 @@ static uint64_t getObjectSize(const Value *V, const DataLayout &TD,
                               const TargetLibraryInfo &TLI,
                               bool RoundToAlign = false) {
   uint64_t Size;
-  if (getObjectSize(V, Size, &TD, &TLI, RoundToAlign))
+  if (getUnderlyingObjectSize(V, Size, &TD, &TLI, RoundToAlign))
     return Size;
   return AliasAnalysis::UnknownSize;
 }

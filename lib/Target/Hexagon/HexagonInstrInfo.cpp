@@ -557,218 +557,43 @@ unsigned HexagonInstrInfo::createVR(MachineFunction* MF, MVT VT) const {
 }
 
 bool HexagonInstrInfo::isExtendable(const MachineInstr *MI) const {
+  // Constant extenders are allowed only for V4 and above.
+  if (!Subtarget.hasV4TOps())
+    return false;
+
+  const MCInstrDesc &MID = MI->getDesc();
+  const uint64_t F = MID.TSFlags;
+  if ((F >> HexagonII::ExtendablePos) & HexagonII::ExtendableMask)
+    return true;
+
+  // TODO: This is largely obsolete now. Will need to be removed
+  // in consecutive patches.
   switch(MI->getOpcode()) {
-    default: return false;
-    // JMP_EQri
-    case Hexagon::JMP_EQriPt_nv_V4:
-    case Hexagon::JMP_EQriPnt_nv_V4:
-    case Hexagon::JMP_EQriNotPt_nv_V4:
-    case Hexagon::JMP_EQriNotPnt_nv_V4:
-
-    // JMP_EQri - with -1
-    case Hexagon::JMP_EQriPtneg_nv_V4:
-    case Hexagon::JMP_EQriPntneg_nv_V4:
-    case Hexagon::JMP_EQriNotPtneg_nv_V4:
-    case Hexagon::JMP_EQriNotPntneg_nv_V4:
-
-    // JMP_EQrr
-    case Hexagon::JMP_EQrrPt_nv_V4:
-    case Hexagon::JMP_EQrrPnt_nv_V4:
-    case Hexagon::JMP_EQrrNotPt_nv_V4:
-    case Hexagon::JMP_EQrrNotPnt_nv_V4:
-
-    // JMP_GTri
-    case Hexagon::JMP_GTriPt_nv_V4:
-    case Hexagon::JMP_GTriPnt_nv_V4:
-    case Hexagon::JMP_GTriNotPt_nv_V4:
-    case Hexagon::JMP_GTriNotPnt_nv_V4:
-
-    // JMP_GTri - with -1
-    case Hexagon::JMP_GTriPtneg_nv_V4:
-    case Hexagon::JMP_GTriPntneg_nv_V4:
-    case Hexagon::JMP_GTriNotPtneg_nv_V4:
-    case Hexagon::JMP_GTriNotPntneg_nv_V4:
-
-    // JMP_GTrr
-    case Hexagon::JMP_GTrrPt_nv_V4:
-    case Hexagon::JMP_GTrrPnt_nv_V4:
-    case Hexagon::JMP_GTrrNotPt_nv_V4:
-    case Hexagon::JMP_GTrrNotPnt_nv_V4:
-
-    // JMP_GTrrdn
-    case Hexagon::JMP_GTrrdnPt_nv_V4:
-    case Hexagon::JMP_GTrrdnPnt_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPt_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPnt_nv_V4:
-
-    // JMP_GTUri
-    case Hexagon::JMP_GTUriPt_nv_V4:
-    case Hexagon::JMP_GTUriPnt_nv_V4:
-    case Hexagon::JMP_GTUriNotPt_nv_V4:
-    case Hexagon::JMP_GTUriNotPnt_nv_V4:
-
-    // JMP_GTUrr
-    case Hexagon::JMP_GTUrrPt_nv_V4:
-    case Hexagon::JMP_GTUrrPnt_nv_V4:
-    case Hexagon::JMP_GTUrrNotPt_nv_V4:
-    case Hexagon::JMP_GTUrrNotPnt_nv_V4:
-
-    // JMP_GTUrrdn
-    case Hexagon::JMP_GTUrrdnPt_nv_V4:
-    case Hexagon::JMP_GTUrrdnPnt_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPt_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPnt_nv_V4:
-
-    // TFR_FI
+    // TFR_FI Remains a special case.
     case Hexagon::TFR_FI:
       return true;
+    default:
+      return false;
   }
+  return  false;
 }
 
+// This returns true in two cases:
+// - The OP code itself indicates that this is an extended instruction.
+// - One of MOs has been marked with HMOTF_ConstExtended flag.
 bool HexagonInstrInfo::isExtended(const MachineInstr *MI) const {
-  switch(MI->getOpcode()) {
-    default: return false;
-    // JMP_EQri
-    case Hexagon::JMP_EQriPt_ie_nv_V4:
-    case Hexagon::JMP_EQriPnt_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPt_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPnt_ie_nv_V4:
-
-    // JMP_EQri - with -1
-    case Hexagon::JMP_EQriPtneg_ie_nv_V4:
-    case Hexagon::JMP_EQriPntneg_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPtneg_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPntneg_ie_nv_V4:
-
-    // JMP_EQrr
-    case Hexagon::JMP_EQrrPt_ie_nv_V4:
-    case Hexagon::JMP_EQrrPnt_ie_nv_V4:
-    case Hexagon::JMP_EQrrNotPt_ie_nv_V4:
-    case Hexagon::JMP_EQrrNotPnt_ie_nv_V4:
-
-    // JMP_GTri
-    case Hexagon::JMP_GTriPt_ie_nv_V4:
-    case Hexagon::JMP_GTriPnt_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPnt_ie_nv_V4:
-
-    // JMP_GTri - with -1
-    case Hexagon::JMP_GTriPtneg_ie_nv_V4:
-    case Hexagon::JMP_GTriPntneg_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPtneg_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPntneg_ie_nv_V4:
-
-    // JMP_GTrr
-    case Hexagon::JMP_GTrrPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrPnt_ie_nv_V4:
-    case Hexagon::JMP_GTrrNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrNotPnt_ie_nv_V4:
-
-    // JMP_GTrrdn
-    case Hexagon::JMP_GTrrdnPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrdnPnt_ie_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPnt_ie_nv_V4:
-
-    // JMP_GTUri
-    case Hexagon::JMP_GTUriPt_ie_nv_V4:
-    case Hexagon::JMP_GTUriPnt_ie_nv_V4:
-    case Hexagon::JMP_GTUriNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTUriNotPnt_ie_nv_V4:
-
-    // JMP_GTUrr
-    case Hexagon::JMP_GTUrrPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrPnt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrNotPnt_ie_nv_V4:
-
-    // JMP_GTUrrdn
-    case Hexagon::JMP_GTUrrdnPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrdnPnt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPnt_ie_nv_V4:
-
-    // V4 absolute set addressing.
-    case Hexagon::LDrid_abs_setimm_V4:
-    case Hexagon::LDriw_abs_setimm_V4:
-    case Hexagon::LDrih_abs_setimm_V4:
-    case Hexagon::LDrib_abs_setimm_V4:
-    case Hexagon::LDriuh_abs_setimm_V4:
-    case Hexagon::LDriub_abs_setimm_V4:
-
-    case Hexagon::STrid_abs_setimm_V4:
-    case Hexagon::STrib_abs_setimm_V4:
-    case Hexagon::STrih_abs_setimm_V4:
-    case Hexagon::STriw_abs_setimm_V4:
-
-    // V4 global address load.
-    case Hexagon::LDd_GP_cPt_V4 :
-    case Hexagon::LDd_GP_cNotPt_V4 :
-    case Hexagon::LDd_GP_cdnPt_V4 :
-    case Hexagon::LDd_GP_cdnNotPt_V4 :
-    case Hexagon::LDb_GP_cPt_V4 :
-    case Hexagon::LDb_GP_cNotPt_V4 :
-    case Hexagon::LDb_GP_cdnPt_V4 :
-    case Hexagon::LDb_GP_cdnNotPt_V4 :
-    case Hexagon::LDub_GP_cPt_V4 :
-    case Hexagon::LDub_GP_cNotPt_V4 :
-    case Hexagon::LDub_GP_cdnPt_V4 :
-    case Hexagon::LDub_GP_cdnNotPt_V4 :
-    case Hexagon::LDh_GP_cPt_V4 :
-    case Hexagon::LDh_GP_cNotPt_V4 :
-    case Hexagon::LDh_GP_cdnPt_V4 :
-    case Hexagon::LDh_GP_cdnNotPt_V4 :
-    case Hexagon::LDuh_GP_cPt_V4 :
-    case Hexagon::LDuh_GP_cNotPt_V4 :
-    case Hexagon::LDuh_GP_cdnPt_V4 :
-    case Hexagon::LDuh_GP_cdnNotPt_V4 :
-    case Hexagon::LDw_GP_cPt_V4 :
-    case Hexagon::LDw_GP_cNotPt_V4 :
-    case Hexagon::LDw_GP_cdnPt_V4 :
-    case Hexagon::LDw_GP_cdnNotPt_V4 :
-
-    // V4 global address store.
-    case Hexagon::STd_GP_cPt_V4 :
-    case Hexagon::STd_GP_cNotPt_V4 :
-    case Hexagon::STd_GP_cdnPt_V4 :
-    case Hexagon::STd_GP_cdnNotPt_V4 :
-    case Hexagon::STb_GP_cPt_V4 :
-    case Hexagon::STb_GP_cNotPt_V4 :
-    case Hexagon::STb_GP_cdnPt_V4 :
-    case Hexagon::STb_GP_cdnNotPt_V4 :
-    case Hexagon::STh_GP_cPt_V4 :
-    case Hexagon::STh_GP_cNotPt_V4 :
-    case Hexagon::STh_GP_cdnPt_V4 :
-    case Hexagon::STh_GP_cdnNotPt_V4 :
-    case Hexagon::STw_GP_cPt_V4 :
-    case Hexagon::STw_GP_cNotPt_V4 :
-    case Hexagon::STw_GP_cdnPt_V4 :
-    case Hexagon::STw_GP_cdnNotPt_V4 :
-
-    // V4 predicated global address new value store.
-    case Hexagon::STb_GP_cPt_nv_V4 :
-    case Hexagon::STb_GP_cNotPt_nv_V4 :
-    case Hexagon::STb_GP_cdnPt_nv_V4 :
-    case Hexagon::STb_GP_cdnNotPt_nv_V4 :
-    case Hexagon::STh_GP_cPt_nv_V4 :
-    case Hexagon::STh_GP_cNotPt_nv_V4 :
-    case Hexagon::STh_GP_cdnPt_nv_V4 :
-    case Hexagon::STh_GP_cdnNotPt_nv_V4 :
-    case Hexagon::STw_GP_cPt_nv_V4 :
-    case Hexagon::STw_GP_cNotPt_nv_V4 :
-    case Hexagon::STw_GP_cdnPt_nv_V4 :
-    case Hexagon::STw_GP_cdnNotPt_nv_V4 :
-
-    // TFR_FI
-    case Hexagon::TFR_FI_immext_V4:
-
-    // TFRI_F
-    case Hexagon::TFRI_f:
-    case Hexagon::TFRI_cPt_f:
-    case Hexagon::TFRI_cNotPt_f:
-    case Hexagon::CONST64_Float_Real:
+  // First check if this is permanently extended op code.
+  const uint64_t F = MI->getDesc().TSFlags;
+  if ((F >> HexagonII::ExtendedPos) & HexagonII::ExtendedMask)
+    return true;
+  // Use MO operand flags to determine if one of MI's operands
+  // has HMOTF_ConstExtended flag set.
+  for (MachineInstr::const_mop_iterator I = MI->operands_begin(),
+       E = MI->operands_end(); I != E; ++I) {
+    if (I->getTargetFlags() && HexagonII::HMOTF_ConstExtended)
       return true;
   }
+  return  false;
 }
 
 bool HexagonInstrInfo::isNewValueJump(const MachineInstr *MI) const {
@@ -876,258 +701,6 @@ bool HexagonInstrInfo::isNewValueJump(const MachineInstr *MI) const {
       return true;
   }
 }
-
-unsigned HexagonInstrInfo::getImmExtForm(const MachineInstr* MI) const {
-  switch(MI->getOpcode()) {
-    default: llvm_unreachable("Unknown type of instruction.");
-    // JMP_EQri
-    case Hexagon::JMP_EQriPt_nv_V4:
-      return Hexagon::JMP_EQriPt_ie_nv_V4;
-    case Hexagon::JMP_EQriNotPt_nv_V4:
-      return Hexagon::JMP_EQriNotPt_ie_nv_V4;
-    case Hexagon::JMP_EQriPnt_nv_V4:
-      return Hexagon::JMP_EQriPnt_ie_nv_V4;
-    case Hexagon::JMP_EQriNotPnt_nv_V4:
-      return Hexagon::JMP_EQriNotPnt_ie_nv_V4;
-
-    // JMP_EQri -- with -1
-    case Hexagon::JMP_EQriPtneg_nv_V4:
-      return Hexagon::JMP_EQriPtneg_ie_nv_V4;
-    case Hexagon::JMP_EQriNotPtneg_nv_V4:
-      return Hexagon::JMP_EQriNotPtneg_ie_nv_V4;
-    case Hexagon::JMP_EQriPntneg_nv_V4:
-      return Hexagon::JMP_EQriPntneg_ie_nv_V4;
-    case Hexagon::JMP_EQriNotPntneg_nv_V4:
-      return Hexagon::JMP_EQriNotPntneg_ie_nv_V4;
-
-    // JMP_EQrr
-    case Hexagon::JMP_EQrrPt_nv_V4:
-      return Hexagon::JMP_EQrrPt_ie_nv_V4;
-    case Hexagon::JMP_EQrrNotPt_nv_V4:
-      return Hexagon::JMP_EQrrNotPt_ie_nv_V4;
-    case Hexagon::JMP_EQrrPnt_nv_V4:
-      return Hexagon::JMP_EQrrPnt_ie_nv_V4;
-    case Hexagon::JMP_EQrrNotPnt_nv_V4:
-      return Hexagon::JMP_EQrrNotPnt_ie_nv_V4;
-
-    // JMP_GTri
-    case Hexagon::JMP_GTriPt_nv_V4:
-      return Hexagon::JMP_GTriPt_ie_nv_V4;
-    case Hexagon::JMP_GTriNotPt_nv_V4:
-      return Hexagon::JMP_GTriNotPt_ie_nv_V4;
-    case Hexagon::JMP_GTriPnt_nv_V4:
-      return Hexagon::JMP_GTriPnt_ie_nv_V4;
-    case Hexagon::JMP_GTriNotPnt_nv_V4:
-      return Hexagon::JMP_GTriNotPnt_ie_nv_V4;
-
-    // JMP_GTri -- with -1
-    case Hexagon::JMP_GTriPtneg_nv_V4:
-      return Hexagon::JMP_GTriPtneg_ie_nv_V4;
-    case Hexagon::JMP_GTriNotPtneg_nv_V4:
-      return Hexagon::JMP_GTriNotPtneg_ie_nv_V4;
-    case Hexagon::JMP_GTriPntneg_nv_V4:
-      return Hexagon::JMP_GTriPntneg_ie_nv_V4;
-    case Hexagon::JMP_GTriNotPntneg_nv_V4:
-      return Hexagon::JMP_GTriNotPntneg_ie_nv_V4;
-
-    // JMP_GTrr
-    case Hexagon::JMP_GTrrPt_nv_V4:
-      return Hexagon::JMP_GTrrPt_ie_nv_V4;
-    case Hexagon::JMP_GTrrNotPt_nv_V4:
-      return Hexagon::JMP_GTrrNotPt_ie_nv_V4;
-    case Hexagon::JMP_GTrrPnt_nv_V4:
-      return Hexagon::JMP_GTrrPnt_ie_nv_V4;
-    case Hexagon::JMP_GTrrNotPnt_nv_V4:
-      return Hexagon::JMP_GTrrNotPnt_ie_nv_V4;
-
-    // JMP_GTrrdn
-    case Hexagon::JMP_GTrrdnPt_nv_V4:
-      return Hexagon::JMP_GTrrdnPt_ie_nv_V4;
-    case Hexagon::JMP_GTrrdnNotPt_nv_V4:
-      return Hexagon::JMP_GTrrdnNotPt_ie_nv_V4;
-    case Hexagon::JMP_GTrrdnPnt_nv_V4:
-      return Hexagon::JMP_GTrrdnPnt_ie_nv_V4;
-    case Hexagon::JMP_GTrrdnNotPnt_nv_V4:
-      return Hexagon::JMP_GTrrdnNotPnt_ie_nv_V4;
-
-    // JMP_GTUri
-    case Hexagon::JMP_GTUriPt_nv_V4:
-      return Hexagon::JMP_GTUriPt_ie_nv_V4;
-    case Hexagon::JMP_GTUriNotPt_nv_V4:
-      return Hexagon::JMP_GTUriNotPt_ie_nv_V4;
-    case Hexagon::JMP_GTUriPnt_nv_V4:
-      return Hexagon::JMP_GTUriPnt_ie_nv_V4;
-    case Hexagon::JMP_GTUriNotPnt_nv_V4:
-      return Hexagon::JMP_GTUriNotPnt_ie_nv_V4;
-
-    // JMP_GTUrr
-    case Hexagon::JMP_GTUrrPt_nv_V4:
-      return Hexagon::JMP_GTUrrPt_ie_nv_V4;
-    case Hexagon::JMP_GTUrrNotPt_nv_V4:
-      return Hexagon::JMP_GTUrrNotPt_ie_nv_V4;
-    case Hexagon::JMP_GTUrrPnt_nv_V4:
-      return Hexagon::JMP_GTUrrPnt_ie_nv_V4;
-    case Hexagon::JMP_GTUrrNotPnt_nv_V4:
-      return Hexagon::JMP_GTUrrNotPnt_ie_nv_V4;
-
-    // JMP_GTUrrdn
-    case Hexagon::JMP_GTUrrdnPt_nv_V4:
-      return Hexagon::JMP_GTUrrdnPt_ie_nv_V4;
-    case Hexagon::JMP_GTUrrdnNotPt_nv_V4:
-      return Hexagon::JMP_GTUrrdnNotPt_ie_nv_V4;
-    case Hexagon::JMP_GTUrrdnPnt_nv_V4:
-      return Hexagon::JMP_GTUrrdnPnt_ie_nv_V4;
-    case Hexagon::JMP_GTUrrdnNotPnt_nv_V4:
-      return Hexagon::JMP_GTUrrdnNotPnt_ie_nv_V4;
-
-    case Hexagon::TFR_FI:
-        return Hexagon::TFR_FI_immext_V4;
-
-    case Hexagon::MEMw_ADDi_indexed_MEM_V4 :
-    case Hexagon::MEMw_SUBi_indexed_MEM_V4 :
-    case Hexagon::MEMw_ADDr_indexed_MEM_V4 :
-    case Hexagon::MEMw_SUBr_indexed_MEM_V4 :
-    case Hexagon::MEMw_ANDr_indexed_MEM_V4 :
-    case Hexagon::MEMw_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMw_ADDi_MEM_V4 :
-    case Hexagon::MEMw_SUBi_MEM_V4 :
-    case Hexagon::MEMw_ADDr_MEM_V4 :
-    case Hexagon::MEMw_SUBr_MEM_V4 :
-    case Hexagon::MEMw_ANDr_MEM_V4 :
-    case Hexagon::MEMw_ORr_MEM_V4 :
-    case Hexagon::MEMh_ADDi_indexed_MEM_V4 :
-    case Hexagon::MEMh_SUBi_indexed_MEM_V4 :
-    case Hexagon::MEMh_ADDr_indexed_MEM_V4 :
-    case Hexagon::MEMh_SUBr_indexed_MEM_V4 :
-    case Hexagon::MEMh_ANDr_indexed_MEM_V4 :
-    case Hexagon::MEMh_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMh_ADDi_MEM_V4 :
-    case Hexagon::MEMh_SUBi_MEM_V4 :
-    case Hexagon::MEMh_ADDr_MEM_V4 :
-    case Hexagon::MEMh_SUBr_MEM_V4 :
-    case Hexagon::MEMh_ANDr_MEM_V4 :
-    case Hexagon::MEMh_ORr_MEM_V4 :
-    case Hexagon::MEMb_ADDi_indexed_MEM_V4 :
-    case Hexagon::MEMb_SUBi_indexed_MEM_V4 :
-    case Hexagon::MEMb_ADDr_indexed_MEM_V4 :
-    case Hexagon::MEMb_SUBr_indexed_MEM_V4 :
-    case Hexagon::MEMb_ANDr_indexed_MEM_V4 :
-    case Hexagon::MEMb_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMb_ADDi_MEM_V4 :
-    case Hexagon::MEMb_SUBi_MEM_V4 :
-    case Hexagon::MEMb_ADDr_MEM_V4 :
-    case Hexagon::MEMb_SUBr_MEM_V4 :
-    case Hexagon::MEMb_ANDr_MEM_V4 :
-    case Hexagon::MEMb_ORr_MEM_V4 :
-      llvm_unreachable("Needs implementing.");
-  }
-}
-
-unsigned HexagonInstrInfo::getNormalBranchForm(const MachineInstr* MI) const {
-  switch(MI->getOpcode()) {
-    default: llvm_unreachable("Unknown type of jump instruction.");
-    // JMP_EQri
-    case Hexagon::JMP_EQriPt_ie_nv_V4:
-      return Hexagon::JMP_EQriPt_nv_V4;
-    case Hexagon::JMP_EQriNotPt_ie_nv_V4:
-      return Hexagon::JMP_EQriNotPt_nv_V4;
-    case Hexagon::JMP_EQriPnt_ie_nv_V4:
-      return Hexagon::JMP_EQriPnt_nv_V4;
-    case Hexagon::JMP_EQriNotPnt_ie_nv_V4:
-      return Hexagon::JMP_EQriNotPnt_nv_V4;
-
-    // JMP_EQri -- with -1
-    case Hexagon::JMP_EQriPtneg_ie_nv_V4:
-      return Hexagon::JMP_EQriPtneg_nv_V4;
-    case Hexagon::JMP_EQriNotPtneg_ie_nv_V4:
-      return Hexagon::JMP_EQriNotPtneg_nv_V4;
-    case Hexagon::JMP_EQriPntneg_ie_nv_V4:
-      return Hexagon::JMP_EQriPntneg_nv_V4;
-    case Hexagon::JMP_EQriNotPntneg_ie_nv_V4:
-      return Hexagon::JMP_EQriNotPntneg_nv_V4;
-
-    // JMP_EQrr
-    case Hexagon::JMP_EQrrPt_ie_nv_V4:
-      return Hexagon::JMP_EQrrPt_nv_V4;
-    case Hexagon::JMP_EQrrNotPt_ie_nv_V4:
-      return Hexagon::JMP_EQrrNotPt_nv_V4;
-    case Hexagon::JMP_EQrrPnt_ie_nv_V4:
-      return Hexagon::JMP_EQrrPnt_nv_V4;
-    case Hexagon::JMP_EQrrNotPnt_ie_nv_V4:
-      return Hexagon::JMP_EQrrNotPnt_nv_V4;
-
-    // JMP_GTri
-    case Hexagon::JMP_GTriPt_ie_nv_V4:
-      return Hexagon::JMP_GTriPt_nv_V4;
-    case Hexagon::JMP_GTriNotPt_ie_nv_V4:
-      return Hexagon::JMP_GTriNotPt_nv_V4;
-    case Hexagon::JMP_GTriPnt_ie_nv_V4:
-      return Hexagon::JMP_GTriPnt_nv_V4;
-    case Hexagon::JMP_GTriNotPnt_ie_nv_V4:
-      return Hexagon::JMP_GTriNotPnt_nv_V4;
-
-    // JMP_GTri -- with -1
-    case Hexagon::JMP_GTriPtneg_ie_nv_V4:
-      return Hexagon::JMP_GTriPtneg_nv_V4;
-    case Hexagon::JMP_GTriNotPtneg_ie_nv_V4:
-      return Hexagon::JMP_GTriNotPtneg_nv_V4;
-    case Hexagon::JMP_GTriPntneg_ie_nv_V4:
-      return Hexagon::JMP_GTriPntneg_nv_V4;
-    case Hexagon::JMP_GTriNotPntneg_ie_nv_V4:
-      return Hexagon::JMP_GTriNotPntneg_nv_V4;
-
-    // JMP_GTrr
-    case Hexagon::JMP_GTrrPt_ie_nv_V4:
-      return Hexagon::JMP_GTrrPt_nv_V4;
-    case Hexagon::JMP_GTrrNotPt_ie_nv_V4:
-      return Hexagon::JMP_GTrrNotPt_nv_V4;
-    case Hexagon::JMP_GTrrPnt_ie_nv_V4:
-      return Hexagon::JMP_GTrrPnt_nv_V4;
-    case Hexagon::JMP_GTrrNotPnt_ie_nv_V4:
-      return Hexagon::JMP_GTrrNotPnt_nv_V4;
-
-    // JMP_GTrrdn
-    case Hexagon::JMP_GTrrdnPt_ie_nv_V4:
-      return Hexagon::JMP_GTrrdnPt_nv_V4;
-    case Hexagon::JMP_GTrrdnNotPt_ie_nv_V4:
-      return Hexagon::JMP_GTrrdnNotPt_nv_V4;
-    case Hexagon::JMP_GTrrdnPnt_ie_nv_V4:
-      return Hexagon::JMP_GTrrdnPnt_nv_V4;
-    case Hexagon::JMP_GTrrdnNotPnt_ie_nv_V4:
-      return Hexagon::JMP_GTrrdnNotPnt_nv_V4;
-
-    // JMP_GTUri
-    case Hexagon::JMP_GTUriPt_ie_nv_V4:
-      return Hexagon::JMP_GTUriPt_nv_V4;
-    case Hexagon::JMP_GTUriNotPt_ie_nv_V4:
-      return Hexagon::JMP_GTUriNotPt_nv_V4;
-    case Hexagon::JMP_GTUriPnt_ie_nv_V4:
-      return Hexagon::JMP_GTUriPnt_nv_V4;
-    case Hexagon::JMP_GTUriNotPnt_ie_nv_V4:
-      return Hexagon::JMP_GTUriNotPnt_nv_V4;
-
-    // JMP_GTUrr
-    case Hexagon::JMP_GTUrrPt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrPt_nv_V4;
-    case Hexagon::JMP_GTUrrNotPt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrNotPt_nv_V4;
-    case Hexagon::JMP_GTUrrPnt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrPnt_nv_V4;
-    case Hexagon::JMP_GTUrrNotPnt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrNotPnt_nv_V4;
-
-    // JMP_GTUrrdn
-    case Hexagon::JMP_GTUrrdnPt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrdnPt_nv_V4;
-    case Hexagon::JMP_GTUrrdnNotPt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrdnNotPt_nv_V4;
-    case Hexagon::JMP_GTUrrdnPnt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrdnPnt_nv_V4;
-    case Hexagon::JMP_GTUrrdnNotPnt_ie_nv_V4:
-      return Hexagon::JMP_GTUrrdnNotPnt_nv_V4;
-  }
-}
-
 
 bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
   switch (MI->getOpcode()) {
@@ -1324,6 +897,16 @@ bool HexagonInstrInfo::isPostIncrement (const MachineInstr* MI) const {
     case Hexagon::POST_STdri_cdnNotPt_V4:
       return true;
   }
+}
+
+bool HexagonInstrInfo::isNewValueInst(const MachineInstr *MI) const {
+  if (isNewValueJump(MI))
+    return true;
+
+  if (isNewValueStore(MI))
+    return true;
+
+  return false;
 }
 
 bool HexagonInstrInfo::isSaveCalleeSavedRegsCall(const MachineInstr *MI) const {
@@ -2366,6 +1949,10 @@ isValidOffset(const int Opcode, const int Offset) const {
   // the given "Opcode". If "Offset" is not in the correct range, "ADD_ri" is
   // inserted to calculate the final address. Due to this reason, the function
   // assumes that the "Offset" has correct alignment.
+  // We used to assert if the offset was not properly aligned, however,
+  // there are cases where a misaligned pointer recast can cause this
+  // problem, and we need to allow for it. The front end warns of such
+  // misaligns with respect to load size.
 
   switch(Opcode) {
 
@@ -2375,7 +1962,6 @@ isValidOffset(const int Opcode, const int Offset) const {
   case Hexagon::STriw_indexed:
   case Hexagon::STriw:
   case Hexagon::STriw_f:
-    assert((Offset % 4 == 0) && "Offset has incorrect alignment");
     return (Offset >= Hexagon_MEMW_OFFSET_MIN) &&
       (Offset <= Hexagon_MEMW_OFFSET_MAX);
 
@@ -2385,14 +1971,12 @@ isValidOffset(const int Opcode, const int Offset) const {
   case Hexagon::STrid:
   case Hexagon::STrid_indexed:
   case Hexagon::STrid_f:
-    assert((Offset % 8 == 0) && "Offset has incorrect alignment");
     return (Offset >= Hexagon_MEMD_OFFSET_MIN) &&
       (Offset <= Hexagon_MEMD_OFFSET_MAX);
 
   case Hexagon::LDrih:
   case Hexagon::LDriuh:
   case Hexagon::STrih:
-    assert((Offset % 2 == 0) && "Offset has incorrect alignment");
     return (Offset >= Hexagon_MEMH_OFFSET_MIN) &&
       (Offset <= Hexagon_MEMH_OFFSET_MAX);
 
@@ -2419,7 +2003,6 @@ isValidOffset(const int Opcode, const int Offset) const {
   case Hexagon::MEMw_SUBr_MEM_V4 :
   case Hexagon::MEMw_ANDr_MEM_V4 :
   case Hexagon::MEMw_ORr_MEM_V4 :
-    assert ((Offset % 4) == 0 && "MEMOPw offset is not aligned correctly." );
     return (0 <= Offset && Offset <= 255);
 
   case Hexagon::MEMh_ADDi_indexed_MEM_V4 :
@@ -2434,7 +2017,6 @@ isValidOffset(const int Opcode, const int Offset) const {
   case Hexagon::MEMh_SUBr_MEM_V4 :
   case Hexagon::MEMh_ANDr_MEM_V4 :
   case Hexagon::MEMh_ORr_MEM_V4 :
-    assert ((Offset % 2) == 0 && "MEMOPh offset is not aligned correctly." );
     return (0 <= Offset && Offset <= 127);
 
   case Hexagon::MEMb_ADDi_indexed_MEM_V4 :
@@ -2800,7 +2382,26 @@ isConditionalStore (const MachineInstr* MI) const {
   }
 }
 
+unsigned HexagonInstrInfo::getAddrMode(const MachineInstr* MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
 
+  return((F >> HexagonII::AddrModePos) & HexagonII::AddrModeMask);
+}
+
+/// immediateExtend - Changes the instruction in place to one using an immediate
+/// extender.
+void HexagonInstrInfo::immediateExtend(MachineInstr *MI) const {
+  assert((isExtendable(MI)||isConstExtended(MI)) &&
+                               "Instruction must be extendable");
+  // Find which operand is extendable.
+  short ExtOpNum = getCExtOpNum(MI);
+  MachineOperand &MO = MI->getOperand(ExtOpNum);
+  // This needs to be something we understand.
+  assert((MO.isMBB() || MO.isImm()) &&
+         "Branch with unknown extendable field type");
+  // Mark given operand as extended.
+  MO.addTargetFlag(HexagonII::HMOTF_ConstExtended);
+}
 
 DFAPacketizer *HexagonInstrInfo::
 CreateTargetScheduleState(const TargetMachine *TM,
@@ -2826,4 +2427,156 @@ bool HexagonInstrInfo::isSchedulingBoundary(const MachineInstr *MI,
     return true;
 
   return false;
+}
+
+bool HexagonInstrInfo::isConstExtended(MachineInstr *MI) const {
+
+  // Constant extenders are allowed only for V4 and above.
+  if (!Subtarget.hasV4TOps())
+    return false;
+
+  const uint64_t F = MI->getDesc().TSFlags;
+  unsigned isExtended = (F >> HexagonII::ExtendedPos) & HexagonII::ExtendedMask;
+  if (isExtended) // Instruction must be extended.
+    return true;
+
+  unsigned isExtendable = (F >> HexagonII::ExtendablePos)
+                          & HexagonII::ExtendableMask;
+  if (!isExtendable)
+    return false;
+
+  short ExtOpNum = getCExtOpNum(MI);
+  const MachineOperand &MO = MI->getOperand(ExtOpNum);
+  // Use MO operand flags to determine if MO
+  // has the HMOTF_ConstExtended flag set.
+  if (MO.getTargetFlags() && HexagonII::HMOTF_ConstExtended)
+    return true;
+  // If this is a Machine BB address we are talking about, and it is
+  // not marked as extended, say so.
+  if (MO.isMBB())
+    return false;
+
+  // We could be using an instruction with an extendable immediate and shoehorn
+  // a global address into it. If it is a global address it will be constant
+  // extended. We do this for COMBINE.
+  // We currently only handle isGlobal() because it is the only kind of
+  // object we are going to end up with here for now.
+  // In the future we probably should add isSymbol(), etc.
+  if (MO.isGlobal() || MO.isSymbol())
+    return true;
+
+  // If the extendable operand is not 'Immediate' type, the instruction should
+  // have 'isExtended' flag set.
+  assert(MO.isImm() && "Extendable operand must be Immediate type");
+
+  int MinValue = getMinValue(MI);
+  int MaxValue = getMaxValue(MI);
+  int ImmValue = MO.getImm();
+
+  return (ImmValue < MinValue || ImmValue > MaxValue);
+}
+
+// Returns true if a particular operand is extendable for an instruction.
+bool HexagonInstrInfo::isOperandExtended(const MachineInstr *MI,
+                                         unsigned short OperandNum) const {
+  // Constant extenders are allowed only for V4 and above.
+  if (!Subtarget.hasV4TOps())
+    return false;
+
+  const uint64_t F = MI->getDesc().TSFlags;
+
+  return ((F >> HexagonII::ExtendableOpPos) & HexagonII::ExtendableOpMask)
+          == OperandNum;
+}
+
+// Returns Operand Index for the constant extended instruction.
+unsigned short HexagonInstrInfo::getCExtOpNum(const MachineInstr *MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
+  return ((F >> HexagonII::ExtendableOpPos) & HexagonII::ExtendableOpMask);
+}
+
+// Returns the min value that doesn't need to be extended.
+int HexagonInstrInfo::getMinValue(const MachineInstr *MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
+  unsigned isSigned = (F >> HexagonII::ExtentSignedPos)
+                    & HexagonII::ExtentSignedMask;
+  unsigned bits =  (F >> HexagonII::ExtentBitsPos)
+                    & HexagonII::ExtentBitsMask;
+
+  if (isSigned) // if value is signed
+    return -1 << (bits - 1);
+  else
+    return 0;
+}
+
+// Returns the max value that doesn't need to be extended.
+int HexagonInstrInfo::getMaxValue(const MachineInstr *MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
+  unsigned isSigned = (F >> HexagonII::ExtentSignedPos)
+                    & HexagonII::ExtentSignedMask;
+  unsigned bits =  (F >> HexagonII::ExtentBitsPos)
+                    & HexagonII::ExtentBitsMask;
+
+  if (isSigned) // if value is signed
+    return ~(-1 << (bits - 1));
+  else
+    return ~(-1 << bits);
+}
+
+// Returns true if an instruction can be converted into a non-extended
+// equivalent instruction.
+bool HexagonInstrInfo::NonExtEquivalentExists (const MachineInstr *MI) const {
+
+  short NonExtOpcode;
+  // Check if the instruction has a register form that uses register in place
+  // of the extended operand, if so return that as the non-extended form.
+  if (Hexagon::getRegForm(MI->getOpcode()) >= 0)
+    return true;
+
+  if (MI->getDesc().mayLoad() || MI->getDesc().mayStore()) {
+    // Check addressing mode and retreive non-ext equivalent instruction.
+
+    switch (getAddrMode(MI)) {
+    case HexagonII::Absolute :
+      // Load/store with absolute addressing mode can be converted into
+      // base+offset mode.
+      NonExtOpcode = Hexagon::getBasedWithImmOffset(MI->getOpcode());
+      break;
+    case HexagonII::BaseImmOffset :
+      // Load/store with base+offset addressing mode can be converted into
+      // base+register offset addressing mode. However left shift operand should
+      // be set to 0.
+      NonExtOpcode = Hexagon::getBaseWithRegOffset(MI->getOpcode());
+      break;
+    default:
+      return false;
+    }
+    if (NonExtOpcode < 0)
+      return false;
+    return true;
+  }
+  return false;
+}
+
+// Returns opcode of the non-extended equivalent instruction.
+short HexagonInstrInfo::getNonExtOpcode (const MachineInstr *MI) const {
+
+  // Check if the instruction has a register form that uses register in place
+  // of the extended operand, if so return that as the non-extended form.
+  short NonExtOpcode = Hexagon::getRegForm(MI->getOpcode());
+    if (NonExtOpcode >= 0)
+      return NonExtOpcode;
+
+  if (MI->getDesc().mayLoad() || MI->getDesc().mayStore()) {
+    // Check addressing mode and retreive non-ext equivalent instruction.
+    switch (getAddrMode(MI)) {
+    case HexagonII::Absolute :
+      return Hexagon::getBasedWithImmOffset(MI->getOpcode());
+    case HexagonII::BaseImmOffset :
+      return Hexagon::getBaseWithRegOffset(MI->getOpcode());
+    default:
+      return -1;
+    }
+  }
+  return -1;
 }

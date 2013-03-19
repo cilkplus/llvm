@@ -417,6 +417,10 @@ retry_random_path:
       RandomPath[i] = "0123456789abcdef"[sys::Process::GetRandomNumber() & 15];
   }
 
+  // Make sure we don't fall into an infinite loop by constantly trying
+  // to create the parent path.
+  bool TriedToCreateParent = false;
+
   // Try to open + create the file.
 rety_open_create:
   int RandomFD = ::open(RandomPath.c_str(), O_RDWR | O_CREAT | O_EXCL, mode);
@@ -427,7 +431,9 @@ rety_open_create:
       goto retry_random_path;
     // If path prefix doesn't exist, try to create it.
     if (SavedErrno == errc::no_such_file_or_directory &&
-        !exists(path::parent_path(RandomPath))) {
+        !exists(path::parent_path(RandomPath)) &&
+        !TriedToCreateParent) {
+      TriedToCreateParent = true;
       StringRef p(RandomPath);
       SmallString<64> dir_to_create;
       for (path::const_iterator i = path::begin(p),
@@ -469,12 +475,14 @@ rety_open_create:
   return error_code::success();
 }
 
-error_code mapped_file_region::init(int fd, uint64_t offset) {
-  AutoFD FD(fd);
+error_code mapped_file_region::init(int FD, bool CloseFD, uint64_t Offset) {
+  AutoFD ScopedFD(FD);
+  if (!CloseFD)
+    ScopedFD.take();
 
   // Figure out how large the file is.
   struct stat FileInfo;
-  if (fstat(fd, &FileInfo) == -1)
+  if (fstat(FD, &FileInfo) == -1)
     return error_code(errno, system_category());
   uint64_t FileSize = FileInfo.st_size;
 
@@ -482,7 +490,7 @@ error_code mapped_file_region::init(int fd, uint64_t offset) {
     Size = FileSize;
   else if (FileSize < Size) {
     // We need to grow the file.
-    if (ftruncate(fd, Size) == -1)
+    if (ftruncate(FD, Size) == -1)
       return error_code(errno, system_category());
   }
 
@@ -491,7 +499,7 @@ error_code mapped_file_region::init(int fd, uint64_t offset) {
 #ifdef MAP_FILE
   flags |= MAP_FILE;
 #endif
-  Mapping = ::mmap(0, Size, prot, flags, fd, offset);
+  Mapping = ::mmap(0, Size, prot, flags, FD, Offset);
   if (Mapping == MAP_FAILED)
     return error_code(errno, system_category());
   return error_code::success();
@@ -520,12 +528,13 @@ mapped_file_region::mapped_file_region(const Twine &path,
     return;
   }
 
-  ec = init(ofd, offset);
+  ec = init(ofd, true, offset);
   if (ec)
     Mapping = 0;
 }
 
 mapped_file_region::mapped_file_region(int fd,
+                                       bool closefd,
                                        mapmode mode,
                                        uint64_t length,
                                        uint64_t offset,
@@ -539,7 +548,7 @@ mapped_file_region::mapped_file_region(int fd,
     return;
   }
 
-  ec = init(fd, offset);
+  ec = init(fd, closefd, offset);
   if (ec)
     Mapping = 0;
 }

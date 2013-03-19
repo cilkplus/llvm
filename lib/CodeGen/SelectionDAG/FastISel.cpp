@@ -696,6 +696,13 @@ bool FastISel::SelectCall(const User *I) {
     UpdateValueMap(Call, ResultReg);
     return true;
   }
+  case Intrinsic::expect: {
+    unsigned ResultReg = getRegForValue(Call->getArgOperand(0));
+    if (ResultReg == 0)
+      return false;
+    UpdateValueMap(Call, ResultReg);
+    return true;
+  }
   }
 
   // Usually, it does not make sense to initialize a value,
@@ -705,7 +712,7 @@ bool FastISel::SelectCall(const User *I) {
   // all the values which have already been materialized,
   // appear after the call. It also makes sense to skip intrinsics
   // since they tend to be inlined.
-  if (!isa<IntrinsicInst>(F))
+  if (!isa<IntrinsicInst>(Call))
     flushLocalValueMap();
 
   // An arbitrary call. Bail.

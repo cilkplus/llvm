@@ -69,6 +69,120 @@ static cl::opt<bool>
 ForceSSAUpdater("force-ssa-updater", cl::init(false), cl::Hidden);
 
 namespace {
+/// \brief A common base class for representing a half-open byte range.
+struct ByteRange {
+  /// \brief The beginning offset of the range.
+  uint64_t BeginOffset;
+
+  /// \brief The ending offset, not included in the range.
+  uint64_t EndOffset;
+
+  ByteRange() : BeginOffset(), EndOffset() {}
+  ByteRange(uint64_t BeginOffset, uint64_t EndOffset)
+      : BeginOffset(BeginOffset), EndOffset(EndOffset) {}
+
+  /// \brief Support for ordering ranges.
+  ///
+  /// This provides an ordering over ranges such that start offsets are
+  /// always increasing, and within equal start offsets, the end offsets are
+  /// decreasing. Thus the spanning range comes first in a cluster with the
+  /// same start position.
+  bool operator<(const ByteRange &RHS) const {
+    if (BeginOffset < RHS.BeginOffset) return true;
+    if (BeginOffset > RHS.BeginOffset) return false;
+    if (EndOffset > RHS.EndOffset) return true;
+    return false;
+  }
+
+  /// \brief Support comparison with a single offset to allow binary searches.
+  friend bool operator<(const ByteRange &LHS, uint64_t RHSOffset) {
+    return LHS.BeginOffset < RHSOffset;
+  }
+
+  friend LLVM_ATTRIBUTE_UNUSED bool operator<(uint64_t LHSOffset,
+                                              const ByteRange &RHS) {
+    return LHSOffset < RHS.BeginOffset;
+  }
+
+  bool operator==(const ByteRange &RHS) const {
+    return BeginOffset == RHS.BeginOffset && EndOffset == RHS.EndOffset;
+  }
+  bool operator!=(const ByteRange &RHS) const { return !operator==(RHS); }
+};
+
+/// \brief A partition of an alloca.
+///
+/// This structure represents a contiguous partition of the alloca. These are
+/// formed by examining the uses of the alloca. During formation, they may
+/// overlap but once an AllocaPartitioning is built, the Partitions within it
+/// are all disjoint.
+struct Partition : public ByteRange {
+  /// \brief Whether this partition is splittable into smaller partitions.
+  ///
+  /// We flag partitions as splittable when they are formed entirely due to
+  /// accesses by trivially splittable operations such as memset and memcpy.
+  bool IsSplittable;
+
+  /// \brief Test whether a partition has been marked as dead.
+  bool isDead() const {
+    if (BeginOffset == UINT64_MAX) {
+      assert(EndOffset == UINT64_MAX);
+      return true;
+    }
+    return false;
+  }
+
+  /// \brief Kill a partition.
+  /// This is accomplished by setting both its beginning and end offset to
+  /// the maximum possible value.
+  void kill() {
+    assert(!isDead() && "He's Dead, Jim!");
+    BeginOffset = EndOffset = UINT64_MAX;
+  }
+
+  Partition() : ByteRange(), IsSplittable() {}
+  Partition(uint64_t BeginOffset, uint64_t EndOffset, bool IsSplittable)
+      : ByteRange(BeginOffset, EndOffset), IsSplittable(IsSplittable) {}
+};
+
+/// \brief A particular use of a partition of the alloca.
+///
+/// This structure is used to associate uses of a partition with it. They
+/// mark the range of bytes which are referenced by a particular instruction,
+/// and includes a handle to the user itself and the pointer value in use.
+/// The bounds of these uses are determined by intersecting the bounds of the
+/// memory use itself with a particular partition. As a consequence there is
+/// intentionally overlap between various uses of the same partition.
+class PartitionUse : public ByteRange {
+  /// \brief Combined storage for both the Use* and split state.
+  PointerIntPair<Use*, 1, bool> UsePtrAndIsSplit;
+
+public:
+  PartitionUse() : ByteRange(), UsePtrAndIsSplit() {}
+  PartitionUse(uint64_t BeginOffset, uint64_t EndOffset, Use *U,
+               bool IsSplit)
+      : ByteRange(BeginOffset, EndOffset), UsePtrAndIsSplit(U, IsSplit) {}
+
+  /// \brief The use in question. Provides access to both user and used value.
+  ///
+  /// Note that this may be null if the partition use is *dead*, that is, it
+  /// should be ignored.
+  Use *getUse() const { return UsePtrAndIsSplit.getPointer(); }
+
+  /// \brief Set the use for this partition use range.
+  void setUse(Use *U) { UsePtrAndIsSplit.setPointer(U); }
+
+  /// \brief Whether this use is split across multiple partitions.
+  bool isSplit() const { return UsePtrAndIsSplit.getInt(); }
+};
+}
+
+namespace llvm {
+template <> struct isPodLike<Partition> : llvm::true_type {};
+template <> struct isPodLike<PartitionUse> : llvm::true_type {};
+}
+
+namespace {
 /// \brief Alloca partitioning representation.
 ///
 /// This class represents a partitioning of an alloca into slices, and
@@ -79,102 +193,6 @@ namespace {
 /// and to enact these transformations.
 class AllocaPartitioning {
 public:
-  /// \brief A common base class for representing a half-open byte range.
-  struct ByteRange {
-    /// \brief The beginning offset of the range.
-    uint64_t BeginOffset;
-
-    /// \brief The ending offset, not included in the range.
-    uint64_t EndOffset;
-
-    ByteRange() : BeginOffset(), EndOffset() {}
-    ByteRange(uint64_t BeginOffset, uint64_t EndOffset)
-        : BeginOffset(BeginOffset), EndOffset(EndOffset) {}
-
-    /// \brief Support for ordering ranges.
-    ///
-    /// This provides an ordering over ranges such that start offsets are
-    /// always increasing, and within equal start offsets, the end offsets are
-    /// decreasing. Thus the spanning range comes first in a cluster with the
-    /// same start position.
-    bool operator<(const ByteRange &RHS) const {
-      if (BeginOffset < RHS.BeginOffset) return true;
-      if (BeginOffset > RHS.BeginOffset) return false;
-      if (EndOffset > RHS.EndOffset) return true;
-      return false;
-    }
-
-    /// \brief Support comparison with a single offset to allow binary searches.
-    friend bool operator<(const ByteRange &LHS, uint64_t RHSOffset) {
-      return LHS.BeginOffset < RHSOffset;
-    }
-
-    friend LLVM_ATTRIBUTE_UNUSED bool operator<(uint64_t LHSOffset,
-                                                const ByteRange &RHS) {
-      return LHSOffset < RHS.BeginOffset;
-    }
-
-    bool operator==(const ByteRange &RHS) const {
-      return BeginOffset == RHS.BeginOffset && EndOffset == RHS.EndOffset;
-    }
-    bool operator!=(const ByteRange &RHS) const { return !operator==(RHS); }
-  };
-
-  /// \brief A partition of an alloca.
-  ///
-  /// This structure represents a contiguous partition of the alloca. These are
-  /// formed by examining the uses of the alloca. During formation, they may
-  /// overlap but once an AllocaPartitioning is built, the Partitions within it
-  /// are all disjoint.
-  struct Partition : public ByteRange {
-    /// \brief Whether this partition is splittable into smaller partitions.
-    ///
-    /// We flag partitions as splittable when they are formed entirely due to
-    /// accesses by trivially splittable operations such as memset and memcpy.
-    bool IsSplittable;
-
-    /// \brief Test whether a partition has been marked as dead.
-    bool isDead() const {
-      if (BeginOffset == UINT64_MAX) {
-        assert(EndOffset == UINT64_MAX);
-        return true;
-      }
-      return false;
-    }
-
-    /// \brief Kill a partition.
-    /// This is accomplished by setting both its beginning and end offset to
-    /// the maximum possible value.
-    void kill() {
-      assert(!isDead() && "He's Dead, Jim!");
-      BeginOffset = EndOffset = UINT64_MAX;
-    }
-
-    Partition() : ByteRange(), IsSplittable() {}
-    Partition(uint64_t BeginOffset, uint64_t EndOffset, bool IsSplittable)
-        : ByteRange(BeginOffset, EndOffset), IsSplittable(IsSplittable) {}
-  };
-
-  /// \brief A particular use of a partition of the alloca.
-  ///
-  /// This structure is used to associate uses of a partition with it. They
-  /// mark the range of bytes which are referenced by a particular instruction,
-  /// and includes a handle to the user itself and the pointer value in use.
-  /// The bounds of these uses are determined by intersecting the bounds of the
-  /// memory use itself with a particular partition. As a consequence there is
-  /// intentionally overlap between various uses of the same partition.
-  struct PartitionUse : public ByteRange {
-    /// \brief The use in question. Provides access to both user and used value.
-    ///
-    /// Note that this may be null if the partition use is *dead*, that is, it
-    /// should be ignored.
-    Use *U;
-
-    PartitionUse() : ByteRange(), U() {}
-    PartitionUse(uint64_t BeginOffset, uint64_t EndOffset, Use *U)
-        : ByteRange(BeginOffset, EndOffset), U(U) {}
-  };
-
   /// \brief Construct a partitioning of a particular alloca.
   ///
   /// Construction does most of the work for partitioning the alloca. This
@@ -456,10 +474,10 @@ private:
 
     // Clamp the end offset to the end of the allocation. Note that this is
     // formulated to handle even the case where "BeginOffset + Size" overflows.
-    // NOTE! This may appear superficially to be something we could ignore
-    // entirely, but that is not so! There may be PHI-node uses where some
-    // instructions are dead but not others. We can't completely ignore the
-    // PHI node, and so have to record at least the information here.
+    // This may appear superficially to be something we could ignore entirely,
+    // but that is not so! There may be widened loads or PHI-node uses where
+    // some instructions are dead but not others. We can't completely ignore
+    // them, and so have to record at least the information here.
     assert(AllocSize >= BeginOffset); // Established above.
     if (Size > AllocSize - BeginOffset) {
       DEBUG(dbgs() << "WARNING: Clamping a " << Size << " byte use @" << Offset
@@ -474,33 +492,17 @@ private:
   }
 
   void handleLoadOrStore(Type *Ty, Instruction &I, const APInt &Offset,
-                         bool IsVolatile) {
-    uint64_t Size = DL.getTypeStoreSize(Ty);
-
-    // If this memory access can be shown to *statically* extend outside the
-    // bounds of of the allocation, it's behavior is undefined, so simply
-    // ignore it. Note that this is more strict than the generic clamping
-    // behavior of insertUse. We also try to handle cases which might run the
-    // risk of overflow.
-    // FIXME: We should instead consider the pointer to have escaped if this
-    // function is being instrumented for addressing bugs or race conditions.
-    if (Offset.isNegative() || Size > AllocSize ||
-        Offset.ugt(AllocSize - Size)) {
-      DEBUG(dbgs() << "WARNING: Ignoring " << Size << " byte "
-                   << (isa<LoadInst>(I) ? "load" : "store") << " @" << Offset
-                   << " which extends past the end of the " << AllocSize
-                   << " byte alloca:\n"
-                   << "    alloca: " << P.AI << "\n"
-                   << "       use: " << I << "\n");
-      return;
-    }
-
+                         uint64_t Size, bool IsVolatile) {
     // We allow splitting of loads and stores where the type is an integer type
-    // and which cover the entire alloca. Such integer loads and stores
-    // often require decomposition into fine grained loads and stores.
-    bool IsSplittable = false;
-    if (IntegerType *ITy = dyn_cast<IntegerType>(Ty))
-      IsSplittable = !IsVolatile && ITy->getBitWidth() == AllocSize*8;
+    // and cover the entire alloca. This prevents us from splitting over
+    // eagerly.
+    // FIXME: In the great blue eventually, we should eagerly split all integer
+    // loads and stores, and then have a separate step that merges adjacent
+    // alloca partitions into a single partition suitable for integer widening.
+    // Or we should skip the merge step and rely on GVN and other passes to
+    // merge adjacent loads and stores that survive mem2reg.
+    bool IsSplittable =
+        Ty->isIntegerTy() && !IsVolatile && Offset == 0 && Size >= AllocSize;
 
     insertUse(I, Offset, Size, IsSplittable);
   }
@@ -512,7 +514,8 @@ private:
     if (!IsOffsetKnown)
       return PI.setAborted(&LI);
 
-    return handleLoadOrStore(LI.getType(), LI, Offset, LI.isVolatile());
+    uint64_t Size = DL.getTypeStoreSize(LI.getType());
+    return handleLoadOrStore(LI.getType(), LI, Offset, Size, LI.isVolatile());
   }
 
   void visitStoreInst(StoreInst &SI) {
@@ -522,9 +525,28 @@ private:
     if (!IsOffsetKnown)
       return PI.setAborted(&SI);
 
+    uint64_t Size = DL.getTypeStoreSize(ValOp->getType());
+
+    // If this memory access can be shown to *statically* extend outside the
+    // bounds of of the allocation, it's behavior is undefined, so simply
+    // ignore it. Note that this is more strict than the generic clamping
+    // behavior of insertUse. We also try to handle cases which might run the
+    // risk of overflow.
+    // FIXME: We should instead consider the pointer to have escaped if this
+    // function is being instrumented for addressing bugs or race conditions.
+    if (Offset.isNegative() || Size > AllocSize ||
+        Offset.ugt(AllocSize - Size)) {
+      DEBUG(dbgs() << "WARNING: Ignoring " << Size << " byte store @" << Offset
+                   << " which extends past the end of the " << AllocSize
+                   << " byte alloca:\n"
+                   << "    alloca: " << P.AI << "\n"
+                   << "       use: " << SI << "\n");
+      return;
+    }
+
     assert((!SI.isSimple() || ValOp->getType()->isSingleValueType()) &&
            "All simple FCA stores should have been pre-split");
-    handleLoadOrStore(ValOp->getType(), SI, Offset, SI.isVolatile());
+    handleLoadOrStore(ValOp->getType(), SI, Offset, Size, SI.isVolatile());
   }
 
 
@@ -795,32 +817,19 @@ private:
       EndOffset = AllocSize;
 
     // NB: This only works if we have zero overlapping partitions.
-    iterator B = std::lower_bound(P.begin(), P.end(), BeginOffset);
-    if (B != P.begin() && llvm::prior(B)->EndOffset > BeginOffset)
-      B = llvm::prior(B);
-    for (iterator I = B, E = P.end(); I != E && I->BeginOffset < EndOffset;
-         ++I) {
+    iterator I = std::lower_bound(P.begin(), P.end(), BeginOffset);
+    if (I != P.begin() && llvm::prior(I)->EndOffset > BeginOffset)
+      I = llvm::prior(I);
+    iterator E = P.end();
+    bool IsSplit = llvm::next(I) != E && llvm::next(I)->BeginOffset < EndOffset;
+    for (; I != E && I->BeginOffset < EndOffset; ++I) {
       PartitionUse NewPU(std::max(I->BeginOffset, BeginOffset),
-                         std::min(I->EndOffset, EndOffset), U);
+                         std::min(I->EndOffset, EndOffset), U, IsSplit);
       P.use_push_back(I, NewPU);
       if (isa<PHINode>(U->getUser()) || isa<SelectInst>(U->getUser()))
         P.PHIOrSelectOpMap[U]
           = std::make_pair(I - P.begin(), P.Uses[I - P.begin()].size() - 1);
     }
-  }
-
-  void handleLoadOrStore(Type *Ty, Instruction &I, const APInt &Offset) {
-    uint64_t Size = DL.getTypeStoreSize(Ty);
-
-    // If this memory access can be shown to *statically* extend outside the
-    // bounds of of the allocation, it's behavior is undefined, so simply
-    // ignore it. Note that this is more strict than the generic clamping
-    // behavior of insertUse.
-    if (Offset.isNegative() || Size > AllocSize ||
-        Offset.ugt(AllocSize - Size))
-      return markAsDead(I);
-
-    insertUse(I, Offset, Size);
   }
 
   void visitBitCastInst(BitCastInst &BC) {
@@ -839,12 +848,23 @@ private:
 
   void visitLoadInst(LoadInst &LI) {
     assert(IsOffsetKnown);
-    handleLoadOrStore(LI.getType(), LI, Offset);
+    uint64_t Size = DL.getTypeStoreSize(LI.getType());
+    insertUse(LI, Offset, Size);
   }
 
   void visitStoreInst(StoreInst &SI) {
     assert(IsOffsetKnown);
-    handleLoadOrStore(SI.getOperand(0)->getType(), SI, Offset);
+    uint64_t Size = DL.getTypeStoreSize(SI.getOperand(0)->getType());
+
+    // If this memory access can be shown to *statically* extend outside the
+    // bounds of of the allocation, it's behavior is undefined, so simply
+    // ignore it. Note that this is more strict than the generic clamping
+    // behavior of insertUse.
+    if (Offset.isNegative() || Size > AllocSize ||
+        Offset.ugt(AllocSize - Size))
+      return markAsDead(SI);
+
+    insertUse(SI, Offset, Size);
   }
 
   void visitMemSetInst(MemSetInst &II) {
@@ -1089,21 +1109,21 @@ AllocaPartitioning::AllocaPartitioning(const DataLayout &TD, AllocaInst &AI)
 Type *AllocaPartitioning::getCommonType(iterator I) const {
   Type *Ty = 0;
   for (const_use_iterator UI = use_begin(I), UE = use_end(I); UI != UE; ++UI) {
-    if (!UI->U)
+    Use *U = UI->getUse();
+    if (!U)
       continue; // Skip dead uses.
-    if (isa<IntrinsicInst>(*UI->U->getUser()))
+    if (isa<IntrinsicInst>(*U->getUser()))
       continue;
     if (UI->BeginOffset != I->BeginOffset || UI->EndOffset != I->EndOffset)
       continue;
 
     Type *UserTy = 0;
-    if (LoadInst *LI = dyn_cast<LoadInst>(UI->U->getUser())) {
+    if (LoadInst *LI = dyn_cast<LoadInst>(U->getUser()))
       UserTy = LI->getType();
-    } else if (StoreInst *SI = dyn_cast<StoreInst>(UI->U->getUser())) {
+    else if (StoreInst *SI = dyn_cast<StoreInst>(U->getUser()))
       UserTy = SI->getValueOperand()->getType();
-    } else {
+    else
       return 0; // Bail if we have weird uses.
-    }
 
     if (IntegerType *ITy = dyn_cast<IntegerType>(UserTy)) {
       // If the type is larger than the partition, skip it. We only encounter
@@ -1140,11 +1160,12 @@ void AllocaPartitioning::print(raw_ostream &OS, const_iterator I,
 void AllocaPartitioning::printUsers(raw_ostream &OS, const_iterator I,
                                     StringRef Indent) const {
   for (const_use_iterator UI = use_begin(I), UE = use_end(I); UI != UE; ++UI) {
-    if (!UI->U)
+    if (!UI->getUse())
       continue; // Skip dead uses.
     OS << Indent << "  [" << UI->BeginOffset << "," << UI->EndOffset << ") "
-       << "used by: " << *UI->U->getUser() << "\n";
-    if (MemTransferInst *II = dyn_cast<MemTransferInst>(UI->U->getUser())) {
+       << "used by: " << *UI->getUse()->getUser() << "\n";
+    if (MemTransferInst *II =
+            dyn_cast<MemTransferInst>(UI->getUse()->getUser())) {
       const MemTransferOffsets &MTO = MemTransferInstData.lookup(II);
       bool IsDest;
       if (!MTO.IsSplittable)
@@ -1375,11 +1396,11 @@ public:
     // may be grown during speculation. However, we never need to re-visit the
     // new uses, and so we can use the initial size bound.
     for (unsigned Idx = 0, Size = P.use_size(PI); Idx != Size; ++Idx) {
-      const AllocaPartitioning::PartitionUse &PU = P.getUse(PI, Idx);
-      if (!PU.U)
+      const PartitionUse &PU = P.getUse(PI, Idx);
+      if (!PU.getUse())
         continue; // Skip dead use.
 
-      visit(cast<Instruction>(PU.U->getUser()));
+      visit(cast<Instruction>(PU.getUse()->getUser()));
     }
   }
 
@@ -1523,8 +1544,8 @@ private:
       // inside the load.
       AllocaPartitioning::use_iterator UI
         = P.findPartitionUseForPHIOrSelectOperand(InUse);
-      assert(isa<PHINode>(*UI->U->getUser()));
-      UI->U = &Load->getOperandUse(Load->getPointerOperandIndex());
+      assert(isa<PHINode>(*UI->getUse()->getUser()));
+      UI->setUse(&Load->getOperandUse(Load->getPointerOperandIndex()));
     }
     DEBUG(dbgs() << "          speculated to: " << *NewPN << "\n");
   }
@@ -1571,16 +1592,16 @@ private:
 
   void visitSelectInst(SelectInst &SI) {
     DEBUG(dbgs() << "    original: " << SI << "\n");
-    IRBuilder<> IRB(&SI);
 
     // If the select isn't safe to speculate, just use simple logic to emit it.
     SmallVector<LoadInst *, 4> Loads;
     if (!isSafeSelectToSpeculate(SI, Loads))
       return;
 
+    IRBuilder<> IRB(&SI);
     Use *Ops[2] = { &SI.getOperandUse(1), &SI.getOperandUse(2) };
     AllocaPartitioning::iterator PIs[2];
-    AllocaPartitioning::PartitionUse PUs[2];
+    PartitionUse PUs[2];
     for (unsigned i = 0, e = 2; i != e; ++i) {
       PIs[i] = P.findPartitionForPHIOrSelectOperand(Ops[i]);
       if (PIs[i] != P.end()) {
@@ -1591,7 +1612,7 @@ private:
         PUs[i] = *UI;
         // Clear out the use here so that the offsets into the use list remain
         // stable but this use is ignored when rewriting.
-        UI->U = 0;
+        UI->setUse(0);
       }
     }
 
@@ -1623,8 +1644,8 @@ private:
       for (unsigned i = 0, e = 2; i != e; ++i) {
         if (PIs[i] != P.end()) {
           Use *LoadUse = &Loads[i]->getOperandUse(0);
-          assert(PUs[i].U->get() == LoadUse->get());
-          PUs[i].U = LoadUse;
+          assert(PUs[i].getUse()->get() == LoadUse->get());
+          PUs[i].setUse(LoadUse);
           P.use_push_back(PIs[i], PUs[i]);
         }
       }
@@ -1911,6 +1932,10 @@ static Value *getAdjustedPtr(IRBuilder<> &IRB, const DataLayout &TD,
 static bool canConvertValue(const DataLayout &DL, Type *OldTy, Type *NewTy) {
   if (OldTy == NewTy)
     return true;
+  if (IntegerType *OldITy = dyn_cast<IntegerType>(OldTy))
+    if (IntegerType *NewITy = dyn_cast<IntegerType>(NewTy))
+      if (NewITy->getBitWidth() >= OldITy->getBitWidth())
+        return true;
   if (DL.getTypeSizeInBits(NewTy) != DL.getTypeSizeInBits(OldTy))
     return false;
   if (!NewTy->isSingleValueType() || !OldTy->isSingleValueType())
@@ -1939,6 +1964,10 @@ static Value *convertValue(const DataLayout &DL, IRBuilder<> &IRB, Value *V,
          "Value not convertable to type");
   if (V->getType() == Ty)
     return V;
+  if (IntegerType *OldITy = dyn_cast<IntegerType>(V->getType()))
+    if (IntegerType *NewITy = dyn_cast<IntegerType>(Ty))
+      if (NewITy->getBitWidth() > OldITy->getBitWidth())
+        return IRB.CreateZExt(V, NewITy);
   if (V->getType()->isIntegerTy() && Ty->isPointerTy())
     return IRB.CreateIntToPtr(V, Ty);
   if (V->getType()->isPointerTy() && Ty->isIntegerTy())
@@ -1977,7 +2006,8 @@ static bool isVectorPromotionViable(const DataLayout &TD,
   ElementSize /= 8;
 
   for (; I != E; ++I) {
-    if (!I->U)
+    Use *U = I->getUse();
+    if (!U)
       continue; // Skip dead use.
 
     uint64_t BeginOffset = I->BeginOffset - PartitionBeginOffset;
@@ -1997,24 +2027,24 @@ static bool isVectorPromotionViable(const DataLayout &TD,
       = (NumElements == 1) ? Ty->getElementType()
                            : VectorType::get(Ty->getElementType(), NumElements);
 
-    if (MemIntrinsic *MI = dyn_cast<MemIntrinsic>(I->U->getUser())) {
+    if (MemIntrinsic *MI = dyn_cast<MemIntrinsic>(U->getUser())) {
       if (MI->isVolatile())
         return false;
-      if (MemTransferInst *MTI = dyn_cast<MemTransferInst>(I->U->getUser())) {
+      if (MemTransferInst *MTI = dyn_cast<MemTransferInst>(U->getUser())) {
         const AllocaPartitioning::MemTransferOffsets &MTO
           = P.getMemTransferOffsets(*MTI);
         if (!MTO.IsSplittable)
           return false;
       }
-    } else if (I->U->get()->getType()->getPointerElementType()->isStructTy()) {
+    } else if (U->get()->getType()->getPointerElementType()->isStructTy()) {
       // Disable vector promotion when there are loads or stores of an FCA.
       return false;
-    } else if (LoadInst *LI = dyn_cast<LoadInst>(I->U->getUser())) {
+    } else if (LoadInst *LI = dyn_cast<LoadInst>(U->getUser())) {
       if (LI->isVolatile())
         return false;
       if (!canConvertValue(TD, PartitionTy, LI->getType()))
         return false;
-    } else if (StoreInst *SI = dyn_cast<StoreInst>(I->U->getUser())) {
+    } else if (StoreInst *SI = dyn_cast<StoreInst>(U->getUser())) {
       if (SI->isVolatile())
         return false;
       if (!canConvertValue(TD, SI->getValueOperand()->getType(), PartitionTy))
@@ -2063,7 +2093,8 @@ static bool isIntegerWideningViable(const DataLayout &TD,
   // unsplittable entry (which we may make splittable later).
   bool WholeAllocaOp = false;
   for (; I != E; ++I) {
-    if (!I->U)
+    Use *U = I->getUse();
+    if (!U)
       continue; // Skip dead use.
 
     uint64_t RelBegin = I->BeginOffset - AllocBeginOffset;
@@ -2074,7 +2105,7 @@ static bool isIntegerWideningViable(const DataLayout &TD,
     if (RelEnd > Size)
       return false;
 
-    if (LoadInst *LI = dyn_cast<LoadInst>(I->U->getUser())) {
+    if (LoadInst *LI = dyn_cast<LoadInst>(U->getUser())) {
       if (LI->isVolatile())
         return false;
       if (RelBegin == 0 && RelEnd == Size)
@@ -2089,7 +2120,7 @@ static bool isIntegerWideningViable(const DataLayout &TD,
       if (RelBegin != 0 || RelEnd != Size ||
           !canConvertValue(TD, AllocaTy, LI->getType()))
         return false;
-    } else if (StoreInst *SI = dyn_cast<StoreInst>(I->U->getUser())) {
+    } else if (StoreInst *SI = dyn_cast<StoreInst>(U->getUser())) {
       Type *ValueTy = SI->getValueOperand()->getType();
       if (SI->isVolatile())
         return false;
@@ -2105,16 +2136,16 @@ static bool isIntegerWideningViable(const DataLayout &TD,
       if (RelBegin != 0 || RelEnd != Size ||
           !canConvertValue(TD, ValueTy, AllocaTy))
         return false;
-    } else if (MemIntrinsic *MI = dyn_cast<MemIntrinsic>(I->U->getUser())) {
+    } else if (MemIntrinsic *MI = dyn_cast<MemIntrinsic>(U->getUser())) {
       if (MI->isVolatile() || !isa<Constant>(MI->getLength()))
         return false;
-      if (MemTransferInst *MTI = dyn_cast<MemTransferInst>(I->U->getUser())) {
+      if (MemTransferInst *MTI = dyn_cast<MemTransferInst>(U->getUser())) {
         const AllocaPartitioning::MemTransferOffsets &MTO
           = P.getMemTransferOffsets(*MTI);
         if (!MTO.IsSplittable)
           return false;
       }
-    } else if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I->U->getUser())) {
+    } else if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(U->getUser())) {
       if (II->getIntrinsicID() != Intrinsic::lifetime_start &&
           II->getIntrinsicID() != Intrinsic::lifetime_end)
         return false;
@@ -2297,6 +2328,7 @@ class AllocaPartitionRewriter : public InstVisitor<AllocaPartitionRewriter,
 
   // The offset of the partition user currently being rewritten.
   uint64_t BeginOffset, EndOffset;
+  bool IsSplit;
   Use *OldUse;
   Instruction *OldPtr;
 
@@ -2314,7 +2346,7 @@ public:
       NewAllocaEndOffset(NewEndOffset),
       NewAllocaTy(NewAI.getAllocatedType()),
       VecTy(), ElementTy(), ElementSize(), IntTy(),
-      BeginOffset(), EndOffset() {
+      BeginOffset(), EndOffset(), IsSplit(), OldUse(), OldPtr() {
   }
 
   /// \brief Visit the users of the alloca partition and rewrite them.
@@ -2336,14 +2368,15 @@ public:
     }
     bool CanSROA = true;
     for (; I != E; ++I) {
-      if (!I->U)
+      if (!I->getUse())
         continue; // Skip dead uses.
       BeginOffset = I->BeginOffset;
       EndOffset = I->EndOffset;
-      OldUse = I->U;
-      OldPtr = cast<Instruction>(I->U->get());
+      IsSplit = I->isSplit();
+      OldUse = I->getUse();
+      OldPtr = cast<Instruction>(OldUse->get());
       NamePrefix = (Twine(NewAI.getName()) + "." + Twine(BeginOffset)).str();
-      CanSROA &= visit(cast<Instruction>(I->U->getUser()));
+      CanSROA &= visit(cast<Instruction>(OldUse->getUser()));
     }
     if (VecTy) {
       assert(CanSROA);
@@ -2450,29 +2483,12 @@ private:
     DEBUG(dbgs() << "    original: " << LI << "\n");
     Value *OldOp = LI.getOperand(0);
     assert(OldOp == OldPtr);
-    IRBuilder<> IRB(&LI);
 
     uint64_t Size = EndOffset - BeginOffset;
-    bool IsSplitIntLoad = Size < TD.getTypeStoreSize(LI.getType());
 
-    // If this memory access can be shown to *statically* extend outside the
-    // bounds of the original allocation it's behavior is undefined. Rather
-    // than trying to transform it, just replace it with undef.
-    // FIXME: We should do something more clever for functions being
-    // instrumented by asan.
-    // FIXME: Eventually, once ASan and friends can flush out bugs here, this
-    // should be transformed to a load of null making it unreachable.
-    uint64_t OldAllocSize = TD.getTypeAllocSize(OldAI.getAllocatedType());
-    if (TD.getTypeStoreSize(LI.getType()) > OldAllocSize) {
-      LI.replaceAllUsesWith(UndefValue::get(LI.getType()));
-      Pass.DeadInsts.insert(&LI);
-      deleteIfTriviallyDead(OldOp);
-      DEBUG(dbgs() << "          to: undef!!\n");
-      return true;
-    }
-
-    Type *TargetTy = IsSplitIntLoad ? Type::getIntNTy(LI.getContext(), Size * 8)
-                                    : LI.getType();
+    IRBuilder<> IRB(&LI);
+    Type *TargetTy = IsSplit ? Type::getIntNTy(LI.getContext(), Size * 8)
+                             : LI.getType();
     bool IsPtrAdjusted = false;
     Value *V;
     if (VecTy) {
@@ -2492,16 +2508,15 @@ private:
     }
     V = convertValue(TD, IRB, V, TargetTy);
 
-    if (IsSplitIntLoad) {
+    if (IsSplit) {
       assert(!LI.isVolatile());
       assert(LI.getType()->isIntegerTy() &&
              "Only integer type loads and stores are split");
+      assert(Size < TD.getTypeStoreSize(LI.getType()) &&
+             "Split load isn't smaller than original load");
       assert(LI.getType()->getIntegerBitWidth() ==
              TD.getTypeStoreSizeInBits(LI.getType()) &&
              "Non-byte-multiple bit width");
-      assert(LI.getType()->getIntegerBitWidth() ==
-             TD.getTypeAllocSizeInBits(OldAI.getAllocatedType()) &&
-             "Only alloca-wide loads can be split and recomposed");
       // Move the insertion point just past the load so that we can refer to it.
       IRB.SetInsertPoint(llvm::next(BasicBlock::iterator(&LI)));
       // Create a placeholder value with the same type as LI to use as the
@@ -2588,14 +2603,12 @@ private:
     uint64_t Size = EndOffset - BeginOffset;
     if (Size < TD.getTypeStoreSize(V->getType())) {
       assert(!SI.isVolatile());
+      assert(IsSplit && "A seemingly split store isn't splittable");
       assert(V->getType()->isIntegerTy() &&
              "Only integer type loads and stores are split");
       assert(V->getType()->getIntegerBitWidth() ==
              TD.getTypeStoreSizeInBits(V->getType()) &&
              "Non-byte-multiple bit width");
-      assert(V->getType()->getIntegerBitWidth() ==
-             TD.getTypeAllocSizeInBits(OldAI.getAllocatedType()) &&
-             "Only alloca-wide stores can be split and recomposed");
       IntegerType *NarrowTy = Type::getIntNTy(SI.getContext(), Size * 8);
       V = extractInteger(TD, IRB, V, NarrowTy, BeginOffset,
                          getName(".extract"));
@@ -3381,7 +3394,7 @@ bool SROA::rewriteAllocaPartition(AllocaInst &AI,
   for (AllocaPartitioning::use_iterator UI = P.use_begin(PI),
                                         UE = P.use_end(PI);
        UI != UE && !IsLive; ++UI)
-    if (UI->U)
+    if (UI->getUse())
       IsLive = true;
   if (!IsLive)
     return false; // No live uses left of this partition.

@@ -1,3 +1,4 @@
+; REQUIRES: asserts
 ; RUN: opt -loop-unswitch -loop-unswitch-threshold 13 -disable-output -stats -info-output-file - < %s | FileCheck --check-prefix=STATS %s
 ; RUN: opt -S -loop-unswitch -loop-unswitch-threshold 13 -verify-loop-info -verify-dom-info < %s | FileCheck %s
 
@@ -25,7 +26,7 @@
 ; CHECK-NEXT:   ]
 
 ; CHECK:      inc.us:                                           ; preds = %second_switch.us, %loop_begin.us
-; CHECK-NEXT:   call void @incf() noreturn nounwind
+; CHECK-NEXT:   call void @incf() [[NOR_NUW:#[0-9]+]]
 ; CHECK-NEXT:   br label %loop_begin.backedge.us
 
 ; CHECK:      .split:                                           ; preds = %..split_crit_edge
@@ -45,7 +46,7 @@
 ; CHECK-NEXT:   ]
 
 ; CHECK:      inc:                                              ; preds = %loop_begin.inc_crit_edge, %second_switch
-; CHECK-NEXT:   call void @incf() noreturn nounwind
+; CHECK-NEXT:   call void @incf() [[NOR_NUW]]
 ; CHECK-NEXT:   br label %loop_begin.backedge
 
 define i32 @test(i32* %var) {
@@ -82,3 +83,6 @@ loop_exit:
 
 declare void @incf() noreturn
 declare void @decf() noreturn
+
+; CHECK: attributes #0 = { noreturn }
+; CHECK: attributes [[NOR_NUW]] = { noreturn nounwind }

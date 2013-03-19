@@ -30,7 +30,6 @@ class PPCRegisterInfo : public PPCGenRegisterInfo {
   std::map<unsigned, unsigned> ImmToIdxMap;
   const PPCSubtarget &Subtarget;
   const TargetInstrInfo &TII;
-  mutable int CRSpillFrameIdx;
 public:
   PPCRegisterInfo(const PPCSubtarget &SubTarget, const TargetInstrInfo &tii);
   
@@ -48,17 +47,18 @@ public:
 
   BitVector getReservedRegs(const MachineFunction &MF) const;
 
-  virtual bool avoidWriteAfterWrite(const TargetRegisterClass *RC) const;
+  /// We require the register scavenger.
+  bool requiresRegisterScavenging(const MachineFunction &MF) const {
+    return true;
+  }
 
-  /// requiresRegisterScavenging - We require a register scavenger.
-  /// FIXME (64-bit): Should be inlined.
-  bool requiresRegisterScavenging(const MachineFunction &MF) const;
+  bool requiresFrameIndexScavenging(const MachineFunction &MF) const {
+    return true;
+  }
 
-  bool trackLivenessAfterRegAlloc(const MachineFunction &MF) const;
-
-  void eliminateCallFramePseudoInstr(MachineFunction &MF,
-                                     MachineBasicBlock &MBB,
-                                     MachineBasicBlock::iterator I) const;
+  bool trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
+    return true;
+  }
 
   void lowerDynamicAlloc(MachineBasicBlock::iterator II,
                          int SPAdj, RegScavenger *RS) const;

@@ -38,7 +38,6 @@
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include <climits>
 
@@ -102,7 +101,7 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
 
   // Allow the target machine to make final modifications to the function
   // before the frame layout is finalized.
-  TFI->processFunctionBeforeFrameFinalized(Fn);
+  TFI->processFunctionBeforeFrameFinalized(Fn, RS);
 
   // Calculate actual frame offsets for all abstract stack objects...
   calculateFrameObjectOffsets(Fn);
@@ -139,7 +138,6 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
 /// variables for the function's frame information and eliminate call frame
 /// pseudo instructions.
 void PEI::calculateCallsInformation(MachineFunction &Fn) {
-  const TargetRegisterInfo *RegInfo = Fn.getTarget().getRegisterInfo();
   const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
   const TargetFrameLowering *TFI = Fn.getTarget().getFrameLowering();
   MachineFrameInfo *MFI = Fn.getFrameInfo();
@@ -186,7 +184,7 @@ void PEI::calculateCallsInformation(MachineFunction &Fn) {
     // here. The sub/add sp instruction pairs are still inserted, but we don't
     // need to track the SP adjustment for frame index elimination.
     if (TFI->canSimplifyCallFramePseudos(Fn))
-      RegInfo->eliminateCallFramePseudoInstr(Fn, *I->getParent(), I);
+      TFI->eliminateCallFramePseudoInstr(Fn, *I->getParent(), I);
   }
 }
 
@@ -747,7 +745,7 @@ void PEI::replaceFrameIndices(MachineFunction &Fn) {
 
         MachineBasicBlock::iterator PrevI = BB->end();
         if (I != BB->begin()) PrevI = prior(I);
-        TRI.eliminateCallFramePseudoInstr(Fn, *BB, I);
+        TFI->eliminateCallFramePseudoInstr(Fn, *BB, I);
 
         // Visit the instructions created by eliminateCallFramePseudoInstr().
         if (PrevI == BB->end())

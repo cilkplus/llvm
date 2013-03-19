@@ -39,14 +39,11 @@ protected:
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
 
+  void AnalyzeFormalArguments(CCState &State,
+                              const SmallVectorImpl<ISD::InputArg> &Ins) const;
+
 public:
   AMDGPUTargetLowering(TargetMachine &TM);
-
-  virtual SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
-                             bool isVarArg,
-                             const SmallVectorImpl<ISD::InputArg> &Ins,
-                             DebugLoc DL, SelectionDAG &DAG,
-                             SmallVectorImpl<SDValue> &InVals) const;
 
   virtual SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                               bool isVarArg,
@@ -64,6 +61,10 @@ public:
   SDValue LowerIntrinsicLRP(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerMinMax(SDValue Op, SelectionDAG &DAG) const;
   virtual const char* getTargetNodeName(unsigned Opcode) const;
+
+  virtual SDNode *PostISelFolding(MachineSDNode *N, SelectionDAG &DAG) const {
+    return N;
+  }
 
 // Functions defined in AMDILISelLowering.cpp
 public:

@@ -153,8 +153,8 @@ unsigned Attribute::getStackAlignment() const {
 std::string Attribute::getAsString(bool InAttrGrp) const {
   if (!pImpl) return "";
 
-  if (hasAttribute(Attribute::AddressSafety))
-    return "address_safety";
+  if (hasAttribute(Attribute::SanitizeAddress))
+    return "sanitize_address";
   if (hasAttribute(Attribute::AlwaysInline))
     return "alwaysinline";
   if (hasAttribute(Attribute::ByVal))
@@ -171,6 +171,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "nest";
   if (hasAttribute(Attribute::NoAlias))
     return "noalias";
+  if (hasAttribute(Attribute::NoBuiltin))
+    return "nobuiltin";
   if (hasAttribute(Attribute::NoCapture))
     return "nocapture";
   if (hasAttribute(Attribute::NoDuplicate))
@@ -205,10 +207,10 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "sspstrong";
   if (hasAttribute(Attribute::StructRet))
     return "sret";
-  if (hasAttribute(Attribute::ThreadSafety))
-    return "thread_safety";
-  if (hasAttribute(Attribute::UninitializedChecks))
-    return "uninitialized_checks";
+  if (hasAttribute(Attribute::SanitizeThread))
+    return "sanitize_thread";
+  if (hasAttribute(Attribute::SanitizeMemory))
+    return "sanitize_memory";
   if (hasAttribute(Attribute::UWTable))
     return "uwtable";
   if (hasAttribute(Attribute::ZExt))
@@ -384,12 +386,13 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::ReturnsTwice:    return 1 << 29;
   case Attribute::UWTable:         return 1 << 30;
   case Attribute::NonLazyBind:     return 1U << 31;
-  case Attribute::AddressSafety:   return 1ULL << 32;
+  case Attribute::SanitizeAddress: return 1ULL << 32;
   case Attribute::MinSize:         return 1ULL << 33;
   case Attribute::NoDuplicate:     return 1ULL << 34;
   case Attribute::StackProtectStrong: return 1ULL << 35;
-  case Attribute::ThreadSafety:    return 1ULL << 36;
-  case Attribute::UninitializedChecks: return 1ULL << 37;
+  case Attribute::SanitizeThread:  return 1ULL << 36;
+  case Attribute::SanitizeMemory:  return 1ULL << 37;
+  case Attribute::NoBuiltin:       return 1ULL << 38;
   }
   llvm_unreachable("Unsupported attribute type");
 }
@@ -642,7 +645,15 @@ AttributeSet AttributeSet::get(LLVMContext &C, ArrayRef<AttributeSet> Attrs) {
 
 AttributeSet AttributeSet::addAttribute(LLVMContext &C, unsigned Idx,
                                         Attribute::AttrKind Attr) const {
+  if (hasAttribute(Idx, Attr)) return *this;
   return addAttributes(C, Idx, AttributeSet::get(C, Idx, Attr));
+}
+
+AttributeSet AttributeSet::addAttribute(LLVMContext &C, unsigned Idx,
+                                        StringRef Kind) const {
+  llvm::AttrBuilder B;
+  B.addAttribute(Kind);
+  return addAttributes(C, Idx, AttributeSet::get(C, Idx, B));
 }
 
 AttributeSet AttributeSet::addAttributes(LLVMContext &C, unsigned Idx,
@@ -696,6 +707,7 @@ AttributeSet AttributeSet::addAttributes(LLVMContext &C, unsigned Idx,
 
 AttributeSet AttributeSet::removeAttribute(LLVMContext &C, unsigned Idx,
                                            Attribute::AttrKind Attr) const {
+  if (!hasAttribute(Idx, Attr)) return *this;
   return removeAttributes(C, Idx, AttributeSet::get(C, Idx, Attr));
 }
 
@@ -1095,6 +1107,33 @@ bool AttrBuilder::operator==(const AttrBuilder &B) {
       return false;
 
   return Alignment == B.Alignment && StackAlignment == B.StackAlignment;
+}
+
+void AttrBuilder::removeFunctionOnlyAttrs() {
+  removeAttribute(Attribute::NoReturn)
+    .removeAttribute(Attribute::NoUnwind)
+    .removeAttribute(Attribute::ReadNone)
+    .removeAttribute(Attribute::ReadOnly)
+    .removeAttribute(Attribute::NoInline)
+    .removeAttribute(Attribute::AlwaysInline)
+    .removeAttribute(Attribute::OptimizeForSize)
+    .removeAttribute(Attribute::StackProtect)
+    .removeAttribute(Attribute::StackProtectReq)
+    .removeAttribute(Attribute::StackProtectStrong)
+    .removeAttribute(Attribute::NoRedZone)
+    .removeAttribute(Attribute::NoImplicitFloat)
+    .removeAttribute(Attribute::Naked)
+    .removeAttribute(Attribute::InlineHint)
+    .removeAttribute(Attribute::StackAlignment)
+    .removeAttribute(Attribute::UWTable)
+    .removeAttribute(Attribute::NonLazyBind)
+    .removeAttribute(Attribute::ReturnsTwice)
+    .removeAttribute(Attribute::SanitizeAddress)
+    .removeAttribute(Attribute::SanitizeThread)
+    .removeAttribute(Attribute::SanitizeMemory)
+    .removeAttribute(Attribute::MinSize)
+    .removeAttribute(Attribute::NoDuplicate)
+    .removeAttribute(Attribute::NoBuiltin);
 }
 
 AttrBuilder &AttrBuilder::addRawValue(uint64_t Val) {

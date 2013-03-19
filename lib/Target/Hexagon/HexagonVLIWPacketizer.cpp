@@ -17,35 +17,36 @@
 //
 //===----------------------------------------------------------------------===//
 #define DEBUG_TYPE "packets"
-#include "Hexagon.h"
-#include "HexagonMachineFunctionInfo.h"
-#include "HexagonRegisterInfo.h"
-#include "HexagonSubtarget.h"
-#include "HexagonTargetMachine.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/DFAPacketizer.h"
-#include "llvm/CodeGen/LatencyPriorityQueue.h"
-#include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/CodeGen/MachineFunctionAnalysis.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineLoopInfo.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
-#include "llvm/CodeGen/ScheduleHazardRecognizer.h"
+#include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
-#include "llvm/MC/MCInstrItineraries.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Compiler.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineFunctionAnalysis.h"
+#include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/MC/MCInstrItineraries.h"
+#include "llvm/Support/Compiler.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
+#include "Hexagon.h"
+#include "HexagonTargetMachine.h"
+#include "HexagonRegisterInfo.h"
+#include "HexagonSubtarget.h"
+#include "HexagonMachineFunctionInfo.h"
+
 #include <map>
 
 using namespace llvm;
@@ -257,7 +258,7 @@ void HexagonPacketizerList::reserveResourcesForConstExt(MachineInstr* MI) {
 
 bool HexagonPacketizerList::canReserveResourcesForConstExt(MachineInstr *MI) {
   const HexagonInstrInfo *QII = (const HexagonInstrInfo *) TII;
-  assert(QII->isExtended(MI) &&
+  assert((QII->isExtended(MI) || QII->isConstExtended(MI)) &&
          "Should only be called for constant extended instructions");
   MachineFunction *MF = MI->getParent()->getParent();
   MachineInstr *PseudoMI = MF->CreateMachineInstr(QII->get(Hexagon::IMMEXT_i),
@@ -348,17 +349,6 @@ static bool IsSchedBarrier(MachineInstr* MI) {
 
 static bool IsControlFlow(MachineInstr* MI) {
   return (MI->getDesc().isTerminator() || MI->getDesc().isCall());
-}
-
-bool HexagonPacketizerList::isNewValueInst(MachineInstr* MI) {
-  const HexagonInstrInfo *QII = (const HexagonInstrInfo *) TII;
-  if (QII->isNewValueJump(MI))
-    return true;
-
-  if (QII->isNewValueStore(MI))
-    return true;
-
-  return false;
 }
 
 // Function returns true if an instruction can be promoted to the new-value
@@ -2165,7 +2155,8 @@ static bool GetPredicateSense(MachineInstr* MI,
 }
 
 bool HexagonPacketizerList::isDotNewInst(MachineInstr* MI) {
-  if (isNewValueInst(MI))
+  const HexagonInstrInfo *QII = (const HexagonInstrInfo *) TII;
+  if (QII->isNewValueInst(MI))
     return true;
 
   switch (MI->getOpcode()) {
@@ -2893,13 +2884,13 @@ bool HexagonPacketizerList::isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) {
   // dealloc_return and memop always take SLOT0.
   // Arch spec 3.4.4.2
   if (QRI->Subtarget.hasV4TOps()) {
-
-    if (MCIDI.mayStore() && MCIDJ.mayStore() && isNewValueInst(J)) {
+    if (MCIDI.mayStore() && MCIDJ.mayStore() &&
+       (QII->isNewValueInst(J) || QII->isMemOp(J) || QII->isMemOp(I))) {
       Dependence = true;
       return false;
     }
 
-    if (   (QII->isMemOp(J) && MCIDI.mayStore())
+    if ((QII->isMemOp(J) && MCIDI.mayStore())
         || (MCIDJ.mayStore() && QII->isMemOp(I))
         || (QII->isMemOp(J) && QII->isMemOp(I))) {
       Dependence = true;
@@ -3196,7 +3187,7 @@ HexagonPacketizerList::addToPacket(MachineInstr *MI) {
       MachineInstr *nvjMI = MII;
       assert(ResourceTracker->canReserveResources(MI));
       ResourceTracker->reserveResources(MI);
-      if (QII->isExtended(MI) &&
+      if ((QII->isExtended(MI) || QII->isConstExtended(MI)) &&
           !tryAllocateResourcesForConstExt(MI)) {
         endPacket(MBB, MI);
         ResourceTracker->reserveResources(MI);
@@ -3216,7 +3207,7 @@ HexagonPacketizerList::addToPacket(MachineInstr *MI) {
             && (!tryAllocateResourcesForConstExt(nvjMI)
                 || !ResourceTracker->canReserveResources(nvjMI)))
         || // For non-extended instruction, no need to allocate extra 4 bytes.
-        (!QII->isExtended(nvjMI) && 
+        (!QII->isExtended(nvjMI) &&
               !ResourceTracker->canReserveResources(nvjMI)))
       {
         endPacket(MBB, MI);
@@ -3232,7 +3223,7 @@ HexagonPacketizerList::addToPacket(MachineInstr *MI) {
       CurrentPacketMIs.push_back(MI);
       CurrentPacketMIs.push_back(nvjMI);
     } else {
-      if (   QII->isExtended(MI)
+      if (   (QII->isExtended(MI) || QII->isConstExtended(MI))
           && (   !tryAllocateResourcesForConstExt(MI)
               || !ResourceTracker->canReserveResources(MI)))
       {
