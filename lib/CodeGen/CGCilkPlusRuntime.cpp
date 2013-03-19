@@ -575,10 +575,7 @@ static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
 /// Calls to this function is always inlined, as it saves
 /// the current stack/frame pointer values.
 ///
-/// There are two variants of this function, depending on
-/// whether exceptions are enabled during compilation.
-///
-/// With exceptions, it is equivalent to the following C code
+/// It is equivalent to the following C code
 ///
 /// void __cilk_sync(struct __cilkrts_stack_frame *sf) {
 ///   if (sf->flags & CILK_FRAME_UNSYNCHED) {
@@ -592,16 +589,8 @@ static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
 ///   ++sf->worker->pedigree.rank;
 /// }
 ///
-/// Without exceptions, it is equivalent to the following C code
-///
-/// void __cilk_sync(struct __cilkrts_stack_frame *sf) {
-///   if (sf->flags & CILK_FRAME_UNSYNCHED) {
-///     sf->parent_pedigree = sf->worker->pedigree;
-///     SAVE_FLOAT_STATE(*sf);
-///     __cilkrts_sync(sf);
-///   }
-///   ++sf->worker->pedigree.rank;
-/// }
+/// With exceptions disabled in the compiler, the function
+/// does not call __cilkrts_rethrow()
 static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
@@ -616,14 +605,10 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   BasicBlock *Entry = BasicBlock::Create(Ctx, "cilk.sync.test", Fn),
              *SaveState = BasicBlock::Create(Ctx, "cilk.sync.savestate", Fn),
              *SyncCall = BasicBlock::Create(Ctx, "cilk.sync.runtimecall", Fn),
-             *Excepting = 0,
-             *Rethrow = 0,
+             *Excepting = BasicBlock::Create(Ctx, "cilk.sync.excepting", Fn),
+             *Rethrow = CGF.CGM.getLangOpts().Exceptions ?
+                          BasicBlock::Create(Ctx, "cilk.sync.rethrow", Fn) : 0,
              *Exit = BasicBlock::Create(Ctx, "cilk.sync.end", Fn);
-
-  if (CGF.CGM.getLangOpts().CXXExceptions) {
-    Excepting = BasicBlock::Create(Ctx, "cilk.sync.excepting", Fn);
-    Rethrow = BasicBlock::Create(Ctx, "cilk.sync.rethrow", Fn);
-  }
 
   // Entry
   {
@@ -649,14 +634,10 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
                 WorkerBuilder::pedigree),
       SF, StackFrameBuilder::parent_pedigree);
 
-    if (CGF.CGM.getLangOpts().Exceptions) {
-      // if (!CILK_SETJMP(sf.ctx))
-      Value *C = EmitCilkSetJmp(B, SF, CGF);
-      C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
-      B.CreateCondBr(C, SyncCall, Excepting);
-    } else {
-      B.CreateBr(SyncCall);
-    }
+    // if (!CILK_SETJMP(sf.ctx))
+    Value *C = EmitCilkSetJmp(B, SF, CGF);
+    C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
+    B.CreateCondBr(C, SyncCall, Excepting);
   }
 
   // SyncCall
@@ -665,13 +646,13 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
 
     // __cilkrts_sync(&sf);
     B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
+    B.CreateBr(Excepting);
+  }
 
-    // Don't create exception handling code when exceptions are disabled
+  // Excepting
+  {
+    CGBuilderTy B(Excepting);
     if (CGF.CGM.getLangOpts().Exceptions) {
-      B.CreateBr(Excepting);
-
-      // Excepting
-      CGBuilderTy B(Excepting);
       Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
       Flags = B.CreateAnd(Flags,
                           ConstantInt::get(Flags->getType(),
@@ -679,16 +660,16 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
       Value *Zero = ConstantInt::get(Flags->getType(), 0);
       Value *C = B.CreateICmpEQ(Flags, Zero);
       B.CreateCondBr(C, Exit, Rethrow);
-
-      // Rethrow
-      {
-        CGBuilderTy B(Rethrow);
-        B.CreateCall(CILKRTS_FUNC(rethrow, CGF), SF)->setDoesNotReturn();
-        B.CreateUnreachable();
-      }
     } else {
       B.CreateBr(Exit);
     }
+  }
+
+  // Rethrow
+  if (CGF.CGM.getLangOpts().Exceptions) {
+    CGBuilderTy B(Rethrow);
+    B.CreateCall(CILKRTS_FUNC(rethrow, CGF), SF)->setDoesNotReturn();
+    B.CreateUnreachable();
   }
 
   // Exit
