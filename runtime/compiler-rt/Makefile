@@ -24,6 +24,7 @@ PROJ_resources := $(DESTDIR)$(PROJ_prefix)/lib/clang/$(CLANG_VERSION)
 
 ResourceLibDir := $(ResourceDir)/lib
 PROJ_resources_lib := $(PROJ_resources)/lib
+IncDir := $(PROJ_OBJ_ROOT)/$(BuildMode)/include
 
 # Expect compiler-rt to be in llvm/projects/compiler-rt
 COMPILERRT_SRC_ROOT := $(LLVM_SRC_ROOT)/projects/compiler-rt
@@ -136,6 +137,7 @@ BuildRuntimeLibraries:
 	  ProjSrcRoot=$(COMPILERRT_SRC_ROOT) \
 	  ProjObjRoot=$(PROJ_OBJ_DIR) \
 	  CC="$(ToolDir)/clang" \
+	  CXX="$(ToolDir)/clang++" \
 	  LLVM_ANDROID_TOOLCHAIN_DIR="$(LLVM_ANDROID_TOOLCHAIN_DIR)" \
 	  $(RuntimeDirs:%=clang_%)
 .PHONY: BuildRuntimeLibraries
@@ -205,9 +207,76 @@ RuntimeLibraryInstall.$1: \
 endef
 $(foreach lib,$(RuntimeDirs), $(eval $(call RuntimeLibraryTemplate,$(lib))))
 
+# Rules for building and installing the Cilk runtime.
+CilkRuntimeLibrary.darwin.Dir := cilk_osx
+CilkRuntimeLibrary.linux.Dir := cilk-$(ARCH)
+CilkRuntimeLibrary.linux.Configs += libcilkrts.so
+CilkRuntimeLibrary.darwin.Configs += libcilkrts.dylib
+define CilkTemplate
+$(PROJ_OBJ_DIR)/clang_$1/%/libcompiler_rt.so: BuildRuntimeLibraries
+	@true
+$(PROJ_OBJ_DIR)/clang_$1/%/libcompiler_rt.dylib: BuildRuntimeLibraries
+	@true
+$(PROJ_OBJ_DIR)/clang_$1/%/include: BuildRuntimeLibraries
+	@true
+
+# Place in build directory
+$(LibDir)/libcilkrts.so.5: $(PROJ_OBJ_DIR)/clang_$1/$(CilkRuntimeLibrary.$1.Dir)/libcompiler_rt.so
+	$(Echo) Copying runtime library $$< to build dir
+	$(Verb) cp $$< $$@
+$(LibDir)/libcilkrts.5.dylib: $(PROJ_OBJ_DIR)/clang_$1/$(CilkRuntimeLibrary.$1.Dir)/libcompiler_rt.dylib
+	$(Echo) Copying runtime library $$< to build dir
+	$(Verb) cp $$< $$@
+	$(Echo) Fixing LC_ID_DYLIB of $$@
+	$(Verb) install_name_tool $$@ -id $$@
+$(LibDir)/libcilkrts.so: $(LibDir)/libcilkrts.so.5
+	$(Echo) Symlinking $$@ to $$(notdir $$<)
+	$(Verb) ln -sf $$(notdir $$<) $$@
+$(LibDir)/libcilkrts.dylib: $(LibDir)/libcilkrts.5.dylib
+	$(Echo) Symlinking $$@ to $$(notdir $$<)
+	$(Verb) ln -sf $$(notdir $$<) $$@
+
+# Cilk headers
+$(IncDir)/cilk: $(PROJ_OBJ_DIR)/clang_$1/$(CilkRuntimeLibrary.$1.Dir)/include $(IncDir)/cilk/.dir
+	$(Echo) Copying $$< to build dir
+	$(Verb) cp $$(wildcard $$</*) $(IncDir)/cilk/
+
+CilkRuntimeLibrary.$1: \
+		$(CilkRuntimeLibrary.$1.Configs:%=$(LibDir)/%) \
+		$(IncDir)/cilk
+.PHONY: CilkRuntimeLibrary.$1
+
+# Install
+$(PROJ_libdir)/libcilkrts.so.5: $(LibDir)/libcilkrts.so.5
+	$(Echo) Installing compiler runtime library: $$(notdir $$<)
+	$(Verb) $(DataInstall) $$< $(PROJ_libdir)/
+$(PROJ_libdir)/libcilkrts.so: $(PROJ_libdir)/libcilkrts.so.5
+	$(Echo) Symlinking $$@ to $$(notdir $$<)
+	$(Verb) ln -sf $$(notdir $$<) $$@
+$(PROJ_libdir)/libcilkrts.5.dylib: $(LibDir)/libcilkrts.5.dylib
+	$(Echo) Installing compiler runtime library: $$(notdir $$<)
+	$(Verb) $(DataInstall) $$< $(PROJ_libdir)/
+$(PROJ_libdir)/libcilkrts.dylib: $(PROJ_libdir)/libcilkrts.5.dylib
+	$(Echo) Symlinking $$@ to $$(notdir $$<)
+	$(Verb) ln -sf $$(notdir $$<) $$@
+
+# Install Cilk headers
+$(PROJ_includedir)/cilk: $(IncDir)/cilk $(PROJ_includedir)/cilk/.dir
+	$(Echo) Installing $(IncDir)/cilk
+	$(foreach file,$(wildcard $(IncDir)/cilk/*),
+		$(Verb) $(DataInstall) $(file) $(PROJ_includedir)/cilk/)
+
+# Rule to install runtime libraries.
+CilkRuntimeLibraryInstall.$1: \
+		$(CilkRuntimeLibrary.$1.Configs:%=$(PROJ_libdir)/%) \
+		$(PROJ_includedir)/cilk
+.PHONY: CilkRuntimeLibraryInstall.$1
+endef
+$(foreach lib,$(RuntimeDirs), $(eval $(call CilkTemplate,$(lib))))
+
 # Hook into the standard Makefile rules.
-all-local:: $(RuntimeDirs:%=RuntimeLibrary.%)
-install-local:: $(RuntimeDirs:%=RuntimeLibraryInstall.%)
+all-local:: $(RuntimeDirs:%=RuntimeLibrary.%) $(RuntimeDirs:%=CilkRuntimeLibrary.%)
+install-local:: $(RuntimeDirs:%=RuntimeLibraryInstall.%)  $(RuntimeDirs:%=CilkRuntimeLibraryInstall.%)
 clean-local:: CleanRuntimeLibraries
 
 endif
