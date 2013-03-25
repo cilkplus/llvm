@@ -623,11 +623,11 @@ public:
     FieldDecl *getReceiverTmpFieldDecl() const { return ReceiverTmpFieldDecl; }
 
     bool isThisParmVarDecl(const NamedDecl *V) const {
-      return V == ThisParmVarDecl;
+      return V && V == ThisParmVarDecl;
     }
 
     bool isReceiverDecl(const NamedDecl *V) const {
-      return V == ReceiverDecl;
+      return V && V == ReceiverDecl;
     }
 
     llvm::Value *getReceiverAddr() const { return ReceiverAddr; }
