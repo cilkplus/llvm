@@ -177,3 +177,5 @@ def CilkSyncStmt : Stmt;
 
 def CapturedStmt : Stmt<1>;
 def CilkSpawnCapturedStmt : DStmt<CapturedStmt>;
+
+def CilkForStmt : Stmt;

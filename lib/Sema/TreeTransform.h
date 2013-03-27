@@ -9358,6 +9358,13 @@ TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
 
 template<typename Derived>
 StmtResult
+TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
+  // FIXME: not implemented yet
+  return Owned(S);
+}
+
+template<typename Derived>
+StmtResult
 TreeTransform<Derived>::TransformCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
   return Owned(S);
 }

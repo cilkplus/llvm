@@ -1122,6 +1122,7 @@ public:
 /// specified in the source.
 ///
 class ForStmt : public Stmt {
+protected:
   enum { INIT, CONDVAR, COND, INC, BODY, END_EXPR };
   Stmt* SubExprs[END_EXPR]; // SubExprs[INIT] is an expression or declstmt.
   SourceLocation ForLoc;
@@ -1133,6 +1134,8 @@ public:
 
   /// \brief Build an empty for statement.
   explicit ForStmt(EmptyShell Empty) : Stmt(ForStmtClass, Empty) { }
+
+  explicit ForStmt(StmtClass SC, EmptyShell Empty) : Stmt(SC, Empty) { }
 
   Stmt *getInit() { return SubExprs[INIT]; }
 
@@ -2052,6 +2055,24 @@ public:
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CilkSpawnCapturedStmtClass;
   }
+};
+
+/// CilkForStmt - This represents a '_Cilk_for (init;cond;inc)' stmt.
+/// Derives from ForStmt.
+///
+class CilkForStmt : public ForStmt {
+public:
+  CilkForStmt(ASTContext &C, Stmt *Init, Expr *Cond, VarDecl *condVar, Expr *Inc,
+          Stmt *Body, SourceLocation FL, SourceLocation LP, SourceLocation RP)
+  : ForStmt(C, Init, Cond, condVar, Inc, Body, FL, LP, RP) { }
+
+  /// \brief Build an empty for statement.
+  explicit CilkForStmt(EmptyShell Empty) : ForStmt(CilkForStmtClass, Empty) { }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CilkForStmtClass;
+  }
+
 };
 
 }  // end namespace clang

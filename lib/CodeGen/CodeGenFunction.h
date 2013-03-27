@@ -2217,6 +2217,7 @@ public:
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
   void EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S);
   void EmitCapturedStmt(const CapturedStmt &S);
+  void EmitCilkForStmt(const CilkForStmt &S);
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//

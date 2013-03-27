@@ -1544,6 +1544,19 @@ void ASTStmtWriter::VisitCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
   Code = serialization::STMT_CILKSPAWN_CAPTURED;
 }
 
+void ASTStmtWriter::VisitCilkForStmt(CilkForStmt *S) {
+  VisitStmt(S);
+  Writer.AddStmt(S->getInit());
+  Writer.AddStmt(S->getCond());
+  Writer.AddDeclRef(S->getConditionVariable(), Record);
+  Writer.AddStmt(S->getInc());
+  Writer.AddStmt(S->getBody());
+  Writer.AddSourceLocation(S->getForLoc(), Record);
+  Writer.AddSourceLocation(S->getLParenLoc(), Record);
+  Writer.AddSourceLocation(S->getRParenLoc(), Record);
+  Code = serialization::STMT_CILK_FOR;
+}
+
 //===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements.
 //===----------------------------------------------------------------------===//

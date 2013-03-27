@@ -172,6 +172,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::CilkSpawnCapturedStmtClass:
     EmitCilkSpawnCapturedStmt(cast<CilkSpawnCapturedStmt>(*S));
     break;
+  case Stmt::CilkForStmtClass:
+    EmitCilkForStmt(cast<CilkForStmt>(*S));
+    break;
   }
 }
 
@@ -1723,6 +1726,12 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
 void
 CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
   CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
+}
+
+void
+CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
+  // FIXME: not implemented yet
+  llvm_unreachable("not implemented yet");
 }
 
 static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
