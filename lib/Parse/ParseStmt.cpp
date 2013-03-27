@@ -62,6 +62,7 @@ using namespace clang;
 ///         while-statement
 ///         do-statement
 ///         for-statement
+///         grainsize-pragma[opt] cilk-for-statement
 ///
 ///       expression-statement:
 ///         expression[opt] ';'
@@ -291,9 +292,23 @@ Retry:
     return StmtEmpty();
 
   case tok::kw__Cilk_sync:
+    if (!getLangOpts().CilkPlus) {
+      Diag(Tok, diag::err_cilkplus_disable);
+      SkipUntil(tok::semi);
+      return StmtError();
+    }
+
     Res = Actions.ActOnCilkSyncStmt(ConsumeToken());
     SemiError = "_Cilk_sync";
     break;
+  case tok::kw__Cilk_for:
+    if (!getLangOpts().CilkPlus) {
+      Diag(Tok, diag::err_cilkplus_disable);
+      SkipUntil(tok::semi);
+      return StmtError();
+    }
+
+    return ParseCilkForStmt();
   }
 
   // If we reached this code, the statement must end in a semicolon.
@@ -2266,4 +2281,160 @@ void Parser::ParseMicrosoftIfExistsStatement(StmtVector &Stmts) {
       Stmts.push_back(R.release());
   }
   Braces.consumeClose();
+}
+
+/// ParseCilkForStatement
+///       cilk-for-statement:
+/// [C]     '_Cilk_for' '(' assignment-expr';' condition ';' expr ')' stmt
+/// [C++]   '_Cilk_for' '(' for-init-stmt condition ';' expr ')' stmt
+StmtResult Parser::ParseCilkForStmt() {
+  assert(Tok.is(tok::kw__Cilk_for) && "Not a Cilk for stmt!");
+  SourceLocation CilkForLoc = ConsumeToken();  // eat the '_Cilk_for'.
+
+  if (Tok.isNot(tok::l_paren)) {
+    Diag(Tok, diag::err_expected_lparen_after) << "_Cilk_for";
+    SkipUntil(tok::semi);
+    return StmtError();
+  }
+
+  bool C99orCXXorObjC = getLangOpts().C99 || getLangOpts().CPlusPlus ||
+                        getLangOpts().ObjC1;
+
+  // Start the loop scope.
+  //
+  // A program contains a return, break or goto statement that would transfer
+  // control into or out of a _Cilk_for loop is ill-formed.
+  //
+  unsigned ScopeFlags = Scope::ContinueScope;
+  if (C99orCXXorObjC)
+    ScopeFlags |= Scope::DeclScope | Scope::ControlScope;
+
+  ParseScope CilkForScope(this, ScopeFlags);
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  if (Tok.is(tok::code_completion)) {
+    Actions.CodeCompleteOrdinaryName(getCurScope(),
+                                     C99orCXXorObjC ? Sema::PCC_ForInit
+                                                    : Sema::PCC_Expression);
+    cutOffParsing();
+    return StmtError();
+  }
+
+  ParsedAttributesWithRange attrs(AttrFactory);
+  MaybeParseCXX11Attributes(attrs);
+
+  // '_Cilk_for' '(' for-init-stmt
+  // '_Cilk_for' '(' assignment-expr;
+  StmtResult FirstPart;
+
+  if (Tok.is(tok::semi)) {  // _Cilk_for (;
+    ProhibitAttributes(attrs);
+    // no control variable declaration initialization, eat the ';'.
+    Diag(Tok, diag::err_cilk_for_missing_control_variable);
+    ConsumeToken();
+  } else if (isCilkForInitDeclaration()) {  // _Cilk_for (int i = 0;
+    // Parse declaration, which eats the ';'.
+    if (!C99orCXXorObjC)   // Use of C99-style for loops in C90 mode?
+      Diag(Tok, diag::ext_c99_variable_decl_in_for_loop);
+
+    SourceLocation DeclStart = Tok.getLocation();
+    SourceLocation DeclEnd;
+    StmtVector Stmts;
+
+    // Still use Declarator::ForContext. A new enum item CilkForContext
+    // may be needed for extra checks.
+    DeclGroupPtrTy DG = ParseSimpleDeclaration(Stmts, Declarator::ForContext,
+                                               DeclEnd, attrs,
+                                               /*RequireSemi*/false,
+                                               /*ForRangeInit*/0);
+    FirstPart = Actions.ActOnDeclStmt(DG, DeclStart, Tok.getLocation());
+
+    if(Tok.is(tok::semi))
+      ConsumeToken(); // Eat the ';'.
+    else
+      Diag(Tok, diag::err_cilk_for_missing_semi);
+  } else {
+    ProhibitAttributes(attrs);
+    ExprResult E = ParseExpression();
+
+    if (!E.isInvalid())
+      FirstPart = Actions.ActOnExprStmt(E);
+
+    if (Tok.is(tok::semi))
+      ConsumeToken(); // Eat the ';'
+    else if (!E.isInvalid())
+      Diag(Tok, diag::err_cilk_for_missing_semi);
+    else {
+      // Skip until semicolon or rparen, don't consume it.
+      SkipUntil(tok::r_paren, true, true);
+      if (Tok.is(tok::semi))
+        ConsumeToken();
+    }
+  }
+
+  // '_Cilk_for' '(' for-init-stmt condition ;
+  // '_Cilk_for' '(' assignment-expr; condition ;
+  FullExprArg SecondPart(Actions);
+  FullExprArg ThirdPart(Actions);
+
+  if (Tok.is(tok::r_paren)) { // _Cilk_for (...;)
+    Diag(Tok, diag::err_cilk_for_missing_condition);
+    Diag(Tok, diag::err_cilk_for_missing_increment);
+  } else {
+    if (Tok.is(tok::semi)) {  // _Cilk_for (...;;
+      // No condition part.
+      Diag(Tok, diag::err_cilk_for_missing_condition);
+      ConsumeToken(); // Eat the ';'
+    } else {
+      ExprResult E = ParseExpression();
+      if (!E.isInvalid())
+        E = Actions.ActOnBooleanCondition(getCurScope(), CilkForLoc, E.get());
+      SecondPart = Actions.MakeFullExpr(E.get(), CilkForLoc);
+
+      if (Tok.isNot(tok::semi)) {
+        if (!E.isInvalid())
+          Diag(Tok, diag::err_cilk_for_missing_semi);
+        else
+          // Skip until semicolon or rparen, don't consume it.
+          SkipUntil(tok::r_paren, true, true);
+      }
+
+      if (Tok.is(tok::semi))
+        ConsumeToken();
+    }
+
+    // Parse the third part.
+    if (Tok.is(tok::r_paren)) { // _Cilk_for (...;...;)
+      // No increment part
+      Diag(Tok, diag::err_cilk_for_missing_increment);
+    } else {
+      ExprResult E = ParseExpression();
+      // FIXME: The C++11 standard doesn't actually say that this is a
+      // discarded-value expression, but it clearly should be.
+      ThirdPart = Actions.MakeFullDiscardedValueExpr(E.take());
+    }
+  }
+
+  // Match the ')'.
+  T.consumeClose();
+
+  // See comments in ParseForStatement.
+  ParseScope InnerScope(this, Scope::DeclScope,
+                        C99orCXXorObjC && Tok.isNot(tok::l_brace));
+
+  // Read the body statement.
+  StmtResult Body(ParseStatement());
+
+  // Pop the body scope if needed.
+  InnerScope.Exit();
+
+  // Leave the for-scope.
+  CilkForScope.Exit();
+
+  if (Body.isInvalid())
+    return StmtError();
+
+  return StmtEmpty();
 }

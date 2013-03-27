@@ -772,7 +772,23 @@ def err_seh___except_filter : Error<
 
 def err_seh___finally_block : Error<
   "%0 only allowed in __finally block">;
-  
+
+// Cilk Plus
+def err_cilkplus_disable: Error<
+  "Cilk Plus support disabled - compile with -fcilkplus">;
+
+def err_cilk_for_missing_control_variable: Error<
+  "missing control variable declaration and initialization in '_Cilk_for'">;
+
+def err_cilk_for_missing_condition: Error<
+  "missing loop condition expression in '_Cilk_for'">;
+
+def err_cilk_for_missing_increment: Error<
+  "missing loop increment expression in '_Cilk_for'">;
+
+def err_cilk_for_missing_semi: Error<
+  "expected ';' in '_Cilk_for'">;
+
 } // end of Parse Issue category.
 
 let CategoryName = "Modules Issue" in {

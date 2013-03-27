@@ -1467,6 +1467,7 @@ private:
   StmtResult ParseReturnStatement();
   StmtResult ParseAsmStatement(bool &msAsm);
   StmtResult ParseMicrosoftAsmStatement(SourceLocation AsmLoc);
+  StmtResult ParseCilkForStmt();
 
   /// \brief Describes the behavior that should be taken for an __if_exists
   /// block.
@@ -1656,6 +1657,15 @@ private:
   bool isForInitDeclaration() {
     if (getLangOpts().CPlusPlus)
       return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/true);
+    return isDeclarationSpecifier(true);
+  }
+
+  /// isCilkForInitDeclaration - Disambiguates between a declaration or an
+  /// expression in the context of 'for-init-stmt' part of a '_Cilk_for'
+  /// statement. Returns true for declaration, false for expression.
+  bool isCilkForInitDeclaration() {
+    if (getLangOpts().CPlusPlus)
+      return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false);
     return isDeclarationSpecifier(true);
   }
 

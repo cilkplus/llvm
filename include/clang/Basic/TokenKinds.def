@@ -216,7 +216,6 @@ PUNCTUATOR(greatergreatergreater, ">>>")
 //   KEYOPENCL  - This is a keyword in OpenCL
 //   KEYALTIVEC - This is a keyword in AltiVec
 //   KEYBORLAND - This is a keyword if Borland extensions are enabled
-//   KEYCILKPLUS - This is a keyword if Cilk Plus extensions are enabled
 //   BOOLSUPPORT - This is a keyword if 'bool' is a built-in type
 //   WCHARSUPPORT - This is a keyword if 'wchar_t' is a built-in type
 //
@@ -352,9 +351,9 @@ KEYWORD(typeof                      , KEYGNU)
 KEYWORD(L__FUNCTION__               , KEYMS)
 
 // Intel Extensions (in impl-reserved namespace)
-KEYWORD(_Cilk_spawn                 , KEYCILKPLUS)
-KEYWORD(_Cilk_sync                  , KEYCILKPLUS)
-KEYWORD(_Cilk_for                   , KEYCILKPLUS)
+KEYWORD(_Cilk_spawn                 , KEYALL)
+KEYWORD(_Cilk_sync                  , KEYALL)
+KEYWORD(_Cilk_for                   , KEYALL)
 
 // GNU and MS Type Traits
 KEYWORD(__has_nothrow_assign        , KEYCXX)

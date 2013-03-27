@@ -1233,6 +1233,12 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
   //   _Cilk_spawn[opt] postfix-expression '(' argument-expression-list[opt] ')'
   case tok::kw__Cilk_spawn: {
     SourceLocation SpawnLoc = ConsumeToken();
+    if (!getLangOpts().CilkPlus) {
+      Diag(SpawnLoc, diag::err_cilkplus_disable);
+      SkipUntil(tok::semi, /*StopAtSemi*/true, /*DontComsume*/true);
+      return ExprError();
+    }
+
     Res = ParseCastExpression(false);
     if (Res.isInvalid()) return ExprError();
     return Actions.ActOnCilkSpawnCall(SpawnLoc, Res.release());
