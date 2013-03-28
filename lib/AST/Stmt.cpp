@@ -1055,3 +1055,13 @@ bool CapturedStmt::capturesVariable(const VarDecl *variable) const {
 
   return false;
 }
+
+CilkForStmt::CilkForStmt(ASTContext &C, Stmt *Init, Expr *Cond, Expr *Inc,
+                         Stmt *Body, SourceLocation FL, SourceLocation LP,
+                         SourceLocation RP)
+  : Stmt(CilkForStmtClass), CilkForLoc(FL), LParenLoc(LP), RParenLoc(RP) {
+  SubExprs[INIT] = Init;
+  SubExprs[COND] = reinterpret_cast<Stmt *>(Cond);
+  SubExprs[INC] = reinterpret_cast<Stmt *>(Inc);
+  SubExprs[BODY] = Body;
+}

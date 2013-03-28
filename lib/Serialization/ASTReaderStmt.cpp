@@ -1563,16 +1563,7 @@ void ASTStmtReader::VisitCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
 }
 
 void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
-  VisitStmt(S);
-  S->setInit(Reader.ReadSubStmt());
-  S->setCond(Reader.ReadSubExpr());
-  S->setConditionVariable(Reader.getContext(),
-                          ReadDeclAs<VarDecl>(Record, Idx));
-  S->setInc(Reader.ReadSubExpr());
-  S->setBody(Reader.ReadSubStmt());
-  S->setForLoc(ReadSourceLocation(Record, Idx));
-  S->setLParenLoc(ReadSourceLocation(Record, Idx));
-  S->setRParenLoc(ReadSourceLocation(Record, Idx));
+  llvm_unreachable("not implemented yet");
 }
 
 //===----------------------------------------------------------------------===//

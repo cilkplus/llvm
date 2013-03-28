@@ -2433,8 +2433,12 @@ StmtResult Parser::ParseCilkForStmt() {
   // Leave the for-scope.
   CilkForScope.Exit();
 
-  if (Body.isInvalid())
+  if (FirstPart.isInvalid() || !FirstPart.get() || !SecondPart.get() ||
+      !ThirdPart.get() || Body.isInvalid() || !Body.get())
     return StmtError();
 
-  return StmtEmpty();
+  return Actions.ActOnCilkForStmt(CilkForLoc, T.getOpenLocation(),
+                                  FirstPart.take(), SecondPart,
+                                  ThirdPart, T.getCloseLocation(),
+                                  Body.take());
 }

@@ -3444,3 +3444,21 @@ StmtResult Sema::ActOnCilkSpawnStmt(Stmt *S) {
   BuildCilkSpawnStmt(*this, S);
   return Owned(S);
 }
+
+StmtResult
+Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
+                       Stmt *First, FullExprArg Second, FullExprArg Third,
+                       SourceLocation RParenLoc, Stmt *Body) {
+  Expr *Increment = Third.release().takeAs<Expr>();
+
+  DiagnoseUnusedExprResult(First);
+  DiagnoseUnusedExprResult(Increment);
+  DiagnoseUnusedExprResult(Body);
+
+  if (isa<NullStmt>(Body))
+    getCurCompoundScope().setHasEmptyLoopBodies();
+
+  return Owned(new (Context) CilkForStmt(Context, First, Second.get(),
+                                         Third.get(), Body, CilkForLoc,
+                                         LParenLoc, RParenLoc));
+}

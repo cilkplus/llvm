@@ -1122,7 +1122,6 @@ public:
 /// specified in the source.
 ///
 class ForStmt : public Stmt {
-protected:
   enum { INIT, CONDVAR, COND, INC, BODY, END_EXPR };
   Stmt* SubExprs[END_EXPR]; // SubExprs[INIT] is an expression or declstmt.
   SourceLocation ForLoc;
@@ -2057,22 +2056,57 @@ public:
   }
 };
 
-/// CilkForStmt - This represents a '_Cilk_for (init;cond;inc)' stmt.
-/// Derives from ForStmt.
-///
-class CilkForStmt : public ForStmt {
-public:
-  CilkForStmt(ASTContext &C, Stmt *Init, Expr *Cond, VarDecl *condVar, Expr *Inc,
-          Stmt *Body, SourceLocation FL, SourceLocation LP, SourceLocation RP)
-  : ForStmt(C, Init, Cond, condVar, Inc, Body, FL, LP, RP) { }
+/// \brief This represents a Cilk for statement.
+/// \code
+/// _Cilk_for (int i = 0; i < n; ++i) {
+///   // ...
+/// }
+/// \endcode
+class CilkForStmt : public Stmt {
+  enum { INIT, COND, INC, BODY, END_EXPR };
+  Stmt *SubExprs[END_EXPR]; // SubExprs[INIT] is an expression or declstmt.
+  SourceLocation CilkForLoc;
+  SourceLocation LParenLoc, RParenLoc;
 
-  /// \brief Build an empty for statement.
-  explicit CilkForStmt(EmptyShell Empty) : ForStmt(CilkForStmtClass, Empty) { }
+public:
+  CilkForStmt(ASTContext &C, Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body,
+              SourceLocation FL, SourceLocation LP, SourceLocation RP);
+
+  /// \brief Build an empty Cilk for statement.
+  explicit CilkForStmt(EmptyShell Empty) : Stmt(CilkForStmtClass, Empty) { }
+
+  CilkForStmt(StmtClass SC, EmptyShell Empty) : Stmt(SC, Empty) { }
+
+  Stmt *getInit() { return SubExprs[INIT]; }
+  Expr *getCond() { return reinterpret_cast<Expr *>(SubExprs[COND]); }
+  Expr *getInc()  { return reinterpret_cast<Expr *>(SubExprs[INC]); }
+  Stmt *getBody() { return SubExprs[BODY]; }
+
+  const Stmt *getInit() const { return SubExprs[INIT]; }
+  const Expr *getCond() const { return reinterpret_cast<Expr *>(SubExprs[COND]); }
+  const Expr *getInc()  const { return reinterpret_cast<Expr *>(SubExprs[INC]); }
+  const Stmt *getBody() const { return SubExprs[BODY]; }
+
+  SourceLocation getCilkForLoc() const LLVM_READONLY { return CilkForLoc; }
+  SourceLocation getLParenLoc() const LLVM_READONLY { return LParenLoc; }
+  SourceLocation getRParenLoc() const LLVM_READONLY { return RParenLoc; }
+
+  void setCilkForLoc(SourceLocation L) { CilkForLoc = L; }
+  void setLParenLoc(SourceLocation L) { LParenLoc = L; }
+  void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+
+  SourceLocation getLocStart() const LLVM_READONLY { return CilkForLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY {
+    return SubExprs[BODY]->getLocEnd();
+  }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CilkForStmtClass;
   }
 
+  child_range children() {
+    return child_range(&SubExprs[0], &SubExprs[0] + END_EXPR);
+  }
 };
 
 }  // end namespace clang

@@ -1869,7 +1869,7 @@ void StmtPrinter::VisitCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *Node) {
 }
 
 void StmtPrinter::VisitCilkForStmt(CilkForStmt *Node) {
-  Indent() << "Cilk_for (";
+  Indent() << "_Cilk_for (";
   if (Node->getInit()) {
     if (DeclStmt *DS = dyn_cast<DeclStmt>(Node->getInit()))
       PrintRawDeclStmt(DS);
