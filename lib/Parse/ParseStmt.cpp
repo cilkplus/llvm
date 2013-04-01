@@ -2379,6 +2379,9 @@ StmtResult Parser::ParseCilkForStmt() {
   FullExprArg SecondPart(Actions);
   FullExprArg ThirdPart(Actions);
 
+  // True while inside the Cilk for variable capturing region.
+  bool InCapturingRegion = false;
+
   if (Tok.is(tok::r_paren)) { // _Cilk_for (...;)
     Diag(Tok, diag::err_cilk_for_missing_condition);
     Diag(Tok, diag::err_cilk_for_missing_increment);
@@ -2410,6 +2413,35 @@ StmtResult Parser::ParseCilkForStmt() {
       // No increment part
       Diag(Tok, diag::err_cilk_for_missing_increment);
     } else {
+      // Enter the variable capturing region for both Cilk for
+      // increment and body.
+      //
+      // For the following Cilk for loop,
+      //
+      // _Cilk_for (T x = a;  x < b; x += c) {
+      //   // body
+      // }
+      //
+      // The outlined function would look like
+      //
+      // void helper(Context, low, high) {
+      //   _index_var = low
+      //   x += low * c
+      //
+      //   while (_index_var < high) {
+      //     // body
+      //     x += c                // loop increment
+      //     _index_var++;
+      //   }
+      // }
+      //
+      // The loop increment would be part of the outlined function,
+      // together with the loop body. Hence, we enter a capturing region
+      // before parsing the loop increment.
+      //
+      Actions.ActOnCilkForDeclBegin(CilkForLoc, getCurScope());
+      InCapturingRegion = true;
+
       ExprResult E = ParseExpression();
       // FIXME: The C++11 standard doesn't actually say that this is a
       // discarded-value expression, but it clearly should be.
@@ -2420,9 +2452,13 @@ StmtResult Parser::ParseCilkForStmt() {
   // Match the ')'.
   T.consumeClose();
 
-  // See comments in ParseForStatement.
-  ParseScope InnerScope(this, Scope::DeclScope,
-                        C99orCXXorObjC && Tok.isNot(tok::l_brace));
+  // Enter the variable capturing region for Cilk for body.
+  if (!InCapturingRegion)
+    Actions.ActOnCilkForDeclBegin(CilkForLoc, getCurScope());
+
+  // Cannot use goto to exit the Cilk for body.
+  ParseScope InnerScope(this, Scope::BlockScope | Scope::FnScope |
+                              Scope::DeclScope | Scope::ContinueScope);
 
   // Read the body statement.
   StmtResult Body(ParseStatement());
@@ -2434,8 +2470,13 @@ StmtResult Parser::ParseCilkForStmt() {
   CilkForScope.Exit();
 
   if (FirstPart.isInvalid() || !FirstPart.get() || !SecondPart.get() ||
-      !ThirdPart.get() || Body.isInvalid() || !Body.get())
+      !ThirdPart.get() || Body.isInvalid() || !Body.get()) {
+    Actions.ActOnCilkForDeclError();
     return StmtError();
+  }
+
+  // Exit from the variable capturing region.
+  Actions.ActOnCilkForDeclEnd();
 
   return Actions.ActOnCilkForStmt(CilkForLoc, T.getOpenLocation(),
                                   FirstPart.take(), SecondPart,

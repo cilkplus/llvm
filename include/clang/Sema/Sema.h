@@ -175,6 +175,7 @@ namespace sema {
   class AccessedEntity;
   class BlockScopeInfo;
   class CapturingScopeInfo;
+  class CilkForScopeInfo;
   class CompoundScopeInfo;
   class DelayedDiagnostic;
   class DelayedDiagnosticPool;
@@ -908,6 +909,8 @@ public:
   void PushLambdaScope(CXXRecordDecl *Lambda, CXXMethodDecl *CallOperator);
   void PushParallelRegionScope(Scope *RegionScope, FunctionDecl *FD,
                                RecordDecl *RD);
+  void PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD);
+
   void PopFunctionScopeInfo(const sema::AnalysisBasedWarnings::Policy *WP =0,
                             const Decl *D = 0, const BlockExpr *blkExpr = 0);
 
@@ -930,6 +933,9 @@ public:
 
   /// \brief Retrieve the current parallel region, if any.
   sema::ParallelRegionScopeInfo *getCurParallelRegion();
+
+  /// \brief Retrieve the current cilk for region, if any.
+  sema::CilkForScopeInfo *getCurCilkFor();
 
   /// WeakTopLevelDeclDecls - access to \#pragma weak-generated Decls
   SmallVector<Decl*,2> &WeakTopLevelDecls() { return WeakTopLevelDecl; }
@@ -2779,6 +2785,10 @@ public:
                               FullExprArg Third,
                               SourceLocation RParenLoc,
                               Stmt *Body);
+
+  void ActOnCilkForDeclBegin(SourceLocation CilkForLoc, Scope *CurScope);
+  CilkForDecl *ActOnCilkForDeclEnd();
+  void ActOnCilkForDeclError(bool IsInstantiation = false);
 
   StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
                              bool IsVolatile, unsigned NumOutputs,

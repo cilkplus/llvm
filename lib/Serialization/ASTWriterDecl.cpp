@@ -103,6 +103,7 @@ namespace clang {
     void VisitStaticAssertDecl(StaticAssertDecl *D);
     void VisitBlockDecl(BlockDecl *D);
     void VisitEmptyDecl(EmptyDecl *D);
+    void VisitCilkForDecl(CilkForDecl *D);
 
     void VisitDeclContext(DeclContext *DC, uint64_t LexicalOffset,
                           uint64_t VisibleOffset);
@@ -815,6 +816,10 @@ void ASTDeclWriter::VisitBlockDecl(BlockDecl *D) {
   }
 
   Code = serialization::DECL_BLOCK;
+}
+
+void ASTDeclWriter::VisitCilkForDecl(CilkForDecl *D) {
+  llvm_unreachable("not implementation yet");
 }
 
 void ASTDeclWriter::VisitLinkageSpecDecl(LinkageSpecDecl *D) {

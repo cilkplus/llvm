@@ -24,6 +24,7 @@ namespace clang {
 
 class Decl;
 class BlockDecl;
+class CilkForDecl;
 class CXXMethodDecl;
 class ObjCPropertyDecl;
 class IdentifierInfo;
@@ -81,7 +82,8 @@ protected:
     SK_Function,
     SK_Block,
     SK_Lambda,
-    SK_ParallelRegion
+    SK_ParallelRegion,
+    SK_CilkFor
   };
   
 public:
@@ -328,7 +330,7 @@ class CapturingScopeInfo : public FunctionScopeInfo {
 public:
   enum ImplicitCaptureStyle {
     ImpCap_None, ImpCap_LambdaByval, ImpCap_LambdaByref, ImpCap_Block,
-    ImpCap_ParallelRegion
+    ImpCap_ParallelRegion, ImpCap_CilkFor
   };
 
   ImplicitCaptureStyle ImpCaptureStyle;
@@ -471,7 +473,8 @@ public:
 
   static bool classof(const FunctionScopeInfo *FSI) { 
     return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda
-                                 || FSI->Kind == SK_ParallelRegion;
+                                 || FSI->Kind == SK_ParallelRegion
+                                 || FSI->Kind == SK_CilkFor;
   }
 };
 
@@ -524,6 +527,32 @@ public:
 
   static bool classof(const FunctionScopeInfo *FSI) { 
     return FSI->Kind == SK_ParallelRegion; 
+  }
+};
+
+/// \brief Retains information about a Cilk for capturing region.
+class CilkForScopeInfo : public CapturingScopeInfo {
+public:
+  /// \brief The declaration describes a Cilk for statement.
+  CilkForDecl *TheCilkForDecl;
+
+  /// \brief The captured record type.
+  RecordDecl *TheRecordDecl;
+
+  /// \brief This is the enclosing scope of the parallel region.
+  Scope *TheScope;
+
+  CilkForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CilkForDecl *FD,
+                   RecordDecl *RD)
+    : CapturingScopeInfo(Diag, ImpCap_CilkFor),
+      TheCilkForDecl(FD), TheRecordDecl(RD), TheScope(S) {
+    Kind = SK_CilkFor;
+  }
+
+  virtual ~CilkForScopeInfo();
+
+  static bool classof(const FunctionScopeInfo *FSI) {
+    return FSI->Kind == SK_CilkFor;
   }
 };
 

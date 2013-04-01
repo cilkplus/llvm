@@ -143,4 +143,69 @@ void jump(int n) {
       if (i > j + 1) break; // OK
     }
   }
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    if (i > n / 2) break; // expected-error {{cannot break from a '_Cilk_for' loop}}
+  }
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    _Cilk_for (int j = 0; j < n; ++j) {
+      if (i > j + 1) break; // expected-error {{cannot break from a '_Cilk_for' loop}}
+    }
+  }
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    return; // expected-error {{cannot return from within a '_Cilk_for' loop}}
+  }
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < n; ++j) {
+      return; // expected-error {{cannot return from within a '_Cilk_for' loop}}
+    }
+  }
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    if (i == 5) continue; // OK
+  }
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    if (i == 5) goto exit; // expected-error {{use of undeclared label 'exit'}}
+  }
+
+exit:
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    if (i == 5) goto inner; // OK
+    (void)i;
+  inner:
+    (void)i;
+  }
+
+  if (1) goto inner; // expected-error {{use of undeclared label 'inner'}}
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+    switch (i) {
+    case 0:
+      continue; // OK
+    case 1:
+      goto l_out; // expected-error {{use of undeclared label 'l_out'}}
+    default:
+      break; // OK
+    }
+  }
+
+  // indirect goto
+  void *addr = 0;
+
+l_out:
+  _Cilk_for (int i = 0; i < n; ++i) {
+    addr = &&l_out; // expected-error {{use of undeclared label 'l_out'}}
+    goto *addr;
+  }
+
+  _Cilk_for (int i = 0; i < n; ++i) {
+l_in:
+    addr = &&l_in;
+    goto *addr;
+  }
 }

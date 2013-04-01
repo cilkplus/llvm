@@ -2391,6 +2391,13 @@ StmtResult
 Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
   Scope *S = CurScope->getBreakParent();
   if (!S) {
+    // Break from a Cilk for loop is not allowed unless the break is
+    // inside a nested loop or switch statement.
+    if (isa<CilkForScopeInfo>(getCurFunction())) {
+      Diag(BreakLoc, diag::err_cilk_for_cannot_break);
+      return StmtError();
+    }
+
     // C99 6.8.6.3p1: A break shall appear only in or as a switch/loop body.
     return StmtError(Diag(BreakLoc, diag::err_break_not_in_loop_or_switch));
   }
@@ -2555,6 +2562,12 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   // rules which allows multiple return statements.
   CapturingScopeInfo *CurCap = cast<CapturingScopeInfo>(getCurFunction());
   QualType FnRetType = CurCap->ReturnType;
+
+  // It is not allowed to return from a Cilk for statement.
+  if (isa<CilkForScopeInfo>(CurCap)) {
+    Diag(ReturnLoc, diag::err_cilk_for_cannot_return);
+    return StmtError();
+  }
 
   // For blocks/lambdas with implicit return types, we check each return
   // statement individually, and deduce the common return type when the block
@@ -3657,4 +3670,102 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   return Owned(new (Context) CilkForStmt(Context, First, Second.get(),
                                          Third.get(), Body, CilkForLoc,
                                          LParenLoc, RParenLoc));
+}
+
+void Sema::ActOnCilkForDeclBegin(SourceLocation CilkForLoc, Scope *CurScope) {
+  DeclContext *DC = CurContext;
+  while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
+    DC = DC->getParent();
+
+  // Create a C/C++ record decl for variable capturing.
+  RecordDecl *RD = 0;
+  {
+    IdentifierInfo *Id = &PP.getIdentifierTable().get("cilk.for.capture");
+    if (getLangOpts().CPlusPlus)
+      RD = CXXRecordDecl::Create(Context, TTK_Struct, DC, CilkForLoc,
+                                 CilkForLoc, Id);
+    else
+      RD = RecordDecl::Create(Context, TTK_Struct, DC, CilkForLoc,
+                              CilkForLoc, Id);
+
+    DC->addDecl(RD);
+    RD->setImplicit();
+    RD->startDefinition();
+  }
+
+  // Start a CilkForDecl.
+  CilkForDecl *CFD = CilkForDecl::Create(Context, CurContext);
+  DC->addDecl(CFD);
+
+  PushCilkForScope(CurScope, CFD, RD);
+
+  if (CurScope)
+    PushDeclContext(CurScope, CFD);
+  else
+    CurContext = CFD;
+
+  PushExpressionEvaluationContext(PotentiallyEvaluated);
+}
+
+static
+void buildCilkForCaptureLists(SmallVectorImpl<CilkForDecl::Capture> &Captures,
+                              SmallVectorImpl<Expr *> &CaptureInits,
+                              ArrayRef<CilkForScopeInfo::Capture> Candidates) {
+  typedef ArrayRef<CilkForScopeInfo::Capture>::const_iterator CaptureIter;
+
+  for (CaptureIter CI = Candidates.begin(), CE = Candidates.end();
+       CI != CE; ++CI) {
+    if (CI->isThisCapture()) {
+      Captures.push_back(CilkForDecl::Capture(CI->getLocation(),
+                                              CilkForDecl::VCK_This));
+      CaptureInits.push_back(CI->getCopyExpr());
+      continue;
+    }
+
+    assert(CI->isReferenceCapture() &&
+           "non-reference capture not yet implemented");
+
+    Captures.push_back(CilkForDecl::Capture(CI->getLocation(),
+                                            CilkForDecl::VCK_ByRef,
+                                            CI->getVariable()));
+    CaptureInits.push_back(CI->getCopyExpr());
+  }
+}
+
+CilkForDecl *Sema::ActOnCilkForDeclEnd() {
+  CilkForScopeInfo *FSI = getCurCilkFor();
+  assert(FSI && "CilkForScopeInfo is out of sync");
+
+  SmallVector<CilkForDecl::Capture, 4> Captures;
+  SmallVector<Expr *, 4> CaptureInits;
+  buildCilkForCaptureLists(Captures, CaptureInits, FSI->Captures);
+
+  RecordDecl *RD = FSI->TheRecordDecl;
+  RD->completeDefinition();
+
+  PopDeclContext();
+  PopFunctionScopeInfo();
+
+  return FSI->TheCilkForDecl;
+}
+
+void Sema::ActOnCilkForDeclError(bool IsInstantiation) {
+  DiscardCleanupsInEvaluationContext();
+  PopExpressionEvaluationContext();
+  if (!IsInstantiation)
+    PopDeclContext();
+
+  CilkForScopeInfo *FSI = getCurCilkFor();
+  RecordDecl *Record = FSI->TheRecordDecl;
+  Record->setInvalidDecl();
+
+  SmallVector<Decl*, 4> Fields;
+  for (RecordDecl::field_iterator I = Record->field_begin(),
+                                  E = Record->field_end(); I != E; ++I)
+    Fields.push_back(*I);
+
+  ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
+              SourceLocation(), SourceLocation(), /*AttributeList=*/0);
+
+  PopFunctionScopeInfo();
 }

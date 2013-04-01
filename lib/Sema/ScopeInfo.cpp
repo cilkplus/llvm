@@ -188,3 +188,4 @@ FunctionScopeInfo::~FunctionScopeInfo() { }
 BlockScopeInfo::~BlockScopeInfo() { }
 LambdaScopeInfo::~LambdaScopeInfo() { }
 ParallelRegionScopeInfo::~ParallelRegionScopeInfo() { }
+CilkForScopeInfo::~CilkForScopeInfo() { }

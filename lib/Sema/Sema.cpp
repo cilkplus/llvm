@@ -797,7 +797,7 @@ DeclContext *Sema::getFunctionLevelDeclContext() {
   DeclContext *DC = CurContext;
 
   while (true) {
-    if (isa<BlockDecl>(DC) || isa<EnumDecl>(DC)) {
+    if (isa<BlockDecl>(DC) || isa<EnumDecl>(DC) || isa<CilkForDecl>(DC)) {
       DC = DC->getParent();
     } else if (isa<FunctionDecl>(DC) &&
                cast<FunctionDecl>(DC)->isParallelRegion()) {
@@ -1016,6 +1016,10 @@ void Sema::PushParallelRegionScope(Scope *S, FunctionDecl *FD, RecordDecl *RD) {
                                                        S, FD, RD));
 }
 
+void Sema::PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD) {
+  FunctionScopes.push_back(new CilkForScopeInfo(getDiagnostics(), S, FD, RD));
+}
+
 void Sema::PushLambdaScope(CXXRecordDecl *Lambda,
                            CXXMethodDecl *CallOperator) {
   FunctionScopes.push_back(new LambdaScopeInfo(getDiagnostics(), Lambda,
@@ -1072,8 +1076,15 @@ BlockScopeInfo *Sema::getCurBlock() {
 ParallelRegionScopeInfo *Sema::getCurParallelRegion() {
   if (FunctionScopes.empty())
     return 0;
-  
-  return dyn_cast<ParallelRegionScopeInfo>(FunctionScopes.back());  
+
+  return dyn_cast<ParallelRegionScopeInfo>(FunctionScopes.back());
+}
+
+CilkForScopeInfo *Sema::getCurCilkFor() {
+  if (FunctionScopes.empty())
+    return 0;
+
+  return dyn_cast<CilkForScopeInfo>(FunctionScopes.back());
 }
 
 LambdaScopeInfo *Sema::getCurLambda() {

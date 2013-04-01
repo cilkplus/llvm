@@ -10671,16 +10671,16 @@ diagnoseUncapturableValueReference(Sema &S, SourceLocation loc,
 
 
 /// \brief Capture the given variable in the parallel region.
-static ExprResult captureInParallelRegion(Sema &S, ParallelRegionScopeInfo *RSI,
-                                          VarDecl *Var, QualType FieldType, 
-                                          QualType DeclRefType,
-                                          SourceLocation Loc,
-                                          bool RefersToEnclosingLocal) {
+template <typename ScopeInfoType>
+static ExprResult captureInRegion(Sema &S, ScopeInfoType *SI, VarDecl *Var,
+                                  QualType FieldType, QualType DeclRefType,
+                                  SourceLocation Loc,
+                                  bool RefersToEnclosingLocal) {
   // The current implemention assumes that all variables are captured
   // by references. Since there is no capture by copy, no expression evaluation
   // will be needed.
   //
-  RecordDecl *RD = RSI->TheRecordDecl;
+  RecordDecl *RD = SI->TheRecordDecl;
 
   FieldDecl *Field
     = FieldDecl::Create(S.Context, RD, Loc, Loc, 0, FieldType,
@@ -10690,7 +10690,7 @@ static ExprResult captureInParallelRegion(Sema &S, ParallelRegionScopeInfo *RSI,
   Field->setAccess(AS_private);
   RD->addDecl(Field);
 
-  Expr *Ref = new (S.Context) DeclRefExpr(Var, RefersToEnclosingLocal, 
+  Expr *Ref = new (S.Context) DeclRefExpr(Var, RefersToEnclosingLocal,
                                           DeclRefType, VK_LValue, Loc);
   Var->setReferenced(true);
   Var->setUsed(true);
@@ -10840,10 +10840,10 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
   bool Explicit = (Kind != TryCapture_Implicit);
   unsigned FunctionScopesIndex = FunctionScopes.size() - 1;
   do {
-    // Only block literals and lambda expressions can capture; other
-    // scopes don't work.
+    // Only block literals, Cilk spawn / for statements and
+    // lambda expressions can capture; other scopes don't work.
     DeclContext *ParentDC;
-    if (isa<BlockDecl>(DC))
+    if (isa<BlockDecl>(DC) || isa<CilkForDecl>(DC))
       ParentDC = DC->getParent();
     else if (isa<CXXMethodDecl>(DC) &&
              cast<CXXMethodDecl>(DC)->getOverloadedOperator() == OO_Call &&
@@ -11038,28 +11038,36 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       continue;
     }
 
-    if (ParallelRegionScopeInfo *RSI = dyn_cast<ParallelRegionScopeInfo>(CSI)) {
+    bool IsCilkFor = isa<CilkForScopeInfo>(CSI);
+    bool IsParallelRegion = isa<ParallelRegionScopeInfo>(CSI);
+
+    if (IsCilkFor || IsParallelRegion) {
       // By Default, capture variables by reference
       bool ByRef = true;
       CaptureType = Context.getLValueReferenceType(DeclRefType);
 
       Expr *CopyExpr = 0;
       if (BuildAndDiagnose) {
-        ExprResult Result = captureInParallelRegion(*this, RSI, Var,
-                                                    CaptureType, DeclRefType,
-                                                    Loc, Nested);
+        ExprResult Result;
+        if (IsCilkFor)
+          Result = captureInRegion(*this, cast<CilkForScopeInfo>(CSI),
+                                   Var, CaptureType, DeclRefType, Loc, Nested);
+        else
+          Result = captureInRegion(*this, cast<ParallelRegionScopeInfo>(CSI),
+                                   Var, CaptureType, DeclRefType, Loc, Nested);
+
         if (!Result.isInvalid())
           CopyExpr = Result.take();
       }
 
       // Actually capture the variable.
       if (BuildAndDiagnose)
-        CSI->addCapture(Var, /*isBlock*/false, ByRef, Nested, Loc, 
+        CSI->addCapture(Var, /*isBlock*/false, ByRef, Nested, Loc,
                         SourceLocation(), CaptureType, CopyExpr);
       Nested = true;
       continue;
-    } 
-    
+    }
+
     LambdaScopeInfo *LSI = cast<LambdaScopeInfo>(CSI);
     
     // Determine whether we are capturing by reference or by value.

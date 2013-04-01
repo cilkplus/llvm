@@ -6222,6 +6222,10 @@ def note_cilk_for_end_expr: Note<
 def warn_cilk_for_cond_user_defined_conv: Warning<
   "'_Cilk_for' loop count does not respect %select{constructor|user-defined}0 "
   "conversion in loop condition">, InGroup<Conversion>, DefaultWarn;
+def err_cilk_for_cannot_return: Error<
+  "cannot return from within a '_Cilk_for' loop">;
+def err_cilk_for_cannot_break: Error<
+  "cannot break from a '_Cilk_for' loop">;
 } // end of sema category
 
 let CategoryName = "Related Result Type Issue" in {

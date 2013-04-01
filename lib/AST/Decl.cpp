@@ -3424,3 +3424,9 @@ SourceRange ImportDecl::getSourceRange() const {
   
   return SourceRange(getLocation(), getIdentifierLocs().back());
 }
+
+CilkForDecl *CilkForDecl::Create(ASTContext &C, DeclContext *DC) {
+  return new (C) CilkForDecl(DC);
+}
+
+void CilkForDecl::anchor() { }

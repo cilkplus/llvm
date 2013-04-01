@@ -562,6 +562,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case ObjCCategoryImpl:
     case Import:
     case Empty:
+    case CilkFor:
       // Never looked up by name.
       return 0;
   }
@@ -710,8 +711,12 @@ DeclContext *DeclContext::getNonClosureAncestor() {
   // This is basically "while (DC->isClosure()) DC = DC->getParent();"
   // except that it's significantly more efficient to cast to a known
   // decl type and call getDeclContext() than to call getParent().
-  while (isa<BlockDecl>(DC))
-    DC = cast<BlockDecl>(DC)->getDeclContext();
+  while (isa<BlockDecl>(DC) || isa<CilkForDecl>(DC)) {
+    if (isa<BlockDecl>(DC))
+      DC = cast<BlockDecl>(DC)->getDeclContext();
+    else
+      DC = cast<CilkForDecl>(DC)->getDeclContext();
+  }
 
   assert(!DC->isClosure());
   return DC;
@@ -836,6 +841,7 @@ DeclContext *DeclContext::getPrimaryContext() {
   case Decl::TranslationUnit:
   case Decl::LinkageSpec:
   case Decl::Block:
+  case Decl::CilkFor:
     // There is only one DeclContext for these entities.
     return this;
 

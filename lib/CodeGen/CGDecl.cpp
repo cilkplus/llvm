@@ -69,6 +69,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::Friend:
   case Decl::FriendTemplate:
   case Decl::Block:
+  case Decl::CilkFor:
   case Decl::ClassScopeFunctionSpecialization:
     llvm_unreachable("Declaration should not be in declstmts!");
   case Decl::Function:  // void X();

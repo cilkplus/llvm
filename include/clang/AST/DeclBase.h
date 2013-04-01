@@ -1022,7 +1022,7 @@ public:
   }
 
   bool isClosure() const {
-    return DeclKind == Decl::Block;
+    return DeclKind == Decl::Block || DeclKind == Decl::CilkFor;
   }
 
   bool isObjCContainer() const {
@@ -1041,6 +1041,7 @@ public:
     switch (DeclKind) {
     case Decl::Block:
     case Decl::ObjCMethod:
+    case Decl::CilkFor:
       return true;
     default:
       return DeclKind >= Decl::firstFunction && DeclKind <= Decl::lastFunction;

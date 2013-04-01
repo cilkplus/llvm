@@ -149,3 +149,13 @@ void conversions() {
   _Cilk_for (ToRef c; c < 5; c++); // OK
   _Cilk_for (ToCRef c; c < 5; c++); // OK
 }
+
+int jump() {
+  _Cilk_for (int i = 0; i < 10; ++i) {
+    return 0; // expected-error {{cannot return from within a '_Cilk_for' loop}}
+  }
+
+  _Cilk_for (int i = 0; i < 10; ++i) {
+    []() { return 0; }(); // OK
+  }
+}
