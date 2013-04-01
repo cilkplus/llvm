@@ -3458,6 +3458,163 @@ StmtResult Sema::ActOnCilkSpawnStmt(Stmt *S) {
   return Owned(S);
 }
 
+static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
+                                 VarDecl *&ControlVar) {
+  // Location of loop control variable/expression in the initializer
+  SourceLocation InitLoc;
+  bool IsDeclStmt = false;
+
+  if (DeclStmt *DS = dyn_cast<DeclStmt>(InitStmt)) {
+    // The initialization shall declare or initialize a single variable,
+    // called the control variable.
+    if (!DS->isSingleDecl()) {
+      DeclStmt::decl_iterator DI = DS->decl_begin();
+      ++DI;
+      S.Diag((*DI)->getLocation(), diag::err_cilk_for_decl_multiple_variables);
+      return false;
+    }
+
+    ControlVar = dyn_cast<VarDecl>(*DS->decl_begin());
+    // Only allow VarDecls in the initializer
+    if (!ControlVar) {
+      S.Diag(InitStmt->getLocStart(),
+             diag::err_cilk_for_initializer_expected_decl)
+        << InitStmt->getSourceRange();
+      return false;
+    }
+
+    // Ignore invalid decls.
+    if (ControlVar->isInvalidDecl())
+      return false;
+
+    // The control variable shall be declared and initialized within the
+    // initialization clause of the _Cilk_for loop.
+    if (!ControlVar->getInit()) {
+      S.Diag(ControlVar->getLocation(),
+          diag::err_cilk_for_control_variable_not_initialized);
+      return false;
+    }
+
+    InitLoc = ControlVar->getLocation();
+    IsDeclStmt = true;
+  } else {
+    // In C++, the control variable shall be declared and initialized within
+    // the initialization clause of the _Cilk_for loop.
+    if (S.getLangOpts().CPlusPlus) {
+      S.Diag(InitStmt->getLocStart(),
+             diag::err_cilk_for_initialization_must_be_decl);
+      return false;
+    }
+
+    // In C only, the control variable may be previously declared, but if so
+    // shall be reinitialized, i.e., assigned, in the initialization clause.
+    BinaryOperator *Op = 0;
+    if (Expr *E = dyn_cast<Expr>(InitStmt)) {
+      E = E->IgnoreParenNoopCasts(S.Context);
+      Op = dyn_cast_or_null<BinaryOperator>(E);
+    }
+
+    if (!Op) {
+      S.Diag(InitStmt->getLocStart(),
+          diag::err_cilk_for_control_variable_not_initialized);
+      return false;
+    }
+
+    // The initialization shall declare or initialize a single variable,
+    // called the control variable.
+    if (Op->getOpcode() == BO_Comma) {
+      S.Diag(Op->getRHS()->getExprLoc(),
+             diag::err_cilk_for_init_multiple_variables);
+      return false;
+    }
+
+    if (!Op->isAssignmentOp()) {
+      S.Diag(Op->getLHS()->getExprLoc(),
+             diag::err_cilk_for_control_variable_not_initialized);
+      return false;
+    }
+
+    // Get the decl for the LHS of the control variable initialization
+    assert(Op->getLHS() && "BinaryOperator has no LHS!");
+    DeclRefExpr *LHS = dyn_cast<DeclRefExpr>(
+      Op->getLHS()->IgnoreParenNoopCasts(S.Context));
+    if (!LHS) {
+      S.Diag(Op->getLHS()->getExprLoc(),
+             diag::err_cilk_for_initializer_expected_variable);
+      return false;
+    }
+
+    // But, use the source location of the LHS for diagnostics
+    InitLoc = LHS->getLocation();
+
+    // Only a VarDecl may be used in the initializer
+    ControlVar = dyn_cast<VarDecl>(LHS->getDecl());
+    if (!ControlVar) {
+      S.Diag(Op->getLHS()->getExprLoc(),
+             diag::err_cilk_for_initializer_expected_variable);
+      return false;
+    }
+  }
+
+  // No storage class may be specified for the variable within the
+  // initialization clause.
+  StorageClass SC = ControlVar->getStorageClass();
+  if (SC != SC_None) {
+    S.Diag(InitLoc, diag::err_cilk_for_control_variable_storage_class)
+      << ControlVar->getStorageClassSpecifierString(SC);
+    if (!IsDeclStmt)
+      S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
+        << ControlVar->getIdentifier();
+    return false;
+  }
+
+  QualType VarType = ControlVar->getType();
+  // FIXME: incomplete types not supported
+  if (VarType->isDependentType())
+    return false;
+
+  // For decltype types, get the actual type
+  const Type *VarTyPtr = VarType.getTypePtrOrNull();
+  if (VarTyPtr && isa<DecltypeType>(VarTyPtr))
+    VarType = cast<DecltypeType>(VarTyPtr)->getUnderlyingType();
+
+  // The variable may not be const or volatile.
+  // Assignment to const variables is checked before sema for cilk_for
+  if (VarType.isVolatileQualified()) {
+    S.Diag(InitLoc, diag::err_cilk_for_control_variable_qualifier)
+      << "volatile";
+    if (!IsDeclStmt)
+      S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
+        << ControlVar->getIdentifier();
+    return false;
+  }
+
+  // Don't allow non-local variables to be used as the control variable
+  if (!ControlVar->isLocalVarDecl()) {
+    S.Diag(InitLoc, diag::err_cilk_for_control_variable_not_local);
+    return false;
+  }
+
+  // The variable shall have integral, pointer, or class type.
+  // struct/class types only allowed in C++
+  bool ValidType = false;
+  if (S.getLangOpts().CPlusPlus &&
+      (VarTyPtr->isClassType() || VarTyPtr->isStructureType()))
+    ValidType = true;
+  else if (VarTyPtr->isIntegralType(S.Context) || VarTyPtr->isPointerType())
+    ValidType = true;
+
+  if (!ValidType) {
+    S.Diag(InitLoc, diag::err_cilk_for_control_variable_type);
+    if (!IsDeclStmt)
+      S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
+        << ControlVar->getIdentifier();
+    return false;
+  }
+
+  return true;
+}
+
 static bool ExtractCilkForCondition(Sema &S,
                                     Expr *Cond,
                                     BinaryOperatorKind &CondOp,
@@ -3604,25 +3761,15 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
 
   Expr *Increment = Third.release().takeAs<Expr>();
 
-  DiagnoseUnusedExprResult(First);
-  DiagnoseUnusedExprResult(Increment);
-  DiagnoseUnusedExprResult(Body);
-
-
-  // FIXME: this is a hack to get the control variable.
-  VarDecl *Var = 0;
-  if (DeclStmt *DS = dyn_cast<DeclStmt>(First))
-    Var = dyn_cast<VarDecl>(DS->getSingleDecl());
-  else
+  // Check loop initializer and get control variable
+  VarDecl *ControlVar = 0;
+  if (!CheckCilkForInitStmt(*this, First, ControlVar))
     return StmtError();
 
-  if (isa<NullStmt>(Body))
-    getCurCompoundScope().setHasEmptyLoopBodies();
-
-  if (Var->getType()->isDependentType())
+  if (ControlVar->getType()->isDependentType())
     return StmtError();
 
-  if (Var->getType()->isReferenceType())
+  if (ControlVar->getType()->isReferenceType())
     return StmtError();
 
   // Check loop condition
@@ -3630,42 +3777,50 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
 
   Expr *Limit = 0;
   int CondDirection = 0;
-  CheckCilkForCondition(*this, CilkForLoc, Var, Second.get(), Limit, CondDirection);
+  CheckCilkForCondition(*this, CilkForLoc, ControlVar, Second.get(),
+                        Limit, CondDirection);
+  if (!Limit)
+    return StmtError();
+  if (Limit->getType()->isDependentType())
+    return StmtError();
 
-  if (Limit) {
-    if (Limit->getType()->isDependentType())
-      return StmtError();
+  // Build end - begin
+  Expr *Begin = BuildDeclRefExpr(ControlVar,
+                                 ControlVar->getType().getNonReferenceType(),
+                                 VK_LValue,
+                                 ControlVar->getLocation()).release();
+  Expr *End = Limit;
+  if (CondDirection < 0)
+    std::swap(Begin, End);
 
-    // Build end - begin
-    Expr *Begin = BuildDeclRefExpr(Var, Var->getType().getNonReferenceType(),
-                                   VK_LValue, Var->getLocation()).release();
-    Expr *End = Limit;
-    if (CondDirection < 0)
-      std::swap(Begin, End);
+  ExprResult Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
 
-    ExprResult Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
-
-    if (Span.isInvalid()) {
-      // error getting operator-()
-      Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
-      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-        << Begin->getSourceRange();
-      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-        << End->getSourceRange();
-      return StmtError();
-    }
-
-    if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
-      // non-integral type
-      Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
-        << Span.get()->getType();
-      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-        << Begin->getSourceRange();
-      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-        << End->getSourceRange();
-      return StmtError();
-    }
+  if (Span.isInvalid()) {
+    // error getting operator-()
+    Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
+    Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+      << Begin->getSourceRange();
+    Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+      << End->getSourceRange();
+    return StmtError();
   }
+
+  if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
+    // non-integral type
+    Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
+      << Span.get()->getType();
+    Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+      << Begin->getSourceRange();
+    Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+      << End->getSourceRange();
+    return StmtError();
+  }
+
+  DiagnoseUnusedExprResult(First);
+  DiagnoseUnusedExprResult(Increment);
+  DiagnoseUnusedExprResult(Body);
+  if (isa<NullStmt>(Body))
+    getCurCompoundScope().setHasEmptyLoopBodies();
 
   return Owned(new (Context) CilkForStmt(Context, First, Second.get(),
                                          Third.get(), Body, CilkForLoc,

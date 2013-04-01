@@ -1,45 +1,6 @@
 // RUN: %clang_cc1 -fcilkplus -fsyntax-only -verify %s
 // XFAIL: *
 
-int k;
-
-extern int m;
-
-void init() {
-  int i, j;
-
-  _Cilk_for (int i = 0, j = 0; i < 10; ++i); // expected-error{{cannot declare more than one loop control variables in '_Cilk_for'}}
-
-  _Cilk_for (i = 0, j = 0; i < 10; ++i); // expected-error{{cannot declare more than one loop control variables in '_Cilk_for'}}
-
-  _Cilk_for (auto int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot have storage class 'auto' in '_Cilk_for'}}
-
-  _Cilk_for (static int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot have storage class 'static' in '_Cilk_for'}}
-
-  _Cilk_for (register int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot have storage class 'register' in '_Cilk_for'}}
-
-  _Cilk_for (k = 0; k < 10; ++k); // expected-error {{loop control variable cannot have storage class 'static' in '_Cilk_for'}}
-
-  _Cilk_for (m = 0; m < 10; ++m); // expected-error {{loop control variable cannot have storage class 'extern' in '_Cilk_for'}}
-
-  _Cilk_for (volatile int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot be 'volatile' in '_Cilk_for'}}
-
-
-  _Cilk_for (const int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot be 'const' in '_Cilk_for'}} \
-                                            // expected-error {{read-only variable is not assignable}}
-
-  float f;
-  _Cilk_for (f = 0.0f; f < 10.0f; ++f); // expected-error {{loop control variable shall have integral, pointer, or class type in '_Cilk_for'}}
-
-  enum E { a = 0, b };
-  _Cilk_for (enum E i = a; i < b; i += 1); // expected-error {{loop control variable shall have integral, pointer, or class type in '_Cilk_for'}}
-
-  union { int i; void *p; } u;
-  _Cilk_for (u.i = 0; u.i < 10; u.i += 1); // expected-error {{loop control variable shall have integral, pointer, or class type in '_Cilk_for'}}
-}
-
-extern int next();
-
 void increment() {
   _Cilk_for (int i = 0; i < 10; i--); // expected-error {{loop increment and condition are inconsistent in '_Cilk_for'}}
 

@@ -1,13 +1,58 @@
 // RUN: %clang_cc1 -fcilkplus -fsyntax-only -verify %s
 
 extern int array[];
+int k;
+extern int m; // expected-note {{'m' declared here}}
+extern int* get_intptr();
+
+struct struct_t {
+  int x;
+};
 
 int k;
 
 void init() {
-  int i;
+  int i, j;
 
   _Cilk_for (i = 0; i < 10; ++i); // OK
+
+  _Cilk_for (((i) = 0); i < 10; ++i); // OK
+
+  _Cilk_for (int i = 0, j = 0; i < 10; ++i); // expected-error{{cannot declare more than one loop control variable in '_Cilk_for'}}
+
+  _Cilk_for (i = 0, j = 0; i < 10; ++i); // expected-error{{cannot initialize more than one loop control variable in '_Cilk_for'}}
+
+  _Cilk_for (auto int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot have storage class 'auto' in '_Cilk_for'}}
+
+  _Cilk_for (static int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot have storage class 'static' in '_Cilk_for'}}
+
+  _Cilk_for (register int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot have storage class 'register' in '_Cilk_for'}}
+
+  _Cilk_for (k = 0; k < 10; ++k); // expected-error {{non-local loop control variable in '_Cilk_for'}}
+
+  _Cilk_for (m = 0; m < 10; ++m); // expected-error {{loop control variable cannot have storage class 'extern' in '_Cilk_for'}}
+
+  _Cilk_for (volatile int i = 0; i < 10; ++i); // expected-error {{loop control variable cannot be 'volatile' in '_Cilk_for'}}
+
+  _Cilk_for (const int i = 0; i < 10; i++); // expected-error {{read-only variable is not assignable}}
+
+  _Cilk_for (*&i = 0; *&i < 10; (*&i)++); // expected-error {{expected a variable for control variable in '_Cilk_for'}}
+  _Cilk_for (*get_intptr() = 0; *&i < 10; (*&i)++); // expected-error {{expected a variable for control variable in '_Cilk_for'}}
+
+  float f;                              // expected-note {{'f' declared here}}
+  _Cilk_for (f = 0.0f; f < 10.0f; ++f); // expected-error {{loop control variable must have an integral, pointer, or class type in '_Cilk_for'}}
+
+  enum E { a = 0, b };
+  _Cilk_for (enum E i = a; i < b; i += 1); // OK
+
+  union { int i; void *p; } u, v;          // expected-note {{'u' declared here}}
+  _Cilk_for (u.i = 0; u.i < 10; u.i += 1); // expected-error {{expected a variable for control variable in '_Cilk_for'}}
+  _Cilk_for (u = v; u.i < 10; u.i += 1);   // expected-error {{loop control variable must have an integral, pointer, or class type in '_Cilk_for'}}
+
+  struct struct_t w;
+  _Cilk_for (w.x = 0; w.x < 10; w.x++); // expected-error {{expected a variable for control variable in '_Cilk_for'}}
+
+  _Cilk_for (extern int foo(); i < 10; i++); // expected-error {{expected control variable declaration in initializer in '_Cilk_for'}}
 }
 
 void condition() {

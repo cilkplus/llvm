@@ -7,6 +7,14 @@ void f1() {
   _Cilk_for (auto i = 0; i < 10; ++i); // OK
 
   _Cilk_for (decltype(j) i = 0; i < 10; ++i); // OK
+
+  _Cilk_for (decltype(k) i = 0; i < 10; i++); // expected-error {{read-only variable is not assignable}}
+
+  _Cilk_for (int &i = j; i < 10; ++i); // expected-error {{loop control variable must have an integral, pointer, or class type in '_Cilk_for'}}
+
+  _Cilk_for (int &&i = 0; i < 10; ++i); // expected-error {{loop control variable must have an integral, pointer, or class type in '_Cilk_for'}}
+
+  _Cilk_for (auto x = bar(); j < 10; j++); //expected-error {{use of undeclared identifier 'bar'}}
 }
 
 struct Base {
@@ -47,6 +55,12 @@ struct NoPreIncrement : public Base {
   NoPreIncrement();
   NoPreIncrement(int);
   NoPreIncrement& operator++() = delete; // expected-note {{candidate function has been explicitly deleted}}
+};
+
+struct NoCopyCtor : public Base {
+  NoCopyCtor();
+  NoCopyCtor(int);
+  NoCopyCtor(const NoCopyCtor &) = delete; // expected-note {{function has been explicitly marked deleted here}}
 };
 
 // This list is not complete. Some extra operators like
@@ -158,4 +172,7 @@ int jump() {
   _Cilk_for (int i = 0; i < 10; ++i) {
     []() { return 0; }(); // OK
   }
+
+  NoCopyCtor j;
+  _Cilk_for (NoCopyCtor i(j); i < 10; ++i); // expected-error {{call to deleted constructor of 'NoCopyCtor'}}
 }

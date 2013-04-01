@@ -6188,6 +6188,7 @@ def err_wrong_sampler_addressspace: Error<
   "sampler type cannot be used with the __local and __global address space qualifiers">;
 
 // Cilk Plus warnings and errors
+// cilk_spawn
 def err_not_a_call : Error<
   "the argument to _Cilk_spawn must be a function call">;
 def err_spawn_invalid_scope : Error<
@@ -6202,6 +6203,31 @@ def err_cannot_spawn_function: Error<
   "function cannot be spawned">;
 def err_cannot_init_static_variable: Error<
   "cannot spawn initialize a 'static' variable">;
+
+// cilk_for
+def err_cilk_for_initializer_expected_variable : Error<
+  "expected a variable for control variable in '_Cilk_for'">;
+def err_cilk_for_initializer_expected_decl : Error<
+  "expected control variable declaration in initializer in '_Cilk_for'">;
+def err_cilk_for_decl_multiple_variables : Error<
+  "cannot declare more than one loop control variable in '_Cilk_for'">;
+def err_cilk_for_init_multiple_variables : Error<
+  "cannot initialize more than one loop control variable in '_Cilk_for'">;
+def err_cilk_for_control_variable_not_initialized : Error<
+  "_Cilk_for loop control variable must be initialized">;
+def err_cilk_for_initialization_must_be_decl : Error<
+  "loop initialization must be a declaration in '_Cilk_for'">;
+
+def err_cilk_for_control_variable_storage_class : Error<
+  "loop control variable cannot have storage class '%0' in '_Cilk_for'">;
+def err_cilk_for_control_variable_qualifier : Error<
+  "loop control variable cannot be '%0' in '_Cilk_for'">;
+def err_cilk_for_control_variable_not_local : Error<
+  "non-local loop control variable in '_Cilk_for'">;
+def err_cilk_for_control_variable_type : Error<
+  "loop control variable must have an integral, pointer, or class type "
+  "in '_Cilk_for'">;
+
 def err_cilk_for_invalid_cond_expr: Error<
   "expected binary comparison operator in '_Cilk_for' loop condition">;
 def err_cilk_for_invalid_cond_operator: Error<
