@@ -718,3 +718,64 @@ PragmaOpenCLExtensionHandler::HandlePragma(Preprocessor &PP,
                       /*OwnsTokens=*/false);
 }
 
+/// \brief Handle Cilk Plus grainsize pragma.
+///
+/// #pragma 'cilk' 'grainsize' '=' expr new-line
+///
+void PragmaCilkGrainSizeHandler::HandlePragma(Preprocessor &PP,
+                                              PragmaIntroducerKind Introducer,
+                                              Token &FirstToken) {
+  Token Tok;
+  PP.Lex(Tok);
+  if (Tok.isNot(tok::identifier)) {
+    PP.Diag(Tok, diag::warn_pragma_expected_identifier) << "cilk";
+    return;
+  }
+
+  IdentifierInfo *Grainsize = Tok.getIdentifierInfo();
+  SourceLocation GrainsizeLoc = Tok.getLocation();
+
+  if (!Grainsize->isStr("grainsize")) {
+    PP.Diag(Tok, diag::err_cilk_for_expect_grainsize);
+    return;
+  }
+
+  PP.Lex(Tok);
+  if (Tok.isNot(tok::equal)) {
+    PP.Diag(Tok, diag::err_cilk_for_expect_assign);
+    return;
+  }
+
+  // Cache tokens after '=' and store them back to the token stream.
+  SmallVector<Token, 5> CachedToks;
+  while (true) {
+    PP.Lex(Tok);
+    if (Tok.is(tok::eod))
+      break;
+    CachedToks.push_back(Tok);
+  }
+
+  llvm::BumpPtrAllocator &Allocator = PP.getPreprocessorAllocator();
+  unsigned Size = CachedToks.size();
+
+  Token *Toks = (Token *) Allocator.Allocate(sizeof(Token) * (Size + 2),
+                                             llvm::alignOf<Token>());
+  Token &GsBeginTok = Toks[0];
+  GsBeginTok.startToken();
+  GsBeginTok.setKind(tok::annot_pragma_cilk_grainsize_begin);
+  GsBeginTok.setLocation(GrainsizeLoc);
+
+  SourceLocation EndLoc = Size ? CachedToks.back().getLocation()
+                               : GrainsizeLoc;
+
+  Token &GsEndTok = Toks[Size + 1];
+  GsEndTok.startToken();
+  GsEndTok.setKind(tok::annot_pragma_cilk_grainsize_end);
+  GsEndTok.setLocation(EndLoc);
+
+  for (unsigned i = 0; i < Size; ++i)
+    Toks[i + 1] = CachedToks[i];
+
+  PP.EnterTokenStream(Toks, Size + 2, /*DisableMacroExpansion=*/true,
+                      /*OwnsTokens=*/false);
+}

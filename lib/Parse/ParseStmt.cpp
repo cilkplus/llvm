@@ -309,6 +309,8 @@ Retry:
     }
 
     return ParseCilkForStmt();
+  case tok::annot_pragma_cilk_grainsize_begin:
+    return ParsePragmaCilkGrainSize();
   }
 
   // If we reached this code, the statement must end in a semicolon.
@@ -324,6 +326,36 @@ Retry:
   }
 
   return Res;
+}
+
+StmtResult Parser::ParsePragmaCilkGrainSize() {
+  assert(getLangOpts().CilkPlus && "Cilk Plus extension not enabled");
+  ConsumeToken(); // Eat 'annot_pragma_cilk_grainsize_begin'.
+
+  ExprResult E = ParseExpression();
+  if (E.isInvalid()) {
+    SkipUntil(tok::annot_pragma_cilk_grainsize_end, /*StopAtSemi*/false);
+    return StmtError();
+  }
+
+  if (Tok.isNot(tok::annot_pragma_cilk_grainsize_end)) {
+    Diag(Tok, diag::warn_pragma_extra_tokens_at_eol) << "cilk";
+    SkipUntil(tok::annot_pragma_cilk_grainsize_end, /*StopAtSemi*/false);
+  } else
+    ConsumeToken(); // Eat 'annot_pragma_cilk_grainsize_end'.
+
+  // Parse the following statement.
+  StmtResult Result(ParseStatement());
+  if (Result.isInvalid())
+    return StmtError();
+
+  if (!isa<CilkForStmt>(Result.get())) {
+    Diag(Result.get()->getLocStart(), diag::err_cilk_for_following_grainsize);
+    return Result;
+  }
+
+  // FIXME: Build AST for the grainsize and its following Cilk for statement.
+  return Result;
 }
 
 /// \brief Parse an expression statement.

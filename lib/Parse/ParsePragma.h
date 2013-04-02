@@ -98,7 +98,13 @@ public:
   virtual void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer,
                             Token &FirstToken);
 };
-  
+
+class PragmaCilkGrainSizeHandler : public PragmaHandler {
+public:
+  PragmaCilkGrainSizeHandler() : PragmaHandler("cilk") {}
+  virtual void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer,
+                            Token &FirstToken);
+};
 
 }  // end namespace clang
 

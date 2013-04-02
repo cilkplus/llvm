@@ -97,6 +97,11 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
     PP.AddPragmaHandler("OPENCL", FPContractHandler.get());
   }
 
+  if (getLangOpts().CilkPlus) {
+    CilkGrainSizeHandler.reset(new PragmaCilkGrainSizeHandler());
+    PP.AddPragmaHandler(CilkGrainSizeHandler.get());
+  }
+
   CommentSemaHandler.reset(new ActionCommentHandler(actions));
   PP.addCommentHandler(CommentSemaHandler.get());
 
@@ -427,6 +432,11 @@ Parser::~Parser() {
     PP.RemovePragmaHandler("OPENCL", OpenCLExtensionHandler.get());
     OpenCLExtensionHandler.reset();
     PP.RemovePragmaHandler("OPENCL", FPContractHandler.get());
+  }
+
+  if (getLangOpts().CilkPlus) {
+    PP.RemovePragmaHandler(CilkGrainSizeHandler.get());
+    CilkGrainSizeHandler.reset();
   }
 
   PP.RemovePragmaHandler("STDC", FPContractHandler.get());

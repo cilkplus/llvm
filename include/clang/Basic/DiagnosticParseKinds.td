@@ -789,6 +789,15 @@ def err_cilk_for_missing_increment: Error<
 def err_cilk_for_missing_semi: Error<
   "expected ';' in '_Cilk_for'">;
 
+def err_cilk_for_expect_grainsize: Error<
+  "expected 'grainsize' in '#pragma cilk'">;
+
+def err_cilk_for_expect_assign: Error<
+  "expected '=' in '#pragma cilk'">;
+
+def err_cilk_for_following_grainsize: Error<
+  "'#pragma cilk' must be followed by a '_Cilk_for' loop">;
+
 } // end of Parse Issue category.
 
 let CategoryName = "Modules Issue" in {

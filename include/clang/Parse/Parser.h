@@ -146,6 +146,7 @@ class Parser : public CodeCompletionHandler {
   OwningPtr<PragmaHandler> RedefineExtnameHandler;
   OwningPtr<PragmaHandler> FPContractHandler;
   OwningPtr<PragmaHandler> OpenCLExtensionHandler;
+  OwningPtr<PragmaHandler> CilkGrainSizeHandler;
   OwningPtr<CommentHandler> CommentSemaHandler;
 
   /// Whether the '>' token acts as an operator or not. This will be
@@ -1468,6 +1469,12 @@ private:
   StmtResult ParseAsmStatement(bool &msAsm);
   StmtResult ParseMicrosoftAsmStatement(SourceLocation AsmLoc);
   StmtResult ParseCilkForStmt();
+
+  /// \brief Parse the Cilk grainsize pragma followed by a Cilk for statement.
+  ///
+  /// #pragma cilk grainsize = ...
+  /// _Cilk_for (...)
+  StmtResult ParsePragmaCilkGrainSize();
 
   /// \brief Describes the behavior that should be taken for an __if_exists
   /// block.
