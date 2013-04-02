@@ -2994,6 +2994,13 @@ public:
     return isShiftAssignOp(getOpcode());
   }
 
+  static bool isAdditiveAssignOp(Opcode Opc) {
+    return Opc == BO_AddAssign || Opc == BO_SubAssign;
+  }
+  bool isAdditiveAssignOp() const {
+    return isAdditiveAssignOp(getOpcode());
+  }
+
   static bool classof(const Stmt *S) {
     return S->getStmtClass() >= firstBinaryOperatorConstant &&
            S->getStmtClass() <= lastBinaryOperatorConstant;
