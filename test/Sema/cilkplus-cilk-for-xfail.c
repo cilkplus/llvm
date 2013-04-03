@@ -38,28 +38,6 @@ void init() {
   _Cilk_for (u.i = 0; u.i < 10; u.i += 1); // expected-error {{loop control variable shall have integral, pointer, or class type in '_Cilk_for'}}
 }
 
-void condition() {
-  int j = 1;
-
-  _Cilk_for (int i = 0; i & 0x20; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; k >> i; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; i == 10; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; int k = i - 10; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; (i << 1) < 10; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; 10 > (i << 1); ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; j < 10; ++i); // expected-error {{loop condition does not test loop control variable in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; i < 10.2f; i++); // expected-error {{operator-(end, begin) must return an integer type in '_Cilk_for'}} \
-                                         // expected-note {{loop begin expression is }} \
-                                         // expected-note {{loop end expression is }}
-}
-
 extern int next();
 
 void increment() {

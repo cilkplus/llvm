@@ -2,6 +2,8 @@
 
 extern int array[];
 
+int k;
+
 void init() {
   int i;
 
@@ -38,6 +40,33 @@ void condition() {
   _Cilk_for (short i = 0; i < 10; ++i); // OK
 
   _Cilk_for (long i = 0; i < 10; ++i); // OK
+
+  _Cilk_for (int i = 0; i; ++i); // expected-error {{expected binary comparison operator in '_Cilk_for' loop condition}}
+
+  _Cilk_for (int i = 0; i & 0x20; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
+
+  _Cilk_for (int i = 0; k >> i; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
+
+  _Cilk_for (int i = 0; i == 10; ++i); // expected-error {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in '_Cilk_for'}}
+
+  _Cilk_for (int i = 0; (i << 1) < 10; ++i); // expected-error {{loop condition does not test control variable 'i' in '_Cilk_for'}} \
+                                             // expected-note {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+
+  _Cilk_for (int i = 0; 10 > (i << 1); ++i); // expected-error {{loop condition does not test control variable 'i' in '_Cilk_for'}} \
+                                             // expected-note {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+
+  _Cilk_for (int i = 0; j < 10; ++i); // expected-error {{loop condition does not test control variable 'i' in '_Cilk_for'}} \
+                                      // expected-note {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+
+  _Cilk_for (int i = 0; // expected-error {{end - begin must have integral type in '_Cilk_for' - got 'float'}} \
+                        // expected-note {{loop begin expression here}}
+             i < 10.2f; // expected-note {{loop end expression here}}
+             i++);
+
+  _Cilk_for (int i = 100; // expected-error {{end - begin must have integral type in '_Cilk_for' - got 'float'}} \
+                          // expected-note {{loop end expression here}}
+      10.2f < i;          // expected-note {{loop begin expression here}}
+      i--);
 }
 
 extern int next();

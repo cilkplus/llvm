@@ -1,7 +1,9 @@
 // RUN: %clang_cc1 -fcilkplus -fsyntax-only -verify %s
 // XFAIL: *
 
-void f2() {
+void test() {
+  _Cilk_for (int i = 0; int k = i - 10; ++i); // expected-error {{unexpected declaration as loop condition in '_Cilk_for'}}
+
   #pragma cilk grainsize = 4
   _Cilk_for (int i = 0; i < 10; i++); // OK
 

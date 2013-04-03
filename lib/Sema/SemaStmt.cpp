@@ -3445,18 +3445,214 @@ StmtResult Sema::ActOnCilkSpawnStmt(Stmt *S) {
   return Owned(S);
 }
 
+static bool ExtractCilkForCondition(Sema &S,
+                                    Expr *Cond,
+                                    BinaryOperatorKind &CondOp,
+                                    SourceLocation &OpLoc,
+                                    Expr *&LHS,
+                                    Expr *&RHS) {
+  if (BinaryOperator *BO = dyn_cast<BinaryOperator>(Cond)) {
+    CondOp = BO->getOpcode();
+    OpLoc = BO->getOperatorLoc();
+    LHS = BO->getLHS();
+    RHS = BO->getRHS();
+    return true;
+  } else if (CXXOperatorCallExpr *OO = dyn_cast<CXXOperatorCallExpr>(Cond)) {
+    CondOp = BinaryOperator::getOverloadedOpcode(OO->getOperator());
+    if (OO->getNumArgs() == 2) {
+      OpLoc = OO->getOperatorLoc();
+      LHS = OO->getArg(0);
+      RHS = OO->getArg(1);
+      return true;
+    }
+  } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Cond)) {
+    switch (ICE->getCastKind()) {
+    case CK_ConstructorConversion:
+    case CK_UserDefinedConversion:
+      S.Diag(Cond->getExprLoc(), diag::warn_cilk_for_cond_user_defined_conv)
+        << (ICE->getCastKind() == CK_ConstructorConversion)
+        << Cond->getSourceRange();
+      // fallthrough
+    default:
+      break;
+    }
+    return ExtractCilkForCondition(S, ICE->getSubExpr(), CondOp, OpLoc, LHS, RHS);
+  } else if (CXXMemberCallExpr *MC = dyn_cast<CXXMemberCallExpr>(Cond)) {
+    CXXMethodDecl *MD = MC->getMethodDecl();
+    if (isa<CXXConversionDecl>(MD))
+      return ExtractCilkForCondition(S, MC->getImplicitObjectArgument(), CondOp,
+                                     OpLoc, LHS, RHS);
+  }
+
+  S.Diag(Cond->getExprLoc(), diag::err_cilk_for_invalid_cond_expr)
+    << Cond->getSourceRange();
+  return false;
+}
+
+static bool IsCilkForControlVarRef(Expr *E, VarDecl *ControlVar,
+                                   CastKind &HasCast) {
+  E = E->IgnoreParenNoopCasts(ControlVar->getASTContext());
+  if (CXXConstructExpr *C = dyn_cast<CXXConstructExpr>(E)) {
+    if (C->getConstructor()->isConvertingConstructor(false)) {
+      HasCast = CK_ConstructorConversion;
+      return IsCilkForControlVarRef(C->getArg(0), ControlVar, HasCast);
+    }
+  } else if (MaterializeTemporaryExpr *M = dyn_cast<MaterializeTemporaryExpr>(E)) {
+    return IsCilkForControlVarRef(M->GetTemporaryExpr(), ControlVar, HasCast);
+  } else if (CastExpr *C = dyn_cast<CastExpr>(E)) {
+    HasCast = C->getCastKind();
+    return IsCilkForControlVarRef(C->getSubExpr(), ControlVar, HasCast);
+  } else if (DeclRefExpr *DR = dyn_cast<DeclRefExpr>(E)) {
+    if (DR->getDecl() == ControlVar)
+      return true;
+  }
+
+  return false;
+}
+
+static bool CanonicalizeCilkForCondOperands(Sema &S, VarDecl *ControlVar,
+                                            Expr *Cond, Expr *&LHS,
+                                            Expr *&RHS, int &Direction) {
+
+  // The condition shall have one of the following two forms:
+  //   var OP shift-expression
+  //   shift-expression OP var
+  // where var is the control variable, optionally enclosed in parentheses.
+  CastKind HasCast = CK_NoOp;
+  if (!IsCilkForControlVarRef(LHS, ControlVar, HasCast)) {
+    HasCast = CK_NoOp;
+    if (!IsCilkForControlVarRef(RHS, ControlVar, HasCast)) {
+      S.Diag(Cond->getLocStart(), diag::err_cilk_for_cond_test_control_var)
+        << ControlVar
+        << Cond->getSourceRange();
+      S.Diag(Cond->getLocStart(), diag::note_cilk_for_cond_allowed)
+        << ControlVar;
+      return false;
+    } else {
+      std::swap(LHS, RHS);
+      Direction = -Direction;
+    }
+  }
+
+  switch (HasCast) {
+  case CK_ConstructorConversion:
+  case CK_UserDefinedConversion:
+    S.Diag(LHS->getLocStart(), diag::warn_cilk_for_cond_user_defined_conv)
+      << (HasCast == CK_ConstructorConversion) << LHS->getSourceRange();
+    // fallthrough
+  default:
+    break;
+  }
+
+  return true;
+}
+
+static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
+                                  VarDecl *ControlVar, Expr *Cond,
+                                  Expr *&Limit, int &Direction) {
+  BinaryOperatorKind Opcode;
+  SourceLocation OpLoc;
+  Expr *LHS = 0;
+  Expr *RHS = 0;
+
+  if (!ExtractCilkForCondition(S, Cond, Opcode, OpLoc, LHS, RHS))
+    return;
+
+  // The operator denoted OP shall be one of !=, <=, <, >=, or >.
+  switch (Opcode) {
+  case BO_NE:
+    Direction = 0;
+    break;
+  case BO_LT: case BO_LE:
+    Direction = 1;
+    break;
+  case BO_GT: case BO_GE:
+    Direction = -1;
+    break;
+  default:
+    S.Diag(OpLoc, diag::err_cilk_for_invalid_cond_operator);
+    return;
+  }
+
+  if (!CanonicalizeCilkForCondOperands(S, ControlVar, Cond, LHS, RHS, Direction))
+    return;
+
+
+  Limit = RHS;
+}
+
 StmtResult
 Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                        Stmt *First, FullExprArg Second, FullExprArg Third,
                        SourceLocation RParenLoc, Stmt *Body) {
+  assert(First && "expected init");
+  assert(Second.get() && "expected cond");
+  assert(Third.get() && "expected increment");
+
   Expr *Increment = Third.release().takeAs<Expr>();
 
   DiagnoseUnusedExprResult(First);
   DiagnoseUnusedExprResult(Increment);
   DiagnoseUnusedExprResult(Body);
 
+
+  // FIXME: this is a hack to get the control variable.
+  VarDecl *Var = 0;
+  if (DeclStmt *DS = dyn_cast<DeclStmt>(First))
+    Var = dyn_cast<VarDecl>(DS->getSingleDecl());
+  else
+    return StmtError();
+
   if (isa<NullStmt>(Body))
     getCurCompoundScope().setHasEmptyLoopBodies();
+
+  if (Var->getType()->isDependentType())
+    return StmtError();
+
+  if (Var->getType()->isReferenceType())
+    return StmtError();
+
+  // Check loop condition
+  CheckForLoopConditionalStatement(*this, Second.get(), Increment, Body);
+
+  Expr *Limit = 0;
+  int CondDirection = 0;
+  CheckCilkForCondition(*this, CilkForLoc, Var, Second.get(), Limit, CondDirection);
+
+  if (Limit) {
+    if (Limit->getType()->isDependentType())
+      return StmtError();
+
+    // Build end - begin
+    Expr *Begin = BuildDeclRefExpr(Var, Var->getType().getNonReferenceType(),
+                                   VK_LValue, Var->getLocation()).release();
+    Expr *End = Limit;
+    if (CondDirection < 0)
+      std::swap(Begin, End);
+
+    ExprResult Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
+
+    if (Span.isInvalid()) {
+      // error getting operator-()
+      Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
+      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+        << Begin->getSourceRange();
+      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+        << End->getSourceRange();
+      return StmtError();
+    }
+
+    if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
+      // non-integral type
+      Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
+        << Span.get()->getType();
+      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+        << Begin->getSourceRange();
+      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+        << End->getSourceRange();
+      return StmtError();
+    }
+  }
 
   return Owned(new (Context) CilkForStmt(Context, First, Second.get(),
                                          Third.get(), Body, CilkForLoc,
