@@ -1022,7 +1022,7 @@ public:
   }
 
   bool isClosure() const {
-    return DeclKind == Decl::Block || DeclKind == Decl::CilkFor;
+    return DeclKind == Decl::Block;
   }
 
   bool isObjCContainer() const {
