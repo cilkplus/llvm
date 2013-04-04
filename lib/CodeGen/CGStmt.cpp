@@ -25,7 +25,6 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/TypeBuilder.h"
 #include "llvm/Support/CallSite.h"
-
 using namespace clang;
 using namespace CodeGen;
 
@@ -1753,8 +1752,82 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
   }
 }
 
+/// Generate an outlined function for the body of a CapturedStmt, store any
+/// captured variables into the captured struct, and call the outlined function.
 void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
-  llvm_unreachable("not implemented yet");
+  const CapturedDecl *CD = S.getCapturedDecl();
+  const RecordDecl *RD = S.getCapturedRecordDecl();
+  QualType RecordTy = getContext().getRecordType(RD);
+  assert(CD->hasBody() && "missing CapturedDecl body");
+
+  // Initialize the captured struct.
+  AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
+  LValue SlotLV = MakeAddrLValue(Slot.getAddr(), RecordTy, Slot.getAlignment());
+
+  RecordDecl::field_iterator CurField = RD->field_begin();
+  for (CapturedStmt::capture_init_iterator I = S.capture_init_begin(),
+                                           E = S.capture_init_end();
+       I != E; ++I, ++CurField) {
+    LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
+    ArrayRef<VarDecl *> ArrayIndexes;
+    EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
+  }
+
+  // The function argument is the address of the captured struct.
+  llvm::SmallVector<llvm::Value *, 1> Args;
+  Args.push_back(SlotLV.getAddress());
+
+  // Emit the CapturedDecl
+  CGCapturedStmtInfo CSInfo(S);
+  CodeGenFunction CGF(CGM, true);
+  CGF.CapturedStmtInfo = &CSInfo;
+
+  llvm::Function *F = CGF.GenerateCapturedFunction(CurGD, CD, RD);
+
+  // Emit call to the helper function.
+  EmitCallOrInvoke(F, Args);
+}
+
+/// Creates the outlined function for a CapturedStmt.
+llvm::Function *
+CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
+                                          const CapturedDecl *CD,
+                                          const RecordDecl *RD) {
+  assert(CapturedStmtInfo &&
+    "CapturedStmtInfo should be set when generating the captured function");
+
+  // Check if we should generate debug info for this function.
+  maybeInitializeDebugInfo();
+  CurGD = GD;
+
+  // Build the argument list.
+  ASTContext &Ctx = CGM.getContext();
+  QualType ThisTy = Ctx.getPointerType(Ctx.getTagDeclType(RD));
+  FunctionArgList Args;
+  ImplicitParamDecl ThisDecl(const_cast<CapturedDecl*>(CD), SourceLocation(),
+                             /*Id=*/0, ThisTy);
+  Args.push_back(&ThisDecl);
+  CapturedStmtInfo->setThisParmVarDecl(&ThisDecl);
+
+  // Create the function declaration.
+  FunctionType::ExtInfo ExtInfo;
+  const CGFunctionInfo &FuncInfo =
+    CGM.getTypes().arrangeFunctionDeclaration(Ctx.VoidTy, Args, ExtInfo,
+                                              /*IsVariadic=*/false);
+  llvm::FunctionType *FuncLLVMTy = CGM.getTypes().GetFunctionType(FuncInfo);
+
+  llvm::Function *F =
+    llvm::Function::Create(FuncLLVMTy, llvm::GlobalValue::InternalLinkage,
+                           "__captured_stmt", &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(CD, F, FuncInfo);
+
+  // Generate the function.
+  StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getBody()->getLocStart());
+  // TODO: lots of code here in GenerateBlockFunction - is any of it needed here?
+  EmitStmt(CD->getBody());
+  FinishFunction(CD->getBodyRBrace());
+
+  return F;
 }
 
 void

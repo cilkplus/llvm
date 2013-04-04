@@ -1708,6 +1708,9 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
   assert(DMEntry == 0 && "Decl already exists in localdeclmap!");
   DMEntry = DeclPtr;
 
+  if (CapturedStmtInfo && CapturedStmtInfo->isThisParmVarDecl(&D))
+    CapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
+
   // The captured record (passed as the first parameter) is the base address.
   if (CurCGDeprecatedCapturedStmtInfo && CurCGDeprecatedCapturedStmtInfo->isThisParmVarDecl(&D)) {
     llvm::Value *This = Builder.CreateLoad(DeclPtr);

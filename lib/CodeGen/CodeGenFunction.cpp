@@ -36,6 +36,7 @@ using namespace CodeGen;
 CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
     Builder(cgm.getModule().getContext()),
+    CapturedStmtInfo(0),
     CurCGDeprecatedCapturedStmtInfo(0),
     DeprecatedCapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
@@ -620,6 +621,18 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
       // fast register allocator would be happier...
       CXXThisValue = CXXABIThisValue;
     }
+  }
+
+  // If CFG is emitting a captured statement and 'this' is captured,
+  // load it into CXXThisValue.
+  if (CapturedStmtInfo && CapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
+    QualType TagType = getContext().getTagDeclType(FD->getParent());
+    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
+                                           TagType);
+    LValue ThisLValue = EmitLValueForField(LV, FD);
+
+    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
   }
 
   // If CFG is emitting a captured statement and 'this' is captured,

@@ -535,6 +535,10 @@ void MicrosoftCXXNameMangler::manglePostfix(const DeclContext *DC,
     Context.mangleBlock(BD, Out);
     Out << '@';
     return manglePostfix(DC->getParent(), NoFunction);
+  } else if (isa<CapturedDecl>(DC)) {
+    // Skip CapturedDecl context.
+    manglePostfix(DC->getParent(), NoFunction);
+    return;
   } else if (isa<CilkForDecl>(DC)) {
     // Skip CilkForDecl context.
     manglePostfix(DC->getParent(), NoFunction);

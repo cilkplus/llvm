@@ -607,6 +607,60 @@ public:
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
 
+  /// \brief API for captured statement code generation.
+  class CGCapturedStmtInfo {
+  public:
+
+    explicit CGCapturedStmtInfo(const CapturedStmt &S)
+      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) {
+
+      RecordDecl::field_iterator Field =
+        S.getCapturedRecordDecl()->field_begin();
+      for (CapturedStmt::capture_iterator I = S.capture_begin(),
+                                          E = S.capture_end();
+           I != E; ++I, ++Field) {
+        if (I->capturesThis())
+          CXXThisFieldDecl = *Field;
+        else
+          CaptureFields[I->getCapturedVar()] = *Field;
+      }
+    }
+
+    void setThisValue(llvm::Value *V) { ThisValue = V; }
+    llvm::Value *getThisValue() const { return ThisValue; }
+
+    /// \brief Lookup the captured field decl for a variable.
+    const FieldDecl *lookup(const VarDecl *VD) const {
+      return CaptureFields.lookup(VD);
+    }
+
+    bool isCXXThisExprCaptured() const { return CXXThisFieldDecl != 0; }
+    FieldDecl *getThisFieldDecl() const { return CXXThisFieldDecl; }
+
+    bool isThisParmVarDecl(const VarDecl *V) const {
+      return V == ThisParmVarDecl;
+    }
+
+    void setThisParmVarDecl(VarDecl *V) {
+      ThisParmVarDecl = V;
+    }
+
+  private:
+    /// \brief Keep the map between VarDecl and FieldDecl.
+    llvm::SmallDenseMap<const VarDecl *, FieldDecl *> CaptureFields;
+
+    /// \brief The base address of the captured record, passed in as the first
+    /// argument of the parallel region function.
+    llvm::Value *ThisValue;
+
+    /// \brief Captured 'this' type.
+    FieldDecl *CXXThisFieldDecl;
+
+    /// \brief The captured record parameter to the helper function.
+    VarDecl *ThisParmVarDecl;
+  };
+  CGCapturedStmtInfo *CapturedStmtInfo;
+
   class CGDeprecatedCapturedStmtInfo {
   public:
     CGDeprecatedCapturedStmtInfo()
@@ -706,7 +760,7 @@ public:
   /// \brief Hold CodeGen info for captured statements
   CGDeprecatedCapturedStmtInfo *CurCGDeprecatedCapturedStmtInfo;
 
-    /// \brief API for captured statement code generation.
+  /// \brief API for captured statement code generation.
   class CGCilkForStmtInfo {
   public:
 
@@ -2296,7 +2350,6 @@ public:
   void EmitCaseStmt(const CaseStmt &S);
   void EmitCaseStmtRange(const CaseStmt &S);
   void EmitAsmStmt(const AsmStmt &S);
-  void EmitCapturedStmt(const CapturedStmt &S);
 
   void EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S);
   void EmitObjCAtTryStmt(const ObjCAtTryStmt &S);
@@ -2311,6 +2364,12 @@ public:
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
+
+  void EmitCapturedStmt(const CapturedStmt &S);
+  llvm::Function *GenerateCapturedFunction(GlobalDecl GD,
+                                           const CapturedDecl *CD,
+                                           const RecordDecl *RD);
+
   void EmitCilkSpawnDeprecatedCapturedStmt(const CilkSpawnDeprecatedCapturedStmt &S);
   void EmitDeprecatedCapturedStmt(const DeprecatedCapturedStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S);
@@ -2318,6 +2377,7 @@ public:
                                            const CilkForDecl *CD,
                                            const RecordDecl *RD,
                                            FunctionArgList &Args);
+
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//

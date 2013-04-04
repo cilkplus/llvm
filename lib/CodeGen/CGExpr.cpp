@@ -1853,6 +1853,15 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
         LValue LambdaLV = MakeNaturalAlignAddrLValue(CXXABIThisValue,
                                                      LambdaTagType);
         return EmitLValueForField(LambdaLV, FD);
+      } else if (CapturedStmtInfo) {
+        if (const FieldDecl *FD = CapturedStmtInfo->lookup(VD)) {
+          QualType TagType = getContext().getTagDeclType(FD->getParent());
+          LValue LV
+            = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
+                                         TagType);
+
+          return EmitLValueForField(LV, FD);
+        }
       } else if (CurCGDeprecatedCapturedStmtInfo) {
         if (const FieldDecl *FD = CurCGDeprecatedCapturedStmtInfo->lookup(VD)) {
           QualType TagType = getContext().getTagDeclType(FD->getParent());
