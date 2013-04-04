@@ -10793,7 +10793,6 @@ diagnoseUncapturableValueReference(Sema &S, SourceLocation loc,
   // capture.
 }
 
-
 /// \brief Capture the given variable in the parallel region.
 template <typename ScopeInfoType>
 static ExprResult captureInRegion(Sema &S, ScopeInfoType *SI, VarDecl *Var,
@@ -10801,8 +10800,7 @@ static ExprResult captureInRegion(Sema &S, ScopeInfoType *SI, VarDecl *Var,
                                   SourceLocation Loc,
                                   bool RefersToEnclosingLocal) {
   // The current implemention assumes that all variables are captured
-  // by references. Since there is no capture by copy, no expression evaluation
-  // will be needed.
+  // by reference or by copy, and an array is only captured by reference.
   //
   RecordDecl *RD = SI->TheRecordDecl;
 
@@ -10814,12 +10812,40 @@ static ExprResult captureInRegion(Sema &S, ScopeInfoType *SI, VarDecl *Var,
   Field->setAccess(AS_private);
   RD->addDecl(Field);
 
+  // Introduce a new evaluation context for the initialization.
+  S.PushExpressionEvaluationContext(Sema::PotentiallyEvaluated);
+
   Expr *Ref = new (S.Context) DeclRefExpr(Var, RefersToEnclosingLocal,
                                           DeclRefType, VK_LValue, Loc);
   Var->setReferenced(true);
   Var->setUsed(true);
 
-  return Ref;
+  assert((!FieldType->isArrayType() || FieldType->isReferenceType()) &&
+         "capture an array by copy is not implemented");
+
+  // Use the same InitializedEntity as lambda expressions.
+  InitializedEntity Entity
+    = InitializedEntity::InitializeLambdaCapture(Var, Field, Loc);
+
+  InitializationKind InitKind = InitializationKind::CreateDirect(Loc, Loc, Loc);
+  InitializationSequence Init(S, Entity, InitKind, &Ref, 1);
+
+  ExprResult Result(true);
+  if (!Init.Diagnose(S, Entity, InitKind, &Ref, 1))
+    Result = Init.Perform(S, Entity, InitKind, Ref);
+
+  // If this initialization requires any cleanups (e.g., due to a
+  // default argument to a copy constructor), note that for the
+  // capturing constructs.
+  if (S.ExprNeedsCleanups)
+    SI->ExprNeedsCleanups = true;
+
+  // Exit the expression evaluation context used for the capture.
+  S.CleanupVarDeclMarking();
+  S.DiscardCleanupsInEvaluationContext();
+  S.PopExpressionEvaluationContext();
+
+  return Result;
 }
 
 /// \brief Capture the given variable in the given lambda expression.
@@ -11168,9 +11194,20 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
     bool IsParallelRegion = isa<ParallelRegionScopeInfo>(CSI);
 
     if (IsCilkFor || IsParallelRegion) {
-      // By Default, capture variables by reference
+      // Capture variable by reference by default.
       bool ByRef = true;
-      CaptureType = Context.getLValueReferenceType(DeclRefType);
+
+      if (ByRef)
+        CaptureType = Context.getLValueReferenceType(DeclRefType);
+      else {
+        // Capture variables by copy.
+        if (const ReferenceType *RefType
+            = CaptureType->getAs<ReferenceType>()) {
+          // This is the same as the lambda expressions. See comments below.
+          if (!RefType->getPointeeType()->isFunctionType())
+            CaptureType = RefType->getPointeeType();
+        }
+      }
 
       Expr *CopyExpr = 0;
       if (BuildAndDiagnose) {
@@ -11185,6 +11222,9 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
         if (!Result.isInvalid())
           CopyExpr = Result.take();
       }
+
+      // Compute the type of a reference to this captured variable.
+      DeclRefType = CaptureType.getNonReferenceType();
 
       // Actually capture the variable.
       if (BuildAndDiagnose)

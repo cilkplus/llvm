@@ -514,19 +514,21 @@ public:
   RecordDecl *TheRecordDecl;
   /// \brief This is the enclosing scope of the parallel region.
   Scope *TheScope;
+  /// \brief Whether any of the capture expressions requires cleanups.
+  bool ExprNeedsCleanups;
 
   ParallelRegionScopeInfo(DiagnosticsEngine &Diag, Scope *S, FunctionDecl *FD,
                           RecordDecl *RD)
     : CapturingScopeInfo(Diag, ImpCap_ParallelRegion),
-      TheFunctionDecl(FD), TheRecordDecl(RD), TheScope(S)
-  {
+      TheFunctionDecl(FD), TheRecordDecl(RD), TheScope(S),
+      ExprNeedsCleanups(false) {
     Kind = SK_ParallelRegion;
   }
 
   virtual ~ParallelRegionScopeInfo();
 
-  static bool classof(const FunctionScopeInfo *FSI) { 
-    return FSI->Kind == SK_ParallelRegion; 
+  static bool classof(const FunctionScopeInfo *FSI) {
+    return FSI->Kind == SK_ParallelRegion;
   }
 };
 
@@ -536,17 +538,28 @@ public:
   /// \brief The declaration describes a Cilk for statement.
   CilkForDecl *TheCilkForDecl;
 
-  /// \brief The captured record type.
+  /// \brief The RecordDecl containing captured variables.
   RecordDecl *TheRecordDecl;
 
-  /// \brief This is the enclosing scope of the parallel region.
+  /// \brief The enclosing scope of the parallel region.
   Scope *TheScope;
 
+  /// \brief The loop control variable of this Cilk for loop.
+  const VarDecl *LoopControlVar;
+
+  /// \brief Whether any of the capture expressions require cleanups.
+  bool ExprNeedsCleanups;
+
   CilkForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CilkForDecl *FD,
-                   RecordDecl *RD)
+                   RecordDecl *RD, const VarDecl *VD)
     : CapturingScopeInfo(Diag, ImpCap_CilkFor),
-      TheCilkForDecl(FD), TheRecordDecl(RD), TheScope(S) {
+      TheCilkForDecl(FD), TheRecordDecl(RD), TheScope(S),
+      LoopControlVar(VD), ExprNeedsCleanups(false) {
     Kind = SK_CilkFor;
+  }
+
+  bool isLoopControlVar(const VarDecl *VD) const {
+    return VD && (VD == LoopControlVar);
   }
 
   virtual ~CilkForScopeInfo();

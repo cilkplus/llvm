@@ -6428,6 +6428,10 @@ void Sema::DiagnoseEmptyLoopBody(const Stmt *S,
     StmtLoc = WS->getCond()->getSourceRange().getEnd();
     Body = WS->getBody();
     DiagID = diag::warn_empty_while_body;
+  } else if (const CilkForStmt *CFS = dyn_cast<CilkForStmt>(S)) {
+    StmtLoc = CFS->getCilkForLoc();
+    Body = CFS->getBody();
+    DiagID = diag::warn_empty_cilk_for_body;
   } else
     return; // Neither `for' nor `while'.
 

@@ -2256,7 +2256,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case STMT_CILK_FOR:
-      S = new (Context) CilkForStmt(Empty);
+      llvm_unreachable("not implemented yet");
       break;
     }
     

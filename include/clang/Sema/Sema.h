@@ -910,7 +910,8 @@ public:
   void PushLambdaScope(CXXRecordDecl *Lambda, CXXMethodDecl *CallOperator);
   void PushParallelRegionScope(Scope *RegionScope, FunctionDecl *FD,
                                RecordDecl *RD);
-  void PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD);
+  void PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD,
+                        const VarDecl *LoopControlVariable);
 
   void PopFunctionScopeInfo(const sema::AnalysisBasedWarnings::Policy *WP =0,
                             const Decl *D = 0, const BlockExpr *blkExpr = 0);
@@ -2790,9 +2791,15 @@ public:
                               SourceLocation RParenLoc,
                               Stmt *Body);
 
-  void ActOnCilkForDeclBegin(SourceLocation CilkForLoc, Scope *CurScope);
-  CilkForDecl *ActOnCilkForDeclEnd();
-  void ActOnCilkForDeclError(bool IsInstantiation = false);
+  StmtResult BuildCilkForStmt(SourceLocation CilkForLoc,
+                              SourceLocation LParenLoc,
+                              Stmt *Init, Expr *Cond, Expr *Inc,
+                              SourceLocation RParenLoc, Stmt *Body);
+
+  void ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
+                               StmtResult FirstPart);
+
+  void ActOnCilkForStmtError(bool IsInstantiation = false);
 
   StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
                              bool IsVolatile, unsigned NumOutputs,

@@ -292,6 +292,24 @@ void Sema::ActOnFinishOfCompoundStmt() {
 }
 
 sema::CompoundScopeInfo &Sema::getCurCompoundScope() const {
+  // For a Cilk for statement, skip the CilkForScopeInfo and return
+  // its enclosing CompoundScope. For example,
+  //
+  // void foo() {
+  //   _Cilk_for (int i = 0; i < 10; ++i)
+  //     bar();
+  // }
+  //
+  // The body of 'foo()' is returned.
+  //
+  if (getLangOpts().CilkPlus) {
+    unsigned I = FunctionScopes.size() - 1;
+    while (isa<CilkForScopeInfo>(FunctionScopes[I]))
+      --I;
+    assert((I < FunctionScopes.size()) && "unwrap unexpected");
+    return FunctionScopes[I]->CompoundScopes.back();
+  }
+
   return getCurFunction()->CompoundScopes.back();
 }
 
@@ -3935,12 +3953,119 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   if (isa<NullStmt>(Body))
     getCurCompoundScope().setHasEmptyLoopBodies();
 
-  return Owned(new (Context) CilkForStmt(Context, First, Second.get(),
-                                         Third.get(), Body, CilkForLoc,
-                                         LParenLoc, RParenLoc));
+  return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
+                          Third.get(), RParenLoc, Body);
 }
 
-void Sema::ActOnCilkForDeclBegin(SourceLocation CilkForLoc, Scope *CurScope) {
+static
+void buildCilkForCaptureLists(SmallVectorImpl<CilkForStmt::Capture> &Captures,
+                              SmallVectorImpl<Expr *> &CaptureInits,
+                              ArrayRef<CilkForScopeInfo::Capture> Candidates) {
+  typedef ArrayRef<CilkForScopeInfo::Capture>::const_iterator CaptureIter;
+
+  for (CaptureIter CI = Candidates.begin(), CE = Candidates.end();
+       CI != CE; ++CI) {
+    if (CI->isThisCapture()) {
+      Captures.push_back(CilkForStmt::Capture(CI->getLocation(),
+                                              CilkForStmt::VCK_This));
+      CaptureInits.push_back(CI->getCopyExpr());
+      continue;
+    }
+
+    CilkForStmt::VariableCaptureKind Kind
+      = CI->isCopyCapture() ? CilkForStmt::VCK_ByCopy : CilkForStmt::VCK_ByRef;
+
+    Captures.push_back(CilkForStmt::Capture(CI->getLocation(), Kind,
+                                            CI->getVariable()));
+    CaptureInits.push_back(CI->getCopyExpr());
+  }
+}
+
+StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
+                                  SourceLocation LParenLoc,
+                                  Stmt *Init, Expr *Cond, Expr *Inc,
+                                  SourceLocation RParenLoc, Stmt *Body) {
+  CilkForScopeInfo *FSI = getCurCilkFor();
+  assert(FSI && "CilkForScopeInfo is out of sync");
+
+  SmallVector<CilkForStmt::Capture, 4> Captures;
+  SmallVector<Expr *, 4> CaptureInits;
+  buildCilkForCaptureLists(Captures, CaptureInits, FSI->Captures);
+
+  // Set the variable captruing record declaration.
+  RecordDecl *RD = FSI->TheRecordDecl;
+  RD->completeDefinition();
+
+  CilkForDecl *CFD = FSI->TheCilkForDecl;
+  CFD->setContextRecordDecl(RD);
+
+  PopDeclContext();
+  PopFunctionScopeInfo();
+
+  // FIXME: Handle ExprNeedsCleanups flag.
+  // ExprNeedsCleanups = FSI->ExprNeedsCleanups;
+
+  CilkForStmt *Result = CilkForStmt::Create(Context, Init, Cond, Inc, Body,
+                                            CilkForLoc, LParenLoc, RParenLoc,
+                                            CFD, Captures, CaptureInits);
+
+  return Owned(Result);
+}
+
+// Find the loop control variable. Returns null if not found.
+static const VarDecl *getLoopControlVariable(Sema &S, StmtResult InitStmt) {
+  if (InitStmt.isInvalid())
+    return 0;
+
+  Stmt *Init = InitStmt.get();
+
+  // No initialization.
+  if (!Init)
+    return 0;
+
+  const VarDecl *Candidate = 0;
+
+  // Initialization is a declaration statement.
+  if (DeclStmt *DS = dyn_cast<DeclStmt>(Init)) {
+    if (!DS->isSingleDecl())
+      return 0;
+
+    if (VarDecl *Var = dyn_cast<VarDecl>(DS->getSingleDecl()))
+      Candidate = Var;
+  } else {
+    // Initialization is an expression.
+    BinaryOperator *Op = 0;
+    if (Expr *E = dyn_cast<Expr>(Init)) {
+      E = E->IgnoreParenNoopCasts(S.Context);
+      Op = dyn_cast<BinaryOperator>(E);
+    }
+
+    if (!Op || !Op->isAssignmentOp())
+      return 0;
+
+    Expr *E = Op->getLHS();
+    if (!E)
+      return 0;
+
+    E = E->IgnoreParenNoopCasts(S.Context);
+    DeclRefExpr *LHS = dyn_cast<DeclRefExpr>(E);
+    if (!LHS)
+      return 0;
+
+    if (VarDecl *Var = dyn_cast<VarDecl>(LHS->getDecl()))
+      Candidate = Var;
+  }
+
+  // Only local variables can be a loop control variable.
+  if (Candidate && Candidate->isLocalVarDecl())
+    return Candidate;
+
+  // Cannot find the loop control variable.
+  return 0;
+}
+
+void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
+                                   StmtResult FirstPart) {
   DeclContext *DC = CurContext;
   while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
     DC = DC->getParent();
@@ -3965,7 +4090,8 @@ void Sema::ActOnCilkForDeclBegin(SourceLocation CilkForLoc, Scope *CurScope) {
   CilkForDecl *CFD = CilkForDecl::Create(Context, CurContext);
   DC->addDecl(CFD);
 
-  PushCilkForScope(CurScope, CFD, RD);
+  const VarDecl *VD = getLoopControlVariable(*this, FirstPart);
+  PushCilkForScope(CurScope, CFD, RD, VD);
 
   if (CurScope)
     PushDeclContext(CurScope, CFD);
@@ -3975,49 +4101,7 @@ void Sema::ActOnCilkForDeclBegin(SourceLocation CilkForLoc, Scope *CurScope) {
   PushExpressionEvaluationContext(PotentiallyEvaluated);
 }
 
-static
-void buildCilkForCaptureLists(SmallVectorImpl<CilkForDecl::Capture> &Captures,
-                              SmallVectorImpl<Expr *> &CaptureInits,
-                              ArrayRef<CilkForScopeInfo::Capture> Candidates) {
-  typedef ArrayRef<CilkForScopeInfo::Capture>::const_iterator CaptureIter;
-
-  for (CaptureIter CI = Candidates.begin(), CE = Candidates.end();
-       CI != CE; ++CI) {
-    if (CI->isThisCapture()) {
-      Captures.push_back(CilkForDecl::Capture(CI->getLocation(),
-                                              CilkForDecl::VCK_This));
-      CaptureInits.push_back(CI->getCopyExpr());
-      continue;
-    }
-
-    assert(CI->isReferenceCapture() &&
-           "non-reference capture not yet implemented");
-
-    Captures.push_back(CilkForDecl::Capture(CI->getLocation(),
-                                            CilkForDecl::VCK_ByRef,
-                                            CI->getVariable()));
-    CaptureInits.push_back(CI->getCopyExpr());
-  }
-}
-
-CilkForDecl *Sema::ActOnCilkForDeclEnd() {
-  CilkForScopeInfo *FSI = getCurCilkFor();
-  assert(FSI && "CilkForScopeInfo is out of sync");
-
-  SmallVector<CilkForDecl::Capture, 4> Captures;
-  SmallVector<Expr *, 4> CaptureInits;
-  buildCilkForCaptureLists(Captures, CaptureInits, FSI->Captures);
-
-  RecordDecl *RD = FSI->TheRecordDecl;
-  RD->completeDefinition();
-
-  PopDeclContext();
-  PopFunctionScopeInfo();
-
-  return FSI->TheCilkForDecl;
-}
-
-void Sema::ActOnCilkForDeclError(bool IsInstantiation) {
+void Sema::ActOnCilkForStmtError(bool IsInstantiation) {
   DiscardCleanupsInEvaluationContext();
   PopExpressionEvaluationContext();
   if (!IsInstantiation)

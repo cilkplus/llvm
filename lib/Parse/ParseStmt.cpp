@@ -2478,8 +2478,7 @@ StmtResult Parser::ParseCilkForStmt() {
       // The loop increment would be part of the outlined function,
       // together with the loop body. Hence, we enter a capturing region
       // before parsing the loop increment.
-      //
-      Actions.ActOnCilkForDeclBegin(CilkForLoc, getCurScope());
+      Actions.ActOnStartOfCilkForStmt(CilkForLoc, getCurScope(), FirstPart);
       InCapturingRegion = true;
 
       ExprResult E = ParseExpression();
@@ -2494,7 +2493,7 @@ StmtResult Parser::ParseCilkForStmt() {
 
   // Enter the variable capturing region for Cilk for body.
   if (!InCapturingRegion)
-    Actions.ActOnCilkForDeclBegin(CilkForLoc, getCurScope());
+    Actions.ActOnStartOfCilkForStmt(CilkForLoc, getCurScope(), FirstPart);
 
   // Cannot use goto to exit the Cilk for body.
   ParseScope InnerScope(this, Scope::BlockScope | Scope::FnScope |
@@ -2511,15 +2510,18 @@ StmtResult Parser::ParseCilkForStmt() {
 
   if (FirstPart.isInvalid() || !FirstPart.get() || !SecondPart.get() ||
       !ThirdPart.get() || Body.isInvalid() || !Body.get()) {
-    Actions.ActOnCilkForDeclError();
+    Actions.ActOnCilkForStmtError();
     return StmtError();
   }
 
-  // Exit from the variable capturing region.
-  Actions.ActOnCilkForDeclEnd();
+  StmtResult Result = Actions.ActOnCilkForStmt(CilkForLoc, T.getOpenLocation(),
+                                               FirstPart.take(), SecondPart,
+                                               ThirdPart, T.getCloseLocation(),
+                                               Body.take());
+  if (Result.isInvalid()) {
+    Actions.ActOnCilkForStmtError();
+    return StmtError();
+  }
 
-  return Actions.ActOnCilkForStmt(CilkForLoc, T.getOpenLocation(),
-                                  FirstPart.take(), SecondPart,
-                                  ThirdPart, T.getCloseLocation(),
-                                  Body.take());
+  return Result;
 }

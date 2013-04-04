@@ -273,3 +273,20 @@ l_in:
     goto *addr;
   }
 }
+
+void empty_body() {
+  _Cilk_for (int i = 0; i < 10; ++i); // expected-warning {{Cilk for loop has empty body}} \
+                                      // expected-note {{put the semicolon on a separate line to silence this warning}}
+  { }
+
+  _Cilk_for (int i = 0; i < 10; ++i) // OK, the semicolon is on a separate line.
+    ;
+  { }
+
+  _Cilk_for (int i = 0; i < 10; ++i); // expected-warning {{Cilk for loop has empty body}} \
+                                      // expected-note {{put the semicolon on a separate line to silence this warning}}
+    next();
+
+  _Cilk_for (int i = 0; i < 10; ++i); // OK, the next statement is not a compound statement and is aligned with _Cilk_for.
+  next();
+}
