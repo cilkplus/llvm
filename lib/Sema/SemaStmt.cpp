@@ -3751,35 +3751,6 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   Limit = RHS;
 }
 
-static bool IsValidCilkForIncrement(Sema &S, Expr *Increment) {
-  switch (Increment->getStmtClass()) {
-  case Stmt::UnaryOperatorClass:
-    if (!cast<UnaryOperator>(Increment)->isIncrementDecrementOp())
-      break;
-    return true;
-  case Stmt::CompoundAssignOperatorClass: {
-    BinaryOperator *B = cast<CompoundAssignOperator>(Increment);
-
-    if (!B->isAdditiveAssignOp())
-      break;
-
-    if (!B->getRHS()->getType()->isIntegralOrEnumerationType()) {
-      S.Diag(Increment->getExprLoc(),
-        diag::err_cilk_for_invalid_increment_rhs) << B->getOpcodeStr();
-      return false;
-    }
-
-    return true;
-  }
-  default:
-    break;
-  }
-
-  // If we reached this point, the basic form is invalid.
-  S.Diag(Increment->getExprLoc(), diag::err_cilk_for_invalid_increment);
-  return false;
-}
-
 StmtResult
 Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                        Stmt *First, FullExprArg Second, FullExprArg Third,
@@ -3811,10 +3782,6 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   if (!Limit)
     return StmtError();
   if (Limit->getType()->isDependentType())
-    return StmtError();
-
-  // Check increment
-  if (!IsValidCilkForIncrement(*this, Increment))
     return StmtError();
 
   // Build end - begin

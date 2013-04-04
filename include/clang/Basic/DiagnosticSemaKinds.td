@@ -6241,12 +6241,6 @@ def err_cilk_for_difference_ill_formed: Error<
   "end - begin must be well-formed in '_Cilk_for'">;
 def err_non_integral_cilk_for_difference_type: Error<
   "end - begin must have integral type in '_Cilk_for' - got %0">;
-
-def err_cilk_for_invalid_increment : Error<
-  "loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'">;
-def err_cilk_for_invalid_increment_rhs : Error<
-  "right-hand side of '%0' must have integral or enum type in '_Cilk_for' increment">;
-
 def note_cilk_for_begin_expr: Note<
   "loop begin expression here">;
 def note_cilk_for_end_expr: Note<
@@ -6258,7 +6252,6 @@ def err_cilk_for_cannot_return: Error<
   "cannot return from within a '_Cilk_for' loop">;
 def err_cilk_for_cannot_break: Error<
   "cannot break from a '_Cilk_for' loop">;
-
 } // end of sema category
 
 let CategoryName = "Related Result Type Issue" in {
