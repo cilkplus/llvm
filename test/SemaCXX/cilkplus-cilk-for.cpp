@@ -17,6 +17,13 @@ void f1() {
   _Cilk_for (auto x = bar(); j < 10; j++); //expected-error {{use of undeclared identifier 'bar'}}
 }
 
+class NotAnInt {
+};
+
+enum AnEnum {
+  EnumOne = 1
+};
+
 struct Base {
   Base();
   Base(int);
@@ -30,6 +37,11 @@ struct Base {
   int operator+(int) const;
   Base& operator++();   // prefix
   Base operator++(int); // postfix
+  Base operator!() const;
+  Base operator+=(int);
+  Base operator+=(NotAnInt);
+  Base operator-=(int);
+  Base operator-=(NotAnInt);
 };
 
 int operator-(int, const Base &); // expected-note {{candidate function not viable}}
@@ -120,6 +132,21 @@ void ops() {
                                     // expected-error {{invalid operands to binary expression ('int' and 'BadTy')}} \
                                     // expected-note {{loop begin expression here}} \
                                     // expected-note {{loop end expression here}}
+
+  // Increment related tests
+
+  _Cilk_for (DC i; i < 10; !i); // expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
+
+  _Cilk_for (int i = 0; i < 10; ); // expected-error {{missing loop increment expression in '_Cilk_for'}}
+
+  _Cilk_for (DC i; i < 10; i += 2); // OK
+  _Cilk_for (DC i; i < 10; i += EnumOne); // OK
+  _Cilk_for (DC i; i < 10; i += NotAnInt()); // expected-error {{right-hand side of '+=' must have integral or enum type in '_Cilk_for' increment}}
+  _Cilk_for (DC i; i < 10; i -= 2); // OK
+  _Cilk_for (DC i; i < 10; i -= EnumOne); // OK
+  _Cilk_for (DC i; i < 10; i -= NotAnInt()); // expected-error {{right-hand side of '-=' must have integral or enum type in '_Cilk_for' increment}}
+
+  _Cilk_for (DC i; i < 10; (0, ++i)); // expected-warning {{expression result unused}} expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
 }
 
 struct Bool {

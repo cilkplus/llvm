@@ -3751,6 +3751,62 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   Limit = RHS;
 }
 
+static bool IsValidCilkForIncrement(Sema &S, Expr *Increment) {
+  Stmt::StmtClass Kind = Increment->getStmtClass();
+
+  // Simple increment or decrement -- always OK
+  if (Kind == Stmt::UnaryOperatorClass
+      && cast<UnaryOperator>(Increment)->isIncrementDecrementOp())
+    return true;
+
+  // In the case of += or -=, whether built-in or overloaded, we need to check
+  // the type of the right-hand side. In that case, RHS will be set to a
+  // non-null value.
+  Expr* RHS = 0;
+  StringRef OperatorName;
+
+  if (Kind == Stmt::CXXOperatorCallExprClass) {
+    CXXOperatorCallExpr* C = cast<CXXOperatorCallExpr>(Increment);
+    OverloadedOperatorKind Overload = C->getOperator();
+
+    // operator++() or operator--() -- always OK
+    if (Overload == OO_PlusPlus || Overload == OO_MinusMinus)
+      return true;
+
+    // operator+=() or operator-=() -- defer checking of the RHS type
+    if (Overload == OO_PlusEqual || Overload == OO_MinusEqual) {
+      RHS = C->getArg(1);
+      OperatorName = (Overload == OO_PlusEqual ? "+=" : "-=");
+    }
+  }
+
+  if (Kind == Stmt::CompoundAssignOperatorClass) {
+    BinaryOperator *B = cast<CompoundAssignOperator>(Increment);
+
+    // += or -= -- defer checking of the RHS type
+    if (B->isAdditiveAssignOp()) {
+      RHS = B->getRHS();
+      OperatorName = B->getOpcodeStr();
+    }
+  }
+
+  // If RHS is non-null, it's a += or -=, either built-in or overloaded.
+  // We need to check that the RHS has the correct type.
+  if (RHS) {
+    if (RHS->getType()->isIntegralOrEnumerationType())
+      return true;
+    else {
+      S.Diag(Increment->getExprLoc(),
+        diag::err_cilk_for_invalid_increment_rhs) << OperatorName;
+      return false;
+    }
+  }
+
+  // If we reached this point, the basic form is invalid. Issue a diagnostic.
+  S.Diag(Increment->getExprLoc(), diag::err_cilk_for_invalid_increment);
+  return false;
+}
+
 StmtResult
 Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                        Stmt *First, FullExprArg Second, FullExprArg Third,
@@ -3782,6 +3838,10 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   if (!Limit)
     return StmtError();
   if (Limit->getType()->isDependentType())
+    return StmtError();
+
+  // Check increment
+  if (!IsValidCilkForIncrement(*this, Increment))
     return StmtError();
 
   // Build end - begin
