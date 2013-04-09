@@ -147,6 +147,11 @@ void increment() {
   _Cilk_for (int i = 10; i > 0; i -= 1.2f); // expected-error {{right-hand side of '-=' must have integral or enum type in '_Cilk_for' increment}}
 
   _Cilk_for (int i = 0; i < 10; (0, ++i)); // expected-warning {{expression result unused}} expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
+
+  _Cilk_for (int i = 0; i < 10; (i++)); // OK
+  _Cilk_for (int i = 0; i < 10; ((i++))); // OK
+  _Cilk_for (int i = 0; i < 10; (i *= 2)); // expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
+  _Cilk_for (int i = 0; i < 10; (i += 1.2f)); // expected-error {{right-hand side of '+=' must have integral or enum type in '_Cilk_for' increment}}
 }
 
 void other_types(int *p, int *q) {

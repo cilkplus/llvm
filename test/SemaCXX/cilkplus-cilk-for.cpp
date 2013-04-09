@@ -147,6 +147,10 @@ void ops() {
   _Cilk_for (DC i; i < 10; i -= NotAnInt()); // expected-error {{right-hand side of '-=' must have integral or enum type in '_Cilk_for' increment}}
 
   _Cilk_for (DC i; i < 10; (0, ++i)); // expected-warning {{expression result unused}} expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
+
+  _Cilk_for (DC i; i < 10; (i += 2)); // OK
+  _Cilk_for (DC i; i < 10; ((i += 2))); // OK
+  _Cilk_for (DC i; i < 10; (i += NotAnInt())); // expected-error {{right-hand side of '+=' must have integral or enum type in '_Cilk_for' increment}}
 }
 
 struct Bool {

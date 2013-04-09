@@ -3751,7 +3751,9 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   Limit = RHS;
 }
 
-static bool IsValidCilkForIncrement(Sema &S, Expr *Increment) {
+static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment) {
+  Increment = Increment->IgnoreParens();
+
   Stmt::StmtClass Kind = Increment->getStmtClass();
 
   // Simple increment or decrement -- always OK
@@ -3762,11 +3764,11 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment) {
   // In the case of += or -=, whether built-in or overloaded, we need to check
   // the type of the right-hand side. In that case, RHS will be set to a
   // non-null value.
-  Expr* RHS = 0;
+  const Expr *RHS = 0;
   StringRef OperatorName;
 
   if (Kind == Stmt::CXXOperatorCallExprClass) {
-    CXXOperatorCallExpr* C = cast<CXXOperatorCallExpr>(Increment);
+    const CXXOperatorCallExpr *C = cast<CXXOperatorCallExpr>(Increment);
     OverloadedOperatorKind Overload = C->getOperator();
 
     // operator++() or operator--() -- always OK
@@ -3781,7 +3783,7 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment) {
   }
 
   if (Kind == Stmt::CompoundAssignOperatorClass) {
-    BinaryOperator *B = cast<CompoundAssignOperator>(Increment);
+    const BinaryOperator *B = cast<CompoundAssignOperator>(Increment);
 
     // += or -= -- defer checking of the RHS type
     if (B->isAdditiveAssignOp()) {
