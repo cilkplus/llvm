@@ -72,12 +72,12 @@ class PPCInstrInfo : public PPCGenInstrInfo {
                            unsigned SrcReg, bool isKill, int FrameIdx,
                            const TargetRegisterClass *RC,
                            SmallVectorImpl<MachineInstr*> &NewMIs,
-                           bool &NonRI) const;
+                           bool &NonRI, bool &SpillsVRS) const;
   bool LoadRegFromStackSlot(MachineFunction &MF, DebugLoc DL,
                             unsigned DestReg, int FrameIdx,
                             const TargetRegisterClass *RC,
                             SmallVectorImpl<MachineInstr*> &NewMIs,
-                            bool &NonRI) const;
+                            bool &NonRI, bool &SpillsVRS) const;
 public:
   explicit PPCInstrInfo(PPCTargetMachine &TM);
 
@@ -120,6 +120,17 @@ public:
                                 MachineBasicBlock *FBB,
                                 const SmallVectorImpl<MachineOperand> &Cond,
                                 DebugLoc DL) const;
+
+  // Select analysis.
+  virtual bool canInsertSelect(const MachineBasicBlock&,
+                               const SmallVectorImpl<MachineOperand> &Cond,
+                               unsigned, unsigned, int&, int&, int&) const;
+  virtual void insertSelect(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator MI, DebugLoc DL,
+                            unsigned DstReg,
+                            const SmallVectorImpl<MachineOperand> &Cond,
+                            unsigned TrueReg, unsigned FalseReg) const;
+
   virtual void copyPhysReg(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator I, DebugLoc DL,
                            unsigned DestReg, unsigned SrcReg,
@@ -145,6 +156,9 @@ public:
 
   virtual
   bool ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const;
+
+  virtual bool FoldImmediate(MachineInstr *UseMI, MachineInstr *DefMI,
+                             unsigned Reg, MachineRegisterInfo *MRI) const;
 
   /// GetInstSize - Return the number of bytes of code the specified
   /// instruction may be.  This returns the maximum number of bytes.

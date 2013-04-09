@@ -92,7 +92,6 @@ void initializeCalculateSpillWeightsPass(PassRegistry&);
 void initializeCallGraphAnalysisGroup(PassRegistry&);
 void initializeCilkStackFrameLateInitPass(PassRegistry&);
 void initializeCodeGenPreparePass(PassRegistry&);
-void initializeCodePlacementOptPass(PassRegistry&);
 void initializeConstantMergePass(PassRegistry&);
 void initializeConstantPropagationPass(PassRegistry&);
 void initializeMachineCopyPropagationPass(PassRegistry&);

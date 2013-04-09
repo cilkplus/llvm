@@ -408,8 +408,14 @@ def BUFFER_LOAD_DWORDX2 : MUBUF_Load_Helper <0x0000000d, "BUFFER_LOAD_DWORDX2", 
 def BUFFER_LOAD_DWORDX4 : MUBUF_Load_Helper <0x0000000e, "BUFFER_LOAD_DWORDX4", VReg_128>;
 //def BUFFER_STORE_BYTE : MUBUF_ <0x00000018, "BUFFER_STORE_BYTE", []>;
 //def BUFFER_STORE_SHORT : MUBUF_ <0x0000001a, "BUFFER_STORE_SHORT", []>;
-//def BUFFER_STORE_DWORD : MUBUF_ <0x0000001c, "BUFFER_STORE_DWORD", []>;
-//def BUFFER_STORE_DWORDX2 : MUBUF_DWORDX2 <0x0000001d, "BUFFER_STORE_DWORDX2", []>;
+
+def BUFFER_STORE_DWORD : MUBUF_Store_Helper <
+  0x0000001c, "BUFFER_STORE_DWORD", VReg_32, i32
+>;
+
+def BUFFER_STORE_DWORDX2 : MUBUF_Store_Helper <
+  0x0000001d, "BUFFER_STORE_DWORDX2", VReg_64, i64
+>;
 //def BUFFER_STORE_DWORDX4 : MUBUF_DWORDX4 <0x0000001e, "BUFFER_STORE_DWORDX4", []>;
 //def BUFFER_ATOMIC_SWAP : MUBUF_ <0x00000030, "BUFFER_ATOMIC_SWAP", []>;
 //def BUFFER_ATOMIC_CMPSWAP : MUBUF_ <0x00000031, "BUFFER_ATOMIC_CMPSWAP", []>;
@@ -804,13 +810,13 @@ let isCommutable = 1 in {
 defm V_ADD_F32 : VOP2_32 <0x00000003, "V_ADD_F32",
   [(set VReg_32:$dst, (fadd VSrc_32:$src0, VReg_32:$src1))]
 >;
-} // End isCommutable = 1
 
 defm V_SUB_F32 : VOP2_32 <0x00000004, "V_SUB_F32",
   [(set VReg_32:$dst, (fsub VSrc_32:$src0, VReg_32:$src1))]
 >;
+defm V_SUBREV_F32 : VOP2_32 <0x00000005, "V_SUBREV_F32", [], "V_SUB_F32">;
+} // End isCommutable = 1
 
-defm V_SUBREV_F32 : VOP2_32 <0x00000005, "V_SUBREV_F32", []>;
 defm V_MAC_LEGACY_F32 : VOP2_32 <0x00000006, "V_MAC_LEGACY_F32", []>;
 
 let isCommutable = 1 in {
@@ -848,18 +854,20 @@ defm V_MAX_I32 : VOP2_32 <0x00000012, "V_MAX_I32", []>;
 defm V_MIN_U32 : VOP2_32 <0x00000013, "V_MIN_U32", []>;
 defm V_MAX_U32 : VOP2_32 <0x00000014, "V_MAX_U32", []>;
 
-} // End isCommutable = 1
+defm V_LSHR_B32 : VOP2_32 <0x00000015, "V_LSHR_B32",
+  [(set VReg_32:$dst, (srl VSrc_32:$src0, (i32 VReg_32:$src1)))]
+>;
+defm V_LSHRREV_B32 : VOP2_32 <0x00000016, "V_LSHRREV_B32", [], "V_LSHR_B32">;
 
-defm V_LSHR_B32 : VOP2_32 <0x00000015, "V_LSHR_B32", []>;
-defm V_LSHRREV_B32 : VOP2_32 <0x00000016, "V_LSHRREV_B32", []>;
-defm V_ASHR_I32 : VOP2_32 <0x00000017, "V_ASHR_I32", []>;
-defm V_ASHRREV_I32 : VOP2_32 <0x00000018, "V_ASHRREV_I32", []>;
+defm V_ASHR_I32 : VOP2_32 <0x00000017, "V_ASHR_I32",
+  [(set VReg_32:$dst, (sra VSrc_32:$src0, (i32 VReg_32:$src1)))]
+>;
+defm V_ASHRREV_I32 : VOP2_32 <0x00000018, "V_ASHRREV_I32", [], "V_ASHR_I32">;
+
 defm V_LSHL_B32 : VOP2_32 <0x00000019, "V_LSHL_B32",
   [(set VReg_32:$dst, (shl VSrc_32:$src0, (i32 VReg_32:$src1)))]
 >;
-defm V_LSHLREV_B32 : VOP2_32 <0x0000001a, "V_LSHLREV_B32", []>;
-
-let isCommutable = 1 in {
+defm V_LSHLREV_B32 : VOP2_32 <0x0000001a, "V_LSHLREV_B32", [], "V_LSHL_B32">;
 
 defm V_AND_B32 : VOP2_32 <0x0000001b, "V_AND_B32",
   [(set VReg_32:$dst, (and VSrc_32:$src0, VReg_32:$src1))]
@@ -880,25 +888,24 @@ defm V_MADAK_F32 : VOP2_32 <0x00000021, "V_MADAK_F32", []>;
 //defm V_BCNT_U32_B32 : VOP2_32 <0x00000022, "V_BCNT_U32_B32", []>;
 //defm V_MBCNT_LO_U32_B32 : VOP2_32 <0x00000023, "V_MBCNT_LO_U32_B32", []>;
 //defm V_MBCNT_HI_U32_B32 : VOP2_32 <0x00000024, "V_MBCNT_HI_U32_B32", []>;
-let Defs = [VCC] in { // Carry-out goes to VCC
 
-let isCommutable = 1 in {
+let isCommutable = 1, Defs = [VCC] in { // Carry-out goes to VCC
 defm V_ADD_I32 : VOP2b_32 <0x00000025, "V_ADD_I32",
   [(set VReg_32:$dst, (add (i32 VSrc_32:$src0), (i32 VReg_32:$src1)))]
 >;
-} // End isCommutable = 1
 
 defm V_SUB_I32 : VOP2b_32 <0x00000026, "V_SUB_I32",
   [(set VReg_32:$dst, (sub (i32 VSrc_32:$src0), (i32 VReg_32:$src1)))]
 >;
+defm V_SUBREV_I32 : VOP2b_32 <0x00000027, "V_SUBREV_I32", [], "V_SUB_I32">;
 
-defm V_SUBREV_I32 : VOP2b_32 <0x00000027, "V_SUBREV_I32", []>;
 let Uses = [VCC] in { // Carry-out comes from VCC
 defm V_ADDC_U32 : VOP2b_32 <0x00000028, "V_ADDC_U32", []>;
 defm V_SUBB_U32 : VOP2b_32 <0x00000029, "V_SUBB_U32", []>;
-defm V_SUBBREV_U32 : VOP2b_32 <0x0000002a, "V_SUBBREV_U32", []>;
+defm V_SUBBREV_U32 : VOP2b_32 <0x0000002a, "V_SUBBREV_U32", [], "V_SUBB_U32">;
 } // End Uses = [VCC]
-} // End Defs = [VCC]
+} // End isCommutable = 1, Defs = [VCC]
+
 defm V_LDEXP_F32 : VOP2_32 <0x0000002b, "V_LDEXP_F32", []>;
 ////def V_CVT_PKACCUM_U8_F32 : VOP2_U8 <0x0000002c, "V_CVT_PKACCUM_U8_F32", []>;
 ////def V_CVT_PKNORM_I16_F32 : VOP2_I16 <0x0000002d, "V_CVT_PKNORM_I16_F32", []>;
@@ -971,14 +978,31 @@ def V_MUL_F64 : VOP3_64 <0x00000165, "V_MUL_F64", []>;
 def V_MIN_F64 : VOP3_64 <0x00000166, "V_MIN_F64", []>;
 def V_MAX_F64 : VOP3_64 <0x00000167, "V_MAX_F64", []>;
 def V_LDEXP_F64 : VOP3_64 <0x00000168, "V_LDEXP_F64", []>;
+
+let isCommutable = 1 in {
+
 def V_MUL_LO_U32 : VOP3_32 <0x00000169, "V_MUL_LO_U32", []>;
 def V_MUL_HI_U32 : VOP3_32 <0x0000016a, "V_MUL_HI_U32", []>;
 def V_MUL_LO_I32 : VOP3_32 <0x0000016b, "V_MUL_LO_I32", []>;
+def V_MUL_HI_I32 : VOP3_32 <0x0000016c, "V_MUL_HI_I32", []>;
+
+} // isCommutable = 1
+
 def : Pat <
   (mul VSrc_32:$src0, VReg_32:$src1),
   (V_MUL_LO_I32 VSrc_32:$src0, VReg_32:$src1, (i32 0), 0, 0, 0, 0)
 >;
-def V_MUL_HI_I32 : VOP3_32 <0x0000016c, "V_MUL_HI_I32", []>;
+
+def : Pat <
+  (mulhu VSrc_32:$src0, VReg_32:$src1),
+  (V_MUL_HI_U32 VSrc_32:$src0, VReg_32:$src1, (i32 0), 0, 0, 0, 0)
+>;
+
+def : Pat <
+  (mulhs VSrc_32:$src0, VReg_32:$src1),
+  (V_MUL_HI_I32 VSrc_32:$src0, VReg_32:$src1, (i32 0), 0, 0, 0, 0)
+>;
+
 def V_DIV_SCALE_F32 : VOP3_32 <0x0000016d, "V_DIV_SCALE_F32", []>;
 def V_DIV_SCALE_F64 : VOP3_64 <0x0000016e, "V_DIV_SCALE_F64", []>;
 def V_DIV_FMAS_F32 : VOP3_32 <0x0000016f, "V_DIV_FMAS_F32", []>;
@@ -1066,17 +1090,6 @@ def LOAD_CONST : AMDGPUShaderInst <
   "LOAD_CONST $dst, $src",
   [(set GPRF32:$dst, (int_AMDGPU_load_const imm:$src))]
 >;
-
-let usesCustomInserter = 1 in {
-
-def SI_WQM : InstSI <
-  (outs),
-  (ins),
-  "SI_WQM",
-  [(int_SI_wqm)]
->;
-
-} // end usesCustomInserter 
 
 // SI Psuedo instructions. These are used by the CFG structurizer pass
 // and should be lowered to ISA instructions prior to codegen.
@@ -1206,10 +1219,9 @@ def : Pat <
 
 /* int_SI_sample for simple 1D texture lookup */
 def : Pat <
-  (int_SI_sample imm:$writemask, (v1i32 VReg_32:$addr),
+  (int_SI_sample imm:$writemask, VReg_32:$addr,
                  SReg_256:$rsrc, SReg_128:$sampler, imm),
-  (IMAGE_SAMPLE imm:$writemask, 0, 0, 0, 0, 0, 0, 0,
-                (i32 (COPY_TO_REGCLASS VReg_32:$addr, VReg_32)),
+  (IMAGE_SAMPLE imm:$writemask, 0, 0, 0, 0, 0, 0, 0, VReg_32:$addr,
                 SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
@@ -1217,8 +1229,7 @@ class SamplePattern<Intrinsic name, MIMG opcode, RegisterClass addr_class,
                     ValueType addr_type> : Pat <
     (name imm:$writemask, (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, imm),
-    (opcode imm:$writemask, 0, 0, 0, 0, 0, 0, 0,
-          (EXTRACT_SUBREG addr_class:$addr, sub0),
+    (opcode imm:$writemask, 0, 0, 0, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
@@ -1226,8 +1237,7 @@ class SampleRectPattern<Intrinsic name, MIMG opcode, RegisterClass addr_class,
                         ValueType addr_type> : Pat <
     (name imm:$writemask, (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_RECT),
-    (opcode imm:$writemask, 1, 0, 0, 0, 0, 0, 0,
-          (EXTRACT_SUBREG addr_class:$addr, sub0),
+    (opcode imm:$writemask, 1, 0, 0, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
@@ -1235,8 +1245,7 @@ class SampleArrayPattern<Intrinsic name, MIMG opcode, RegisterClass addr_class,
                          ValueType addr_type> : Pat <
     (name imm:$writemask, (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_ARRAY),
-    (opcode imm:$writemask, 0, 0, 1, 0, 0, 0, 0,
-          (EXTRACT_SUBREG addr_class:$addr, sub0),
+    (opcode imm:$writemask, 0, 0, 1, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
@@ -1244,8 +1253,7 @@ class SampleShadowPattern<Intrinsic name, MIMG opcode,
                           RegisterClass addr_class, ValueType addr_type> : Pat <
     (name imm:$writemask, (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_SHADOW),
-    (opcode imm:$writemask, 0, 0, 0, 0, 0, 0, 0,
-          (EXTRACT_SUBREG addr_class:$addr, sub0),
+    (opcode imm:$writemask, 0, 0, 0, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
@@ -1253,8 +1261,7 @@ class SampleShadowArrayPattern<Intrinsic name, MIMG opcode,
                                RegisterClass addr_class, ValueType addr_type> : Pat <
     (name imm:$writemask, (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_SHADOW_ARRAY),
-    (opcode imm:$writemask, 0, 0, 1, 0, 0, 0, 0,
-          (EXTRACT_SUBREG addr_class:$addr, sub0),
+    (opcode imm:$writemask, 0, 0, 1, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
@@ -1442,8 +1449,7 @@ def : Pat <
 /********** ================== **********/
 
 /* llvm.AMDGPU.pow */
-/* XXX: We are using IEEE MUL, not the 0 * anything = 0 MUL, is this correct? */
-def : POW_Common <V_LOG_F32_e32, V_EXP_F32_e32, V_MUL_F32_e32, VReg_32>;
+def : POW_Common <V_LOG_F32_e32, V_EXP_F32_e32, V_MUL_LEGACY_F32_e32, VReg_32>;
 
 def : Pat <
   (int_AMDGPU_div VSrc_32:$src0, VSrc_32:$src1),
@@ -1589,5 +1595,19 @@ defm : SI_INDIRECT_Pattern <VReg_64, v2f32, SI_INDIRECT_DST_V2>;
 defm : SI_INDIRECT_Pattern <VReg_128, v4f32, SI_INDIRECT_DST_V4>;
 defm : SI_INDIRECT_Pattern <VReg_256, v8f32, SI_INDIRECT_DST_V8>;
 defm : SI_INDIRECT_Pattern <VReg_512, v16f32, SI_INDIRECT_DST_V16>;
+
+/********** =============== **********/
+/**********   Conditions    **********/
+/********** =============== **********/
+
+def : Pat<
+  (i1 (setcc f32:$src0, f32:$src1, SETO)),
+  (V_CMP_O_F32_e64 f32:$src0, f32:$src1)
+>;
+
+def : Pat<
+  (i1 (setcc f32:$src0, f32:$src1, SETUO)),
+  (V_CMP_U_F32_e64 f32:$src0, f32:$src1)
+>;
 
 } // End isSI predicate

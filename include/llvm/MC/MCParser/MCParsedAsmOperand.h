@@ -37,15 +37,7 @@ public:
   void setMCOperandNum (unsigned OpNum) { MCOperandNum = OpNum; }
   unsigned getMCOperandNum() { return MCOperandNum; }
 
-  unsigned getNameLen() {
-    assert (getStartLoc().isValid() && "Invalid StartLoc!");
-    assert (getEndLoc().isValid() && "Invalid EndLoc!");
-    return getEndLoc().getPointer() - getStartLoc().getPointer();
-  }
-
-  StringRef getName() {
-    return StringRef(getStartLoc().getPointer(), getNameLen());
-  }
+  virtual StringRef getSymName() { return StringRef(); }
 
   /// isToken - Is this a token operand?
   virtual bool isToken() const = 0;
@@ -62,12 +54,6 @@ public:
   virtual SMLoc getStartLoc() const = 0;
   /// getEndLoc - Get the location of the last token of this operand.
   virtual SMLoc getEndLoc() const = 0;
-
-  /// needAsmRewrite - AsmRewrites happen in both the target-independent and
-  /// target-dependent parsers.  The target-independent parser calls this
-  /// function to determine if the target-dependent parser has already taken
-  /// care of the rewrites.  Only valid when parsing MS-style inline assembly.
-  virtual bool needAsmRewrite() const { return true; }
 
   /// needAddressOf - Do we need to emit code to get the address of the
   /// variable/label?   Only valid when parsing MS-style inline assembly.
