@@ -3754,6 +3754,9 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
 static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment) {
   Increment = Increment->IgnoreParens();
 
+  if (const ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(Increment))
+    Increment = E->getSubExpr();
+
   Stmt::StmtClass Kind = Increment->getStmtClass();
 
   // Simple increment or decrement -- always OK

@@ -151,6 +151,13 @@ void ops() {
   _Cilk_for (DC i; i < 10; (i += 2)); // OK
   _Cilk_for (DC i; i < 10; ((i += 2))); // OK
   _Cilk_for (DC i; i < 10; (i += NotAnInt())); // expected-error {{right-hand side of '+=' must have integral or enum type in '_Cilk_for' increment}}
+
+  struct S {
+    S();
+    ~S();
+    operator int() const;
+  };
+  _Cilk_for (int i = 0; i < 10; i += S()); // OK
 }
 
 struct Bool {
