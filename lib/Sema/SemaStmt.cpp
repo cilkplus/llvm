@@ -3640,7 +3640,7 @@ static bool ExtractCilkForCondition(Sema &S,
     case CK_ConstructorConversion:
     case CK_UserDefinedConversion:
       S.Diag(Cond->getExprLoc(), diag::warn_cilk_for_cond_user_defined_conv)
-        << (ICE->getCastKind() == CK_ConstructorConversion)
+        << (ICE->getCastKind() != CK_ConstructorConversion)
         << Cond->getSourceRange();
       // fallthrough
     default:
@@ -3708,7 +3708,7 @@ static bool CanonicalizeCilkForCondOperands(Sema &S, VarDecl *ControlVar,
   case CK_ConstructorConversion:
   case CK_UserDefinedConversion:
     S.Diag(LHS->getLocStart(), diag::warn_cilk_for_cond_user_defined_conv)
-      << (HasCast == CK_ConstructorConversion) << LHS->getSourceRange();
+      << (HasCast != CK_ConstructorConversion) << LHS->getSourceRange();
     // fallthrough
   default:
     break;

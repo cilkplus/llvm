@@ -187,8 +187,8 @@ struct ToCRef: public Base {
 };
 
 void conversions() {
-  _Cilk_for (C c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect constructor conversion in loop condition}}
-  _Cilk_for (From c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect user-defined conversion in loop condition}}
+  _Cilk_for (C c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect user-defined conversion in loop condition}}
+  _Cilk_for (From c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect constructor conversion in loop condition}}
   _Cilk_for (ToInt c; c < 5; c++); // OK
   _Cilk_for (ToPtr c; c < 5; c++); // OK
   _Cilk_for (ToRef c; c < 5; c++); // OK
