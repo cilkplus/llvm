@@ -75,9 +75,9 @@ public:
         CanBreakBefore(false), MustBreakBefore(false),
         ClosesTemplateDeclaration(false), MatchingParen(NULL),
         ParameterCount(0), BindingStrength(0), SplitPenalty(0),
-        LongestObjCSelectorName(0), Parent(NULL), FakeLParens(0),
-        FakeRParens(0), LastInChainOfCalls(false) {
-  }
+        LongestObjCSelectorName(0), Parent(NULL),
+        FakeRParens(0), LastInChainOfCalls(false),
+        PartOfMultiVariableDeclStmt(false) {}
 
   bool is(tok::TokenKind Kind) const { return FormatTok.Tok.is(Kind); }
 
@@ -105,6 +105,20 @@ public:
 
   bool isObjCAtKeyword(tok::ObjCKeywordKind Kind) const {
     return FormatTok.Tok.isObjCAtKeyword(Kind);
+  }
+
+  bool isAccessSpecifier(bool ColonRequired = true) const {
+    return isOneOf(tok::kw_public, tok::kw_protected, tok::kw_private) &&
+           (!ColonRequired ||
+            (!Children.empty() && Children[0].is(tok::colon)));
+  }
+
+  bool isObjCAccessSpecifier() const {
+    return is(tok::at) && !Children.empty() &&
+           (Children[0].isObjCAtKeyword(tok::objc_public) ||
+            Children[0].isObjCAtKeyword(tok::objc_protected) ||
+            Children[0].isObjCAtKeyword(tok::objc_package) ||
+            Children[0].isObjCAtKeyword(tok::objc_private));
   }
 
   FormatToken FormatTok;
@@ -144,13 +158,22 @@ public:
   std::vector<AnnotatedToken> Children;
   AnnotatedToken *Parent;
 
-  /// \brief Insert this many fake ( before this token for correct indentation.
-  unsigned FakeLParens;
+  /// \brief Stores the number of required fake parentheses and the
+  /// corresponding operator precedence.
+  ///
+  /// If multiple fake parentheses start at a token, this vector stores them in
+  /// reverse order, i.e. inner fake parenthesis first.
+  SmallVector<prec::Level, 4>  FakeLParens;
   /// \brief Insert this many fake ) after this token for correct indentation.
   unsigned FakeRParens;
 
   /// \brief Is this the last "." or "->" in a builder-type call?
   bool LastInChainOfCalls;
+
+  /// \brief Is this token part of a \c DeclStmt defining multiple variables?
+  ///
+  /// Only set if \c Type == \c TT_StartOfName.
+  bool PartOfMultiVariableDeclStmt;
 
   const AnnotatedToken *getPreviousNoneComment() const {
     AnnotatedToken *Tok = Parent;
@@ -204,6 +227,11 @@ inline prec::Level getPrecedence(const AnnotatedToken &Tok) {
   return getBinOpPrecedence(Tok.FormatTok.Tok.getKind(), true, true);
 }
 
+/// \brief Returns whether \p Tok is ([{ or a template opening <.
+bool opensScope(const AnnotatedToken &Tok);
+/// \brief Returns whether \p Tok is )]} or a template opening >.
+bool closesScope(const AnnotatedToken &Tok);
+
 /// \brief Determines extra information about the tokens comprising an
 /// \c UnwrappedLine.
 class TokenAnnotator {
@@ -228,6 +256,8 @@ private:
                            const AnnotatedToken &Tok);
 
   bool canBreakBefore(const AnnotatedLine &Line, const AnnotatedToken &Right);
+
+  void printDebugInfo(const AnnotatedLine &Line);
 
   const FormatStyle &Style;
   SourceManager &SourceMgr;

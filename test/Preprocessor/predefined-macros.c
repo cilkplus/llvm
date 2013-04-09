@@ -29,3 +29,21 @@
 //
 // RUN: %clang_cc1 %s -fcilkplus -E -dM -o - | FileCheck %s --check-prefix=CHECK-CILK
 // CHECK-CILK: #define __cilk 200
+//
+// RUN: %clang_cc1 %s -E -dM -o - -triple i686 -target-cpu i386 \
+// RUN:   | FileCheck %s --check-prefix=CHECK-SYNC_CAS_I386
+// CHECK-SYNC_CAS_I386-NOT: __GCC_HAVE_SYNC_COMPARE_AND_SWAP
+//
+// RUN: %clang_cc1 %s -E -dM -o - -triple i686 -target-cpu i486 \
+// RUN:   | FileCheck %s --check-prefix=CHECK-SYNC_CAS_I486
+// CHECK-SYNC_CAS_I486: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1
+// CHECK-SYNC_CAS_I486: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_2
+// CHECK-SYNC_CAS_I486: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4
+// CHECK-SYNC_CAS_I486-NOT: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8
+//
+// RUN: %clang_cc1 %s -E -dM -o - -triple i686 -target-cpu i586 \
+// RUN:   | FileCheck %s --check-prefix=CHECK-SYNC_CAS_I586
+// CHECK-SYNC_CAS_I586: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1
+// CHECK-SYNC_CAS_I586: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_2
+// CHECK-SYNC_CAS_I586: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4
+// CHECK-SYNC_CAS_I586: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8

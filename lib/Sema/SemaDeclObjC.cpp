@@ -193,7 +193,7 @@ void Sema::CheckObjCMethodOverride(ObjCMethodDecl *NewMethod,
 
 /// \brief Check a method declaration for compatibility with the Objective-C
 /// ARC conventions.
-static bool CheckARCMethodDecl(Sema &S, ObjCMethodDecl *method) {
+bool Sema::CheckARCMethodDecl(ObjCMethodDecl *method) {
   ObjCMethodFamily family = method->getMethodFamily();
   switch (family) {
   case OMF_None:
@@ -207,17 +207,17 @@ static bool CheckARCMethodDecl(Sema &S, ObjCMethodDecl *method) {
     return false;
 
   case OMF_dealloc:
-    if (!S.Context.hasSameType(method->getResultType(), S.Context.VoidTy)) {
+    if (!Context.hasSameType(method->getResultType(), Context.VoidTy)) {
       SourceRange ResultTypeRange;
       if (const TypeSourceInfo *ResultTypeInfo
           = method->getResultTypeSourceInfo())
         ResultTypeRange = ResultTypeInfo->getTypeLoc().getSourceRange();
       if (ResultTypeRange.isInvalid())
-        S.Diag(method->getLocation(), diag::error_dealloc_bad_result_type) 
+        Diag(method->getLocation(), diag::error_dealloc_bad_result_type) 
           << method->getResultType() 
           << FixItHint::CreateInsertion(method->getSelectorLoc(0), "(void)");
       else
-        S.Diag(method->getLocation(), diag::error_dealloc_bad_result_type) 
+        Diag(method->getLocation(), diag::error_dealloc_bad_result_type) 
           << method->getResultType() 
           << FixItHint::CreateReplacement(ResultTypeRange, "void");
       return true;
@@ -226,11 +226,11 @@ static bool CheckARCMethodDecl(Sema &S, ObjCMethodDecl *method) {
       
   case OMF_init:
     // If the method doesn't obey the init rules, don't bother annotating it.
-    if (S.checkInitMethod(method, QualType()))
+    if (checkInitMethod(method, QualType()))
       return true;
 
-    method->addAttr(new (S.Context) NSConsumesSelfAttr(SourceLocation(),
-                                                       S.Context));
+    method->addAttr(new (Context) NSConsumesSelfAttr(SourceLocation(),
+                                                     Context));
 
     // Don't add a second copy of this attribute, but otherwise don't
     // let it be suppressed.
@@ -249,8 +249,8 @@ static bool CheckARCMethodDecl(Sema &S, ObjCMethodDecl *method) {
     break;
   }
 
-  method->addAttr(new (S.Context) NSReturnsRetainedAttr(SourceLocation(),
-                                                        S.Context));
+  method->addAttr(new (Context) NSReturnsRetainedAttr(SourceLocation(),
+                                                      Context));
   return false;
 }
 
@@ -521,8 +521,14 @@ ActOnStartClassInterface(SourceLocation AtInterfaceLoc,
               dyn_cast_or_null<TypedefNameDecl>(PrevDecl)) {
           QualType T = TDecl->getUnderlyingType();
           if (T->isObjCObjectType()) {
-            if (NamedDecl *IDecl = T->getAs<ObjCObjectType>()->getInterface())
+            if (NamedDecl *IDecl = T->getAs<ObjCObjectType>()->getInterface()) {
               SuperClassDecl = dyn_cast<ObjCInterfaceDecl>(IDecl);
+              // This handles the following case:
+              // @interface NewI @end
+              // typedef NewI DeprI __attribute__((deprecated("blah")))
+              // @interface SI : DeprI /* warn here */ @end
+              (void)DiagnoseUseOfDecl(const_cast<TypedefNameDecl*>(TDecl), SuperLoc);
+            }
           }
         }
 
@@ -739,7 +745,10 @@ Sema::FindProtocolDeclaration(bool WarnOnDeclarations,
         << ProtocolId[i].first;
       continue;
     }
-
+    // If this is a forward protocol declaration, get its definition.
+    if (!PDecl->isThisDeclarationADefinition() && PDecl->getDefinition())
+      PDecl = PDecl->getDefinition();
+    
     (void)DiagnoseUseOfDecl(PDecl, ProtocolId[i].second);
 
     // If this is a forward declaration and we are supposed to warn in this
@@ -1177,14 +1186,18 @@ void Sema::WarnUndefinedMethod(SourceLocation ImpLoc, ObjCMethodDecl *method,
     return;
   }
   
-  if (!IncompleteImpl) {
-    Diag(ImpLoc, diag::warn_incomplete_impl);
-    IncompleteImpl = true;
-  }
-  if (DiagID == diag::warn_unimplemented_protocol_method)
-    Diag(ImpLoc, DiagID) << method->getDeclName();
-  else
-    Diag(method->getLocation(), DiagID) << method->getDeclName();
+  // FIXME: For now ignore 'IncompleteImpl'.
+  // Previously we grouped all unimplemented methods under a single
+  // warning, but some users strongly voiced that they would prefer
+  // separate warnings.  We will give that approach a try, as that
+  // matches what we do with protocols.
+  
+  Diag(ImpLoc, DiagID) << method->getDeclName();
+
+  // Issue a note to the original declaration.
+  SourceLocation MethodLoc = method->getLocStart();
+  if (MethodLoc.isValid())
+    Diag(MethodLoc, diag::note_method_declared_at) << method;
 }
 
 /// Determines if type B can be substituted for type A.  Returns true if we can
@@ -1628,8 +1641,6 @@ void Sema::CheckProtocolMethodDefs(SourceLocation ImpLoc,
             if (Diags.getDiagnosticLevel(DIAG, ImpLoc)
                 != DiagnosticsEngine::Ignored) {
               WarnUndefinedMethod(ImpLoc, method, IncompleteImpl, DIAG);
-              Diag(method->getLocation(), diag::note_method_declared_at)
-                << method->getDeclName();
               Diag(CDecl->getLocation(), diag::note_required_for_protocol_at)
                 << PDecl->getDeclName();
             }
@@ -1651,8 +1662,6 @@ void Sema::CheckProtocolMethodDefs(SourceLocation ImpLoc,
       if (Diags.getDiagnosticLevel(DIAG, ImpLoc) !=
             DiagnosticsEngine::Ignored) {
         WarnUndefinedMethod(ImpLoc, method, IncompleteImpl, DIAG);
-        Diag(method->getLocation(), diag::note_method_declared_at)
-          << method->getDeclName();
         Diag(IDecl->getLocation(), diag::note_required_for_protocol_at) <<
           PDecl->getDeclName();
       }
@@ -1687,7 +1696,7 @@ void Sema::MatchAllMethodDeclarations(const SelectorSet &InsMap,
         !InsMap.count((*I)->getSelector())) {
       if (ImmediateClass)
         WarnUndefinedMethod(IMPDecl->getLocation(), *I, IncompleteImpl,
-                            diag::note_undef_method_impl);
+                            diag::warn_undef_method_impl);
       continue;
     } else {
       ObjCMethodDecl *ImpMethodDecl =
@@ -1717,7 +1726,7 @@ void Sema::MatchAllMethodDeclarations(const SelectorSet &InsMap,
     if (!ClsMap.count((*I)->getSelector())) {
       if (ImmediateClass)
         WarnUndefinedMethod(IMPDecl->getLocation(), *I, IncompleteImpl,
-                            diag::note_undef_method_impl);
+                            diag::warn_undef_method_impl);
     } else {
       ObjCMethodDecl *ImpMethodDecl =
         IMPDecl->getClassMethod((*I)->getSelector());
@@ -2727,9 +2736,9 @@ private:
       return;
     
     //   - categories,
-    for (ObjCInterfaceDecl::visible_categories_iterator
-           cat = iface->visible_categories_begin(),
-           catEnd = iface->visible_categories_end();
+    for (ObjCInterfaceDecl::known_categories_iterator
+           cat = iface->known_categories_begin(),
+           catEnd = iface->known_categories_end();
          cat != catEnd; ++cat) {
       search(*cat);
     }
@@ -2759,7 +2768,8 @@ private:
   void search(ObjCContainerDecl *container) {
     // Check for a method in this container which matches this selector.
     ObjCMethodDecl *meth = container->getMethod(Method->getSelector(),
-                                                Method->isInstanceMethod());
+                                                Method->isInstanceMethod(),
+                                                /*AllowHidden=*/true);
 
     // If we find one, record it and bail out.
     if (meth) {
@@ -2929,7 +2939,7 @@ Decl *Sema::ActOnMethodDeclaration(
 
     ParmVarDecl* Param = CheckParameter(ObjCMethod, StartLoc,
                                         ArgInfo[i].NameLoc, ArgInfo[i].Name,
-                                        ArgType, DI, SC_None, SC_None);
+                                        ArgType, DI, SC_None);
 
     Param->setObjCMethodScopeInfo(i);
 
@@ -3031,7 +3041,7 @@ Decl *Sema::ActOnMethodDeclaration(
 
   bool ARCError = false;
   if (getLangOpts().ObjCAutoRefCount)
-    ARCError = CheckARCMethodDecl(*this, ObjCMethod);
+    ARCError = CheckARCMethodDecl(ObjCMethod);
 
   // Infer the related result type when possible.
   if (!ARCError && RTC == Sema::RTC_Compatible &&
@@ -3160,7 +3170,7 @@ VarDecl *Sema::BuildObjCExceptionDecl(TypeSourceInfo *TInfo, QualType T,
   }
   
   VarDecl *New = VarDecl::Create(Context, CurContext, StartLoc, IdLoc, Id,
-                                 T, TInfo, SC_None, SC_None);
+                                 T, TInfo, SC_None);
   New->setExceptionVariable(true);
   
   // In ARC, infer 'retaining' for variables of retainable type.

@@ -621,7 +621,7 @@ class NaClTargetInfo : public OSTargetInfo<Target> {
     this->SizeType = TargetInfo::UnsignedInt;
     this->PtrDiffType = TargetInfo::SignedInt;
     this->IntPtrType = TargetInfo::SignedInt;
-    this->RegParmMax = 2;
+    // RegParmMax is inherited from the underlying architecture
     this->LongDoubleFormat = &llvm::APFloat::IEEEdouble;
     this->DescriptionString = "e-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-"
                               "f32:32:32-f64:64:64-p:32:32:32-v128:32:32";
@@ -1029,7 +1029,8 @@ void PPCTargetInfo::getDefaultFeatures(llvm::StringMap<bool> &Features) const {
 bool PPCTargetInfo::setFeatureEnabled(llvm::StringMap<bool> &Features,
                                          StringRef Name,
                                          bool Enabled) const {
-  if (Name == "altivec" || Name == "qpx") {
+  if (Name == "altivec" || Name == "fprnd" || Name == "mfocrf" ||
+      Name == "popcntd" || Name == "qpx") {
     Features[Name] = Enabled;
     return true;
   }
@@ -1301,7 +1302,14 @@ namespace {
       return TargetInfo::CharPtrBuiltinVaList;
     }
     virtual bool setCPU(const std::string &Name) {
-      return Name == "sm_10" || Name == "sm_13" || Name == "sm_20";
+      bool Valid = llvm::StringSwitch<bool>(Name)
+        .Case("sm_20", true)
+        .Case("sm_21", true)
+        .Case("sm_30", true)
+        .Case("sm_35", true)
+        .Default(false);
+
+      return Valid;
     }
     virtual bool setFeatureEnabled(llvm::StringMap<bool> &Features,
                                    StringRef Name,
@@ -1484,7 +1492,7 @@ public:
       .Case("caicos",   GK_NORTHERN_ISLANDS)
       .Case("cayman",   GK_CAYMAN)
       .Case("aruba",    GK_CAYMAN)
-      .Case("SI",       GK_SOUTHERN_ISLANDS)
+      .Case("tahiti",   GK_SOUTHERN_ISLANDS)
       .Case("pitcairn", GK_SOUTHERN_ISLANDS)
       .Case("verde",    GK_SOUTHERN_ISLANDS)
       .Case("oland",    GK_SOUTHERN_ISLANDS)
@@ -1701,6 +1709,8 @@ class X86TargetInfo : public TargetInfo {
   bool HasBMI2;
   bool HasPOPCNT;
   bool HasRTM;
+  bool HasPRFCHW;
+  bool HasRDSEED;
   bool HasSSE4a;
   bool HasFMA4;
   bool HasFMA;
@@ -1852,8 +1862,8 @@ public:
     : TargetInfo(triple), SSELevel(NoSSE), MMX3DNowLevel(NoMMX3DNow),
       HasAES(false), HasPCLMUL(false), HasLZCNT(false), HasRDRND(false),
       HasBMI(false), HasBMI2(false), HasPOPCNT(false), HasRTM(false),
-      HasSSE4a(false), HasFMA4(false), HasFMA(false), HasXOP(false),
-      HasF16C(false), CPU(CK_Generic) {
+      HasPRFCHW(false), HasRDSEED(false), HasSSE4a(false), HasFMA4(false),
+      HasFMA(false), HasXOP(false), HasF16C(false), CPU(CK_Generic) {
     BigEndian = false;
     LongDoubleFormat = &llvm::APFloat::x87DoubleExtended;
   }
@@ -2059,6 +2069,8 @@ void X86TargetInfo::getDefaultFeatures(llvm::StringMap<bool> &Features) const {
   Features["bmi2"] = false;
   Features["popcnt"] = false;
   Features["rtm"] = false;
+  Features["prfchw"] = false;
+  Features["rdseed"] = false;
   Features["fma4"] = false;
   Features["fma"] = false;
   Features["xop"] = false;
@@ -2281,6 +2293,10 @@ bool X86TargetInfo::setFeatureEnabled(llvm::StringMap<bool> &Features,
       Features["f16c"] = true;
     else if (Name == "rtm")
       Features["rtm"] = true;
+    else if (Name == "prfchw")
+      Features["prfchw"] = true;
+    else if (Name == "rdseed")
+      Features["rdseed"] = true;
   } else {
     if (Name == "mmx")
       Features["mmx"] = Features["3dnow"] = Features["3dnowa"] = false;
@@ -2345,6 +2361,10 @@ bool X86TargetInfo::setFeatureEnabled(llvm::StringMap<bool> &Features,
       Features["f16c"] = false;
     else if (Name == "rtm")
       Features["rtm"] = false;
+    else if (Name == "prfchw")
+      Features["prfchw"] = false;
+    else if (Name == "rdseed")
+      Features["rdseed"] = false;
   }
 
   return true;
@@ -2398,6 +2418,16 @@ void X86TargetInfo::HandleTargetFeatures(std::vector<std::string> &Features) {
 
     if (Feature == "rtm") {
       HasRTM = true;
+      continue;
+    }
+
+    if (Feature == "prfchw") {
+      HasPRFCHW = true;
+      continue;
+    }
+
+    if (Feature == "rdseed") {
+      HasRDSEED = true;
       continue;
     }
 
@@ -2625,6 +2655,12 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
   if (HasRTM)
     Builder.defineMacro("__RTM__");
 
+  if (HasPRFCHW)
+    Builder.defineMacro("__PRFCHW__");
+
+  if (HasRDSEED)
+    Builder.defineMacro("__RDSEED__");
+
   if (HasSSE4a)
     Builder.defineMacro("__SSE4A__");
 
@@ -2694,6 +2730,14 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
   case NoMMX3DNow:
     break;
   }
+
+  if (CPU >= CK_i486) {
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
+  }
+  if (CPU >= CK_i586)
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
 }
 
 bool X86TargetInfo::hasFeature(StringRef Feature) const {
@@ -2713,6 +2757,8 @@ bool X86TargetInfo::hasFeature(StringRef Feature) const {
       .Case("pclmul", HasPCLMUL)
       .Case("popcnt", HasPOPCNT)
       .Case("rtm", HasRTM)
+      .Case("prfchw", HasPRFCHW)
+      .Case("rdseed", HasRDSEED)
       .Case("sse", SSELevel >= SSE1)
       .Case("sse2", SSELevel >= SSE2)
       .Case("sse3", SSELevel >= SSE3)
@@ -3277,40 +3323,40 @@ public:
     // FIXME: these were written based on an unreleased version of a 32-bit ACLE
     // which was intended to be compatible with a 64-bit implementation. They
     // will need updating when a real 64-bit ACLE exists. Particularly pressing
-    // instances are: __AARCH_ISA_A32, __AARCH_ISA_T32, __ARCH_PCS.
-    Builder.defineMacro("__AARCH_ACLE",    "101");
-    Builder.defineMacro("__AARCH",         "8");
-    Builder.defineMacro("__AARCH_PROFILE", "'A'");
+    // instances are: __ARM_ARCH_ISA_ARM, __ARM_ARCH_ISA_THUMB, __ARM_PCS.
+    Builder.defineMacro("__ARM_ACLE",         "101");
+    Builder.defineMacro("__ARM_ARCH",         "8");
+    Builder.defineMacro("__ARM_ARCH_PROFILE", "'A'");
 
-    Builder.defineMacro("__AARCH_FEATURE_UNALIGNED");
-    Builder.defineMacro("__AARCH_FEATURE_CLZ");
-    Builder.defineMacro("__AARCH_FEATURE_FMA");
+    Builder.defineMacro("__ARM_FEATURE_UNALIGNED");
+    Builder.defineMacro("__ARM_FEATURE_CLZ");
+    Builder.defineMacro("__ARM_FEATURE_FMA");
 
     // FIXME: ACLE 1.1 reserves bit 4. Will almost certainly come to mean
     // 128-bit LDXP present, at which point this becomes 0x1f.
-    Builder.defineMacro("__AARCH_FEATURE_LDREX", "0xf");
+    Builder.defineMacro("__ARM_FEATURE_LDREX", "0xf");
 
     // 0xe implies support for half, single and double precision operations.
-    Builder.defineMacro("__AARCH_FP", "0xe");
+    Builder.defineMacro("__ARM_FP", "0xe");
 
     // PCS specifies this for SysV variants, which is all we support. Other ABIs
-    // may choose __AARCH_FP16_FORMAT_ALTERNATIVE.
-    Builder.defineMacro("__AARCH_FP16_FORMAT_IEEE");
+    // may choose __ARM_FP16_FORMAT_ALTERNATIVE.
+    Builder.defineMacro("__ARM_FP16_FORMAT_IEEE");
 
     if (Opts.FastMath || Opts.FiniteMathOnly)
-      Builder.defineMacro("__AARCH_FP_FAST");
+      Builder.defineMacro("__ARM_FP_FAST");
 
     if ((Opts.C99 || Opts.C11) && !Opts.Freestanding)
-      Builder.defineMacro("__AARCH_FP_FENV_ROUNDING");
+      Builder.defineMacro("__ARM_FP_FENV_ROUNDING");
 
-    Builder.defineMacro("__AARCH_SIZEOF_WCHAR_T",
+    Builder.defineMacro("__ARM_SIZEOF_WCHAR_T",
                         Opts.ShortWChar ? "2" : "4");
 
-    Builder.defineMacro("__AARCH_SIZEOF_MINIMAL_ENUM",
+    Builder.defineMacro("__ARM_SIZEOF_MINIMAL_ENUM",
                         Opts.ShortEnums ? "1" : "4");
 
     if (BigEndian)
-      Builder.defineMacro("__AARCH_BIG_ENDIAN");
+      Builder.defineMacro("__ARM_BIG_ENDIAN");
   }
   virtual void getTargetBuiltins(const Builtin::Info *&Records,
                                  unsigned &NumRecords) const {
@@ -4816,7 +4862,7 @@ public:
     this->SizeType = TargetInfo::UnsignedInt;
     this->PtrDiffType = TargetInfo::SignedInt;
     this->IntPtrType = TargetInfo::SignedInt;
-    this->RegParmMax = 2;
+    this->RegParmMax = 0; // Disallow regparm
     DescriptionString = "e-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-"
                         "f32:32:32-f64:64:64-p:32:32:32-v128:32:32";
   }

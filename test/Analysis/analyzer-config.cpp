@@ -11,9 +11,11 @@ public:
 };
 
 // CHECK: [config]
-// CHECK-NEXT: c++-inlining = constructors
+// CHECK-NEXT: c++-container-inlining = false
+// CHECK-NEXT: c++-inlining = destructors
 // CHECK-NEXT: c++-stdlib-inlining = true
 // CHECK-NEXT: c++-template-inlining = true
+// CHECK-NEXT: cfg-conditional-static-initializers = true
 // CHECK-NEXT: cfg-temporary-dtors = false
 // CHECK-NEXT: faux-bodies = true
 // CHECK-NEXT: graph-trim-interval = 1000
@@ -24,4 +26,4 @@ public:
 // CHECK-NEXT: max-times-inline-large = 32
 // CHECK-NEXT: mode = deep
 // CHECK-NEXT: [stats]
-// CHECK-NEXT: num-entries = 12
+// CHECK-NEXT: num-entries = 14

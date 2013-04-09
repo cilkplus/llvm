@@ -68,12 +68,14 @@ void ExprEngine::VisitBinaryOperator(const BinaryOperator* B,
         // SymSymExpr.
         unsigned Count = currBldrCtx->blockCount();
         if (LeftV.getAs<Loc>() &&
-            RHS->getType()->isIntegerType() && RightV.isUnknown()) {
+            RHS->getType()->isIntegralOrEnumerationType() &&
+            RightV.isUnknown()) {
           RightV = svalBuilder.conjureSymbolVal(RHS, LCtx, RHS->getType(),
                                                 Count);
         }
         if (RightV.getAs<Loc>() &&
-            LHS->getType()->isIntegerType() && LeftV.isUnknown()) {
+            LHS->getType()->isIntegralOrEnumerationType() &&
+            LeftV.isUnknown()) {
           LeftV = svalBuilder.conjureSymbolVal(LHS, LCtx, LHS->getType(),
                                                Count);
         }
@@ -423,11 +425,6 @@ void ExprEngine::VisitCompoundLiteralExpr(const CompoundLiteralExpr *CL,
     B.generateNode(CL, Pred, state->BindExpr(CL, LC, ILV));
 }
 
-/// The GDM component containing the set of global variables which have been
-/// previously initialized with explicit initializers.
-REGISTER_TRAIT_WITH_PROGRAMSTATE(InitializedGlobalsSet,
-                                 llvm::ImmutableSet<const VarDecl *> )
-
 void ExprEngine::VisitDeclStmt(const DeclStmt *DS, ExplodedNode *Pred,
                                ExplodedNodeSet &Dst) {
   // Assumption: The CFG has one DeclStmt per Decl.
@@ -438,15 +435,6 @@ void ExprEngine::VisitDeclStmt(const DeclStmt *DS, ExplodedNode *Pred,
     Dst.insert(Pred);
     return;
   }
-
-  // Check if a value has been previously initialized. There will be an entry in
-  // the set for variables with global storage which have been previously
-  // initialized.
-  if (VD->hasGlobalStorage())
-    if (Pred->getState()->contains<InitializedGlobalsSet>(VD)) {
-      Dst.insert(Pred);
-      return;
-    }
   
   // FIXME: all pre/post visits should eventually be handled by ::Visit().
   ExplodedNodeSet dstPreVisit;
@@ -464,11 +452,6 @@ void ExprEngine::VisitDeclStmt(const DeclStmt *DS, ExplodedNode *Pred,
 
       // Note in the state that the initialization has occurred.
       ExplodedNode *UpdatedN = N;
-      if (VD->hasGlobalStorage()) {
-        state = state->add<InitializedGlobalsSet>(VD);
-        UpdatedN = B.generateNode(DS, N, state);
-      }
-
       SVal InitVal = state->getSVal(InitEx, LC);
 
       if (isa<CXXConstructExpr>(InitEx->IgnoreImplicit())) {
@@ -681,8 +664,9 @@ VisitOffsetOfExpr(const OffsetOfExpr *OOE,
   APSInt IV;
   if (OOE->EvaluateAsInt(IV, getContext())) {
     assert(IV.getBitWidth() == getContext().getTypeSize(OOE->getType()));
-    assert(OOE->getType()->isIntegerType());
-    assert(IV.isSigned() == OOE->getType()->isSignedIntegerOrEnumerationType());
+    assert(OOE->getType()->isBuiltinType());
+    assert(OOE->getType()->getAs<BuiltinType>()->isInteger());
+    assert(IV.isSigned() == OOE->getType()->isSignedIntegerType());
     SVal X = svalBuilder.makeIntVal(IV);
     B.generateNode(OOE, Pred,
                    Pred->getState()->BindExpr(OOE, Pred->getLocationContext(),

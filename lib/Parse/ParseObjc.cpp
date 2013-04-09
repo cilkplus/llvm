@@ -22,6 +22,18 @@
 #include "llvm/ADT/StringExtras.h"
 using namespace clang;
 
+/// Skips attributes after an Objective-C @ directive. Emits a diagnostic.
+void Parser::MaybeSkipAttributes(tok::ObjCKeywordKind Kind) {
+  ParsedAttributes attrs(AttrFactory);
+  if (Tok.is(tok::kw___attribute)) {
+    if (Kind == tok::objc_interface || Kind == tok::objc_protocol)
+      Diag(Tok, diag::err_objc_postfix_attribute_hint)
+          << (Kind == tok::objc_protocol);
+    else
+      Diag(Tok, diag::err_objc_postfix_attribute);
+    ParseGNUAttributes(attrs);
+  }
+}
 
 /// ParseObjCAtDirectives - Handle parts of the external-declaration production:
 ///       external-declaration: [C99 6.9]
@@ -93,6 +105,7 @@ Parser::ParseObjCAtClassDeclaration(SourceLocation atLoc) {
 
 
   while (1) {
+    MaybeSkipAttributes(tok::objc_class);
     if (Tok.isNot(tok::identifier)) {
       Diag(Tok, diag::err_expected_ident);
       SkipUntil(tok::semi);
@@ -178,6 +191,8 @@ Decl *Parser::ParseObjCAtInterfaceDeclaration(SourceLocation AtLoc,
     cutOffParsing();
     return 0;
   }
+
+  MaybeSkipAttributes(tok::objc_interface);
 
   if (Tok.isNot(tok::identifier)) {
     Diag(Tok, diag::err_expected_ident); // missing class or category name.
@@ -1228,6 +1243,22 @@ bool Parser::ParseObjCProtocolQualifiers(DeclSpec &DS) {
   return Result;
 }
 
+void Parser::HelperActionsForIvarDeclarations(Decl *interfaceDecl, SourceLocation atLoc,
+                                 BalancedDelimiterTracker &T,
+                                 SmallVectorImpl<Decl *> &AllIvarDecls,
+                                 bool RBraceMissing) {
+  if (!RBraceMissing)
+    T.consumeClose();
+  
+  Actions.ActOnObjCContainerStartDefinition(interfaceDecl);
+  Actions.ActOnLastBitfield(T.getCloseLocation(), AllIvarDecls);
+  Actions.ActOnObjCContainerFinishDefinition();
+  // Call ActOnFields() even if we don't have any decls. This is useful
+  // for code rewriting tools that need to be aware of the empty list.
+  Actions.ActOnFields(getCurScope(), atLoc, interfaceDecl,
+                      AllIvarDecls,
+                      T.getOpenLocation(), T.getCloseLocation(), 0);
+}
 
 ///   objc-class-instance-variables:
 ///     '{' objc-instance-variable-decl-list[opt] '}'
@@ -1260,7 +1291,6 @@ void Parser::ParseObjCClassInstanceVariables(Decl *interfaceDecl,
 
   BalancedDelimiterTracker T(*this, tok::l_brace);
   T.consumeOpen();
-
   // While we still have something to read, read the instance variables.
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
     // Each iteration of this loop reads one objc-instance-variable-decl.
@@ -1288,10 +1318,17 @@ void Parser::ParseObjCClassInstanceVariables(Decl *interfaceDecl,
         visibility = Tok.getObjCKeywordID();
         ConsumeToken();
         continue;
+
       case tok::objc_end:
         Diag(Tok, diag::err_objc_unexpected_atend);
-        ConsumeToken();
-        continue;
+        Tok.setLocation(Tok.getLocation().getLocWithOffset(-1));
+        Tok.setKind(tok::at);
+        Tok.setLength(1);
+        PP.EnterToken(Tok);
+        HelperActionsForIvarDeclarations(interfaceDecl, atLoc,
+                                         T, AllIvarDecls, true);
+        return;
+          
       default:
         Diag(Tok, diag::err_objc_illegal_visibility_spec);
         continue;
@@ -1341,16 +1378,8 @@ void Parser::ParseObjCClassInstanceVariables(Decl *interfaceDecl,
       SkipUntil(tok::r_brace, true, true);
     }
   }
-  T.consumeClose();
-
-  Actions.ActOnObjCContainerStartDefinition(interfaceDecl);
-  Actions.ActOnLastBitfield(T.getCloseLocation(), AllIvarDecls);
-  Actions.ActOnObjCContainerFinishDefinition();
-  // Call ActOnFields() even if we don't have any decls. This is useful
-  // for code rewriting tools that need to be aware of the empty list.
-  Actions.ActOnFields(getCurScope(), atLoc, interfaceDecl,
-                      AllIvarDecls,
-                      T.getOpenLocation(), T.getCloseLocation(), 0);
+  HelperActionsForIvarDeclarations(interfaceDecl, atLoc,
+                                   T, AllIvarDecls, false);
   return;
 }
 
@@ -1382,6 +1411,8 @@ Parser::ParseObjCAtProtocolDeclaration(SourceLocation AtLoc,
     cutOffParsing();
     return DeclGroupPtrTy();
   }
+
+  MaybeSkipAttributes(tok::objc_protocol);
 
   if (Tok.isNot(tok::identifier)) {
     Diag(Tok, diag::err_expected_ident); // missing protocol name.
@@ -1473,6 +1504,8 @@ Parser::ParseObjCAtImplementationDeclaration(SourceLocation AtLoc) {
     cutOffParsing();
     return DeclGroupPtrTy();
   }
+
+  MaybeSkipAttributes(tok::objc_implementation);
 
   if (Tok.isNot(tok::identifier)) {
     Diag(Tok, diag::err_expected_ident); // missing class or category name.
@@ -2882,7 +2915,7 @@ void Parser::ParseLexedObjCMethodDefs(LexedMethod &LM, bool parseMethod) {
   PP.EnterTokenStream(LM.Toks.data(), LM.Toks.size(), true, false);
   
   // Consume the previously pushed token.
-  ConsumeAnyToken();
+  ConsumeAnyToken(/*ConsumeCodeCompletionTok=*/true);
     
   assert((Tok.is(tok::l_brace) || Tok.is(tok::kw_try) ||
           Tok.is(tok::colon)) && 

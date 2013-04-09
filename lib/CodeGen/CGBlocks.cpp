@@ -753,6 +753,7 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
     if (capture.isConstant()) continue;
 
     QualType type = variable->getType();
+    CharUnits align = getContext().getDeclAlign(variable);
 
     // This will be a [[type]]*, except that a byref entry will just be
     // an i8**.
@@ -796,21 +797,21 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
     if (ci->isByRef()) {
       // Get a void* that points to the byref struct.
       if (ci->isNested())
-        src = Builder.CreateLoad(src, "byref.capture");
+        src = Builder.CreateAlignedLoad(src, align.getQuantity(),
+                                        "byref.capture");
       else
         src = Builder.CreateBitCast(src, VoidPtrTy);
 
       // Write that void* into the capture field.
-      Builder.CreateStore(src, blockField);
+      Builder.CreateAlignedStore(src, blockField, align.getQuantity());
 
     // If we have a copy constructor, evaluate that into the block field.
     } else if (const Expr *copyExpr = ci->getCopyExpr()) {
       if (blockDecl->isConversionFromLambda()) {
         // If we have a lambda conversion, emit the expression
         // directly into the block instead.
-        CharUnits Align = getContext().getTypeAlignInChars(type);
         AggValueSlot Slot =
-            AggValueSlot::forAddr(blockField, Align, Qualifiers(),
+            AggValueSlot::forAddr(blockField, align, Qualifiers(),
                                   AggValueSlot::IsDestructed,
                                   AggValueSlot::DoesNotNeedGCBarriers,
                                   AggValueSlot::IsNotAliased);
@@ -821,7 +822,27 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
 
     // If it's a reference variable, copy the reference into the block field.
     } else if (type->isReferenceType()) {
-      Builder.CreateStore(Builder.CreateLoad(src, "ref.val"), blockField);
+      llvm::Value *ref =
+        Builder.CreateAlignedLoad(src, align.getQuantity(), "ref.val");
+      Builder.CreateAlignedStore(ref, blockField, align.getQuantity());
+
+    // If this is an ARC __strong block-pointer variable, don't do a
+    // block copy.
+    //
+    // TODO: this can be generalized into the normal initialization logic:
+    // we should never need to do a block-copy when initializing a local
+    // variable, because the local variable's lifetime should be strictly
+    // contained within the stack block's.
+    } else if (type.getObjCLifetime() == Qualifiers::OCL_Strong &&
+               type->isBlockPointerType()) {
+      // Load the block and do a simple retain.
+      LValue srcLV = MakeAddrLValue(src, type, align);
+      llvm::Value *value = EmitLoadOfScalar(srcLV);
+      value = EmitARCRetainNonBlock(value);
+
+      // Do a primitive store to the block field.
+      LValue destLV = MakeAddrLValue(blockField, type, align);
+      EmitStoreOfScalar(value, destLV, /*init*/ true);
 
     // Otherwise, fake up a POD copy into the block field.
     } else {
@@ -839,8 +860,7 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
       ImplicitCastExpr l2r(ImplicitCastExpr::OnStack, type, CK_LValueToRValue,
                            &declRef, VK_RValue);
       EmitExprAsInit(&l2r, &blockFieldPseudoVar,
-                     MakeAddrLValue(blockField, type,
-                                    getContext().getDeclAlign(variable)),
+                     MakeAddrLValue(blockField, type, align),
                      /*captured by init*/ false);
     }
 
@@ -1138,6 +1158,24 @@ CodeGenFunction::GenerateBlockFunction(GlobalDecl GD,
   BlockPointer = Builder.CreateBitCast(blockAddr,
                                        blockInfo.StructureType->getPointerTo(),
                                        "block");
+  // At -O0 we generate an explicit alloca for the BlockPointer, so the RA
+  // won't delete the dbg.declare intrinsics for captured variables.
+  llvm::Value *BlockPointerDbgLoc = BlockPointer;
+  if (CGM.getCodeGenOpts().OptimizationLevel == 0) {
+    // Allocate a stack slot for it, so we can point the debugger to it
+    llvm::AllocaInst *Alloca = CreateTempAlloca(BlockPointer->getType(),
+                                                "block.addr");
+    unsigned Align = getContext().getDeclAlign(&selfDecl).getQuantity();
+    Alloca->setAlignment(Align);
+    // Set the DebugLocation to empty, so the store is recognized as a
+    // frame setup instruction by llvm::DwarfDebug::beginFunction().
+    llvm::DebugLoc Empty;
+    llvm::DebugLoc Loc = Builder.getCurrentDebugLocation();
+    Builder.SetCurrentDebugLocation(Empty);
+    Builder.CreateAlignedStore(BlockPointer, Alloca, Align);
+    Builder.SetCurrentDebugLocation(Loc);
+    BlockPointerDbgLoc = Alloca;
+  }
 
   // If we have a C++ 'this' reference, go ahead and force it into
   // existence now.
@@ -1161,20 +1199,7 @@ CodeGenFunction::GenerateBlockFunction(GlobalDecl GD,
       llvm::Value *selfAddr = Builder.CreateStructGEP(BlockPointer,
                                                       capture.getIndex(),
                                                       "block.captured-self");
-
-      // At -O0 we generate an explicit alloca for self to facilitate debugging.
-      if (CGM.getCodeGenOpts().OptimizationLevel == 0) {
-	llvm::Value *load = Builder.CreateLoad(selfAddr);
-
-	// Allocate a stack slot for it, so we can generate debug info for it
-	llvm::AllocaInst *alloca = CreateTempAlloca(load->getType(),
-                                                   "block.captured-self.addr");
-        unsigned align = getContext().getDeclAlign(self).getQuantity();
-        alloca->setAlignment(align);
-	Builder.CreateAlignedStore(load, alloca, align);
-        LocalDeclMap[self] = alloca;
-      } else
-        LocalDeclMap[self] = selfAddr;
+      LocalDeclMap[self] = selfAddr;
     }
   }
 
@@ -1230,13 +1255,13 @@ CodeGenFunction::GenerateBlockFunction(GlobalDecl GD,
           continue;
         }
 
-        DI->EmitDeclareOfBlockDeclRefVariable(variable, BlockPointer,
+        DI->EmitDeclareOfBlockDeclRefVariable(variable, BlockPointerDbgLoc,
                                               Builder, blockInfo);
       }
     }
     // Recover location if it was changed in the above loop.
     DI->EmitLocation(Builder,
-        cast<CompoundStmt>(blockDecl->getBody())->getRBracLoc());
+                     cast<CompoundStmt>(blockDecl->getBody())->getRBracLoc());
   }
 
   // And resume where we left off.
@@ -1311,7 +1336,6 @@ CodeGenFunction::GenerateCopyHelperFunction(const CGBlockInfo &blockInfo) {
                                           SourceLocation(),
                                           SourceLocation(), II, C.VoidTy, 0,
                                           SC_Static,
-                                          SC_None,
                                           false,
                                           false);
   StartFunction(FD, C.VoidTy, Fn, FI, args, SourceLocation());
@@ -1486,7 +1510,6 @@ CodeGenFunction::GenerateDestroyHelperFunction(const CGBlockInfo &blockInfo) {
                                           SourceLocation(),
                                           SourceLocation(), II, C.VoidTy, 0,
                                           SC_Static,
-                                          SC_None,
                                           false, false);
   StartFunction(FD, C.VoidTy, Fn, FI, args, SourceLocation());
 
@@ -1777,7 +1800,6 @@ generateByrefCopyHelper(CodeGenFunction &CGF,
                                           SourceLocation(),
                                           SourceLocation(), II, R, 0,
                                           SC_Static,
-                                          SC_None,
                                           false, false);
 
   // Initialize debug info if necessary.
@@ -1852,7 +1874,6 @@ generateByrefDisposeHelper(CodeGenFunction &CGF,
                                           SourceLocation(),
                                           SourceLocation(), II, R, 0,
                                           SC_Static,
-                                          SC_None,
                                           false, false);
   // Initialize debug info if necessary.
   CGF.maybeInitializeDebugInfo();

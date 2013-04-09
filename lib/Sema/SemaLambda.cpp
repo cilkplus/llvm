@@ -74,7 +74,6 @@ CXXMethodDecl *Sema::startLambdaDefinition(CXXRecordDecl *Class,
                                                 IntroducerRange.getBegin(),
                                                 MethodNameLoc),
                             MethodType->getType(), MethodType,
-                            /*isStatic=*/false,
                             SC_None,
                             /*isInline=*/true,
                             /*isConstExpr=*/false,
@@ -738,7 +737,7 @@ static void addFunctionPointerConversion(Sema &S,
     = CXXMethodDecl::Create(S.Context, Class, Loc, 
                             DeclarationNameInfo(Name, Loc), FunctionTy, 
                             CallOperator->getTypeSourceInfo(),
-                            /*IsStatic=*/true, SC_Static, /*IsInline=*/true,
+                            SC_Static, /*IsInline=*/true,
                             /*IsConstexpr=*/false, 
                             CallOperator->getBody()->getLocEnd());
   SmallVector<ParmVarDecl *, 4> InvokeParams;
@@ -751,7 +750,6 @@ static void addFunctionPointerConversion(Sema &S,
                                                From->getType(),
                                                From->getTypeSourceInfo(),
                                                From->getStorageClass(),
-                                               From->getStorageClassAsWritten(),
                                                /*DefaultArg=*/0));
   }
   Invoke->setParams(InvokeParams);
@@ -1013,7 +1011,6 @@ ExprResult Sema::BuildBlockForLambdaConversion(SourceLocation CurrentLocation,
                                               From->getType(),
                                               From->getTypeSourceInfo(),
                                               From->getStorageClass(),
-                                            From->getStorageClassAsWritten(),
                                               /*DefaultArg=*/0));
   }
   Block->setParams(BlockParams);
@@ -1028,7 +1025,7 @@ ExprResult Sema::BuildBlockForLambdaConversion(SourceLocation CurrentLocation,
   VarDecl *CapVar = VarDecl::Create(Context, Block, ConvLocation,
                                     ConvLocation, 0,
                                     Src->getType(), CapVarTSI,
-                                    SC_None, SC_None);
+                                    SC_None);
   BlockDecl::Capture Capture(/*Variable=*/CapVar, /*ByRef=*/false,
                              /*Nested=*/false, /*Copy=*/Init.take());
   Block->setCaptures(Context, &Capture, &Capture + 1, 

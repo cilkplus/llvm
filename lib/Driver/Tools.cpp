@@ -1097,15 +1097,53 @@ void Clang::AddPPCTargetArgs(const ArgList &Args,
   }
 
   // Allow override of the Altivec feature.
-  if (Args.hasFlag(options::OPT_fno_altivec, options::OPT_faltivec, false)) {
-    CmdArgs.push_back("-target-feature");
-    CmdArgs.push_back("-altivec");
-  }
+  AddTargetFeature(Args, CmdArgs,
+                   options::OPT_faltivec, options::OPT_fno_altivec,
+                   "altivec");
 
+  AddTargetFeature(Args, CmdArgs,
+                   options::OPT_mfprnd, options::OPT_mno_fprnd,
+                   "fprnd");
+
+  // Note that gcc calls this mfcrf and LLVM calls this mfocrf.
+  AddTargetFeature(Args, CmdArgs,
+                   options::OPT_mmfcrf, options::OPT_mno_mfcrf,
+                   "mfocrf");
+
+  AddTargetFeature(Args, CmdArgs,
+                   options::OPT_mpopcntd, options::OPT_mno_popcntd,
+                   "popcntd");
+
+  // It is really only possible to turn qpx off because turning qpx on is tied
+  // to using the a2q CPU.
   if (Args.hasFlag(options::OPT_mno_qpx, options::OPT_mqpx, false)) {
     CmdArgs.push_back("-target-feature");
     CmdArgs.push_back("-qpx");
   }
+}
+
+/// Get the (LLVM) name of the R600 gpu we are targeting.
+static std::string getR600TargetGPU(const ArgList &Args) {
+  if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ)) {
+    std::string GPUName = A->getValue();
+    return llvm::StringSwitch<const char *>(GPUName)
+      .Cases("rv610", "rv620", "rv630", "r600")
+      .Cases("rv635", "rs780", "rs880", "r600")
+      .Case("rv740", "rv770")
+      .Case("palm", "cedar")
+      .Cases("sumo", "sumo2", "redwood")
+      .Case("hemlock", "cypress")
+      .Case("aruba", "cayman")
+      .Default(GPUName.c_str());
+  }
+  return "";
+}
+
+void Clang::AddR600TargetArgs(const ArgList &Args,
+                              ArgStringList &CmdArgs) const {
+  std::string TargetGPUName = getR600TargetGPU(Args);
+  CmdArgs.push_back("-target-cpu");
+  CmdArgs.push_back(Args.MakeArgString(TargetGPUName.c_str()));
 }
 
 void Clang::AddSparcTargetArgs(const ArgList &Args,
@@ -1470,11 +1508,12 @@ static bool UseRelaxAll(Compilation &C, const ArgList &Args) {
     RelaxDefault);
 }
 
-SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args)
+SanitizerArgs::SanitizerArgs(const ToolChain &TC, const ArgList &Args)
     : Kind(0), BlacklistFile(""), MsanTrackOrigins(false),
       AsanZeroBaseShadow(false) {
   unsigned AllKinds = 0;  // All kinds of sanitizers that were turned on
                           // at least once (possibly, disabled further).
+  const Driver &D = TC.getDriver();
   for (ArgList::const_iterator I = Args.begin(), E = Args.end(); I != E; ++I) {
     unsigned Add, Remove;
     if (!parse(D, Args, *I, Add, Remove, true))
@@ -1566,40 +1605,60 @@ SanitizerArgs::SanitizerArgs(const Driver &D, const ArgList &Args)
                    /* Default */false);
 
   // Parse -f(no-)sanitize-address-zero-base-shadow options.
-  if (NeedsAsan)
+  if (NeedsAsan) {
+    bool IsAndroid = (TC.getTriple().getEnvironment() == llvm::Triple::Android);
+    bool ZeroBaseShadowDefault = IsAndroid;
     AsanZeroBaseShadow =
-      Args.hasFlag(options::OPT_fsanitize_address_zero_base_shadow,
-                   options::OPT_fno_sanitize_address_zero_base_shadow,
-                   /* Default */false);
+        Args.hasFlag(options::OPT_fsanitize_address_zero_base_shadow,
+                     options::OPT_fno_sanitize_address_zero_base_shadow,
+                     ZeroBaseShadowDefault);
+    // Zero-base shadow is a requirement on Android.
+    if (IsAndroid && !AsanZeroBaseShadow) {
+      D.Diag(diag::err_drv_argument_not_allowed_with)
+          << "-fno-sanitize-address-zero-base-shadow"
+          << lastArgumentForKind(D, Args, Address);
+    }
+  }
 }
 
 static void addSanitizerRTLinkFlagsLinux(
     const ToolChain &TC, const ArgList &Args, ArgStringList &CmdArgs,
-    const StringRef Sanitizer, bool BeforeLibStdCXX) {
+    const StringRef Sanitizer, bool BeforeLibStdCXX,
+    bool ExportSymbols = true) {
   // Sanitizer runtime is located in the Linux library directory and
   // has name "libclang_rt.<Sanitizer>-<ArchName>.a".
   SmallString<128> LibSanitizer(TC.getDriver().ResourceDir);
   llvm::sys::path::append(
       LibSanitizer, "lib", "linux",
       (Twine("libclang_rt.") + Sanitizer + "-" + TC.getArchName() + ".a"));
+
   // Sanitizer runtime may need to come before -lstdc++ (or -lc++, libstdc++.a,
   // etc.) so that the linker picks custom versions of the global 'operator
   // new' and 'operator delete' symbols. We take the extreme (but simple)
   // strategy of inserting it at the front of the link command. It also
   // needs to be forced to end up in the executable, so wrap it in
   // whole-archive.
-  if (BeforeLibStdCXX) {
-    SmallVector<const char *, 3> PrefixArgs;
-    PrefixArgs.push_back("-whole-archive");
-    PrefixArgs.push_back(Args.MakeArgString(LibSanitizer));
-    PrefixArgs.push_back("-no-whole-archive");
-    CmdArgs.insert(CmdArgs.begin(), PrefixArgs.begin(), PrefixArgs.end());
-  } else {
-    CmdArgs.push_back(Args.MakeArgString(LibSanitizer));
-  }
+  SmallVector<const char *, 3> LibSanitizerArgs;
+  LibSanitizerArgs.push_back("-whole-archive");
+  LibSanitizerArgs.push_back(Args.MakeArgString(LibSanitizer));
+  LibSanitizerArgs.push_back("-no-whole-archive");
+
+  CmdArgs.insert(BeforeLibStdCXX ? CmdArgs.begin() : CmdArgs.end(),
+                 LibSanitizerArgs.begin(), LibSanitizerArgs.end());
+
   CmdArgs.push_back("-lpthread");
   CmdArgs.push_back("-ldl");
-  CmdArgs.push_back("-export-dynamic");
+
+  // If possible, use a dynamic symbols file to export the symbols from the
+  // runtime library. If we can't do so, use -export-dynamic instead to export
+  // all symbols from the binary.
+  if (ExportSymbols) {
+    if (llvm::sys::fs::exists(LibSanitizer + ".syms"))
+      CmdArgs.push_back(
+          Args.MakeArgString("--dynamic-list=" + LibSanitizer + ".syms"));
+    else
+      CmdArgs.push_back("-export-dynamic");
+  }
 }
 
 /// If AddressSanitizer is enabled, add appropriate linker flags (Linux).
@@ -1607,11 +1666,6 @@ static void addSanitizerRTLinkFlagsLinux(
 static void addAsanRTLinux(const ToolChain &TC, const ArgList &Args,
                            ArgStringList &CmdArgs) {
   if(TC.getTriple().getEnvironment() == llvm::Triple::Android) {
-    if (!Args.hasArg(options::OPT_shared)) {
-      if (!Args.hasArg(options::OPT_pie))
-        TC.getDriver().Diag(diag::err_drv_asan_android_requires_pie);
-    }
-
     SmallString<128> LibAsan(TC.getDriver().ResourceDir);
     llvm::sys::path::append(LibAsan, "lib", "linux",
         (Twine("libclang_rt.asan-") +
@@ -1619,13 +1673,6 @@ static void addAsanRTLinux(const ToolChain &TC, const ArgList &Args,
     CmdArgs.insert(CmdArgs.begin(), Args.MakeArgString(LibAsan));
   } else {
     if (!Args.hasArg(options::OPT_shared)) {
-      bool ZeroBaseShadow = Args.hasFlag(
-          options::OPT_fsanitize_address_zero_base_shadow,
-          options::OPT_fno_sanitize_address_zero_base_shadow, false);
-      if (ZeroBaseShadow && !Args.hasArg(options::OPT_pie)) {
-        TC.getDriver().Diag(diag::err_drv_argument_only_allowed_with) <<
-            "-fsanitize-address-zero-base-shadow" << "-pie";
-      }
       addSanitizerRTLinkFlagsLinux(TC, Args, CmdArgs, "asan", true);
     }
   }
@@ -1636,9 +1683,6 @@ static void addAsanRTLinux(const ToolChain &TC, const ArgList &Args,
 static void addTsanRTLinux(const ToolChain &TC, const ArgList &Args,
                            ArgStringList &CmdArgs) {
   if (!Args.hasArg(options::OPT_shared)) {
-    if (!Args.hasArg(options::OPT_pie))
-      TC.getDriver().Diag(diag::err_drv_argument_only_allowed_with) <<
-        "-fsanitize=thread" << "-pie";
     addSanitizerRTLinkFlagsLinux(TC, Args, CmdArgs, "tsan", true);
   }
 }
@@ -1648,9 +1692,6 @@ static void addTsanRTLinux(const ToolChain &TC, const ArgList &Args,
 static void addMsanRTLinux(const ToolChain &TC, const ArgList &Args,
                            ArgStringList &CmdArgs) {
   if (!Args.hasArg(options::OPT_shared)) {
-    if (!Args.hasArg(options::OPT_pie))
-      TC.getDriver().Diag(diag::err_drv_argument_only_allowed_with) <<
-        "-fsanitize=memory" << "-pie";
     addSanitizerRTLinkFlagsLinux(TC, Args, CmdArgs, "msan", true);
   }
 }
@@ -1658,8 +1699,22 @@ static void addMsanRTLinux(const ToolChain &TC, const ArgList &Args,
 /// If UndefinedBehaviorSanitizer is enabled, add appropriate linker flags
 /// (Linux).
 static void addUbsanRTLinux(const ToolChain &TC, const ArgList &Args,
-                            ArgStringList &CmdArgs) {
+                            ArgStringList &CmdArgs, bool IsCXX,
+                            bool HasOtherSanitizerRt) {
+  if (Args.hasArg(options::OPT_shared))
+    return;
+
+  // Need a copy of sanitizer_common. This could come from another sanitizer
+  // runtime; if we're not including one, include our own copy.
+  if (!HasOtherSanitizerRt)
+    addSanitizerRTLinkFlagsLinux(TC, Args, CmdArgs, "san", true, false);
+
   addSanitizerRTLinkFlagsLinux(TC, Args, CmdArgs, "ubsan", false);
+
+  // Only include the bits of the runtime which need a C++ ABI library if
+  // we're linking in C++ mode.
+  if (IsCXX)
+    addSanitizerRTLinkFlagsLinux(TC, Args, CmdArgs, "ubsan_cxx", false);
 }
 
 static bool shouldUseFramePointer(const ArgList &Args,
@@ -1669,6 +1724,24 @@ static bool shouldUseFramePointer(const ArgList &Args,
     return A->getOption().matches(options::OPT_fno_omit_frame_pointer);
 
   // Don't use a frame pointer on linux x86 and x86_64 if optimizing.
+  if ((Triple.getArch() == llvm::Triple::x86_64 ||
+       Triple.getArch() == llvm::Triple::x86) &&
+      Triple.getOS() == llvm::Triple::Linux) {
+    if (Arg *A = Args.getLastArg(options::OPT_O_Group))
+      if (!A->getOption().matches(options::OPT_O0))
+        return false;
+  }
+
+  return true;
+}
+
+static bool shouldUseLeafFramePointer(const ArgList &Args,
+                                      const llvm::Triple &Triple) {
+  if (Arg *A = Args.getLastArg(options::OPT_mno_omit_leaf_frame_pointer,
+                               options::OPT_momit_leaf_frame_pointer))
+    return A->getOption().matches(options::OPT_mno_omit_leaf_frame_pointer);
+
+  // Don't use a leaf frame pointer on linux x86 and x86_64 if optimizing.
   if ((Triple.getArch() == llvm::Triple::x86_64 ||
        Triple.getArch() == llvm::Triple::x86) &&
       Triple.getOS() == llvm::Triple::Linux) {
@@ -1835,6 +1908,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-S");
     } else if (JA.getType() == types::TY_AST) {
       CmdArgs.push_back("-emit-pch");
+    } else if (JA.getType() == types::TY_ModuleFile) {
+      CmdArgs.push_back("-module-file-info");
     } else if (JA.getType() == types::TY_RewrittenObjC) {
       CmdArgs.push_back("-rewrite-objc");
       rewriteKind = RK_NonFragile;
@@ -1886,6 +1961,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       
       CmdArgs.push_back("-analyzer-checker=deadcode");
       
+      if (types::isCXX(Inputs[0].getType()))
+        CmdArgs.push_back("-analyzer-checker=cplusplus");
+
       // Enable the following experimental checkers for testing. 
       CmdArgs.push_back("-analyzer-checker=security.insecureAPI.UncheckedReturn");
       CmdArgs.push_back("-analyzer-checker=security.insecureAPI.getpw");
@@ -1914,37 +1992,38 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   CheckCodeGenerationOptions(D, Args);
 
-  // For the PIC and PIE flag options, this logic is different from the legacy
-  // logic in very old versions of GCC, as that logic was just a bug no one had
-  // ever fixed. This logic is both more rational and consistent with GCC's new
-  // logic now that the bugs are fixed. The last argument relating to either
-  // PIC or PIE wins, and no other argument is used. If the last argument is
-  // any flavor of the '-fno-...' arguments, both PIC and PIE are disabled. Any
-  // PIE option implicitly enables PIC at the same level.
-  bool PIE = false;
-  bool PIC = getToolChain().isPICDefault();
+  bool PIE = getToolChain().isPIEDefault();
+  bool PIC = PIE || getToolChain().isPICDefault();
   bool IsPICLevelTwo = PIC;
-  if (Arg *A = Args.getLastArg(options::OPT_fPIC, options::OPT_fno_PIC,
-                               options::OPT_fpic, options::OPT_fno_pic,
-                               options::OPT_fPIE, options::OPT_fno_PIE,
-                               options::OPT_fpie, options::OPT_fno_pie)) {
-    Option O = A->getOption();
-    if (O.matches(options::OPT_fPIC) || O.matches(options::OPT_fpic) ||
-        O.matches(options::OPT_fPIE) || O.matches(options::OPT_fpie)) {
-      PIE = O.matches(options::OPT_fPIE) || O.matches(options::OPT_fpie);
-      PIC = PIE || O.matches(options::OPT_fPIC) || O.matches(options::OPT_fpic);
-      IsPICLevelTwo = O.matches(options::OPT_fPIE) ||
-                      O.matches(options::OPT_fPIC);
-    } else {
-      PIE = PIC = false;
-    }
-  }
+
+  // For the PIC and PIE flag options, this logic is different from the
+  // legacy logic in very old versions of GCC, as that logic was just
+  // a bug no one had ever fixed. This logic is both more rational and
+  // consistent with GCC's new logic now that the bugs are fixed. The last
+  // argument relating to either PIC or PIE wins, and no other argument is
+  // used. If the last argument is any flavor of the '-fno-...' arguments,
+  // both PIC and PIE are disabled. Any PIE option implicitly enables PIC
+  // at the same level.
+  Arg *LastPICArg =Args.getLastArg(options::OPT_fPIC, options::OPT_fno_PIC,
+                                 options::OPT_fpic, options::OPT_fno_pic,
+                                 options::OPT_fPIE, options::OPT_fno_PIE,
+                                 options::OPT_fpie, options::OPT_fno_pie);
   // Check whether the tool chain trumps the PIC-ness decision. If the PIC-ness
   // is forced, then neither PIC nor PIE flags will have no effect.
-  if (getToolChain().isPICDefaultForced()) {
-    PIE = false;
-    PIC = getToolChain().isPICDefault();
-    IsPICLevelTwo = PIC;
+  if (!getToolChain().isPICDefaultForced()) {
+    if (LastPICArg) {
+      Option O = LastPICArg->getOption();
+      if (O.matches(options::OPT_fPIC) || O.matches(options::OPT_fpic) ||
+          O.matches(options::OPT_fPIE) || O.matches(options::OPT_fpie)) {
+        PIE = O.matches(options::OPT_fPIE) || O.matches(options::OPT_fpie);
+        PIC = PIE || O.matches(options::OPT_fPIC) ||
+              O.matches(options::OPT_fpic);
+        IsPICLevelTwo = O.matches(options::OPT_fPIE) ||
+                        O.matches(options::OPT_fPIC);
+      } else {
+        PIE = PIC = false;
+      }
+    }
   }
 
   // Inroduce a Darwin-specific hack. If the default is PIC but the flags
@@ -2022,6 +2101,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                     options::OPT_fno_strict_aliasing,
                     getToolChain().IsStrictAliasingDefault()))
     CmdArgs.push_back("-relaxed-aliasing");
+  if (Args.hasArg(options::OPT_fstruct_path_tbaa))
+    CmdArgs.push_back("-struct-path-tbaa");
   if (Args.hasFlag(options::OPT_fstrict_enums, options::OPT_fno_strict_enums,
                    false))
     CmdArgs.push_back("-fstrict-enums");
@@ -2029,6 +2110,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                     options::OPT_fno_optimize_sibling_calls))
     CmdArgs.push_back("-mdisable-tail-calls");
 
+  // Handle segmented stacks.
+  if (Args.hasArg(options::OPT_fsplit_stack))
+    CmdArgs.push_back("-split-stacks");
+  
   // Handle various floating point optimization flags, mapping them to the
   // appropriate LLVM code generation flags. The pattern for all of these is to
   // default off the codegen optimizations, and if any flag enables them and no
@@ -2228,6 +2313,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     AddPPCTargetArgs(Args, CmdArgs);
     break;
 
+  case llvm::Triple::r600:
+    AddR600TargetArgs(Args, CmdArgs);
+    break;
+
   case llvm::Triple::sparc:
     AddSparcTargetArgs(Args, CmdArgs);
     break;
@@ -2250,10 +2339,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(A->getValue());
   }
 
-  // -mno-omit-leaf-frame-pointer is the default on Darwin.
-  if (Args.hasFlag(options::OPT_momit_leaf_frame_pointer,
-                   options::OPT_mno_omit_leaf_frame_pointer,
-                   !getToolChain().getTriple().isOSDarwin()))
+  if (!shouldUseLeafFramePointer(Args, getToolChain().getTriple()))
     CmdArgs.push_back("-momit-leaf-frame-pointer");
 
   // Explicitly error on some things we know we don't support and can't just
@@ -2622,7 +2708,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         !getToolChain().getTriple().isMacOSX())
       D.Diag(diag::err_drv_cilk_unsupported);
 
-  SanitizerArgs Sanitize(D, Args);
+  SanitizerArgs Sanitize(getToolChain(), Args);
   Sanitize.addArgs(Args, CmdArgs);
 
   if (!Args.hasFlag(options::OPT_fsanitize_recover,
@@ -2796,7 +2882,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     SmallString<128> DefaultModuleCache;
     llvm::sys::path::system_temp_directory(/*erasedOnReboot=*/false,
                                            DefaultModuleCache);
-    llvm::sys::path::append(DefaultModuleCache, "clang-module-cache");
+    llvm::sys::path::append(DefaultModuleCache, "org.llvm.clang");
+    llvm::sys::path::append(DefaultModuleCache, "ModuleCache");
     const char Arg[] = "-fmodules-cache-path=";
     DefaultModuleCache.insert(DefaultModuleCache.begin(),
                               Arg, Arg + strlen(Arg));
@@ -2805,6 +2892,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Pass through all -fmodules-ignore-macro arguments.
   Args.AddAllArgs(CmdArgs, options::OPT_fmodules_ignore_macro);
+  Args.AddLastArg(CmdArgs, options::OPT_fmodules_prune_interval);
+  Args.AddLastArg(CmdArgs, options::OPT_fmodules_prune_after);
 
   // -fmodules-autolink (on by default when modules is enabled) automatically
   // links against libraries for imported modules.  This requires the
@@ -3638,7 +3727,7 @@ void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
   // here.
   if (Arch == llvm::Triple::x86 || Arch == llvm::Triple::ppc)
     CmdArgs.push_back("-m32");
-  else if (Arch == llvm::Triple::x86_64 || Arch == llvm::Triple::x86_64)
+  else if (Arch == llvm::Triple::x86_64 || Arch == llvm::Triple::ppc64)
     CmdArgs.push_back("-m64");
 
   if (Output.isFilename()) {
@@ -3671,6 +3760,9 @@ void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
         << getToolChain().getTripleString();
     else if (II.getType() == types::TY_AST)
       D.Diag(diag::err_drv_no_ast_support)
+        << getToolChain().getTripleString();
+    else if (II.getType() == types::TY_ModuleFile)
+      D.Diag(diag::err_drv_no_module_support)
         << getToolChain().getTripleString();
 
     if (types::canTypeBeUserSpecified(II.getType())) {
@@ -3802,6 +3894,9 @@ void hexagon::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
     else if (II.getType() == types::TY_AST)
       D.Diag(clang::diag::err_drv_no_ast_support)
         << getToolChain().getTripleString();
+    else if (II.getType() == types::TY_ModuleFile)
+      D.Diag(diag::err_drv_no_module_support)
+      << getToolChain().getTripleString();
 
     if (II.isFilename())
       CmdArgs.push_back(II.getFilename());
@@ -4487,7 +4582,7 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
-  SanitizerArgs Sanitize(getToolChain().getDriver(), Args);
+  SanitizerArgs Sanitize(getToolChain(), Args);
   // If we're building a dynamic lib with -fsanitize=address,
   // unresolved symbols may appear. Mark all
   // of them as dynamic_lookup. Linking executables is handled in
@@ -5561,11 +5656,11 @@ void netbsd::Link::ConstructJob(Compilation &C, const JobAction &JA,
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
-void linuxtools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
-                                        const InputInfo &Output,
-                                        const InputInfoList &Inputs,
-                                        const ArgList &Args,
-                                        const char *LinkingOutput) const {
+void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
+                                      const InputInfo &Output,
+                                      const InputInfoList &Inputs,
+                                      const ArgList &Args,
+                                      const char *LinkingOutput) const {
   ArgStringList CmdArgs;
 
   // Add --32/--64 to make sure we get the format we want.
@@ -5682,16 +5777,20 @@ static bool hasMipsN32ABIArg(const ArgList &Args) {
   return A && (A->getValue() == StringRef("n32"));
 }
 
-void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
-                                    const InputInfo &Output,
-                                    const InputInfoList &Inputs,
-                                    const ArgList &Args,
-                                    const char *LinkingOutput) const {
+void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const ArgList &Args,
+                                  const char *LinkingOutput) const {
   const toolchains::Linux& ToolChain =
     static_cast<const toolchains::Linux&>(getToolChain());
   const Driver &D = ToolChain.getDriver();
   const bool isAndroid =
     ToolChain.getTriple().getEnvironment() == llvm::Triple::Android;
+  SanitizerArgs Sanitize(getToolChain(), Args);
+  const bool IsPIE =
+    !Args.hasArg(options::OPT_shared) &&
+    (Args.hasArg(options::OPT_pie) || Sanitize.hasZeroBaseShadow());
 
   ArgStringList CmdArgs;
 
@@ -5706,7 +5805,7 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
   if (!D.SysRoot.empty())
     CmdArgs.push_back(Args.MakeArgString("--sysroot=" + D.SysRoot));
 
-  if (Args.hasArg(options::OPT_pie) && !Args.hasArg(options::OPT_shared))
+  if (IsPIE)
     CmdArgs.push_back("-pie");
 
   if (Args.hasArg(options::OPT_rdynamic))
@@ -5812,7 +5911,7 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
     if (!isAndroid) {
       const char *crt1 = NULL;
       if (!Args.hasArg(options::OPT_shared)){
-        if (Args.hasArg(options::OPT_pie))
+        if (IsPIE)
           crt1 = "Scrt1.o";
         else
           crt1 = "crt1.o";
@@ -5828,7 +5927,7 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       crtbegin = isAndroid ? "crtbegin_static.o" : "crtbeginT.o";
     else if (Args.hasArg(options::OPT_shared))
       crtbegin = isAndroid ? "crtbegin_so.o" : "crtbeginS.o";
-    else if (Args.hasArg(options::OPT_pie))
+    else if (IsPIE)
       crtbegin = isAndroid ? "crtbegin_dynamic.o" : "crtbeginS.o";
     else
       crtbegin = isAndroid ? "crtbegin_dynamic.o" : "crtbegin.o";
@@ -5879,11 +5978,11 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
 
   AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
 
-  SanitizerArgs Sanitize(D, Args);
-
   // Call these before we add the C++ ABI library.
   if (Sanitize.needsUbsanRt())
-    addUbsanRTLinux(getToolChain(), Args, CmdArgs);
+    addUbsanRTLinux(getToolChain(), Args, CmdArgs, D.CCCIsCXX,
+                    Sanitize.needsAsanRt() || Sanitize.needsTsanRt() ||
+                    Sanitize.needsMsanRt());
   if (Sanitize.needsAsanRt())
     addAsanRTLinux(getToolChain(), Args, CmdArgs);
   if (Sanitize.needsTsanRt())
@@ -5936,7 +6035,7 @@ void linuxtools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       const char *crtend;
       if (Args.hasArg(options::OPT_shared))
         crtend = isAndroid ? "crtend_so.o" : "crtendS.o";
-      else if (Args.hasArg(options::OPT_pie))
+      else if (IsPIE)
         crtend = isAndroid ? "crtend_android.o" : "crtendS.o";
       else
         crtend = isAndroid ? "crtend_android.o" : "crtend.o";

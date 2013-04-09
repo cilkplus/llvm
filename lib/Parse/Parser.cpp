@@ -96,6 +96,11 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
 
     PP.AddPragmaHandler("OPENCL", FPContractHandler.get());
   }
+  if (getLangOpts().OpenMP)
+    OpenMPHandler.reset(new PragmaOpenMPHandler());
+  else
+    OpenMPHandler.reset(new PragmaNoOpenMPHandler());
+  PP.AddPragmaHandler(OpenMPHandler.get());
 
   if (getLangOpts().CilkPlus) {
     CilkGrainSizeHandler.reset(new PragmaCilkGrainSizeHandler());
@@ -433,6 +438,8 @@ Parser::~Parser() {
     OpenCLExtensionHandler.reset();
     PP.RemovePragmaHandler("OPENCL", FPContractHandler.get());
   }
+  PP.RemovePragmaHandler(OpenMPHandler.get());
+  OpenMPHandler.reset();
 
   if (getLangOpts().CilkPlus) {
     PP.RemovePragmaHandler(CilkGrainSizeHandler.get());
@@ -633,6 +640,9 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
     return DeclGroupPtrTy();
   case tok::annot_pragma_opencl_extension:
     HandlePragmaOpenCLExtension();
+    return DeclGroupPtrTy();
+  case tok::annot_pragma_openmp:
+    ParseOpenMPDeclarativeDirective();
     return DeclGroupPtrTy();
   case tok::semi:
     // Either a C++11 empty-declaration or attribute-declaration.

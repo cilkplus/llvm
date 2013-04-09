@@ -920,7 +920,8 @@ Sema::CheckOverload(Scope *S, FunctionDecl *New, const LookupResult &Old,
     // function templates hide function templates with different
     // return types or template parameter lists.
     bool UseMemberUsingDeclRules =
-      (OldIsUsingDecl || NewIsUsingDecl) && CurContext->isRecord();
+      (OldIsUsingDecl || NewIsUsingDecl) && CurContext->isRecord() &&
+      !New->getFriendObjectKind();
 
     if (FunctionTemplateDecl *OldT = dyn_cast<FunctionTemplateDecl>(OldD)) {
       if (!IsOverload(New, OldT->getTemplatedDecl(), UseMemberUsingDeclRules)) {
@@ -3937,6 +3938,15 @@ CompareDerivedToBaseConversions(Sema &S,
   return ImplicitConversionSequence::Indistinguishable;
 }
 
+/// \brief Determine whether the given type is valid, e.g., it is not an invalid
+/// C++ class.
+static bool isTypeValid(QualType T) {
+  if (CXXRecordDecl *Record = T->getAsCXXRecordDecl())
+    return !Record->isInvalidDecl();
+
+  return true;
+}
+
 /// CompareReferenceRelationship - Compare the two types T1 and T2 to
 /// determine whether they are reference-related,
 /// reference-compatible, reference-compatible with added
@@ -3970,7 +3980,8 @@ Sema::CompareReferenceRelationship(SourceLocation Loc,
   if (UnqualT1 == UnqualT2) {
     // Nothing to do.
   } else if (!RequireCompleteType(Loc, OrigT2, 0) &&
-           IsDerivedFrom(UnqualT2, UnqualT1))
+             isTypeValid(UnqualT1) && isTypeValid(UnqualT2) &&
+             IsDerivedFrom(UnqualT2, UnqualT1))
     DerivedToBase = true;
   else if (UnqualT1->isObjCObjectOrInterfaceType() &&
            UnqualT2->isObjCObjectOrInterfaceType() &&
@@ -5013,7 +5024,7 @@ ExprResult Sema::CheckConvertedConstantExpression(Expr *From, QualType T,
   Expr::EvalResult Eval;
   Eval.Diag = &Notes;
 
-  if (!Result.get()->EvaluateAsRValue(Eval, Context)) {
+  if (!Result.get()->EvaluateAsRValue(Eval, Context) || !Eval.Val.isInt()) {
     // The expression can't be folded, so we can't keep it at this position in
     // the AST.
     Result = ExprError();
@@ -8497,13 +8508,35 @@ void DiagnoseBadDeduction(Sema &S, OverloadCandidate *Cand,
     return;
   }
 
-  case Sema::TDK_NonDeducedMismatch:
+  case Sema::TDK_NonDeducedMismatch: {
     // FIXME: Provide a source location to indicate what we couldn't match.
+    TemplateArgument FirstTA = *Cand->DeductionFailure.getFirstArg();
+    TemplateArgument SecondTA = *Cand->DeductionFailure.getSecondArg();
+    if (FirstTA.getKind() == TemplateArgument::Template &&
+        SecondTA.getKind() == TemplateArgument::Template) {
+      TemplateName FirstTN = FirstTA.getAsTemplate();
+      TemplateName SecondTN = SecondTA.getAsTemplate();
+      if (FirstTN.getKind() == TemplateName::Template &&
+          SecondTN.getKind() == TemplateName::Template) {
+        if (FirstTN.getAsTemplateDecl()->getName() ==
+            SecondTN.getAsTemplateDecl()->getName()) {
+          // FIXME: This fixes a bad diagnostic where both templates are named
+          // the same.  This particular case is a bit difficult since:
+          // 1) It is passed as a string to the diagnostic printer.
+          // 2) The diagnostic printer only attempts to find a better
+          //    name for types, not decls.
+          // Ideally, this should folded into the diagnostic printer.
+          S.Diag(Fn->getLocation(),
+                 diag::note_ovl_candidate_non_deduced_mismatch_qualified)
+              << FirstTN.getAsTemplateDecl() << SecondTN.getAsTemplateDecl();
+          return;
+        }
+      }
+    }
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_non_deduced_mismatch)
-      << *Cand->DeductionFailure.getFirstArg()
-      << *Cand->DeductionFailure.getSecondArg();
+      << FirstTA << SecondTA;
     return;
-
+  }
   // TODO: diagnose these individually, then kill off
   // note_ovl_candidate_bad_deduction, which is uselessly vague.
   case Sema::TDK_MiscellaneousDeductionFailure:

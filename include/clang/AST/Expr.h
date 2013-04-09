@@ -2905,7 +2905,7 @@ public:
     SubExprs[LHS] = lhs;
     SubExprs[RHS] = rhs;
     assert(!isCompoundAssignmentOp() &&
-           "Use ArithAssignBinaryOperator for compound assignments");
+           "Use CompoundAssignOperator for compound assignments");
   }
 
   /// \brief Construct an empty binary operator.
@@ -2964,6 +2964,33 @@ public:
 
   static bool isComparisonOp(Opcode Opc) { return Opc >= BO_LT && Opc<=BO_NE; }
   bool isComparisonOp() const { return isComparisonOp(getOpcode()); }
+
+  static Opcode negateComparisonOp(Opcode Opc) {
+    switch (Opc) {
+    default:
+      llvm_unreachable("Not a comparsion operator.");
+    case BO_LT: return BO_GE;
+    case BO_GT: return BO_LE;
+    case BO_LE: return BO_GT;
+    case BO_GE: return BO_LT;
+    case BO_EQ: return BO_NE;
+    case BO_NE: return BO_EQ;
+    }
+  }
+
+  static Opcode reverseComparisonOp(Opcode Opc) {
+    switch (Opc) {
+    default:
+      llvm_unreachable("Not a comparsion operator.");
+    case BO_LT: return BO_GT;
+    case BO_GT: return BO_LT;
+    case BO_LE: return BO_GE;
+    case BO_GE: return BO_LE;
+    case BO_EQ:
+    case BO_NE:
+      return Opc;
+    }
+  }
 
   static bool isLogicalOp(Opcode Opc) { return Opc == BO_LAnd || Opc==BO_LOr; }
   bool isLogicalOp() const { return isLogicalOp(getOpcode()); }

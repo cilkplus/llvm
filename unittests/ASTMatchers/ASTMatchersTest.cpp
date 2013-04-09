@@ -337,14 +337,22 @@ TEST(DeclarationMatcher, hasDeclContext) {
       "    class D {};"
       "  }"
       "}",
-      recordDecl(hasDeclContext(namedDecl(hasName("M"))))));
+      recordDecl(hasDeclContext(namespaceDecl(hasName("M"))))));
   EXPECT_TRUE(notMatches(
       "namespace N {"
       "  namespace M {"
       "    class D {};"
       "  }"
       "}",
-      recordDecl(hasDeclContext(namedDecl(hasName("N"))))));
+      recordDecl(hasDeclContext(namespaceDecl(hasName("N"))))));
+
+  EXPECT_TRUE(matches("namespace {"
+                      "  namespace M {"
+                      "    class D {};"
+                      "  }"
+                      "}",
+                      recordDecl(hasDeclContext(namespaceDecl(
+                          hasName("M"), hasDeclContext(namespaceDecl()))))));
 }
 
 TEST(ClassTemplate, DoesNotMatchClass) {
@@ -1354,6 +1362,17 @@ TEST(QualType, hasCanonicalType) {
               "int a;"
               "int_ref b = a;",
               varDecl(hasType(qualType(hasCanonicalType(referenceType()))))));
+}
+
+TEST(QualType, hasLocalQualifiers) {
+  EXPECT_TRUE(notMatches("typedef const int const_int; const_int i = 1;",
+                         varDecl(hasType(hasLocalQualifiers()))));
+  EXPECT_TRUE(matches("int *const j = nullptr;",
+                      varDecl(hasType(hasLocalQualifiers()))));
+  EXPECT_TRUE(matches("int *volatile k;",
+                      varDecl(hasType(hasLocalQualifiers()))));
+  EXPECT_TRUE(notMatches("int m;",
+                         varDecl(hasType(hasLocalQualifiers()))));
 }
 
 TEST(HasParameter, CallsInnerMatcher) {
@@ -3385,6 +3404,19 @@ TEST(TypeMatching, MatchesAutoTypes) {
 TEST(TypeMatching, MatchesFunctionTypes) {
   EXPECT_TRUE(matches("int (*f)(int);", functionType()));
   EXPECT_TRUE(matches("void f(int i) {}", functionType()));
+}
+
+TEST(TypeMatching, MatchesParenType) {
+  EXPECT_TRUE(
+      matches("int (*array)[4];", varDecl(hasType(pointsTo(parenType())))));
+  EXPECT_TRUE(notMatches("int *array[4];", varDecl(hasType(parenType()))));
+
+  EXPECT_TRUE(matches(
+      "int (*ptr_to_func)(int);",
+      varDecl(hasType(pointsTo(parenType(innerType(functionType())))))));
+  EXPECT_TRUE(notMatches(
+      "int (*ptr_to_array)[4];",
+      varDecl(hasType(pointsTo(parenType(innerType(functionType())))))));
 }
 
 TEST(TypeMatching, PointerTypes) {

@@ -71,9 +71,7 @@ public:
   }
 
 private:
-  bool eof() {
-    return Token.NewlinesBefore > 0 && Token.HasUnescapedNewline;
-  }
+  bool eof() { return Token.HasUnescapedNewline; }
 
   FormatToken createEOF() {
     FormatToken FormatTok;
@@ -133,8 +131,7 @@ bool UnwrappedLineParser::parse() {
   DEBUG(llvm::dbgs() << "----\n");
   readToken();
   bool Error = parseFile();
-  for (std::vector<UnwrappedLine>::iterator I = Lines.begin(),
-                                            E = Lines.end();
+  for (std::vector<UnwrappedLine>::iterator I = Lines.begin(), E = Lines.end();
        I != E; ++I) {
     Callback.consumeUnwrappedLine(*I);
   }
@@ -147,9 +144,10 @@ bool UnwrappedLineParser::parse() {
 }
 
 bool UnwrappedLineParser::parseFile() {
-  ScopedDeclarationState DeclarationState(*Line, DeclarationScopeStack,
-                                          /*MustBeDeclaration=*/ true);
-  bool Error = parseLevel(/*HasOpeningBrace=*/false);
+  ScopedDeclarationState DeclarationState(
+      *Line, DeclarationScopeStack,
+      /*MustBeDeclaration=*/ !Line->InPPDirective);
+  bool Error = parseLevel(/*HasOpeningBrace=*/ false);
   // Make sure to format the remaining tokens.
   flushComments(true);
   addUnwrappedLine();
@@ -200,14 +198,14 @@ bool UnwrappedLineParser::parseBlock(bool MustBeDeclaration,
   ScopedDeclarationState DeclarationState(*Line, DeclarationScopeStack,
                                           MustBeDeclaration);
   Line->Level += AddLevels;
-  parseLevel(/*HasOpeningBrace=*/true);
+  parseLevel(/*HasOpeningBrace=*/ true);
 
   if (!FormatTok.Tok.is(tok::r_brace)) {
     Line->Level -= AddLevels;
     return true;
   }
 
-  nextToken();  // Munch the closing brace.
+  nextToken(); // Munch the closing brace.
   Line->Level -= AddLevels;
   return false;
 }
@@ -262,9 +260,35 @@ void UnwrappedLineParser::parsePPUnknown() {
   addUnwrappedLine();
 }
 
+// Here we blacklist certain tokens that are not usually the first token in an
+// unwrapped line. This is used in attempt to distinguish macro calls without
+// trailing semicolons from other constructs split to several lines.
+bool tokenCanStartNewLine(clang::Token Tok) {
+  // Semicolon can be a null-statement, l_square can be a start of a macro or
+  // a C++11 attribute, but this doesn't seem to be common.
+  return Tok.isNot(tok::semi) && Tok.isNot(tok::l_brace) &&
+         Tok.isNot(tok::l_square) &&
+         // Tokens that can only be used as binary operators and a part of
+         // overloaded operator names.
+         Tok.isNot(tok::period) && Tok.isNot(tok::periodstar) &&
+         Tok.isNot(tok::arrow) && Tok.isNot(tok::arrowstar) &&
+         Tok.isNot(tok::less) && Tok.isNot(tok::greater) &&
+         Tok.isNot(tok::slash) && Tok.isNot(tok::percent) &&
+         Tok.isNot(tok::lessless) && Tok.isNot(tok::greatergreater) &&
+         Tok.isNot(tok::equal) && Tok.isNot(tok::plusequal) &&
+         Tok.isNot(tok::minusequal) && Tok.isNot(tok::starequal) &&
+         Tok.isNot(tok::slashequal) && Tok.isNot(tok::percentequal) &&
+         Tok.isNot(tok::ampequal) && Tok.isNot(tok::pipeequal) &&
+         Tok.isNot(tok::caretequal) && Tok.isNot(tok::greatergreaterequal) &&
+         Tok.isNot(tok::lesslessequal) &&
+         // Colon is used in labels, base class lists, initializer lists,
+         // range-based for loops, ternary operator, but should never be the
+         // first token in an unwrapped line.
+         Tok.isNot(tok::colon);
+}
+
 void UnwrappedLineParser::parseStructuralElement() {
   assert(!FormatTok.Tok.is(tok::l_brace));
-  int TokenNumber = 0;
   switch (FormatTok.Tok.getKind()) {
   case tok::at:
     nextToken();
@@ -299,7 +323,6 @@ void UnwrappedLineParser::parseStructuralElement() {
     return;
   case tok::kw_inline:
     nextToken();
-    TokenNumber++;
     if (FormatTok.Tok.is(tok::kw_namespace)) {
       parseNamespace();
       return;
@@ -349,7 +372,6 @@ void UnwrappedLineParser::parseStructuralElement() {
     break;
   }
   do {
-    ++TokenNumber;
     switch (FormatTok.Tok.getKind()) {
     case tok::at:
       nextToken();
@@ -386,9 +408,20 @@ void UnwrappedLineParser::parseStructuralElement() {
       return;
     case tok::identifier:
       nextToken();
-      if (TokenNumber == 1 && FormatTok.Tok.is(tok::colon)) {
-        parseLabel();
-        return;
+      if (Line->Tokens.size() == 1) {
+        if (FormatTok.Tok.is(tok::colon)) {
+          parseLabel();
+          return;
+        }
+        // Recognize function-like macro usages without trailing semicolon.
+        if (FormatTok.Tok.is(tok::l_paren)) {
+          parseParens();
+          if (FormatTok.HasUnescapedNewline &&
+              tokenCanStartNewLine(FormatTok.Tok)) {
+            addUnwrappedLine();
+            return;
+          }
+        }
       }
       break;
     case tok::equal:
@@ -574,7 +607,7 @@ void UnwrappedLineParser::parseLabel() {
     return;
   nextToken();
   unsigned OldLineLevel = Line->Level;
-  if (Line->Level > 0)
+  if (Line->Level > 1 || (!Line->InPPDirective && Line->Level > 0))
     --Line->Level;
   if (CommentsBeforeNextToken.empty() && FormatTok.Tok.is(tok::l_brace)) {
     parseBlock(/*MustBeDeclaration=*/ false);
@@ -673,8 +706,7 @@ void UnwrappedLineParser::parseRecord() {
     // The actual identifier can be a nested name specifier, and in macros
     // it is often token-pasted.
     while (FormatTok.Tok.is(tok::identifier) ||
-           FormatTok.Tok.is(tok::coloncolon) ||
-           FormatTok.Tok.is(tok::hashhash))
+           FormatTok.Tok.is(tok::coloncolon) || FormatTok.Tok.is(tok::hashhash))
       nextToken();
 
     // Note that parsing away template declarations here leads to incorrectly
@@ -688,7 +720,7 @@ void UnwrappedLineParser::parseRecord() {
     // (this would still leave us with an ambiguity between template function
     // and class declarations).
     if (FormatTok.Tok.is(tok::colon) || FormatTok.Tok.is(tok::less)) {
-      while (FormatTok.Tok.isNot(tok::l_brace)) {
+      while (!eof() && FormatTok.Tok.isNot(tok::l_brace)) {
         if (FormatTok.Tok.is(tok::semi))
           return;
         nextToken();
@@ -723,12 +755,12 @@ void UnwrappedLineParser::parseObjCUntilAtEnd() {
 
 void UnwrappedLineParser::parseObjCInterfaceOrImplementation() {
   nextToken();
-  nextToken();  // interface name
+  nextToken(); // interface name
 
   // @interface can be followed by either a base class, or a category.
   if (FormatTok.Tok.is(tok::colon)) {
     nextToken();
-    nextToken();  // base class name
+    nextToken(); // base class name
   } else if (FormatTok.Tok.is(tok::l_paren))
     // Skip category, if present.
     parseParens();
@@ -749,7 +781,7 @@ void UnwrappedLineParser::parseObjCInterfaceOrImplementation() {
 
 void UnwrappedLineParser::parseObjCProtocol() {
   nextToken();
-  nextToken();  // protocol name
+  nextToken(); // protocol name
 
   if (FormatTok.Tok.is(tok::less))
     parseObjCProtocolList();
@@ -791,9 +823,7 @@ void UnwrappedLineParser::addUnwrappedLine() {
   }
 }
 
-bool UnwrappedLineParser::eof() const {
-  return FormatTok.Tok.is(tok::eof);
-}
+bool UnwrappedLineParser::eof() const { return FormatTok.Tok.is(tok::eof); }
 
 void UnwrappedLineParser::flushComments(bool NewlineBeforeNext) {
   bool JustComments = Line->Tokens.empty();
@@ -825,13 +855,16 @@ void UnwrappedLineParser::readToken() {
   do {
     FormatTok = Tokens->getNextToken();
     while (!Line->InPPDirective && FormatTok.Tok.is(tok::hash) &&
-           ((FormatTok.NewlinesBefore > 0 && FormatTok.HasUnescapedNewline) ||
-            FormatTok.IsFirst)) {
+           (FormatTok.HasUnescapedNewline || FormatTok.IsFirst)) {
       // If there is an unfinished unwrapped line, we flush the preprocessor
       // directives only after that unwrapped line was finished later.
-      bool SwitchToPreprocessorLines = !Line->Tokens.empty() &&
-                                       CurrentLines == &Lines;
+      bool SwitchToPreprocessorLines =
+          !Line->Tokens.empty() && CurrentLines == &Lines;
       ScopedLineState BlockState(*this, SwitchToPreprocessorLines);
+      // Comments stored before the preprocessor directive need to be output
+      // before the preprocessor directive, at the same level as the
+      // preprocessor directive, as we consider them to apply to the directive.
+      flushComments(FormatTok.NewlinesBefore > 0);
       parsePPDirective();
     }
     if (!FormatTok.Tok.is(tok::comment))

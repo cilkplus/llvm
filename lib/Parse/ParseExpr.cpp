@@ -1188,10 +1188,13 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
   case tok::kw___is_union:
   case tok::kw___is_final:
   case tok::kw___has_trivial_constructor:
+  case tok::kw___has_trivial_move_constructor:
   case tok::kw___has_trivial_copy:
   case tok::kw___has_trivial_assign:
+  case tok::kw___has_trivial_move_assign:
   case tok::kw___has_trivial_destructor:
   case tok::kw___has_nothrow_assign:
+  case tok::kw___has_nothrow_move_assign:
   case tok::kw___has_nothrow_copy:
   case tok::kw___has_nothrow_constructor:
   case tok::kw___has_virtual_destructor:
@@ -1974,12 +1977,16 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
                       Tok.is(tok::kw___bridge_retained) ||
                       Tok.is(tok::kw___bridge_retain)));
   if (BridgeCast && !getLangOpts().ObjCAutoRefCount) {
-    StringRef BridgeCastName = Tok.getName();
-    SourceLocation BridgeKeywordLoc = ConsumeToken();
-    if (!PP.getSourceManager().isInSystemHeader(BridgeKeywordLoc))
-      Diag(BridgeKeywordLoc, diag::warn_arc_bridge_cast_nonarc)
-        << BridgeCastName
-        << FixItHint::CreateReplacement(BridgeKeywordLoc, "");
+    if (Tok.isNot(tok::kw___bridge)) {
+      StringRef BridgeCastName = Tok.getName();
+      SourceLocation BridgeKeywordLoc = ConsumeToken();
+      if (!PP.getSourceManager().isInSystemHeader(BridgeKeywordLoc))
+        Diag(BridgeKeywordLoc, diag::warn_arc_bridge_cast_nonarc)
+          << BridgeCastName
+          << FixItHint::CreateReplacement(BridgeKeywordLoc, "");
+    }
+    else
+      ConsumeToken(); // consume __bridge
     BridgeCast = false;
   }
   

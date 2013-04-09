@@ -542,22 +542,28 @@ void CXXRecordDecl::addedMember(Decl *D) {
 
     // Keep the list of conversion functions up-to-date.
     if (CXXConversionDecl *Conversion = dyn_cast<CXXConversionDecl>(D)) {
-      // FIXME: We intentionally don't use the decl's access here because it
-      // hasn't been set yet.  That's really just a misdesign in Sema.
+      // FIXME: We use the 'unsafe' accessor for the access specifier here,
+      // because Sema may not have set it yet. That's really just a misdesign
+      // in Sema. However, LLDB *will* have set the access specifier correctly,
+      // and adds declarations after the class is technically completed,
+      // so completeDefinition()'s overriding of the access specifiers doesn't
+      // work.
+      AccessSpecifier AS = Conversion->getAccessUnsafe();
+
       if (Conversion->getPrimaryTemplate()) {
         // We don't record specializations.
       } else if (FunTmpl) {
         if (FunTmpl->getPreviousDecl())
           data().Conversions.replace(FunTmpl->getPreviousDecl(),
-                                     FunTmpl);
+                                     FunTmpl, AS);
         else
-          data().Conversions.addDecl(getASTContext(), FunTmpl);
+          data().Conversions.addDecl(getASTContext(), FunTmpl, AS);
       } else {
         if (Conversion->getPreviousDecl())
           data().Conversions.replace(Conversion->getPreviousDecl(),
-                                     Conversion);
+                                     Conversion, AS);
         else
-          data().Conversions.addDecl(getASTContext(), Conversion);
+          data().Conversions.addDecl(getASTContext(), Conversion, AS);
       }
     }
 
@@ -1251,6 +1257,42 @@ bool CXXRecordDecl::mayBeAbstract() const {
 
 void CXXMethodDecl::anchor() { }
 
+bool CXXMethodDecl::isStatic() const {
+  const CXXMethodDecl *MD = this;
+  for (;;) {
+    const CXXMethodDecl *C = MD->getCanonicalDecl();
+    if (C != MD) {
+      MD = C;
+      continue;
+    }
+
+    FunctionTemplateSpecializationInfo *Info =
+      MD->getTemplateSpecializationInfo();
+    if (!Info)
+      break;
+    MD = cast<CXXMethodDecl>(Info->getTemplate()->getTemplatedDecl());
+  }
+
+  if (MD->getStorageClass() == SC_Static)
+    return true;
+
+  DeclarationName Name = getDeclName();
+  // [class.free]p1:
+  // Any allocation function for a class T is a static member
+  // (even if not explicitly declared static).
+  if (Name.getCXXOverloadedOperator() == OO_New ||
+      Name.getCXXOverloadedOperator() == OO_Array_New)
+    return true;
+
+  // [class.free]p6 Any deallocation function for a class X is a static member
+  // (even if not explicitly declared static).
+  if (Name.getCXXOverloadedOperator() == OO_Delete ||
+      Name.getCXXOverloadedOperator() == OO_Array_Delete)
+    return true;
+
+  return false;
+}
+
 static bool recursivelyOverrides(const CXXMethodDecl *DerivedMD,
                                  const CXXMethodDecl *BaseMD) {
   for (CXXMethodDecl::method_iterator I = DerivedMD->begin_overridden_methods(),
@@ -1312,10 +1354,10 @@ CXXMethodDecl::Create(ASTContext &C, CXXRecordDecl *RD,
                       SourceLocation StartLoc,
                       const DeclarationNameInfo &NameInfo,
                       QualType T, TypeSourceInfo *TInfo,
-                      bool isStatic, StorageClass SCAsWritten, bool isInline,
+                      StorageClass SC, bool isInline,
                       bool isConstexpr, SourceLocation EndLocation) {
   return new (C) CXXMethodDecl(CXXMethod, RD, StartLoc, NameInfo, T, TInfo,
-                               isStatic, SCAsWritten, isInline, isConstexpr,
+                               SC, isInline, isConstexpr,
                                EndLocation);
 }
 
@@ -1323,7 +1365,7 @@ CXXMethodDecl *CXXMethodDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   void *Mem = AllocateDeserializedDecl(C, ID, sizeof(CXXMethodDecl));
   return new (Mem) CXXMethodDecl(CXXMethod, 0, SourceLocation(), 
                                  DeclarationNameInfo(), QualType(),
-                                 0, false, SC_None, false, false,
+                                 0, SC_None, false, false,
                                  SourceLocation());
 }
 

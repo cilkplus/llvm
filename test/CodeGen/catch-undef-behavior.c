@@ -288,7 +288,10 @@ int float_int_overflow(float f) {
   // CHECK: %[[GE:.*]] = fcmp ogt float %[[F:.*]], 0xC1E0000020000000
   // CHECK: %[[LE:.*]] = fcmp olt float %[[F]], 0x41E0000000000000
   // CHECK: and i1 %[[GE]], %[[LE]]
-  // CHECK: call void @__ubsan_handle_float_cast_overflow(
+
+  // CHECK: %[[CAST:.*]] = bitcast float %[[F]] to i32
+  // CHECK: %[[ARG:.*]] = zext i32 %[[CAST]] to i64
+  // CHECK: call void @__ubsan_handle_float_cast_overflow({{.*}}, i64 %[[ARG]]
 
   // CHECK-TRAP: %[[GE:.*]] = fcmp ogt float %[[F:.*]], 0xC1E0000020000000
   // CHECK-TRAP: %[[LE:.*]] = fcmp olt float %[[F]], 0x41E0000000000000
@@ -298,6 +301,28 @@ int float_int_overflow(float f) {
   // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
   // CHECK-TRAP-NEXT: unreachable
   return f;
+}
+
+// CHECK: @long_double_int_overflow
+// CHECK-TRAP: @long_double_int_overflow
+int long_double_int_overflow(long double ld) {
+  // CHECK: alloca x86_fp80
+  // CHECK: %[[GE:.*]] = fcmp ogt x86_fp80 %[[F:.*]], 0xKC01E8000000100000000
+  // CHECK: %[[LE:.*]] = fcmp olt x86_fp80 %[[F]], 0xK401E8000000000000000
+  // CHECK: and i1 %[[GE]], %[[LE]]
+
+  // CHECK: store x86_fp80 %[[F]], x86_fp80* %[[ALLOCA:.*]]
+  // CHECK: %[[ARG:.*]] = ptrtoint x86_fp80* %[[ALLOCA]] to i64
+  // CHECK: call void @__ubsan_handle_float_cast_overflow({{.*}}, i64 %[[ARG]]
+
+  // CHECK-TRAP: %[[GE:.*]] = fcmp ogt x86_fp80 %[[F:.*]], 0xKC01E800000010000000
+  // CHECK-TRAP: %[[LE:.*]] = fcmp olt x86_fp80 %[[F]], 0xK401E800000000000000
+  // CHECK-TRAP: %[[INBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
+  // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
+
+  // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]
+  // CHECK-TRAP-NEXT: unreachable
+  return ld;
 }
 
 // CHECK: @float_uint_overflow
@@ -339,14 +364,17 @@ signed char fp16_char_overflow(__fp16 *p) {
 // CHECK: @float_float_overflow
 // CHECK-TRAP: @float_float_overflow
 float float_float_overflow(double f) {
-  // CHECK: %[[GE:.*]] = fcmp oge double %[[F:.*]], 0xC7EFFFFFE0000000
-  // CHECK: %[[LE:.*]] = fcmp ole double %[[F]], 0x47EFFFFFE0000000
+  // CHECK: %[[F:.*]] = call double @llvm.fabs.f64(
+  // CHECK: %[[GE:.*]] = fcmp ogt double %[[F]], 0x47EFFFFFE0000000
+  // CHECK: %[[LE:.*]] = fcmp olt double %[[F]], 0x7FF0000000000000
   // CHECK: and i1 %[[GE]], %[[LE]]
   // CHECK: call void @__ubsan_handle_float_cast_overflow(
 
-  // CHECK-TRAP: %[[GE:.*]] = fcmp oge double %[[F:.*]], 0xC7EFFFFFE0000000
-  // CHECK-TRAP: %[[LE:.*]] = fcmp ole double %[[F]], 0x47EFFFFFE0000000
-  // CHECK-TRAP: %[[INBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
+  // CHECK-TRAP: %[[F:.*]] = call double @llvm.fabs.f64(
+  // CHECK-TRAP: %[[GE:.*]] = fcmp ogt double %[[F]], 0x47EFFFFFE0000000
+  // CHECK-TRAP: %[[LE:.*]] = fcmp olt double %[[F]], 0x7FF0000000000000
+  // CHECK-TRAP: %[[OUTOFBOUNDS:.*]] = and i1 %[[GE]], %[[LE]]
+  // CHECK-TRAP: %[[INBOUNDS:.*]] = xor i1 %[[OUTOFBOUNDS]], true
   // CHECK-TRAP-NEXT: br i1 %[[INBOUNDS]]
 
   // CHECK-TRAP:      call void @llvm.trap() [[NR_NUW]]

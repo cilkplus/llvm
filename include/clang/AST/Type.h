@@ -998,14 +998,12 @@ private:
 namespace llvm {
 /// Implement simplify_type for QualType, so that we can dyn_cast from QualType
 /// to a specific Type class.
-template<> struct simplify_type<const ::clang::QualType> {
+template<> struct simplify_type< ::clang::QualType> {
   typedef const ::clang::Type *SimpleType;
-  static SimpleType getSimplifiedValue(const ::clang::QualType &Val) {
+  static SimpleType getSimplifiedValue(::clang::QualType Val) {
     return Val.getTypePtr();
   }
 };
-template<> struct simplify_type< ::clang::QualType>
-  : public simplify_type<const ::clang::QualType> {};
 
 // Teach SmallPtrSet that QualType is "basically a pointer".
 template<>
@@ -2094,6 +2092,14 @@ public:
   }
 };
 
+/// The inheritance model to use for this member pointer.
+enum MSInheritanceModel {
+  MSIM_Single,
+  MSIM_Multiple,
+  MSIM_Virtual,
+  MSIM_Unspecified
+};
+
 /// MemberPointerType - C++ 8.3.3 - Pointers to members
 ///
 class MemberPointerType : public Type, public llvm::FoldingSetNode {
@@ -2128,6 +2134,10 @@ public:
   bool isMemberDataPointer() const {
     return !PointeeType->isFunctionProtoType();
   }
+
+  /// Returns the number of pointer and integer slots used to represent this
+  /// member pointer in the MS C++ ABI.
+  std::pair<unsigned, unsigned> getMSMemberPointerSlots() const;
 
   const Type *getClass() const { return Class; }
 

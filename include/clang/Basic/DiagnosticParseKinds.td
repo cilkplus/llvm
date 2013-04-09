@@ -399,6 +399,11 @@ def err_objc_properties_require_objc2 : Error<
   "properties are an Objective-C 2 feature">;
 def err_objc_unexpected_attr : Error<
   "prefix attribute must be followed by an interface or protocol">;
+def err_objc_postfix_attribute : Error <
+  "postfix attributes are not allowed on Objective-C directives">;
+def err_objc_postfix_attribute_hint : Error <
+  "postfix attributes are not allowed on Objective-C directives, place"
+  " them in front of '%select{@interface|@protocol}0'">;
 def err_objc_directive_only_in_protocol : Error<
   "directive may only be specified in protocols only">;
 def err_missing_catch_finally : Error<
@@ -556,7 +561,6 @@ def err_explicit_instantiation_with_definition : Error<
     "explicit template instantiation cannot have a definition; if this "
     "definition is meant to be an explicit specialization, add '<>' after the "
     "'template' keyword">;
-def err_enum_template : Error<"enumeration cannot be a template">;
 def err_explicit_instantiation_enum : Error<
     "enumerations cannot be explicitly instantiated">;
 def err_expected_template_parameter : Error<"expected template parameter">;
@@ -797,6 +801,17 @@ def err_cilk_for_expect_assign: Error<
 
 def err_cilk_for_following_grainsize: Error<
   "'#pragma cilk' must be followed by a '_Cilk_for' loop">;
+
+// OpenMP support.
+def warn_pragma_omp_ignored : Warning <
+  "unexpected '#pragma omp ...' in program">, InGroup<SourceUsesOpenMP>, DefaultIgnore;
+def warn_omp_extra_tokens_at_eol : Warning <
+  "extra tokens at end of '#pragma omp %0' are ignored">,
+  InGroup<ExtraTokens>;
+def err_omp_unknown_directive : Error <
+  "expected an OpenMP directive">;
+def err_omp_unexpected_directive : Error <
+  "unexpected OpenMP directive '#pragma omp %0'">;
 
 } // end of Parse Issue category.
 
