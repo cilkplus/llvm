@@ -1,17 +1,6 @@
 // RUN: %clang_cc1 -fcilkplus -fsyntax-only -verify %s
 // XFAIL: *
 
-void increment() {
-  _Cilk_for (int i = 0; i < 10; i--); // expected-error {{loop increment and condition are inconsistent in '_Cilk_for'}}
-
-  _Cilk_for (int i = 10; i >= 0; i++); // expected-error {{loop increment and condition are inconsistent in '_Cilk_for'}}
-
-  int j = 0;
-  _Cilk_for (int i = 0; i < 10; j++); // expected-error {{loop increment does not modify loop variable in '_Cilk_for'}}
-
-  _Cilk_for (int i = 0; i < 10; (++i)); // OK
-}
-
 int gs();
 
 void grainsize() {

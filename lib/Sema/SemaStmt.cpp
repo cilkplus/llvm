@@ -3817,60 +3817,101 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   Limit = RHS;
 }
 
-static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment) {
-  Increment = Increment->IgnoreParens();
+// Returns true if OpSubExpr references ControlVar, false otherwise.
+// If OpSubExpr does not reference ControlVar, a diagnostic is issued.
+static bool CheckIncrementVar(Sema &S, const Expr *OpSubExpr,
+                              const VarDecl *ControlVar)
+{
+  OpSubExpr = OpSubExpr->IgnoreImpCasts();
+  const DeclRefExpr *VarRef = dyn_cast<DeclRefExpr>(OpSubExpr);
+  if (!VarRef)
+    return false;
 
+  if (VarRef->getDecl() != ControlVar) {
+    S.Diag(VarRef->getExprLoc(), diag::err_cilk_for_increment_not_control_var)
+      << ControlVar;
+    return false;
+  }
+
+  return true;
+}
+
+static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment,
+                                    const VarDecl *ControlVar,
+                                    bool &HasConstantIncrement,
+                                    llvm::APSInt &Stride,
+                                    SourceLocation &RHSLoc) {
+  Increment = Increment->IgnoreParens();
   if (const ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(Increment))
     Increment = E->getSubExpr();
 
-  Stmt::StmtClass Kind = Increment->getStmtClass();
-
   // Simple increment or decrement -- always OK
-  if (Kind == Stmt::UnaryOperatorClass
-      && cast<UnaryOperator>(Increment)->isIncrementDecrementOp())
-    return true;
+  if (const UnaryOperator *U = dyn_cast<UnaryOperator>(Increment)) {
+    if (!CheckIncrementVar(S, U->getSubExpr(), ControlVar))
+      return false;
+
+    if (U->isIncrementDecrementOp()) {
+      HasConstantIncrement = true;
+      Stride = llvm::APInt(64, U->isIncrementOp() ? 1 : -1, true);
+      return true;
+    }
+  }
 
   // In the case of += or -=, whether built-in or overloaded, we need to check
   // the type of the right-hand side. In that case, RHS will be set to a
   // non-null value.
   const Expr *RHS = 0;
+  // Direction is 1 if the operator is +=, -1 if it is -=
+  int Direction = 0;
   StringRef OperatorName;
 
-  if (Kind == Stmt::CXXOperatorCallExprClass) {
-    const CXXOperatorCallExpr *C = cast<CXXOperatorCallExpr>(Increment);
+  if (const CXXOperatorCallExpr *C = dyn_cast<CXXOperatorCallExpr>(Increment)) {
     OverloadedOperatorKind Overload = C->getOperator();
 
     // operator++() or operator--() -- always OK
-    if (Overload == OO_PlusPlus || Overload == OO_MinusMinus)
+    if (Overload == OO_PlusPlus || Overload == OO_MinusMinus) {
+      HasConstantIncrement = true;
+      Stride = llvm::APInt(64, Overload == OO_PlusPlus ? 1 : -1, true);
       return true;
+    }
 
     // operator+=() or operator-=() -- defer checking of the RHS type
     if (Overload == OO_PlusEqual || Overload == OO_MinusEqual) {
       RHS = C->getArg(1);
       OperatorName = (Overload == OO_PlusEqual ? "+=" : "-=");
+      Direction = Overload == OO_PlusEqual ? 1 : -1;
     }
+
+    if (!CheckIncrementVar(S, C->getArg(0), ControlVar))
+      return false;
   }
 
-  if (Kind == Stmt::CompoundAssignOperatorClass) {
-    const BinaryOperator *B = cast<CompoundAssignOperator>(Increment);
+  if (const BinaryOperator *B = dyn_cast<CompoundAssignOperator>(Increment)) {
+    if (!CheckIncrementVar(S, B->getLHS(), ControlVar))
+      return false;
 
     // += or -= -- defer checking of the RHS type
     if (B->isAdditiveAssignOp()) {
       RHS = B->getRHS();
       OperatorName = B->getOpcodeStr();
+      Direction = B->getOpcode() == BO_AddAssign ? 1 : -1;
     }
   }
 
   // If RHS is non-null, it's a += or -=, either built-in or overloaded.
   // We need to check that the RHS has the correct type.
   if (RHS) {
-    if (RHS->getType()->isIntegralOrEnumerationType())
-      return true;
-    else {
+    if (!RHS->getType()->isIntegralOrEnumerationType()) {
       S.Diag(Increment->getExprLoc(),
         diag::err_cilk_for_invalid_increment_rhs) << OperatorName;
       return false;
     }
+
+    HasConstantIncrement = RHS->EvaluateAsInt(Stride, S.Context);
+    if (Direction == -1)
+      Stride = -Stride;
+    RHSLoc = RHS->getExprLoc();
+    return true;
   }
 
   // If we reached this point, the basic form is invalid. Issue a diagnostic.
@@ -3912,8 +3953,29 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     return StmtError();
 
   // Check increment
-  if (!IsValidCilkForIncrement(*this, Increment))
+  llvm::APSInt Stride;
+  bool HasConstantIncrement;
+  SourceLocation IncrementRHSLoc;
+  if (!IsValidCilkForIncrement(*this, Increment, ControlVar,
+                               HasConstantIncrement, Stride,
+                               IncrementRHSLoc))
     return StmtError();
+
+  // Check consistency between loop condition and increment only if the
+  // increment amount is known at compile-time.
+  if (HasConstantIncrement) {
+    if (!Stride)
+      Diag(IncrementRHSLoc, diag::err_cilk_for_increment_zero);
+
+    if ((CondDirection > 0 && Stride.isNegative()) ||
+        (CondDirection < 0 && Stride.isStrictlyPositive())) {
+      Diag(Increment->getExprLoc(), diag::err_cilk_for_increment_inconsistent)
+        << (CondDirection > 0);
+      Diag(Increment->getExprLoc(), diag::note_cilk_constant_stride)
+        << Stride.toString(10, true)
+        << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
+    }
+  }
 
   // Build end - begin
   Expr *Begin = BuildDeclRefExpr(ControlVar,

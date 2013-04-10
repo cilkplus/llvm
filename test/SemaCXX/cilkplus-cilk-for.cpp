@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -std=c++11 -fcilkplus -fsyntax-only -verify %s
 
+constexpr int stride() { return 1; }
+
 void f1() {
   int j = 0;
   const int k = 10;
@@ -15,6 +17,9 @@ void f1() {
   _Cilk_for (int &&i = 0; i < 10; ++i); // expected-error {{loop control variable must have an integral, pointer, or class type in '_Cilk_for'}}
 
   _Cilk_for (auto x = bar(); j < 10; j++); //expected-error {{use of undeclared identifier 'bar'}}
+
+  _Cilk_for (int i = 0; i < 10; i -= stride()); //expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected positive stride}} \
+                                                //expected-note {{constant stride is -1}}
 }
 
 class NotAnInt {
@@ -116,10 +121,12 @@ void ops() {
   _Cilk_for (DC i; i <= 10; ++i); // OK
   _Cilk_for (NoOps i; i <= 10; ++i); // expected-error {{overload resolution selected deleted operator '<='}}
 
-  _Cilk_for (DC i; i > 10; ++i); // OK
+  _Cilk_for (DC i; i > 10; ++i); // expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected negative stride}} \
+                                 // expected-note  {{constant stride is 1}}
   _Cilk_for (NoOps i; i > 10; ++i); // expected-error {{overload resolution selected deleted operator '>'}}
 
-  _Cilk_for (DC i; i >= 10; ++i); // OK
+  _Cilk_for (DC i; i >= 10; ++i); // expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected negative stride}} \
+                                  // expected-note  {{constant stride is 1}}
   _Cilk_for (NoOps i; i >= 10; ++i); // expected-error {{overload resolution selected deleted operator '>='}}
 
   _Cilk_for (DC i; i != 10; ++i); // OK
@@ -142,8 +149,10 @@ void ops() {
   _Cilk_for (DC i; i < 10; i += 2); // OK
   _Cilk_for (DC i; i < 10; i += EnumOne); // OK
   _Cilk_for (DC i; i < 10; i += NotAnInt()); // expected-error {{right-hand side of '+=' must have integral or enum type in '_Cilk_for' increment}}
-  _Cilk_for (DC i; i < 10; i -= 2); // OK
-  _Cilk_for (DC i; i < 10; i -= EnumOne); // OK
+  _Cilk_for (DC i; i < 10; i -= 2); // expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected positive stride}} \
+                                    // expected-note  {{constant stride is -2}}
+  _Cilk_for (DC i; i < 10; i -= EnumOne); // expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected positive stride}} \
+                                          // expected-note  {{constant stride is -1}}
   _Cilk_for (DC i; i < 10; i -= NotAnInt()); // expected-error {{right-hand side of '-=' must have integral or enum type in '_Cilk_for' increment}}
 
   _Cilk_for (DC i; i < 10; (0, ++i)); // expected-warning {{expression result unused}} expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}

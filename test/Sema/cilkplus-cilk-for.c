@@ -118,17 +118,11 @@ extern int next();
 
 void increment() {
   _Cilk_for (int i = 0; i < 10; ++i); // OK
-
   _Cilk_for (int i = 0; i < 10; i++); // OK
-
   _Cilk_for (int i = 10; i > 0; --i); // OK
-
   _Cilk_for (int i = 10; i > 0; i--); // OK
-
   _Cilk_for (int i = 10; i > 0; i -= 2); // OK
-
   _Cilk_for (int i = 0; i < 10; i += 2); // OK
-
   _Cilk_for (int i = 0; i < 10; i += next()); // OK
 
   enum E { a = 0, b = 5 };
@@ -137,13 +131,10 @@ void increment() {
   _Cilk_for (int i = 0; i < 10; ); // expected-error {{missing loop increment expression in '_Cilk_for'}}
 
   _Cilk_for (int i = 0; i < 10; !i); // expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
-
   _Cilk_for (int i = 0; i < 10; i *= 2); // expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
-
   _Cilk_for (int i = 0; i < 10; i <<= 1); // expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
 
   _Cilk_for (int i = 0; i < 10; i += 1.2f); // expected-error {{right-hand side of '+=' must have integral or enum type in '_Cilk_for' increment}}
-
   _Cilk_for (int i = 10; i > 0; i -= 1.2f); // expected-error {{right-hand side of '-=' must have integral or enum type in '_Cilk_for' increment}}
 
   _Cilk_for (int i = 0; i < 10; (0, ++i)); // expected-warning {{expression result unused}} expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
@@ -152,6 +143,21 @@ void increment() {
   _Cilk_for (int i = 0; i < 10; ((i++))); // OK
   _Cilk_for (int i = 0; i < 10; (i *= 2)); // expected-error {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'}}
   _Cilk_for (int i = 0; i < 10; (i += 1.2f)); // expected-error {{right-hand side of '+=' must have integral or enum type in '_Cilk_for' increment}}
+
+  // Tests for inconsistency between loop condition and increment
+  _Cilk_for (int i = 0; i < 10; i--); // expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected positive stride}} \
+                                      // expected-note  {{constant stride is -1}}
+  _Cilk_for (int i = 0; i < 10; i -= 1); // expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected positive stride}} \
+                                         // expected-note  {{constant stride is -1}}
+  _Cilk_for (int i = 10; i >= 0; i++); // expected-error {{loop increment is inconsistent with condition in '_Cilk_for': expected negative stride}} \
+                                       // expected-note  {{constant stride is 1}}
+  _Cilk_for (int i = 10; i >= 0; i += 0); // expected-error {{loop increment must be non-zero in '_Cilk_for'}}
+
+  int j = -1;
+  _Cilk_for (int i = 0; i < 10; j++); // expected-error {{loop increment does not modify control variable 'i' in '_Cilk_for'}}
+  _Cilk_for (int i = 0; i < 10; (++i)); // OK
+  _Cilk_for (int i = 0; i < 10; i -= j); // OK
+  _Cilk_for (int i = 0; i < 10; i -= -1); // OK
 }
 
 void other_types(int *p, int *q) {

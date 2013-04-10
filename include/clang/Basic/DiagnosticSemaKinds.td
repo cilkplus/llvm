@@ -6297,15 +6297,23 @@ def err_cilk_for_difference_ill_formed: Error<
 def err_non_integral_cilk_for_difference_type: Error<
   "end - begin must have integral type in '_Cilk_for' - got %0">;
 
+def err_cilk_for_increment_not_control_var: Error<
+  "loop increment does not modify control variable %0 in '_Cilk_for'">;
 def err_cilk_for_invalid_increment : Error<
   "loop increment operator must be one of operators '++', '--', '+=', or '-=' in '_Cilk_for'">;
 def err_cilk_for_invalid_increment_rhs : Error<
   "right-hand side of '%0' must have integral or enum type in '_Cilk_for' increment">;
+def err_cilk_for_increment_inconsistent : Error<
+  "loop increment is inconsistent with condition in '_Cilk_for': expected %select{negative|positive}0 stride">;
+def err_cilk_for_increment_zero : Error<
+  "loop increment must be non-zero in '_Cilk_for'">;
 
 def note_cilk_for_begin_expr: Note<
   "loop begin expression here">;
 def note_cilk_for_end_expr: Note<
   "loop end expression here">;
+def note_cilk_constant_stride: Note<
+  "constant stride is %0">;
 def warn_cilk_for_cond_user_defined_conv: Warning<
   "'_Cilk_for' loop count does not respect %select{constructor|user-defined}0 "
   "conversion in loop condition">, InGroup<Conversion>, DefaultWarn;
