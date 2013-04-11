@@ -176,6 +176,15 @@ struct C : public Base { };
 Bool operator<(const C&, int);
 int operator-(int, const C&);
 
+struct BoolWithCleanup {
+  ~BoolWithCleanup(); // make the condition into an ExpressionWithCleanups
+  operator bool() const;
+};
+
+struct D : public Base { };
+BoolWithCleanup operator<(const D&, int);
+int operator-(int, const D&);
+
 struct From {
   bool operator++(int);
 };
@@ -204,6 +213,7 @@ struct ToCRef: public Base {
 
 void conversions() {
   _Cilk_for (C c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect user-defined conversion in loop condition}}
+  _Cilk_for (D d; d < 5; d++); // expected-warning {{'_Cilk_for' loop count does not respect user-defined conversion in loop condition}}
   _Cilk_for (From c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect constructor conversion in loop condition}}
   _Cilk_for (ToInt c; c < 5; c++); // OK
   _Cilk_for (ToPtr c; c < 5; c++); // OK

@@ -3718,7 +3718,10 @@ static bool ExtractCilkForCondition(Sema &S,
     if (isa<CXXConversionDecl>(MD))
       return ExtractCilkForCondition(S, MC->getImplicitObjectArgument(), CondOp,
                                      OpLoc, LHS, RHS);
-  }
+  } else if (CXXBindTemporaryExpr *BT = dyn_cast<CXXBindTemporaryExpr>(Cond)) {
+    return ExtractCilkForCondition(S, BT->getSubExpr(), CondOp, OpLoc, LHS, RHS);
+  } else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(Cond))
+    return ExtractCilkForCondition(S, EWC->getSubExpr(), CondOp, OpLoc, LHS, RHS);
 
   S.Diag(Cond->getExprLoc(), diag::err_cilk_for_invalid_cond_expr)
     << Cond->getSourceRange();
