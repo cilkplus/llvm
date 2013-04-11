@@ -911,7 +911,8 @@ public:
   void PushParallelRegionScope(Scope *RegionScope, FunctionDecl *FD,
                                RecordDecl *RD);
   void PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD,
-                        const VarDecl *LoopControlVariable);
+                        const VarDecl *LoopControlVariable,
+                        SourceLocation CilkForLoc);
 
   void PopFunctionScopeInfo(const sema::AnalysisBasedWarnings::Policy *WP =0,
                             const Decl *D = 0, const BlockExpr *blkExpr = 0);

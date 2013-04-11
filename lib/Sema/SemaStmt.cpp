@@ -4057,13 +4057,16 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   SmallVector<Expr *, 4> CaptureInits;
   buildCilkForCaptureLists(Captures, CaptureInits, FSI->Captures);
 
-  // Set the variable captruing record declaration.
+  // Set the variable capturing record declaration.
   RecordDecl *RD = FSI->TheRecordDecl;
   RD->completeDefinition();
 
   CilkForDecl *CFD = FSI->TheCilkForDecl;
   CFD->setContextRecordDecl(RD);
+  CFD->setInnerLoopControlVar(FSI->InnerLoopControlVar);
+  CFD->setContextParam(FSI->ContextParam);
 
+  PopExpressionEvaluationContext();
   PopDeclContext();
   PopFunctionScopeInfo();
 
@@ -4156,7 +4159,7 @@ void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
   DC->addDecl(CFD);
 
   const VarDecl *VD = getLoopControlVariable(*this, FirstPart);
-  PushCilkForScope(CurScope, CFD, RD, VD);
+  PushCilkForScope(CurScope, CFD, RD, VD, CilkForLoc);
 
   if (CurScope)
     PushDeclContext(CurScope, CFD);

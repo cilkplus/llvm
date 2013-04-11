@@ -28,6 +28,7 @@ class CilkForDecl;
 class CXXMethodDecl;
 class ObjCPropertyDecl;
 class IdentifierInfo;
+class ImplicitParamDecl;
 class LabelDecl;
 class ReturnStmt;
 class Scope;
@@ -544,17 +545,27 @@ public:
   /// \brief The enclosing scope of the parallel region.
   Scope *TheScope;
 
+  /// \brief The source location of the Cilk for.
+  SourceLocation CilkForLoc;
+
   /// \brief The loop control variable of this Cilk for loop.
   const VarDecl *LoopControlVar;
+
+  /// \brief The local copy of the loop control variable.
+  VarDecl *InnerLoopControlVar;
+
+  /// \brief The implicit parameter for the captured variables.
+  ImplicitParamDecl *ContextParam;
 
   /// \brief Whether any of the capture expressions require cleanups.
   bool ExprNeedsCleanups;
 
   CilkForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CilkForDecl *FD,
-                   RecordDecl *RD, const VarDecl *VD)
+                   RecordDecl *RD, const VarDecl *VD, SourceLocation Loc)
     : CapturingScopeInfo(Diag, ImpCap_CilkFor),
       TheCilkForDecl(FD), TheRecordDecl(RD), TheScope(S),
-      LoopControlVar(VD), ExprNeedsCleanups(false) {
+      CilkForLoc(Loc), LoopControlVar(VD), InnerLoopControlVar(0),
+      ContextParam(0), ExprNeedsCleanups(false) {
     Kind = SK_CilkFor;
   }
 

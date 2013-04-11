@@ -10793,6 +10793,101 @@ diagnoseUncapturableValueReference(Sema &S, SourceLocation loc,
   // capture.
 }
 
+// Build a VarDecl to copy-construct the Cilk for loop control variable,
+// which will be captured by copy or by reference.
+//
+// For example,
+//
+// _Cilk_for (T i = 0; i < 10; i++) { }
+//
+// the loop control variable 'i' will be captured as follows:
+//
+// class capture {
+//   T &__ref;
+//   capture(const T &i) : __ref(i) {}
+// };
+//
+// We construct the following local declaration:
+//
+// T __i(capture.__ref);
+//
+// Any reference to 'i' inside the captured region will reference this local
+// copy, instead.
+//
+static MemberExpr *createMemberExpr(Sema &S, ASTContext &C, Expr *Base,
+                                   FieldDecl *Member) {
+  assert(Base->isRValue() && "-> base must be a pointer rvalue");
+  SourceLocation Loc;
+  NestedNameSpecifierLoc SpecifierLoc;
+  DeclAccessPair FoundDecl = DeclAccessPair::make(Member, Member->getAccess());
+  DeclarationNameInfo NameInfo(Member->getDeclName(), Loc);
+  QualType MemTy = Member->getType().getNonReferenceType();
+  MemberExpr *E = MemberExpr::Create(C, Base, /*isArrow*/true, SpecifierLoc,
+                                     Loc, Member, FoundDecl, NameInfo,
+                                     /*TemplateArgs*/0, MemTy, VK_LValue,
+                                     OK_Ordinary);
+  S.MarkMemberReferenced(E);
+  return E;
+}
+
+static void buildInnerLoopControlVar(Sema &S, CilkForScopeInfo *FSI,
+                                     const VarDecl *Var, FieldDecl *FD) {
+  // Only for loop control variables
+  if (!FSI->isLoopControlVar(Var))
+    return;
+
+  CilkForDecl *ForDecl = FSI->TheCilkForDecl;
+  DeclContext *DC = CilkForDecl::castToDeclContext(ForDecl);
+  RecordDecl *RD = FSI->TheRecordDecl;
+
+  EnterExpressionEvaluationContext Scope(S, Sema::PotentiallyEvaluated);
+
+  // Build member expression to the captured loop control variable.
+  MemberExpr *MemExpr = 0;
+  {
+    // Create the local variable for this loop control variable.
+    IdentifierInfo *VarName = 0;
+    {
+      SmallString<8> Str;
+      llvm::raw_svector_ostream OS(Str);
+      OS << "__ctx_" << RD->getName();
+      VarName = &S.Context.Idents.get(OS.str());
+    }
+    SourceLocation Loc = FSI->CilkForLoc;
+    QualType ParamType = S.Context.getPointerType(S.Context.getTagDeclType(RD));
+    ImplicitParamDecl *Param
+      = ImplicitParamDecl::Create(S.Context, DC, Loc, VarName, ParamType);
+    DC->addDecl(Param);
+    FSI->ContextParam = Param;
+
+    ExprResult Ref = S.BuildDeclRefExpr(Param, ParamType, VK_LValue, Loc);
+    Ref = S.DefaultLvalueConversion(Ref.release());
+    MemExpr = createMemberExpr(S, S.Context, Ref.get(), FD);
+  }
+
+  // Create the local variable for this loop control variable.
+  VarDecl *InnerVar = 0;
+  {
+    IdentifierInfo *VarName = 0;
+    {
+      SmallString<8> Str;
+      llvm::raw_svector_ostream OS(Str);
+      OS << "__cv_" << Var->getName();
+      VarName = &S.Context.Idents.get(OS.str());
+    }
+    SourceLocation Loc = FD->getLocation();
+    QualType VarType = Var->getType().getNonReferenceType();
+    InnerVar = VarDecl::Create(S.Context, DC, Loc, Loc, VarName, VarType,
+                               S.Context.getTrivialTypeSourceInfo(VarType, Loc),
+                               SC_None);
+    InnerVar->setImplicit();
+    DC->addDecl(InnerVar);
+  }
+
+  S.AddInitializerToDecl(InnerVar, MemExpr, /*Direct*/true, /*Auto*/false);
+  FSI->InnerLoopControlVar = InnerVar;
+}
+
 /// \brief Capture the given variable in the parallel region.
 template <typename ScopeInfoType>
 static ExprResult captureInRegion(Sema &S, ScopeInfoType *SI, VarDecl *Var,
@@ -10844,6 +10939,10 @@ static ExprResult captureInRegion(Sema &S, ScopeInfoType *SI, VarDecl *Var,
   S.CleanupVarDeclMarking();
   S.DiscardCleanupsInEvaluationContext();
   S.PopExpressionEvaluationContext();
+
+  // Only build for a Cilk for.
+  if (llvm::is_same<ScopeInfoType, CilkForScopeInfo>::value)
+    buildInnerLoopControlVar(S, cast<CilkForScopeInfo>(SI), Var, Field);
 
   return Result;
 }

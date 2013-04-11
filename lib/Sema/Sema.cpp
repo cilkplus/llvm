@@ -1018,9 +1018,11 @@ void Sema::PushParallelRegionScope(Scope *S, FunctionDecl *FD, RecordDecl *RD) {
 }
 
 void Sema::PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD,
-                            const VarDecl *LoopControlVariable) {
+                            const VarDecl *LoopControlVariable,
+                            SourceLocation CilkForLoc) {
   FunctionScopes.push_back(
-      new CilkForScopeInfo(getDiagnostics(), S, FD, RD, LoopControlVariable));
+      new CilkForScopeInfo(getDiagnostics(), S, FD, RD, LoopControlVariable,
+                           CilkForLoc));
 }
 
 void Sema::PushLambdaScope(CXXRecordDecl *Lambda,
