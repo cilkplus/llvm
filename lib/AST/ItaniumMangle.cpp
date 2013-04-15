@@ -1408,6 +1408,10 @@ void CXXNameMangler::manglePrefix(const DeclContext *DC, bool NoFunction) {
     NameStream.flush();
     Out << Name.size() << Name;
     return;
+  } else if (isa<CilkForDecl>(DC)) {
+    // Skip CilkForDecl context.
+    manglePrefix(getEffectiveParentContext(DC), NoFunction);
+    return;
   }
   
   const NamedDecl *ND = cast<NamedDecl>(DC);  

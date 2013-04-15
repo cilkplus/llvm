@@ -38,6 +38,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     Target(CGM.getContext().getTargetInfo()),
     Builder(cgm.getModule().getContext()),
     CurCGCapturedStmtInfo(0),
+    CapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getSanOpts().Null |
                              CGM.getSanOpts().Alignment |
@@ -628,6 +629,16 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     FieldDecl *FD = CurCGCapturedStmtInfo->getThisFieldDecl();
     QualType TagType = getContext().getTagDeclType(FD->getParent());
     LValue LV = MakeNaturalAlignAddrLValue(CurCGCapturedStmtInfo->getThisValue(), TagType);
+    LValue ThisLValue = EmitLValueForField(LV, FD);
+
+    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
+  }
+
+  if (CapturedStmtInfo && CapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
+    QualType TagType = getContext().getTagDeclType(FD->getParent());
+    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
+                                           TagType);
     LValue ThisLValue = EmitLValueForField(LV, FD);
 
     CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();

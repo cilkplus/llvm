@@ -1727,6 +1727,9 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
     }
   }
 
+  if (CapturedStmtInfo && CapturedStmtInfo->isThisParmVarDecl(&D))
+    CapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
+
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {
     if (CGM.getCodeGenOpts().getDebugInfo()
