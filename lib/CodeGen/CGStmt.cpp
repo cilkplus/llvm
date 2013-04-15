@@ -1789,8 +1789,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
 
   EmitBlock(ThenBlock);
   {
-    // TODO: calculate the loop count
-
+    llvm::Value *LoopCount = EmitAnyExpr(S.getLoopCount()).getScalarVal();
     // TODO: calculate grainsize
 
     // Initialize the captured struct.
@@ -1831,7 +1830,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
     SmallVector<llvm::Value *, 4> Args(4);
     Args[0] = Builder.CreateBitCast(Helper, FTy->getParamType(0));
     Args[1] = Builder.CreatePointerCast(Slot.getAddr(), FTy->getParamType(1));
-    Args[2] = llvm::Constant::getNullValue(FTy->getParamType(2)); // TODO: count
+    Args[2] = LoopCount;
     Args[3] = llvm::Constant::getNullValue(FTy->getParamType(3)); // TODO: grainsize
 
     EmitCallOrInvoke(CilkForABI, Args);

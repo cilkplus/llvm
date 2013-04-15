@@ -1081,11 +1081,12 @@ CilkForStmt::CilkForStmt(EmptyShell Empty, unsigned NumCaptures)
   Stored[COND] = 0;
   Stored[INC] = 0;
   Stored[BODY] = 0;
+  Stored[LOOP_COUNT] = 0;
 }
 
 /// \brief Construct a Cilk for statement.
 CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body,
-                         SourceLocation FL, SourceLocation LP,
+                         Expr *LoopCount, SourceLocation FL, SourceLocation LP,
                          SourceLocation RP, CilkForDecl *CFD,
                          ArrayRef<Capture> Captures,
                          ArrayRef<Expr *> CaptureInits)
@@ -1098,6 +1099,7 @@ CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body,
   Stored[COND] = Cond;
   Stored[INC] = Inc;
   Stored[BODY] = Body;
+  Stored[LOOP_COUNT] = LoopCount;
 
   // Copy initialization expressions.
   Stored += LAST;
@@ -1110,9 +1112,10 @@ CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body,
 }
 
 CilkForStmt *CilkForStmt::Create(ASTContext &C, Stmt *Init, Expr *Cond,
-                                 Expr *Inc, Stmt *Body, SourceLocation FL,
-                                 SourceLocation LP, SourceLocation RP,
-                                 CilkForDecl *CFD, ArrayRef<Capture> Captures,
+                                 Expr *Inc, Stmt *Body, Expr *LoopCount,
+                                 SourceLocation FL, SourceLocation LP,
+                                 SourceLocation RP, CilkForDecl *CFD,
+                                 ArrayRef<Capture> Captures,
                                  ArrayRef<Expr *> CaptureInits) {
   // The layout is
   //
@@ -1133,8 +1136,8 @@ CilkForStmt *CilkForStmt::Create(ASTContext &C, Stmt *Init, Expr *Cond,
   }
 
   void *Mem = C.Allocate(Size);
-  return new (Mem) CilkForStmt(Init, Cond, Inc, Body, FL, LP, RP, CFD,
-                               Captures, CaptureInits);
+  return new (Mem) CilkForStmt(Init, Cond, Inc, Body, LoopCount, FL, LP, RP,
+                               CFD, Captures, CaptureInits);
 }
 
 CilkForStmt *CilkForStmt::CreateDeserialized(ASTContext &Context,

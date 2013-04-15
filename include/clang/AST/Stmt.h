@@ -1895,7 +1895,8 @@ class CilkSyncStmt : public Stmt {
   friend class ASTStmtReader;
 
 public:
-  explicit CilkSyncStmt(SourceLocation SL) : Stmt(CilkSyncStmtClass), SyncLoc(SL) {}
+  explicit CilkSyncStmt(SourceLocation SL)
+      : Stmt(CilkSyncStmtClass), SyncLoc(SL) {}
   explicit CilkSyncStmt(EmptyShell E) : Stmt(CilkSyncStmtClass, E) { }
 
   SourceLocation getSyncLoc() const { return SyncLoc; }
@@ -2140,12 +2141,13 @@ private:
 
   /// \brief An enumeration for accessing stored statements in a Cilk for
   /// statement.
-  enum { INIT, COND, INC, BODY, LAST};
+  enum { INIT, COND, INC, BODY, LOOP_COUNT, LAST};
 
   /// \brief Construct a Cilk for statement.
-  CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body, SourceLocation FL,
-              SourceLocation LP, SourceLocation RP, CilkForDecl *CFD,
-              ArrayRef<Capture> Captures, ArrayRef<Expr *> CaptureInits);
+  CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body, Expr *LoopCount,
+              SourceLocation FL, SourceLocation LP, SourceLocation RP,
+              CilkForDecl *CFD, ArrayRef<Capture> Captures,
+              ArrayRef<Expr *> CaptureInits);
 
   /// \brief Construct an empty Cilk for statement.
   CilkForStmt(EmptyShell Empty, unsigned NumCaptures);
@@ -2158,9 +2160,9 @@ private:
 
 public:
   static CilkForStmt *Create(ASTContext &C, Stmt *Init, Expr *Cond, Expr *Inc,
-                             Stmt *Body, SourceLocation FL, SourceLocation LP,
-                             SourceLocation RP, CilkForDecl *CFD,
-                             ArrayRef<Capture> Captures,
+                             Stmt *Body, Expr *LoopCount, SourceLocation FL,
+                             SourceLocation LP, SourceLocation RP,
+                             CilkForDecl *CFD, ArrayRef<Capture> Captures,
                              ArrayRef<Expr *> CaptureInits);
 
   static CilkForStmt *CreateDeserialized(ASTContext &C, unsigned NumCaptures);
@@ -2217,6 +2219,14 @@ public:
   /// \brief Retrieve the loop body.
   Stmt *getBody() { return getStoredStmts()[BODY]; }
   const Stmt *getBody() const { return getStoredStmts()[BODY]; }
+
+  /// \brief Retrieve the loop count expression.
+  Expr *getLoopCount() {
+    return reinterpret_cast<Expr *>(getStoredStmts()[LOOP_COUNT]);
+  }
+  const Expr *getLoopCount() const {
+    return reinterpret_cast<Expr *>(getStoredStmts()[LOOP_COUNT]);
+  }
 
   SourceLocation getCilkForLoc() const LLVM_READONLY { return CilkForLoc; }
   SourceLocation getLParenLoc() const LLVM_READONLY { return LParenLoc; }

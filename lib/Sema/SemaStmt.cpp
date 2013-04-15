@@ -3787,9 +3787,8 @@ static bool CanonicalizeCilkForCondOperands(Sema &S, VarDecl *ControlVar,
 }
 
 static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
-                                  VarDecl *ControlVar, Expr *Cond,
-                                  Expr *&Limit, int &Direction) {
-  BinaryOperatorKind Opcode;
+                                  VarDecl *ControlVar, Expr *Cond, Expr *&Limit,
+                                  int &Direction, BinaryOperatorKind &Opcode) {
   SourceLocation OpLoc;
   Expr *LHS = 0;
   Expr *RHS = 0;
@@ -3816,7 +3815,6 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   if (!CanonicalizeCilkForCondOperands(S, ControlVar, Cond, LHS, RHS, Direction))
     return;
 
-
   Limit = RHS;
 }
 
@@ -3839,23 +3837,27 @@ static bool CheckIncrementVar(Sema &S, const Expr *OpSubExpr,
   return true;
 }
 
-static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment,
+static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
                                     const VarDecl *ControlVar,
                                     bool &HasConstantIncrement,
-                                    llvm::APSInt &Stride,
+                                    llvm::APSInt &Stride, Expr *&StrideExpr,
                                     SourceLocation &RHSLoc) {
   Increment = Increment->IgnoreParens();
-  if (const ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(Increment))
+  if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(Increment))
     Increment = E->getSubExpr();
 
   // Simple increment or decrement -- always OK
-  if (const UnaryOperator *U = dyn_cast<UnaryOperator>(Increment)) {
+  if (UnaryOperator *U = dyn_cast<UnaryOperator>(Increment)) {
     if (!CheckIncrementVar(S, U->getSubExpr(), ControlVar))
       return false;
 
     if (U->isIncrementDecrementOp()) {
       HasConstantIncrement = true;
       Stride = llvm::APInt(64, U->isIncrementOp() ? 1 : -1, true);
+      StrideExpr = S.ActOnIntegerConstant(Increment->getExprLoc(), 1).get();
+      if (U->isDecrementOp())
+        StrideExpr = S.BuildUnaryOp(S.getCurScope(), Increment->getExprLoc(),
+                                    UO_Minus, StrideExpr).get();
       return true;
     }
   }
@@ -3863,18 +3865,22 @@ static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment,
   // In the case of += or -=, whether built-in or overloaded, we need to check
   // the type of the right-hand side. In that case, RHS will be set to a
   // non-null value.
-  const Expr *RHS = 0;
+  Expr *RHS = 0;
   // Direction is 1 if the operator is +=, -1 if it is -=
   int Direction = 0;
   StringRef OperatorName;
 
-  if (const CXXOperatorCallExpr *C = dyn_cast<CXXOperatorCallExpr>(Increment)) {
+  if (CXXOperatorCallExpr *C = dyn_cast<CXXOperatorCallExpr>(Increment)) {
     OverloadedOperatorKind Overload = C->getOperator();
 
     // operator++() or operator--() -- always OK
     if (Overload == OO_PlusPlus || Overload == OO_MinusMinus) {
       HasConstantIncrement = true;
       Stride = llvm::APInt(64, Overload == OO_PlusPlus ? 1 : -1, true);
+      StrideExpr = S.ActOnIntegerConstant(Increment->getExprLoc(), 1).get();
+      if (Overload == OO_MinusMinus)
+        StrideExpr = S.BuildUnaryOp(S.getCurScope(), Increment->getExprLoc(),
+                                    UO_Minus, StrideExpr).get();
       return true;
     }
 
@@ -3889,7 +3895,7 @@ static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment,
       return false;
   }
 
-  if (const BinaryOperator *B = dyn_cast<CompoundAssignOperator>(Increment)) {
+  if (BinaryOperator *B = dyn_cast<CompoundAssignOperator>(Increment)) {
     if (!CheckIncrementVar(S, B->getLHS(), ControlVar))
       return false;
 
@@ -3911,8 +3917,12 @@ static bool IsValidCilkForIncrement(Sema &S, const Expr *Increment,
     }
 
     HasConstantIncrement = RHS->EvaluateAsInt(Stride, S.Context);
-    if (Direction == -1)
+    StrideExpr = RHS;
+    if (Direction == -1) {
       Stride = -Stride;
+      StrideExpr = S.BuildUnaryOp(S.getCurScope(), Increment->getExprLoc(),
+                                  UO_Minus, StrideExpr).get();
+    }
     RHSLoc = RHS->getExprLoc();
     return true;
   }
@@ -3948,8 +3958,9 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
 
   Expr *Limit = 0;
   int CondDirection = 0;
+  BinaryOperatorKind Opcode;
   CheckCilkForCondition(*this, CilkForLoc, ControlVar, Second.get(),
-                        Limit, CondDirection);
+                        Limit, CondDirection, Opcode);
   if (!Limit)
     return StmtError();
   if (Limit->getType()->isDependentType())
@@ -3957,10 +3968,11 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
 
   // Check increment
   llvm::APSInt Stride;
+  Expr *StrideExpr = 0;
   bool HasConstantIncrement;
   SourceLocation IncrementRHSLoc;
   if (!IsValidCilkForIncrement(*this, Increment, ControlVar,
-                               HasConstantIncrement, Stride,
+                               HasConstantIncrement, Stride, StrideExpr,
                                IncrementRHSLoc))
     return StmtError();
 
@@ -4018,8 +4030,64 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   if (isa<NullStmt>(Body))
     getCurCompoundScope().setHasEmptyLoopBodies();
 
+  // Generate the loop count expression according to the following:
+  //
+  // if var < limit or limit > var     then span+(stride-1)/stride
+  // if var > limit or limit < var     then span+(stride-1)/-stride
+  // if var <= limit or limit >= var   then (span+1)+(stride-1)/stride
+  // if var >= limit or limit <= var   then (span+1)+(stride-1)/-stride
+  // if var != limit or limit != var   then if stride is positive,
+  //                                                 span+(stride-1)/stride
+  //                                      otherwise, span+(stride-1)/-stride
+  Expr *LoopCount = 0;
+  // Build "-stride"
+  Expr *NegativeStride = BuildUnaryOp(getCurScope(), Increment->getExprLoc(),
+                                      UO_Minus, StrideExpr).get();
+  // Build "stride-1"
+  Expr *StrideMinusOne =
+      BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub, StrideExpr,
+                 ActOnIntegerConstant(CilkForLoc, 1).get()).get();
+  // Updating span to be "span+(stride-1)"
+  Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span.get(),
+                    StrideMinusOne).get();
+
+  if (Opcode == BO_NE) {
+    // Build "stride<0"
+    Expr *StrideLessThanZero =
+        BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
+                   ActOnIntegerConstant(CilkForLoc, 0).get()).get();
+    // Build "(stride<0)?-stride:stride"
+    ExprResult StrideCondExpr = ActOnConditionalOp(
+        CilkForLoc, CilkForLoc, StrideLessThanZero, NegativeStride, StrideExpr);
+
+    // Build "span/(stride<0)?-stride:stride"
+    LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
+                           StrideCondExpr.get()).get();
+  } else {
+    if (Opcode == BO_LE || Opcode == BO_GE)
+      // Updating span to be "span+1"
+      Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span.get(),
+                                ActOnIntegerConstant(CilkForLoc, 1).get());
+    // Build "span/stride" if CondDirection==1, otherwise "span/-stride"
+    LoopCount =
+        BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
+                   (CondDirection == 1) ? StrideExpr : NegativeStride).get();
+  }
+
+  QualType LoopCountExprType = LoopCount->getType();
+  QualType LoopCountType = Context.UnsignedLongLongTy;
+  // Loop count should be either u32 or u64 in Cilk Plus.
+  if (Context.getTypeSize(LoopCountExprType) > 64) {
+    // TODO: Emit warning about truncation to u64.
+  } else if (Context.getTypeSize(LoopCountExprType) <= 32) {
+    LoopCountType = Context.UnsignedIntTy;
+  }
+  // Implicitly casting LoopCount to u32/u64.
+  LoopCount =
+      ImpCastExprToType(LoopCount, LoopCountType, CK_IntegralCast).get();
+
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
-                          Third.get(), RParenLoc, Body);
+                          Third.get(), RParenLoc, Body, LoopCount);
 }
 
 static
@@ -4049,7 +4117,8 @@ void buildCilkForCaptureLists(SmallVectorImpl<CilkForStmt::Capture> &Captures,
 StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *Init, Expr *Cond, Expr *Inc,
-                                  SourceLocation RParenLoc, Stmt *Body) {
+                                  SourceLocation RParenLoc, Stmt *Body,
+                                  Expr *LoopCount) {
   CilkForScopeInfo *FSI = getCurCilkFor();
   assert(FSI && "CilkForScopeInfo is out of sync");
 
@@ -4096,8 +4165,9 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   // ExprNeedsCleanups = FSI->ExprNeedsCleanups;
 
   CilkForStmt *Result = CilkForStmt::Create(Context, Init, Cond, Inc, Body,
-                                            CilkForLoc, LParenLoc, RParenLoc,
-                                            CFD, Captures, CaptureInits);
+                                            LoopCount, CilkForLoc, LParenLoc,
+                                            RParenLoc, CFD, Captures,
+                                            CaptureInits);
 
   return Owned(Result);
 }

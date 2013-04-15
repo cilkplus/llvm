@@ -2795,7 +2795,8 @@ public:
   StmtResult BuildCilkForStmt(SourceLocation CilkForLoc,
                               SourceLocation LParenLoc,
                               Stmt *Init, Expr *Cond, Expr *Inc,
-                              SourceLocation RParenLoc, Stmt *Body);
+                              SourceLocation RParenLoc, Stmt *Body,
+                              Expr *LoopCount);
 
   void ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
                                StmtResult FirstPart);
