@@ -1771,16 +1771,35 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
   // Evaluate the first part before the loop.
   EmitStmt(S.getInit());
 
+  // Emit the helper function
+  const CilkForDecl *CFD = S.getCilkForDecl();
+  const RecordDecl *RD = CFD->getContextRecordDecl();
+  QualType RecordTy = getContext().getRecordType(RD);
+
+  CGCilkForStmtInfo CSInfo(S);
+  CodeGenFunction CGF(CGM, true);
+  CGF.CapturedStmtInfo = &CSInfo;
+  CGF.CapturedStmtInfo->setThisParmVarDecl(CFD->getContextParam());
+
+  FunctionArgList HelperArgs;
+  //TODO: use the loop count type instead of the increment
+  QualType CountTy = S.getInc()->getType();
+  ImplicitParamDecl LowDecl(const_cast<CilkForDecl*>(CFD), SourceLocation(),
+                             /*Id=*/0, CountTy);
+  ImplicitParamDecl HighDecl(const_cast<CilkForDecl*>(CFD), SourceLocation(),
+                             /*Id=*/0, CountTy);
+  HelperArgs.push_back(CFD->getContextParam());
+  HelperArgs.push_back(&LowDecl);
+  HelperArgs.push_back(&HighDecl);
+
+  llvm::Function *Helper = CGF.GenerateCapturedFunction(CurGD, CFD, RD, HelperArgs);
+
   llvm::BasicBlock *ThenBlock = createBasicBlock("if.then");
   llvm::BasicBlock *ContBlock = createBasicBlock("if.end");
   EmitBranchOnBoolExpr(S.getCond(), ThenBlock, ContBlock);
 
   EmitBlock(ThenBlock);
   {
-    const CilkForDecl *CFD = S.getCilkForDecl();
-    const RecordDecl *RD = CFD->getContextRecordDecl();
-    QualType RecordTy = getContext().getRecordType(RD);
-
     // TODO: calculate the loop count
 
     // TODO: calculate grainsize
@@ -1821,7 +1840,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
 
     // Call __cilkrts_cilk_for_*(helper, captures, count, grainsize);
     SmallVector<llvm::Value *, 4> Args(4);
-    Args[0] = llvm::Constant::getNullValue(FTy->getParamType(0)); // TODO: helper
+    Args[0] = Builder.CreateBitCast(Helper, FTy->getParamType(0));
     Args[1] = Builder.CreatePointerCast(Slot.getAddr(), FTy->getParamType(1));
     Args[2] = llvm::Constant::getNullValue(FTy->getParamType(2)); // TODO: count
     Args[3] = llvm::Constant::getNullValue(FTy->getParamType(3)); // TODO: grainsize
@@ -1834,6 +1853,40 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
   EmitBlock(ContBlock, true);
 }
 
+/// Creates the outlined function for a CilkForDecl.
+llvm::Function *
+CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
+                                          const CilkForDecl *CFD,
+                                          const RecordDecl *RD,
+                                          FunctionArgList &Args) {
+  assert(CapturedStmtInfo &&
+    "CapturedStmtInfo should be set when generating the captured function");
+
+  // Check if we should generate debug info for this function.
+  maybeInitializeDebugInfo();
+  CurGD = GD;
+
+  ASTContext &Ctx = CGM.getContext();
+
+  // Create the function declaration.
+  FunctionType::ExtInfo ExtInfo;
+  const CGFunctionInfo &FuncInfo =
+    CGM.getTypes().arrangeFunctionDeclaration(Ctx.VoidTy, Args, ExtInfo,
+                                              /*IsVariadic=*/false);
+  llvm::FunctionType *FuncLLVMTy = CGM.getTypes().GetFunctionType(FuncInfo);
+
+  llvm::Function *F =
+    llvm::Function::Create(FuncLLVMTy, llvm::GlobalValue::InternalLinkage,
+                           "__captured_stmt", &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(CFD, F, FuncInfo);
+
+  // Generate the function.
+  StartFunction(CFD, Ctx.VoidTy, F, FuncInfo, Args, CFD->getLocation());
+  // TODO: Emit the function body
+  FinishFunction(CFD->getBodyRBrace());
+
+  return F;
+ }
 
 static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
                                        llvm::Value *ReceiverTmp,
