@@ -23,6 +23,7 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/TypeBuilder.h"
 #include "llvm/Support/CallSite.h"
 
 using namespace clang;
@@ -1755,9 +1756,84 @@ CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
 
 void
 CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
-  // FIXME: not implemented yet
-  llvm_unreachable("not implemented yet");
+  // if (cond) {
+  //   count = loop_count;
+  //   grainsize = gs;
+  //   initialize context
+  //   __cilkrts_cilk_for_32(helper, captures, count, gs);
+  // }
+  RunCleanupsScope CilkForScope(*this);
+
+  CGDebugInfo *DI = getDebugInfo();
+  if (DI)
+    DI->EmitLexicalBlockStart(Builder, S.getSourceRange().getBegin());
+
+  // Evaluate the first part before the loop.
+  EmitStmt(S.getInit());
+
+  llvm::BasicBlock *ThenBlock = createBasicBlock("if.then");
+  llvm::BasicBlock *ContBlock = createBasicBlock("if.end");
+  EmitBranchOnBoolExpr(S.getCond(), ThenBlock, ContBlock);
+
+  EmitBlock(ThenBlock);
+  {
+    const CilkForDecl *CFD = S.getCilkForDecl();
+    const RecordDecl *RD = CFD->getContextRecordDecl();
+    QualType RecordTy = getContext().getRecordType(RD);
+
+    // TODO: calculate the loop count
+
+    // TODO: calculate grainsize
+
+    // Initialize the captured struct.
+    AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
+    LValue SlotLV = MakeAddrLValue(Slot.getAddr(), RecordTy,
+                                   Slot.getAlignment());
+
+    RecordDecl::field_iterator CurField = RD->field_begin();
+    for (CilkForStmt::capture_init_iterator I = S.capture_init_begin(),
+         E = S.capture_init_end(); I != E; ++I, ++CurField) {
+      LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
+      ArrayRef<VarDecl *> ArrayIndexes;
+      EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
+    }
+
+    llvm::LLVMContext &Ctx = CGM.getLLVMContext();
+
+    // Get or insert the cilk_for abi function.
+    llvm::Constant *CilkForABI = 0;
+    llvm::FunctionType *FTy = 0;
+    {
+      llvm::Module &M = CGM.getModule();
+      // TODO: check loop count type
+      bool IsCount32Bit =
+        getContext().getTypeSize(S.getInc()->getType()) <= 32;
+      if (IsCount32Bit) {
+        FTy = llvm::TypeBuilder<void(void(void *, uint32_t, uint32_t),
+                                     void *, uint32_t, int), false>::get(Ctx);
+        CilkForABI = M.getOrInsertFunction("__cilkrts_cilk_for_32", FTy);
+      } else {
+        FTy = llvm::TypeBuilder<void(void(void *, uint64_t, uint64_t),
+                                     void *, uint64_t, int), false>::get(Ctx);
+        CilkForABI = M.getOrInsertFunction("__cilkrts_cilk_for_64", FTy);
+      }
+    }
+
+    // Call __cilkrts_cilk_for_*(helper, captures, count, grainsize);
+    SmallVector<llvm::Value *, 4> Args(4);
+    Args[0] = llvm::Constant::getNullValue(FTy->getParamType(0)); // TODO: helper
+    Args[1] = Builder.CreatePointerCast(Slot.getAddr(), FTy->getParamType(1));
+    Args[2] = llvm::Constant::getNullValue(FTy->getParamType(2)); // TODO: count
+    Args[3] = llvm::Constant::getNullValue(FTy->getParamType(3)); // TODO: grainsize
+
+    EmitCallOrInvoke(CilkForABI, Args);
+
+    EmitBranch(ContBlock);
+  }
+
+  EmitBlock(ContBlock, true);
 }
+
 
 static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
                                        llvm::Value *ReceiverTmp,
