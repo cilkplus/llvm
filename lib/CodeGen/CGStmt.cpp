@@ -1777,22 +1777,11 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
   QualType RecordTy = getContext().getRecordType(RD);
 
   CGCilkForStmtInfo CSInfo(S);
+  CSInfo.setThisParmVarDecl(CFD->getContextParam());
+
   CodeGenFunction CGF(CGM, true);
   CGF.CapturedStmtInfo = &CSInfo;
-  CGF.CapturedStmtInfo->setThisParmVarDecl(CFD->getContextParam());
-
-  FunctionArgList HelperArgs;
-  //TODO: use the loop count type instead of the increment
-  QualType CountTy = S.getInc()->getType();
-  ImplicitParamDecl LowDecl(const_cast<CilkForDecl*>(CFD), SourceLocation(),
-                             /*Id=*/0, CountTy);
-  ImplicitParamDecl HighDecl(const_cast<CilkForDecl*>(CFD), SourceLocation(),
-                             /*Id=*/0, CountTy);
-  HelperArgs.push_back(CFD->getContextParam());
-  HelperArgs.push_back(&LowDecl);
-  HelperArgs.push_back(&HighDecl);
-
-  llvm::Function *Helper = CGF.GenerateCapturedFunction(CurGD, CFD, RD, HelperArgs);
+  llvm::Function *Helper = CGF.GenerateCapturedFunction(CurGD, S);
 
   llvm::BasicBlock *ThenBlock = createBasicBlock("if.then");
   llvm::BasicBlock *ContBlock = createBasicBlock("if.end");
@@ -1856,9 +1845,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
 /// Creates the outlined function for a CilkForDecl.
 llvm::Function *
 CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
-                                          const CilkForDecl *CFD,
-                                          const RecordDecl *RD,
-                                          FunctionArgList &Args) {
+                                          const CilkForStmt &S) {
   assert(CapturedStmtInfo &&
     "CapturedStmtInfo should be set when generating the captured function");
 
@@ -1867,6 +1854,12 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
   CurGD = GD;
 
   ASTContext &Ctx = CGM.getContext();
+  const CilkForDecl *CFD = S.getCilkForDecl();
+
+  FunctionArgList Args;
+  Args.push_back(CFD->getContextParam());
+  Args.push_back(CFD->getLowParam());
+  Args.push_back(CFD->getHighParam());
 
   // Create the function declaration.
   FunctionType::ExtInfo ExtInfo;
@@ -1882,7 +1875,7 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
 
   // Generate the function.
   StartFunction(CFD, Ctx.VoidTy, F, FuncInfo, Args, CFD->getLocation());
-  // TODO: Emit the function body
+  EmitCilkForHelperBody(S);
   FinishFunction(CFD->getBodyRBrace());
 
   return F;
@@ -1967,4 +1960,100 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
   // temporary at the end of the reference's lifetime.
   if (ReceiverTmp)
     maybeCleanupBoundTemporary(*this, ReceiverTmp, InitTy);
+}
+
+void CodeGenFunction::EmitCilkForHelperBody(const CilkForStmt &S) {
+  // The outlined function for a Cilk for statement looks like
+  //
+  // void helper(context, low, high) {
+  //   for (index = low /*, other-initialization/;
+  //        index < high;
+  //        ++index /*, loop-increment*/) {
+  //     /* loop-body */
+  //   }
+  // }
+  //
+  // This function is a simplified version of EmitForStmt with the partial
+  // knowledge of the loop head structure. For example, the loop condition
+  // always exists and there is no loop condition variable declaration.
+
+  assert(CapturedStmtInfo && "codegen info expected");
+  const CilkForDecl *CFD = S.getCilkForDecl();
+  const VarDecl *LowVar = CFD->getLowParam();
+  const VarDecl *HighVar = CFD->getHighParam();
+  llvm::Value *Low = LocalDeclMap.lookup(LowVar);
+  llvm::Value *High = LocalDeclMap.lookup(HighVar);
+
+  // Find the type for the index variable.
+  llvm::Type *VarType = Low->getType();
+  assert(VarType->isPointerTy() && "pointer type expected");
+  VarType = cast<llvm::PointerType>(VarType)->getElementType();
+  assert((VarType->isIntegerTy(32) || VarType->isIntegerTy(64))
+         && "unexpected type size");
+
+  llvm::Value *Index = CreateTempAlloca(VarType, "__index.addr");
+
+  JumpDest LoopExit = getJumpDestInCurrentScope("loop.end");
+  RunCleanupsScope LoopScope(*this);
+
+  // Emit the loop initialization.
+  {
+    // Initialize Low.
+    Builder.CreateStore(Builder.CreateLoad(Low), Index);
+
+    // FIXME: Emit the inner loop control variable. This copy initialization
+    // may have cleanups.
+  }
+
+  // Emit the loop condition.
+  llvm::BasicBlock *CondBlock = createBasicBlock("loop.cond");
+  {
+    EmitBlock(CondBlock);
+    llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
+
+    // If there are any cleanups between here and the loop-exit scope,
+    // create a block to stage a loop exit along.
+    if (LoopScope.requiresCleanups())
+      ExitBlock = createBasicBlock("loop.cond.cleanup");
+
+    // As long as the condition is true, iterate the loop.
+    llvm::BasicBlock *LoopBody = createBasicBlock("loop.body");
+
+    llvm::Value *CondVal = Builder.CreateICmpULT(Builder.CreateLoad(Index),
+                                                 Builder.CreateLoad(High));
+    Builder.CreateCondBr(CondVal, LoopBody, ExitBlock);
+    EmitBlock(LoopBody);
+  }
+
+  JumpDest Continue = getJumpDestInCurrentScope("loop.inc");
+
+  // Store the blocks to use for break and continue.
+  BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
+
+  // Emit the loop body.
+  {
+    // Create a separate cleanup scope for the body, in case it is not
+    // a compound statement.
+    RunCleanupsScope BodyScope(*this);
+    EmitStmt(S.getBody());
+  }
+
+  // Emit the loop increment.
+  {
+    EmitBlock(Continue.getBlock());
+    EmitStmt(S.getInc());
+
+    // Increment the loop variable and branch back the loop condition.
+    llvm::Value *Inc = Builder.CreateAdd(Builder.CreateLoad(Index),
+                                         llvm::ConstantInt::get(VarType, 1));
+    Builder.CreateStore(Inc, Index);
+  }
+
+  BreakContinueStack.pop_back();
+  EmitBranch(CondBlock);
+
+  LoopScope.ForceCleanup();
+
+  // Emit the fall-through block.
+  EmitBlock(LoopExit.getBlock(), true);
 }

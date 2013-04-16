@@ -3325,7 +3325,7 @@ class CilkForDecl : public Decl, public DeclContext {
 
   explicit CilkForDecl(DeclContext *DC)
     : Decl(CilkFor, DC, SourceLocation()), DeclContext(CilkFor),
-      ContextRecordDecl(0), InnerLoopControlVar(0), ContextParam(0) { }
+      ContextRecordDecl(0), InnerLoopControlVar(0) { }
 
   /// \brief The variable capturing C or C++ RecordDecl.
   RecordDecl *ContextRecordDecl;
@@ -3333,8 +3333,11 @@ class CilkForDecl : public Decl, public DeclContext {
   /// \brief The local copy of the loop control variable.
   VarDecl *InnerLoopControlVar;
 
-  /// \brief The implicit parameter for the captured variables.
-  ImplicitParamDecl *ContextParam;
+  /// \brief The implicit parameters for the outlined function.
+  /// \code
+  /// void helper(Context, Low, High);
+  /// \endcode
+  ImplicitParamDecl *Args[3];
 
 public:
   static CilkForDecl *Create(ASTContext &C, DeclContext *DC);
@@ -3345,8 +3348,14 @@ public:
   VarDecl *getInnerLoopControlVar() const { return InnerLoopControlVar; }
   void setInnerLoopControlVar(VarDecl *V) { InnerLoopControlVar = V; }
 
-  ImplicitParamDecl *getContextParam() const { return ContextParam; }
-  void setContextParam(ImplicitParamDecl *D) { ContextParam = D; }
+  ImplicitParamDecl *getContextParam() const { return Args[0]; }
+  void setContextParam(ImplicitParamDecl *D) { Args[0] = D; }
+
+  ImplicitParamDecl *getLowParam() const { return Args[1]; }
+  ImplicitParamDecl *getHighParam() const { return Args[2]; }
+  void setLowHighParams(ImplicitParamDecl *Low, ImplicitParamDecl *High) {
+    Args[1] = Low, Args[2] = High;
+  }
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == CilkFor; }

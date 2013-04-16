@@ -10846,13 +10846,7 @@ static void buildInnerLoopControlVar(Sema &S, CilkForScopeInfo *FSI,
   MemberExpr *MemExpr = 0;
   {
     // Create the local variable for this loop control variable.
-    IdentifierInfo *VarName = 0;
-    {
-      SmallString<8> Str;
-      llvm::raw_svector_ostream OS(Str);
-      OS << "__ctx_" << RD->getName();
-      VarName = &S.Context.Idents.get(OS.str());
-    }
+    IdentifierInfo *VarName = &S.Context.Idents.get("__context");
     SourceLocation Loc = FSI->CilkForLoc;
     QualType ParamType = S.Context.getPointerType(S.Context.getTagDeclType(RD));
     ImplicitParamDecl *Param

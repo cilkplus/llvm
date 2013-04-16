@@ -4064,7 +4064,29 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   CilkForDecl *CFD = FSI->TheCilkForDecl;
   CFD->setContextRecordDecl(RD);
   CFD->setInnerLoopControlVar(FSI->InnerLoopControlVar);
-  CFD->setContextParam(FSI->ContextParam);
+
+  // Set parameters for the outlined function.
+  {
+    // Context for variable capturing.
+    CFD->setContextParam(FSI->ContextParam);
+
+    // FIXME: Use the loop count type.
+    QualType Ty = Inc->getType();
+    DeclContext *DC = CilkForDecl::castToDeclContext(CFD);
+    SourceLocation EmptyLoc;
+
+    ImplicitParamDecl *Low
+      = ImplicitParamDecl::Create(Context, DC, EmptyLoc,
+                                  &Context.Idents.get("__low"), Ty);
+    DC->addDecl(Low);
+
+    ImplicitParamDecl *High
+      = ImplicitParamDecl::Create(Context, DC, EmptyLoc,
+                                  &Context.Idents.get("__high"), Ty);
+    DC->addDecl(High);
+
+    CFD->setLowHighParams(Low, High);
+  }
 
   PopExpressionEvaluationContext();
   PopDeclContext();

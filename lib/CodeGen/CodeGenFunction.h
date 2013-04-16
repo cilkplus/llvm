@@ -2313,9 +2313,8 @@ public:
   void EmitCapturedStmt(const CapturedStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S);
   llvm::Function *GenerateCapturedFunction(GlobalDecl GD,
-                                           const CilkForDecl *CD,
-                                           const RecordDecl *RD,
-                                           FunctionArgList &Args);
+                                           const CilkForStmt &S);
+  void EmitCilkForHelperBody(const CilkForStmt &S);
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//
