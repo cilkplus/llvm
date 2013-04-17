@@ -928,7 +928,7 @@ public:
                                sema::CapturedRegionScopeInfo::CapturedRegionKind K);
   void PushParallelRegionScope(Scope *RegionScope, FunctionDecl *FD,
                                RecordDecl *RD);
-  void PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD,
+  void PushCilkForScope(Scope *S, CapturedDecl *FD, RecordDecl *RD,
                         const VarDecl *LoopControlVariable,
                         SourceLocation CilkForLoc);
 

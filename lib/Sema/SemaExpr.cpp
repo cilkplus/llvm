@@ -10926,8 +10926,8 @@ static void buildInnerLoopControlVar(Sema &S, CilkForScopeInfo *FSI,
   if (!FSI->isLoopControlVar(Var))
     return;
 
-  CilkForDecl *ForDecl = FSI->TheCilkForDecl;
-  DeclContext *DC = CilkForDecl::castToDeclContext(ForDecl);
+  CapturedDecl *ForDecl = FSI->TheCapturedDecl;
+  DeclContext *DC = CapturedDecl::castToDeclContext(ForDecl);
   RecordDecl *RD = FSI->TheRecordDecl;
 
   EnterExpressionEvaluationContext Scope(S, Sema::PotentiallyEvaluated);
@@ -10936,21 +10936,9 @@ static void buildInnerLoopControlVar(Sema &S, CilkForScopeInfo *FSI,
   MemberExpr *MemExpr = 0;
   {
     // Create the local variable for this loop control variable.
-    IdentifierInfo *VarName = 0;
-    {
-      SmallString<8> Str;
-      llvm::raw_svector_ostream OS(Str);
-      OS << "__ctx_" << RD->getName();
-      VarName = &S.Context.Idents.get(OS.str());
-    }
-    SourceLocation Loc = FSI->CilkForLoc;
     QualType ParamType = S.Context.getPointerType(S.Context.getTagDeclType(RD));
-    ImplicitParamDecl *Param
-      = ImplicitParamDecl::Create(S.Context, DC, Loc, VarName, ParamType);
-    DC->addDecl(Param);
-    FSI->ContextParam = Param;
-
-    ExprResult Ref = S.BuildDeclRefExpr(Param, ParamType, VK_LValue, Loc);
+    ExprResult Ref = S.BuildDeclRefExpr(FSI->ContextParam, ParamType, VK_LValue,
+                                        FSI->CilkForLoc);
     Ref = S.DefaultLvalueConversion(Ref.release());
     MemExpr = createMemberExpr(S, S.Context, Ref.get(), FD);
   }
@@ -11240,7 +11228,7 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
     // Only block literals, captured statements, and lambda expressions can
     // capture; other scopes don't work.
     DeclContext *ParentDC;
-    if (isa<BlockDecl>(DC) || isa<CapturedDecl>(DC) || isa<CilkForDecl>(DC))
+    if (isa<BlockDecl>(DC) || isa<CapturedDecl>(DC))
       ParentDC = DC->getParent();
     else if (isa<CXXMethodDecl>(DC) &&
              cast<CXXMethodDecl>(DC)->getOverloadedOperator() == OO_Call &&

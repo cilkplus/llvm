@@ -38,7 +38,6 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     Builder(cgm.getModule().getContext()),
     CapturedStmtInfo(0),
     CurCGDeprecatedCapturedStmtInfo(0),
-    DeprecatedCapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getSanOpts().Null |
                              CGM.getSanOpts().Alignment |
@@ -641,16 +640,6 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     FieldDecl *FD = CurCGDeprecatedCapturedStmtInfo->getThisFieldDecl();
     QualType TagType = getContext().getTagDeclType(FD->getParent());
     LValue LV = MakeNaturalAlignAddrLValue(CurCGDeprecatedCapturedStmtInfo->getThisValue(), TagType);
-    LValue ThisLValue = EmitLValueForField(LV, FD);
-
-    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
-  }
-
-  if (DeprecatedCapturedStmtInfo && DeprecatedCapturedStmtInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = DeprecatedCapturedStmtInfo->getThisFieldDecl();
-    QualType TagType = getContext().getTagDeclType(FD->getParent());
-    LValue LV = MakeNaturalAlignAddrLValue(DeprecatedCapturedStmtInfo->getThisValue(),
-                                           TagType);
     LValue ThisLValue = EmitLValueForField(LV, FD);
 
     CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();

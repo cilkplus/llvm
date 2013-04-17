@@ -1752,37 +1752,46 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
   }
 }
 
-/// Generate an outlined function for the body of a CapturedStmt, store any
-/// captured variables into the captured struct, and call the outlined function.
-void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
-  const CapturedDecl *CD = S.getCapturedDecl();
+static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S) {
   const RecordDecl *RD = S.getCapturedRecordDecl();
-  QualType RecordTy = getContext().getRecordType(RD);
-  assert(CD->hasBody() && "missing CapturedDecl body");
+  QualType RecordTy = CGF.getContext().getRecordType(RD);
 
   // Initialize the captured struct.
-  AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
-  LValue SlotLV = MakeAddrLValue(Slot.getAddr(), RecordTy, Slot.getAlignment());
+  AggValueSlot Slot = CGF.CreateAggTemp(RecordTy, "agg.captured");
+  LValue SlotLV = CGF.MakeAddrLValue(Slot.getAddr(), RecordTy,
+                                     Slot.getAlignment());
 
   RecordDecl::field_iterator CurField = RD->field_begin();
   for (CapturedStmt::capture_init_iterator I = S.capture_init_begin(),
                                            E = S.capture_init_end();
        I != E; ++I, ++CurField) {
-    LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
+    LValue LV = CGF.EmitLValueForFieldInitialization(SlotLV, *CurField);
     ArrayRef<VarDecl *> ArrayIndexes;
-    EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
+    CGF.EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
   }
 
-  // The function argument is the address of the captured struct.
-  llvm::SmallVector<llvm::Value *, 1> Args;
-  Args.push_back(SlotLV.getAddress());
+  return SlotLV;
+}
+
+/// Generate an outlined function for the body of a CapturedStmt, store any
+/// captured variables into the captured struct, and call the outlined function.
+void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
+  CapturedDecl *CD = S.getCapturedDecl();
+  const RecordDecl *RD = S.getCapturedRecordDecl();
+  assert(CD->hasBody() && "missing CapturedDecl body");
+
+  LValue CapStruct = InitCapturedStruct(*this, S);
 
   // Emit the CapturedDecl
   CGCapturedStmtInfo CSInfo(S);
   CodeGenFunction CGF(CGM, true);
   CGF.CapturedStmtInfo = &CSInfo;
-
+  CGF.CapturedStmtInfo->setThisParmVarDecl(CD->getContextParam());
   llvm::Function *F = CGF.GenerateCapturedFunction(CurGD, CD, RD);
+
+  // The function argument is the address of the captured struct.
+  llvm::SmallVector<llvm::Value *, 3> Args;
+  Args.push_back(CapStruct.getAddress());
 
   // Emit call to the helper function.
   EmitCallOrInvoke(F, Args);
@@ -1802,12 +1811,8 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
 
   // Build the argument list.
   ASTContext &Ctx = CGM.getContext();
-  QualType ThisTy = Ctx.getPointerType(Ctx.getTagDeclType(RD));
   FunctionArgList Args;
-  ImplicitParamDecl ThisDecl(const_cast<CapturedDecl*>(CD), SourceLocation(),
-                             /*Id=*/0, ThisTy);
-  Args.push_back(&ThisDecl);
-  CapturedStmtInfo->setThisParmVarDecl(&ThisDecl);
+  Args.append(CD->getParams().begin(), CD->getParams().end());
 
   // Create the function declaration.
   FunctionType::ExtInfo ExtInfo;
@@ -1823,7 +1828,6 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
 
   // Generate the function.
   StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getBody()->getLocStart());
-  // TODO: lots of code here in GenerateBlockFunction - is any of it needed here?
   EmitStmt(CD->getBody());
   FinishFunction(CD->getBodyRBrace());
 
@@ -1853,27 +1857,24 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
   EmitStmt(S.getInit());
 
   // Emit the helper function
-  const CilkForDecl *CFD = S.getCilkForDecl();
-  const RecordDecl *RD = CFD->getContextRecordDecl();
-  QualType RecordTy = getContext().getRecordType(RD);
+  CapturedDecl *CD = const_cast<CapturedDecl *>(S.getBody()->getCapturedDecl());
+  const RecordDecl *RD = S.getBody()->getCapturedRecordDecl();
 
   CGCilkForStmtInfo CSInfo(S);
   CodeGenFunction CGF(CGM, true);
-  CGF.DeprecatedCapturedStmtInfo = &CSInfo;
-  CGF.DeprecatedCapturedStmtInfo->setThisParmVarDecl(CFD->getContextParam());
+  CGF.CapturedStmtInfo = &CSInfo;
+  CGF.CapturedStmtInfo->setThisParmVarDecl(CD->getContextParam());
 
-  FunctionArgList HelperArgs;
   //TODO: use the loop count type instead of the increment
   QualType CountTy = S.getInc()->getType();
-  ImplicitParamDecl LowDecl(const_cast<CilkForDecl*>(CFD), SourceLocation(),
-                             /*Id=*/0, CountTy);
-  ImplicitParamDecl HighDecl(const_cast<CilkForDecl*>(CFD), SourceLocation(),
-                             /*Id=*/0, CountTy);
-  HelperArgs.push_back(CFD->getContextParam());
-  HelperArgs.push_back(&LowDecl);
-  HelperArgs.push_back(&HighDecl);
+  ImplicitParamDecl LowDecl(CD, SourceLocation(), /*Id=*/0, CountTy);
+  ImplicitParamDecl HighDecl(CD, SourceLocation(), /*Id=*/0, CountTy);
+  // Assertion: the captured decl parameters are not used after this function
+  // returns. Otherwise we need to allocate these somewhere else.
+  CD->addParam(&LowDecl);
+  CD->addParam(&HighDecl);
 
-  llvm::Function *Helper = CGF.GenerateCapturedFunction(CurGD, CFD, RD, HelperArgs);
+  llvm::Function *Helper = CGF.GenerateCapturedFunction(CurGD, CD, RD);
 
   llvm::BasicBlock *ThenBlock = createBasicBlock("if.then");
   llvm::BasicBlock *ContBlock = createBasicBlock("if.end");
@@ -1886,17 +1887,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
     // TODO: calculate grainsize
 
     // Initialize the captured struct.
-    AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
-    LValue SlotLV = MakeAddrLValue(Slot.getAddr(), RecordTy,
-                                   Slot.getAlignment());
-
-    RecordDecl::field_iterator CurField = RD->field_begin();
-    for (CilkForStmt::capture_init_iterator I = S.capture_init_begin(),
-         E = S.capture_init_end(); I != E; ++I, ++CurField) {
-      LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
-      ArrayRef<VarDecl *> ArrayIndexes;
-      EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
-    }
+    LValue CapStruct = InitCapturedStruct(*this, *S.getBody());
 
     llvm::LLVMContext &Ctx = CGM.getLLVMContext();
 
@@ -1922,7 +1913,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
     // Call __cilkrts_cilk_for_*(helper, captures, count, grainsize);
     SmallVector<llvm::Value *, 4> Args(4);
     Args[0] = Builder.CreateBitCast(Helper, FTy->getParamType(0));
-    Args[1] = Builder.CreatePointerCast(Slot.getAddr(), FTy->getParamType(1));
+    Args[1] = Builder.CreatePointerCast(CapStruct.getAddress(), FTy->getParamType(1));
     Args[2] = llvm::Constant::getNullValue(FTy->getParamType(2)); // TODO: count
     Args[3] = llvm::Constant::getNullValue(FTy->getParamType(3)); // TODO: grainsize
 
@@ -1933,41 +1924,6 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
 
   EmitBlock(ContBlock, true);
 }
-
-/// Creates the outlined function for a CilkForDecl.
-llvm::Function *
-CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
-                                          const CilkForDecl *CFD,
-                                          const RecordDecl *RD,
-                                          FunctionArgList &Args) {
-  assert(DeprecatedCapturedStmtInfo &&
-    "DeprecatedCapturedStmtInfo should be set when generating the captured function");
-
-  // Check if we should generate debug info for this function.
-  maybeInitializeDebugInfo();
-  CurGD = GD;
-
-  ASTContext &Ctx = CGM.getContext();
-
-  // Create the function declaration.
-  FunctionType::ExtInfo ExtInfo;
-  const CGFunctionInfo &FuncInfo =
-    CGM.getTypes().arrangeFunctionDeclaration(Ctx.VoidTy, Args, ExtInfo,
-                                              /*IsVariadic=*/false);
-  llvm::FunctionType *FuncLLVMTy = CGM.getTypes().GetFunctionType(FuncInfo);
-
-  llvm::Function *F =
-    llvm::Function::Create(FuncLLVMTy, llvm::GlobalValue::InternalLinkage,
-                           "__captured_stmt", &CGM.getModule());
-  CGM.SetInternalFunctionAttributes(CFD, F, FuncInfo);
-
-  // Generate the function.
-  StartFunction(CFD, Ctx.VoidTy, F, FuncInfo, Args, CFD->getLocation());
-  // TODO: Emit the function body
-  FinishFunction(CFD->getBodyRBrace());
-
-  return F;
- }
 
 static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
                                        llvm::Value *ReceiverTmp,

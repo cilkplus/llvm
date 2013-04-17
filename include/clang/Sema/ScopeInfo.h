@@ -25,7 +25,6 @@ namespace clang {
 class Decl;
 class BlockDecl;
 class CapturedDecl;
-class CilkForDecl;
 class CXXMethodDecl;
 class ObjCPropertyDecl;
 class IdentifierInfo;
@@ -334,7 +333,7 @@ public:
   enum ImplicitCaptureStyle {
     ImpCap_None, ImpCap_LambdaByval, ImpCap_LambdaByref, ImpCap_Block,
     ImpCap_CapturedRegion,
-    ImpCap_ParallelRegion, ImpCap_CilkFor
+    ImpCap_ParallelRegion
   };
 
   ImplicitCaptureStyle ImpCaptureStyle;
@@ -515,7 +514,8 @@ class CapturedRegionScopeInfo: public CapturingScopeInfo {
 public:
 
   enum CapturedRegionKind {
-    CR_Default
+    CR_Default,
+    CR_CilkFor
   };
 
   /// \brief The CapturedDecl for this statement.
@@ -524,6 +524,8 @@ public:
   RecordDecl *TheRecordDecl;
   /// \brief This is the enclosing scope of the captured region.
   Scope *TheScope;
+  /// \brief The implicit parameter for the captured variables.
+  ImplicitParamDecl *ContextParam;
   /// \brief The kind of captured region.
   CapturedRegionKind CapRegionKind;
 
@@ -531,10 +533,11 @@ public:
   bool ExprNeedsCleanups;
 
   CapturedRegionScopeInfo(DiagnosticsEngine &Diag, Scope *S, CapturedDecl *CD,
-                          RecordDecl *RD, CapturedRegionKind K)
+                          RecordDecl *RD, ImplicitParamDecl *Context,
+                          CapturedRegionKind K)
     : CapturingScopeInfo(Diag, ImpCap_CapturedRegion),
-      TheCapturedDecl(CD), TheRecordDecl(RD), TheScope(S), CapRegionKind(K),
-      ExprNeedsCleanups(false) {
+      TheCapturedDecl(CD), TheRecordDecl(RD), TheScope(S), ContextParam(Context),
+      CapRegionKind(K), ExprNeedsCleanups(false) {
     Kind = SK_CapturedRegion;
   }
 
@@ -545,11 +548,13 @@ public:
     switch (CapRegionKind) {
     case CR_Default:
       return "default captured statement";
+    case CR_CilkFor:
+      return "_Cilk_for";
     }
   }
 
   static bool classof(const FunctionScopeInfo *FSI) {
-    return FSI->Kind == SK_CapturedRegion;
+    return FSI->Kind == SK_CapturedRegion || FSI->Kind == SK_CilkFor;
   }
 };
 
@@ -581,17 +586,8 @@ public:
 };
 
 /// \brief Retains information about a Cilk for capturing region.
-class CilkForScopeInfo : public CapturingScopeInfo {
+class CilkForScopeInfo : public CapturedRegionScopeInfo {
 public:
-  /// \brief The declaration describes a Cilk for statement.
-  CilkForDecl *TheCilkForDecl;
-
-  /// \brief The RecordDecl containing captured variables.
-  RecordDecl *TheRecordDecl;
-
-  /// \brief The enclosing scope of the parallel region.
-  Scope *TheScope;
-
   /// \brief The source location of the Cilk for.
   SourceLocation CilkForLoc;
 
@@ -601,18 +597,11 @@ public:
   /// \brief The local copy of the loop control variable.
   VarDecl *InnerLoopControlVar;
 
-  /// \brief The implicit parameter for the captured variables.
-  ImplicitParamDecl *ContextParam;
-
-  /// \brief Whether any of the capture expressions require cleanups.
-  bool ExprNeedsCleanups;
-
-  CilkForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CilkForDecl *FD,
-                   RecordDecl *RD, const VarDecl *VD, SourceLocation Loc)
-    : CapturingScopeInfo(Diag, ImpCap_CilkFor),
-      TheCilkForDecl(FD), TheRecordDecl(RD), TheScope(S),
-      CilkForLoc(Loc), LoopControlVar(VD), InnerLoopControlVar(0),
-      ContextParam(0), ExprNeedsCleanups(false) {
+  CilkForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CapturedDecl *CD,
+                   RecordDecl *RD, ImplicitParamDecl *Context, const VarDecl *VD,
+                   SourceLocation Loc)
+    : CapturedRegionScopeInfo(Diag, S, CD, RD, Context, CR_CilkFor),
+      CilkForLoc(Loc), LoopControlVar(VD), InnerLoopControlVar(0) {
     Kind = SK_CilkFor;
   }
 

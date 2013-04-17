@@ -125,8 +125,6 @@ serialization::getDefinitiveDeclContext(const DeclContext *DC) {
   case Decl::ObjCCategory:
   case Decl::ObjCCategoryImpl:
   case Decl::ObjCImplementation:
-  // CilkForDecl is its own DeclContext.
-  case Decl::CilkFor:
     return DC;
 
   case Decl::ObjCProtocol:
@@ -209,7 +207,6 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
   case Decl::Captured:
   case Decl::ClassScopeFunctionSpecialization:
   case Decl::Import:
-  case Decl::CilkFor:
   case Decl::OMPThreadPrivate:
     return false;
   }

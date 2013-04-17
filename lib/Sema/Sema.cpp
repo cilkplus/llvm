@@ -802,7 +802,7 @@ DeclContext *Sema::getFunctionLevelDeclContext() {
   DeclContext *DC = CurContext;
 
   while (true) {
-    if (isa<BlockDecl>(DC) || isa<EnumDecl>(DC) || isa<CapturedDecl>(DC) || isa<CilkForDecl>(DC)) {
+    if (isa<BlockDecl>(DC) || isa<EnumDecl>(DC) || isa<CapturedDecl>(DC)) {
       DC = DC->getParent();
     } else if (isa<FunctionDecl>(DC) &&
                cast<FunctionDecl>(DC)->isParallelRegion()) {
@@ -1021,12 +1021,15 @@ void Sema::PushParallelRegionScope(Scope *S, FunctionDecl *FD, RecordDecl *RD) {
                                                        S, FD, RD));
 }
 
-void Sema::PushCilkForScope(Scope *S, CilkForDecl *FD, RecordDecl *RD,
+void Sema::PushCilkForScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
                             const VarDecl *LoopControlVariable,
                             SourceLocation CilkForLoc) {
-  FunctionScopes.push_back(
-      new CilkForScopeInfo(getDiagnostics(), S, FD, RD, LoopControlVariable,
-                           CilkForLoc));
+  CapturingScopeInfo *CSI =
+      new CilkForScopeInfo(getDiagnostics(), S, CD, RD, CD->getContextParam(),
+                           LoopControlVariable, CilkForLoc);
+
+  CSI->ReturnType = Context.VoidTy;
+  FunctionScopes.push_back(CSI);
 }
 
 void Sema::PushLambdaScope(CXXRecordDecl *Lambda,
@@ -1347,8 +1350,8 @@ IdentifierInfo *Sema::getSuperIdentifier() const {
 
 void Sema::PushCapturedRegionScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
                                    CapturedRegionScopeInfo::CapturedRegionKind K) {
-  CapturingScopeInfo *CSI = new CapturedRegionScopeInfo(getDiagnostics(),
-                                                        S, CD, RD, K);
+  CapturingScopeInfo *CSI = new CapturedRegionScopeInfo(getDiagnostics(), S, CD, RD,
+                                                        CD->getContextParam(), K);
   CSI->ReturnType = Context.VoidTy;
   FunctionScopes.push_back(CSI);
 }

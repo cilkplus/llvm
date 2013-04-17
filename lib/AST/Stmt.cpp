@@ -1158,101 +1158,24 @@ bool DeprecatedCapturedStmt::capturesVariable(const VarDecl *variable) const {
   return false;
 }
 
-//===----------------------------------------------------------------------===//
-// CilkForStmt implementation
-//===----------------------------------------------------------------------===//
-
-CilkForStmt::Capture *CilkForStmt::getStoredCaptures() const {
- unsigned Sz = sizeof(CilkForStmt) + sizeof(Stmt *) * (NumCaptures + LAST);
-
- // Offset of the first Capture object.
- unsigned FirstCaptureOffset =
-   llvm::RoundUpToAlignment(Sz, llvm::alignOf<Capture>());
-
- return reinterpret_cast<Capture *>(
-     reinterpret_cast<char *>(const_cast<CilkForStmt *>(this))
-     + FirstCaptureOffset);
-}
-
 /// \brief Construct an empty Cilk for statement.
-CilkForStmt::CilkForStmt(EmptyShell Empty, unsigned NumCaptures)
-  : Stmt(CilkForStmtClass, Empty), NumCaptures(NumCaptures),
-    TheCilkForDecl(0) {
-  Stmt **Stored = getStoredStmts();
-  Stored[INIT] = 0;
-  Stored[COND] = 0;
-  Stored[INC] = 0;
-  Stored[BODY] = 0;
+CilkForStmt::CilkForStmt(EmptyShell Empty)
+  : Stmt(CilkForStmtClass, Empty), InnerLoopControlVar(0) {
+  SubExprs[INIT] = 0;
+  SubExprs[COND] = 0;
+  SubExprs[INC] = 0;
+  SubExprs[BODY] = 0;
 }
 
 /// \brief Construct a Cilk for statement.
-CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body,
-                         SourceLocation FL, SourceLocation LP,
-                         SourceLocation RP, CilkForDecl *CFD,
-                         ArrayRef<Capture> Captures,
-                         ArrayRef<Expr *> CaptureInits)
-  : Stmt(CilkForStmtClass), NumCaptures(Captures.size()), TheCilkForDecl(CFD),
-    CilkForLoc(FL), LParenLoc(LP), RParenLoc(RP) {
-  assert(Init && Cond && Inc && Body && CFD && "null argument unexpected");
+CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
+                         SourceLocation FL, SourceLocation LP, SourceLocation RP)
+  : Stmt(CilkForStmtClass), CilkForLoc(FL), LParenLoc(LP), RParenLoc(RP),
+    InnerLoopControlVar(0) {
+  assert(Init && Cond && Inc && Body && "null argument unexpected");
 
-  Stmt **Stored = getStoredStmts();
-  Stored[INIT] = Init;
-  Stored[COND] = Cond;
-  Stored[INC] = Inc;
-  Stored[BODY] = Body;
-
-  // Copy initialization expressions.
-  Stored += LAST;
-  for (unsigned I = 0, N = NumCaptures; I != N; ++I)
-    *Stored++ = CaptureInits[I];
-
-  // Copy all Capture objects.
-  Capture *Buffer = getStoredCaptures();
-  std::copy(Captures.begin(), Captures.end(), Buffer);
-}
-
-CilkForStmt *CilkForStmt::Create(ASTContext &C, Stmt *Init, Expr *Cond,
-                                 Expr *Inc, Stmt *Body, SourceLocation FL,
-                                 SourceLocation LP, SourceLocation RP,
-                                 CilkForDecl *CFD, ArrayRef<Capture> Captures,
-                                 ArrayRef<Expr *> CaptureInits) {
-  // The layout is
-  //
-  // ------------------------------------------------------------------------
-  // | this, Init, Cond, Inc, Body, CapInit, ..., CapInit, Cap,..., Cap     |
-  // --------^---------------------------------------------^-----------------
-  //         getStoredStmts()                              getStoredCapures()
-  //
-  unsigned NumCaptures = Captures.size();
-  assert(CaptureInits.size() == NumCaptures && "wrong number of arguments");
-
-  unsigned Size = sizeof(CilkForStmt) + sizeof(Stmt *) * (NumCaptures + LAST);
-
-  if (!Captures.empty()) {
-    // Realign for the following Capture array.
-    Size = llvm::RoundUpToAlignment(Size, llvm::alignOf<Capture>());
-    Size += sizeof(Capture) * NumCaptures;
-  }
-
-  void *Mem = C.Allocate(Size);
-  return new (Mem) CilkForStmt(Init, Cond, Inc, Body, FL, LP, RP, CFD,
-                               Captures, CaptureInits);
-}
-
-CilkForStmt *CilkForStmt::CreateDeserialized(ASTContext &Context,
-                                             unsigned NumCaptures) {
-  unsigned Size = sizeof(CilkForStmt) + sizeof(Stmt *) * (NumCaptures + LAST);
-  if (NumCaptures > 0) {
-    // Realign for the following Capture array.
-    Size = llvm::RoundUpToAlignment(Size, llvm::alignOf<Capture>());
-    Size += sizeof(Capture) * NumCaptures;
-  }
-
-  void *Mem = Context.Allocate(Size);
-  return new (Mem) CilkForStmt(EmptyShell(), NumCaptures);
-}
-
-Stmt::child_range CilkForStmt::children() {
-  Stmt **Stored = getStoredStmts();
-  return child_range(Stored, Stored + LAST + NumCaptures);
+  SubExprs[INIT] = Init;
+  SubExprs[COND] = Cond;
+  SubExprs[INC] = Inc;
+  SubExprs[BODY] = Body;
 }

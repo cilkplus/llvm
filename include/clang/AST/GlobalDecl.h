@@ -42,7 +42,6 @@ public:
   GlobalDecl(const FunctionDecl *D) { Init(D); }
   GlobalDecl(const BlockDecl *D) { Init(D); }
   GlobalDecl(const CapturedDecl *D) { Init(D); }
-  GlobalDecl(const CilkForDecl *D) { Init(D); }
   GlobalDecl(const ObjCMethodDecl *D) { Init(D); }
 
   GlobalDecl(const CXXConstructorDecl *D, CXXCtorType Type)

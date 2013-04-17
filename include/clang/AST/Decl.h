@@ -3184,6 +3184,7 @@ public:
 class CapturedDecl : public Decl, public DeclContext {
 private:
   Stmt *Body;
+  SmallVector<ImplicitParamDecl *, 3> Params;
 
   explicit CapturedDecl(DeclContext *DC)
     : Decl(Captured, DC, SourceLocation()), DeclContext(Captured) { }
@@ -3193,6 +3194,20 @@ public:
 
   Stmt *getBody() const { return Body; }
   void setBody(Stmt *B) { Body = B; }
+
+  void setContextParam(ImplicitParamDecl *P) {
+    assert(Params.size() == 0);
+    Params.push_back(P);
+  }
+  ImplicitParamDecl *getContextParam() {
+    assert(Params.size() > 0);
+    return Params[0];
+  }
+
+  void addParam(ImplicitParamDecl *P) { Params.push_back(P); }
+  ImplicitParamDecl *getParam(unsigned i) { return Params[i]; }
+
+  const SmallVectorImpl<ImplicitParamDecl *>& getParams() const { return Params; }
 
   // Implement isa/cast/dyncast/etc.
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
@@ -3345,47 +3360,6 @@ inline bool IsEnumDeclComplete(EnumDecl *ED) {
 inline bool IsEnumDeclScoped(EnumDecl *ED) {
   return ED->isScoped();
 }
-
-/// \brief This describes a Cilk for statement, and serves as the DeclContext
-/// for capturing variables.
-///
-class CilkForDecl : public Decl, public DeclContext {
-  virtual void anchor();
-
-  explicit CilkForDecl(DeclContext *DC)
-    : Decl(CilkFor, DC, SourceLocation()), DeclContext(CilkFor),
-      ContextRecordDecl(0), InnerLoopControlVar(0), ContextParam(0) { }
-
-  /// \brief The variable capturing C or C++ RecordDecl.
-  RecordDecl *ContextRecordDecl;
-
-  /// \brief The local copy of the loop control variable.
-  VarDecl *InnerLoopControlVar;
-
-  /// \brief The implicit parameter for the captured variables.
-  ImplicitParamDecl *ContextParam;
-
-public:
-  static CilkForDecl *Create(ASTContext &C, DeclContext *DC);
-
-  RecordDecl *getContextRecordDecl() const { return ContextRecordDecl; }
-  void setContextRecordDecl(RecordDecl *RD) { ContextRecordDecl = RD; }
-
-  VarDecl *getInnerLoopControlVar() const { return InnerLoopControlVar; }
-  void setInnerLoopControlVar(VarDecl *V) { InnerLoopControlVar = V; }
-
-  ImplicitParamDecl *getContextParam() const { return ContextParam; }
-  void setContextParam(ImplicitParamDecl *D) { ContextParam = D; }
-
-  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
-  static bool classofKind(Kind K) { return K == CilkFor; }
-  static DeclContext *castToDeclContext(const CilkForDecl *D) {
-    return static_cast<DeclContext *>(const_cast<CilkForDecl *>(D));
-  }
-  static CilkForDecl *castFromDeclContext(const DeclContext *DC) {
-    return static_cast<CilkForDecl *>(const_cast<DeclContext *>(DC));
-  }
-};
 
 }  // end namespace clang
 

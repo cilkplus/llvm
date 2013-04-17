@@ -20,10 +20,10 @@ void test1(void) {
   //
   // TODO: loop count
   //
-  // CHECK1: call void @__cilkrts_cilk_for_32(void (i8*, i32, i32)* bitcast (void (%struct.cilk.for.capture.1*, i32, i32)* [[helper1:@__captured_stmt[0-9]*]]
+  // CHECK1: call void @__cilkrts_cilk_for_32(void (i8*, i32, i32)* bitcast (void (%[[CapStruct:[a-z0-9\.]*]]*, i32, i32)* [[helper1:@__captured_stmt[0-9]*]]
   //
   // CHECK1: define internal void [[helper1]]
-  // CHECK1: alloca %struct.cilk.for.capture
+  // CHECK1: alloca %[[CapStruct]]
   // CHECK1: alloca i32
   // CHECK1: alloca i32
   // CHECK1: }

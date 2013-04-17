@@ -1870,15 +1870,6 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
                                          TagType);
           return EmitLValueForField(LV, FD);
         }
-      } else if (DeprecatedCapturedStmtInfo) {
-        if (const FieldDecl *FD = DeprecatedCapturedStmtInfo->lookup(VD)) {
-          QualType TagType = getContext().getTagDeclType(FD->getParent());
-          LValue LV
-            = MakeNaturalAlignAddrLValue(DeprecatedCapturedStmtInfo->getThisValue(),
-                                         TagType);
-
-          return EmitLValueForField(LV, FD);
-        }
       }
 
       assert(isa<BlockDecl>(CurCodeDecl) && E->refersToEnclosingLocal());

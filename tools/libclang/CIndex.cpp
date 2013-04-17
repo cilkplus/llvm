@@ -4478,7 +4478,6 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::Label:  // FIXME: Is this right??
   case Decl::ClassScopeFunctionSpecialization:
   case Decl::Import:
-  case Decl::CilkFor:
   case Decl::OMPThreadPrivate:
     return C;
 

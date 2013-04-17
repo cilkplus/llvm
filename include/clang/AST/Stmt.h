@@ -33,11 +33,11 @@ namespace clang {
   class ASTContext;
   class Attr;
   class CapturedDecl;
-  class CilkForDecl;
   class Decl;
   class Expr;
   class FunctionDecl;
   class IdentifierInfo;
+  class ImplicitParamDecl;
   class LabelDecl;
   class ParmVarDecl;
   class PrinterHelper;
@@ -2227,70 +2227,13 @@ public:
 /// }
 /// \endcode
 class CilkForStmt : public Stmt {
-public:
-  /// \brief The different capture forms.
-  enum VariableCaptureKind {
-    VCK_This,
-    VCK_ByRef,
-    VCK_ByCopy
-  };
-
-  /// \brief Describes the capture of either a variable or 'this'.
-  class Capture {
-    VarDecl *Var;
-    VariableCaptureKind Kind;
-    SourceLocation Loc;
-
-  public:
-    /// \brief Create a new capture.
-    ///
-    /// \param Loc The source location associated with this capture.
-    ///
-    /// \param Kind The kind of capture (this, ByRef, ...).
-    ///
-    /// \param Var The variable being captured, or null if capturing this.
-    ///
-    Capture(SourceLocation Loc, VariableCaptureKind Kind, VarDecl *Var = 0)
-      : Var(Var), Kind(Kind), Loc(Loc) {
-      switch (Kind) {
-      case VCK_This:
-        assert(Var == 0 && "'this' capture cannot have a variable!");
-        break;
-      case VCK_ByRef:
-      case VCK_ByCopy:
-        assert(Var && "capturing by reference / copy must have a variable!");
-        break;
-      }
-    }
-
-    /// \brief Determine the kind of capture.
-    VariableCaptureKind getCaptureKind() const { return Kind; }
-
-    /// \brief Retrieve the source location at which the variable or 'this' was
-    /// first used.
-    SourceLocation getLocation() const { return Loc; }
-
-    /// \brief Determine whether this capture handles the C++ 'this' pointer.
-    bool capturesThis() const { return Kind == VCK_This; }
-
-    /// \brief Determine whether this capture handles a variable.
-    bool capturesVariable() const { return Kind != VCK_This; }
-
-    /// \brief Retrieve the declaration of the variable being captured.
-    ///
-    /// This operation is only valid if this capture does not capture 'this'.
-    VarDecl *getCapturedVar() const {
-      assert(!capturesThis() && "No variable available for 'this' capture");
-      return Var;
-    }
-  };
-
 private:
-  /// \brief The number of variables captured, including 'this'.
-  unsigned NumCaptures;
+  /// \brief An enumeration for accessing stored statements in a Cilk for
+  /// statement.
+  enum { INIT, COND, INC, BODY, LAST };
 
-  /// \brief The declaration for the implicit outlined function.
-  CilkForDecl *TheCilkForDecl;
+  Stmt *SubExprs[LAST]; // SubExprs[INIT] is an expression or declstmt.
+                        // SubExprs[BODY] is a CapturedStmt.
 
   /// \brief The source location of '_Cilk_for'.
   SourceLocation CilkForLoc;
@@ -2301,85 +2244,43 @@ private:
   /// \brief The source location of closing parenthesis.
   SourceLocation RParenLoc;
 
-  /// \brief An enumeration for accessing stored statements in a Cilk for
-  /// statement.
-  enum { INIT, COND, INC, BODY, LAST};
-
-  /// \brief Construct a Cilk for statement.
-  CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, Stmt *Body, SourceLocation FL,
-              SourceLocation LP, SourceLocation RP, CilkForDecl *CFD,
-              ArrayRef<Capture> Captures, ArrayRef<Expr *> CaptureInits);
-
-  /// \brief Construct an empty Cilk for statement.
-  CilkForStmt(EmptyShell Empty, unsigned NumCaptures);
-
-  Stmt **getStoredStmts() const {
-    return reinterpret_cast<Stmt **>(const_cast<CilkForStmt *>(this) + 1);
-  }
-
-  Capture *getStoredCaptures() const;
+  /// \brief The local copy of the loop control variable.
+  VarDecl *InnerLoopControlVar;
 
 public:
-  static CilkForStmt *Create(ASTContext &C, Stmt *Init, Expr *Cond, Expr *Inc,
-                             Stmt *Body, SourceLocation FL, SourceLocation LP,
-                             SourceLocation RP, CilkForDecl *CFD,
-                             ArrayRef<Capture> Captures,
-                             ArrayRef<Expr *> CaptureInits);
+  /// \brief Construct a Cilk for statement.
+  CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
+              SourceLocation FL, SourceLocation LP, SourceLocation RP);
 
-  static CilkForStmt *CreateDeserialized(ASTContext &C, unsigned NumCaptures);
-
-  /// \brief An iterator that walks over the captures.
-  typedef const Capture *capture_iterator;
-
-  /// \brief Retrieve an iterator pointing to the first capture.
-  capture_iterator capture_begin() const { return getStoredCaptures(); }
-
-  /// \brief Retrieve an iterator pointing past the end of the sequence of
-  /// captures.
-  capture_iterator capture_end() const {
-    return getStoredCaptures() + NumCaptures;
-  }
-
-  /// \brief Retrieve the number of captures, including 'this'.
-  unsigned capture_size() const { return NumCaptures; }
-
-  /// \brief Iterator that walks over the capture initialization arguments.
-  typedef Expr **capture_init_iterator;
-
-  /// \brief Retrieve the first initialization argument.
-  capture_init_iterator capture_init_begin() const {
-    return reinterpret_cast<Expr **>(getStoredStmts() + LAST);
-  }
-
-  /// \brief Retrieve the iterator pointing one past the last initialization
-  /// argument.
-  capture_init_iterator capture_init_end() const {
-    return capture_init_begin() + NumCaptures;
-  }
-
-  /// \brief Retrieve the associated Cilk for declaration.
-  CilkForDecl *getCilkForDecl() { return TheCilkForDecl; }
-  const CilkForDecl *getCilkForDecl() const { return TheCilkForDecl; }
+  /// \brief Construct an empty Cilk for statement.
+  explicit CilkForStmt(EmptyShell Empty);
 
   /// \brief Retrieve the initialization expression or declaration statement.
-  Stmt *getInit() { return getStoredStmts()[INIT]; }
-  const Stmt *getInit() const { return getStoredStmts()[INIT]; }
+  Stmt *getInit() { return SubExprs[INIT]; }
+  const Stmt *getInit() const { return SubExprs[INIT]; }
 
   /// \brief Retrieve the loop condition expression.
-  Expr *getCond() { return reinterpret_cast<Expr *>(getStoredStmts()[COND]); }
+  Expr *getCond() { return reinterpret_cast<Expr *>(SubExprs[COND]); }
   const Expr *getCond() const {
-    return reinterpret_cast<Expr *>(getStoredStmts()[COND]);
+    return reinterpret_cast<Expr *>(SubExprs[COND]);
   }
 
   /// \brief Retrieve the loop increment expression.
-  Expr *getInc() { return reinterpret_cast<Expr *>(getStoredStmts()[INC]); }
+  Expr *getInc() { return reinterpret_cast<Expr *>(SubExprs[INC]); }
   const Expr *getInc()  const {
-    return reinterpret_cast<Expr *>(getStoredStmts()[INC]);
+    return reinterpret_cast<Expr *>(SubExprs[INC]);
   }
 
   /// \brief Retrieve the loop body.
-  Stmt *getBody() { return getStoredStmts()[BODY]; }
-  const Stmt *getBody() const { return getStoredStmts()[BODY]; }
+  CapturedStmt *getBody() {
+    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]); 
+  }
+  const CapturedStmt *getBody() const {
+    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]); 
+  }
+
+  VarDecl *getInnerLoopControlVar() const { return InnerLoopControlVar; }
+  void setInnerLoopControlVar(VarDecl *V) { InnerLoopControlVar = V; }
 
   SourceLocation getCilkForLoc() const LLVM_READONLY { return CilkForLoc; }
   SourceLocation getLParenLoc() const LLVM_READONLY { return LParenLoc; }
@@ -2391,14 +2292,16 @@ public:
 
   SourceLocation getLocStart() const LLVM_READONLY { return CilkForLoc; }
   SourceLocation getLocEnd() const LLVM_READONLY {
-    return getStoredStmts()[BODY]->getLocEnd();
+    return SubExprs[BODY]->getLocEnd();
   }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CilkForStmtClass;
   }
 
-  child_range children();
+  child_range children() {
+    return child_range(SubExprs, SubExprs + LAST);
+  }
 };
 
 }  // end namespace clang

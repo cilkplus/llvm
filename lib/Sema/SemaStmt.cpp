@@ -3210,6 +3210,22 @@ Sema::CreateCapturedStmtRecordDecl(CapturedDecl *&CD, SourceLocation Loc)
   CD = CapturedDecl::Create(Context, CurContext);
   DC->addDecl(CD);
 
+  // Build the context parameter
+  DC = CapturedDecl::castToDeclContext(CD);
+  IdentifierInfo *VarName = 0;
+  {
+    SmallString<8> Str;
+    llvm::raw_svector_ostream OS(Str);
+    OS << "__ctx_" << RD->getName();
+    VarName = &Context.Idents.get(OS.str());
+  }
+  QualType ParamType = Context.getPointerType(Context.getTagDeclType(RD));
+  ImplicitParamDecl *Param
+    = ImplicitParamDecl::Create(Context, DC, Loc, VarName, ParamType);
+  DC->addDecl(Param);
+
+  CD->setContextParam(Param);
+
   return RD;
 }
 
@@ -4134,30 +4150,6 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                           Third.get(), RParenLoc, Body);
 }
 
-static
-void buildCilkForCaptureLists(SmallVectorImpl<CilkForStmt::Capture> &Captures,
-                              SmallVectorImpl<Expr *> &CaptureInits,
-                              ArrayRef<CilkForScopeInfo::Capture> Candidates) {
-  typedef ArrayRef<CilkForScopeInfo::Capture>::const_iterator CaptureIter;
-
-  for (CaptureIter CI = Candidates.begin(), CE = Candidates.end();
-       CI != CE; ++CI) {
-    if (CI->isThisCapture()) {
-      Captures.push_back(CilkForStmt::Capture(CI->getLocation(),
-                                              CilkForStmt::VCK_This));
-      CaptureInits.push_back(CI->getCopyExpr());
-      continue;
-    }
-
-    CilkForStmt::VariableCaptureKind Kind
-      = CI->isCopyCapture() ? CilkForStmt::VCK_ByCopy : CilkForStmt::VCK_ByRef;
-
-    Captures.push_back(CilkForStmt::Capture(CI->getLocation(), Kind,
-                                            CI->getVariable()));
-    CaptureInits.push_back(CI->getCopyExpr());
-  }
-}
-
 StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *Init, Expr *Cond, Expr *Inc,
@@ -4165,29 +4157,30 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   CilkForScopeInfo *FSI = getCurCilkFor();
   assert(FSI && "CilkForScopeInfo is out of sync");
 
-  SmallVector<CilkForStmt::Capture, 4> Captures;
+  SmallVector<CapturedStmt::Capture, 4> Captures;
   SmallVector<Expr *, 4> CaptureInits;
-  buildCilkForCaptureLists(Captures, CaptureInits, FSI->Captures);
+  buildCapturedStmtCaptureList(Captures, CaptureInits, FSI->Captures);
 
-  // Set the variable capturing record declaration.
+  CapturedDecl *CD = FSI->TheCapturedDecl;
   RecordDecl *RD = FSI->TheRecordDecl;
-  RD->completeDefinition();
 
-  CilkForDecl *CFD = FSI->TheCilkForDecl;
-  CFD->setContextRecordDecl(RD);
-  CFD->setInnerLoopControlVar(FSI->InnerLoopControlVar);
-  CFD->setContextParam(FSI->ContextParam);
+  CapturedStmt *CapturedBody = CapturedStmt::Create(getASTContext(), Body,
+                                                    Captures, CaptureInits,
+                                                    CD, RD);
+
+  CD->setBody(CapturedBody->getCapturedStmt());
+  RD->completeDefinition();
 
   PopExpressionEvaluationContext();
   PopDeclContext();
   PopFunctionScopeInfo();
 
-  // FIXME: Handle ExprNeedsCleanups flag.
-  // ExprNeedsCleanups = FSI->ExprNeedsCleanups;
+  ExprNeedsCleanups = FSI->ExprNeedsCleanups;
 
-  CilkForStmt *Result = CilkForStmt::Create(Context, Init, Cond, Inc, Body,
-                                            CilkForLoc, LParenLoc, RParenLoc,
-                                            CFD, Captures, CaptureInits);
+  CilkForStmt *Result = new (Context)
+      CilkForStmt(Init, Cond, Inc, CapturedBody, CilkForLoc, LParenLoc, RParenLoc);
+
+  Result->setInnerLoopControlVar(FSI->InnerLoopControlVar);
 
   return Owned(Result);
 }
@@ -4246,37 +4239,17 @@ static const VarDecl *getLoopControlVariable(Sema &S, StmtResult InitStmt) {
 
 void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
                                    StmtResult FirstPart) {
-  DeclContext *DC = CurContext;
-  while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
-    DC = DC->getParent();
 
-  // Create a C/C++ record decl for variable capturing.
-  RecordDecl *RD = 0;
-  {
-    IdentifierInfo *Id = &PP.getIdentifierTable().get("cilk.for.capture");
-    if (getLangOpts().CPlusPlus)
-      RD = CXXRecordDecl::Create(Context, TTK_Struct, DC, CilkForLoc,
-                                 CilkForLoc, Id);
-    else
-      RD = RecordDecl::Create(Context, TTK_Struct, DC, CilkForLoc,
-                              CilkForLoc, Id);
-
-    DC->addDecl(RD);
-    RD->setImplicit();
-    RD->startDefinition();
-  }
-
-  // Start a CilkForDecl.
-  CilkForDecl *CFD = CilkForDecl::Create(Context, CurContext);
-  DC->addDecl(CFD);
+  CapturedDecl *CD = 0;
+  RecordDecl *RD = CreateCapturedStmtRecordDecl(CD, CilkForLoc);
 
   const VarDecl *VD = getLoopControlVariable(*this, FirstPart);
-  PushCilkForScope(CurScope, CFD, RD, VD, CilkForLoc);
+  PushCilkForScope(CurScope, CD, RD, VD, CilkForLoc);
 
   if (CurScope)
-    PushDeclContext(CurScope, CFD);
+    PushDeclContext(CurScope, CD);
   else
-    CurContext = CFD;
+    CurContext = CD;
 
   PushExpressionEvaluationContext(PotentiallyEvaluated);
 }

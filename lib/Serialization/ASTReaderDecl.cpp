@@ -268,7 +268,6 @@ namespace clang {
     void VisitBlockDecl(BlockDecl *BD);
     void VisitCapturedDecl(CapturedDecl *CD);
     void VisitEmptyDecl(EmptyDecl *D);
-    void VisitCilkForDecl(CilkForDecl *D);
 
     std::pair<uint64_t, uint64_t> VisitDeclContext(DeclContext *DC);
     
@@ -997,9 +996,6 @@ void ASTDeclReader::VisitBlockDecl(BlockDecl *BD) {
 }
 
 void ASTDeclReader::VisitCapturedDecl(CapturedDecl *) {
-  llvm_unreachable("not implemented yet");
-}
-void ASTDeclReader::VisitCilkForDecl(CilkForDecl *D) {
   llvm_unreachable("not implemented yet");
 }
 
@@ -2171,9 +2167,6 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
     break;
   case DECL_EMPTY:
     D = EmptyDecl::CreateDeserialized(Context, ID);
-    break;
-  case DECL_CILKFOR:
-    llvm_unreachable("not implemented yet");
     break;
   }
 

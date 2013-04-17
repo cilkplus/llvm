@@ -1172,7 +1172,7 @@ bool RecursiveASTVisitor<Derived>::TraverseDeclContextHelper(DeclContext *DC) {
        Child != ChildEnd; ++Child) {
     // BlockDecls and CapturedDecls are traversed through BlockExprs and
     // CapturedStmts respectively.
-    if (!isa<BlockDecl>(*Child) && !isa<CapturedDecl>(*Child) && !isa<CilkForDecl>(*Child))
+    if (!isa<BlockDecl>(*Child) && !isa<CapturedDecl>(*Child))
       TRY_TO(TraverseDecl(*Child));
   }
 
@@ -1203,12 +1203,6 @@ DEF_TRAVERSE_DECL(BlockDecl, {
 
 DEF_TRAVERSE_DECL(CapturedDecl, {
     TRY_TO(TraverseStmt(D->getBody()));
-    // This return statement makes sure the traversal of nodes in
-    // decls_begin()/decls_end() (done in the DEF_TRAVERSE_DECL macro)
-    // is skipped - don't remove it.
-    return true;
-  })
-DEF_TRAVERSE_DECL(CilkForDecl, {
     // This return statement makes sure the traversal of nodes in
     // decls_begin()/decls_end() (done in the DEF_TRAVERSE_DECL macro)
     // is skipped - don't remove it.

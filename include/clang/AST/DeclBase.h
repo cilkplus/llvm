@@ -1048,7 +1048,6 @@ public:
     case Decl::Block:
     case Decl::Captured:
     case Decl::ObjCMethod:
-    case Decl::CilkFor:
       return true;
     default:
       return DeclKind >= Decl::firstFunction && DeclKind <= Decl::lastFunction;

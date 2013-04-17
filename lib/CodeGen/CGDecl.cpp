@@ -71,7 +71,6 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::FriendTemplate:
   case Decl::Block:
   case Decl::Captured:
-  case Decl::CilkFor:
   case Decl::ClassScopeFunctionSpecialization:
     llvm_unreachable("Declaration should not be in declstmts!");
   case Decl::Function:  // void X();
@@ -1731,9 +1730,6 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
       }
     }
   }
-
-  if (DeprecatedCapturedStmtInfo && DeprecatedCapturedStmtInfo->isThisParmVarDecl(&D))
-    DeprecatedCapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
 
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {
