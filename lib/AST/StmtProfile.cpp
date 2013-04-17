@@ -215,6 +215,10 @@ void StmtProfiler::VisitSEHExceptStmt(const SEHExceptStmt *S) {
   VisitStmt(S);
 }
 
+void StmtProfiler::VisitCapturedStmt(const CapturedStmt *S) {
+  VisitStmt(S);
+}
+
 void StmtProfiler::VisitObjCForCollectionStmt(const ObjCForCollectionStmt *S) {
   VisitStmt(S);
 }
@@ -776,6 +780,11 @@ void StmtProfiler::VisitCXXUuidofExpr(const CXXUuidofExpr *S) {
   VisitExpr(S);
   if (S->isTypeOperand())
     VisitType(S->getTypeOperand());
+}
+
+void StmtProfiler::VisitMSPropertyRefExpr(const MSPropertyRefExpr *S) {
+  VisitExpr(S);
+  VisitDecl(S->getPropertyDecl());
 }
 
 void StmtProfiler::VisitCXXThisExpr(const CXXThisExpr *S) {

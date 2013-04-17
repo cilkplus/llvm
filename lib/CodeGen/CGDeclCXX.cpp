@@ -39,7 +39,7 @@ static void EmitDeclInit(CodeGenFunction &CGF, const VarDecl &D,
     CodeGenModule &CGM = CGF.CGM;
     if (lv.isObjCStrong())
       CGM.getObjCRuntime().EmitObjCGlobalAssign(CGF, CGF.EmitScalarExpr(Init),
-                                                DeclPtr, D.isThreadSpecified());
+                                                DeclPtr, D.getTLSKind());
     else if (lv.isObjCWeak())
       CGM.getObjCRuntime().EmitObjCWeakAssign(CGF, CGF.EmitScalarExpr(Init),
                                               DeclPtr);
@@ -80,6 +80,7 @@ static void EmitDeclDestroy(CodeGenFunction &CGF, const VarDecl &D,
   case QualType::DK_objc_strong_lifetime:
   case QualType::DK_objc_weak_lifetime:
     // We don't care about releasing objects during process teardown.
+    assert(!D.getTLSKind() && "should have rejected this");
     return;
   }
 
@@ -105,7 +106,7 @@ static void EmitDeclDestroy(CodeGenFunction &CGF, const VarDecl &D,
     argument = llvm::Constant::getNullValue(CGF.Int8PtrTy);
   }
 
-  CGM.getCXXABI().registerGlobalDtor(CGF, function, argument);
+  CGM.getCXXABI().registerGlobalDtor(CGF, D, function, argument);
 }
 
 /// Emit code to cause the variable at the given address to be considered as
@@ -231,7 +232,7 @@ CreateGlobalInitOrDestructFunction(CodeGenModule &CGM,
   if (!CGM.getLangOpts().AppleKext) {
     // Set the section if needed.
     if (const char *Section = 
-          CGM.getContext().getTargetInfo().getStaticInitSectionSpecifier())
+          CGM.getTarget().getStaticInitSectionSpecifier())
       Fn->setSection(Section);
   }
 
@@ -254,6 +255,9 @@ void
 CodeGenModule::EmitCXXGlobalVarDeclInitFunc(const VarDecl *D,
                                             llvm::GlobalVariable *Addr,
                                             bool PerformInit) {
+  if (D->getTLSKind())
+    ErrorUnsupported(D->getInit(), "dynamic TLS initialization");
+
   llvm::FunctionType *FTy = llvm::FunctionType::get(VoidTy, false);
 
   // Create a variable initialization function.

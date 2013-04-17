@@ -1219,7 +1219,10 @@ bool Sema::ShouldWarnIfUnusedFileScopedDecl(const DeclaratorDecl *D) const {
         return false;
     } else {
       // 'static inline' functions are used in headers; don't warn.
-      if (FD->getStorageClass() == SC_Static &&
+      // Make sure we get the storage class from the canonical declaration,
+      // since otherwise we will get spurious warnings on specialized
+      // static template functions.
+      if (FD->getCanonicalDecl()->getStorageClass() == SC_Static &&
           FD->isInlineSpecified())
         return false;
     }
@@ -1613,20 +1616,7 @@ static void filterNonConflictingPreviousDecls(ASTContext &context,
     if (!old->isHidden())
       continue;
 
-    // If either has no-external linkage, ignore the old declaration.
-    // If this declaration would have external linkage if it were the first
-    // declaration of this name, then it may in fact be a redeclaration of
-    // some hidden declaration, so include those too. We don't need to worry
-    // about some previous visible declaration giving this declaration external
-    // linkage, because in that case, we'll mark this declaration as a redecl
-    // of the visible decl, and that decl will already be a redecl of the
-    // hidden declaration if that's appropriate.
-    //
-    // Don't cache this linkage computation, because it's not yet correct: we
-    // may later give this declaration a previous declaration which changes
-    // its linkage.
-    if (old->getLinkage() != ExternalLinkage ||
-        !decl->hasExternalLinkageUncached())
+    if (old->getLinkage() != ExternalLinkage)
       filter.erase();
   }
 
@@ -2697,21 +2687,31 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, Decl *OldD, Scope *S) {
     // Fall through to diagnose conflicting types.
   }
 
-  // A function that has already been declared has been redeclared or defined
-  // with a different type- show appropriate diagnostic
-  if (unsigned BuiltinID = Old->getBuiltinID()) {
-    // The user has declared a builtin function with an incompatible
-    // signature.
+  // A function that has already been declared has been redeclared or
+  // defined with a different type; show an appropriate diagnostic.
+
+  // If the previous declaration was an implicitly-generated builtin
+  // declaration, then at the very least we should use a specialized note.
+  unsigned BuiltinID;
+  if (Old->isImplicit() && (BuiltinID = Old->getBuiltinID())) {
+    // If it's actually a library-defined builtin function like 'malloc'
+    // or 'printf', just warn about the incompatible redeclaration.
     if (Context.BuiltinInfo.isPredefinedLibFunction(BuiltinID)) {
-      // The function the user is redeclaring is a library-defined
-      // function like 'malloc' or 'printf'. Warn about the
-      // redeclaration, then pretend that we don't know about this
-      // library built-in.
       Diag(New->getLocation(), diag::warn_redecl_library_builtin) << New;
       Diag(Old->getLocation(), diag::note_previous_builtin_declaration)
         << Old << Old->getType();
-      New->getIdentifier()->setBuiltinID(Builtin::NotBuiltin);
-      Old->setInvalidDecl();
+
+      // If this is a global redeclaration, just forget hereafter
+      // about the "builtin-ness" of the function.
+      //
+      // Doing this for local extern declarations is problematic.  If
+      // the builtin declaration remains visible, a second invalid
+      // local declaration will produce a hard error; if it doesn't
+      // remain visible, a single bogus local redeclaration (which is
+      // actually only a warning) could break all the downstream code.
+      if (!New->getDeclContext()->isFunctionOrMethod())
+        New->getIdentifier()->setBuiltinID(Builtin::NotBuiltin);
+
       return false;
     }
 
@@ -2871,6 +2871,9 @@ void Sema::MergeVarDecl(VarDecl *New, LookupResult &Previous,
     return New->setInvalidDecl();
   }
 
+  if (!shouldLinkPossiblyHiddenDecl(Old, New))
+    return;
+
   // C++ [class.mem]p1:
   //   A member shall not be declared twice in the member-specification [...]
   // 
@@ -2953,12 +2956,22 @@ void Sema::MergeVarDecl(VarDecl *New, LookupResult &Previous,
     return New->setInvalidDecl();
   }
 
-  if (New->isThreadSpecified() && !Old->isThreadSpecified()) {
-    Diag(New->getLocation(), diag::err_thread_non_thread) << New->getDeclName();
-    Diag(Old->getLocation(), diag::note_previous_definition);
-  } else if (!New->isThreadSpecified() && Old->isThreadSpecified()) {
-    Diag(New->getLocation(), diag::err_non_thread_thread) << New->getDeclName();
-    Diag(Old->getLocation(), diag::note_previous_definition);
+  if (New->getTLSKind() != Old->getTLSKind()) {
+    if (!Old->getTLSKind()) {
+      Diag(New->getLocation(), diag::err_thread_non_thread) << New->getDeclName();
+      Diag(Old->getLocation(), diag::note_previous_declaration);
+    } else if (!New->getTLSKind()) {
+      Diag(New->getLocation(), diag::err_non_thread_thread) << New->getDeclName();
+      Diag(Old->getLocation(), diag::note_previous_declaration);
+    } else {
+      // Do not allow redeclaration to change the variable between requiring
+      // static and dynamic initialization.
+      // FIXME: GCC allows this, but uses the TLS keyword on the first
+      // declaration to determine the kind. Do we need to be compatible here?
+      Diag(New->getLocation(), diag::err_thread_thread_different_kind)
+        << New->getDeclName() << (New->getTLSKind() == VarDecl::TLS_Dynamic);
+      Diag(Old->getLocation(), diag::note_previous_declaration);
+    }
   }
 
   // C++ doesn't have tentative definitions, so go right ahead and check here.
@@ -3182,8 +3195,9 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
       Diag(DS.getStorageClassSpecLoc(), DiagID)
         << DeclSpec::getSpecifierName(SCS);
 
-  if (DS.isThreadSpecified())
-    Diag(DS.getThreadSpecLoc(), DiagID) << "__thread";
+  if (DeclSpec::TSCS TSCS = DS.getThreadStorageClassSpec())
+    Diag(DS.getThreadStorageClassSpecLoc(), DiagID)
+      << DeclSpec::getSpecifierName(TSCS);
   if (DS.getTypeQualifiers()) {
     if (DS.getTypeQualifiers() & DeclSpec::TQ_const)
       Diag(DS.getConstSpecLoc(), DiagID) << "const";
@@ -4327,34 +4341,6 @@ Sema::RegisterLocallyScopedExternCDecl(NamedDecl *ND,
          "Decl is not a locally-scoped decl!");
   // Note that we have a locally-scoped external with this name.
   LocallyScopedExternCDecls[ND->getDeclName()] = ND;
-
-  if (!Previous.isSingleResult())
-    return;
-
-  NamedDecl *PrevDecl = Previous.getFoundDecl();
-
-  // If there was a previous declaration of this entity, it may be in
-  // our identifier chain. Update the identifier chain with the new
-  // declaration.
-  if (S && IdResolver.ReplaceDecl(PrevDecl, ND)) {
-    // The previous declaration was found on the identifer resolver
-    // chain, so remove it from its scope.
-
-    if (S->isDeclScope(PrevDecl)) {
-      // Special case for redeclarations in the SAME scope.
-      // Because this declaration is going to be added to the identifier chain
-      // later, we should temporarily take it OFF the chain.
-      IdResolver.RemoveDecl(ND);
-
-    } else {
-      // Find the scope for the original declaration.
-      while (S && !S->isDeclScope(PrevDecl))
-        S = S->getParent();
-    }
-
-    if (S)
-      S->RemoveDecl(PrevDecl);
-  }
 }
 
 llvm::DenseMap<DeclarationName, NamedDecl *>::iterator
@@ -4411,8 +4397,6 @@ Sema::ActOnTypedefDeclarator(Scope* S, Declarator& D, DeclContext* DC,
 
   DiagnoseFunctionSpecifiers(D.getDeclSpec());
 
-  if (D.getDeclSpec().isThreadSpecified())
-    Diag(D.getDeclSpec().getThreadSpecLoc(), diag::err_invalid_thread);
   if (D.getDeclSpec().isConstexprSpecified())
     Diag(D.getDeclSpec().getConstexprSpecLoc(), diag::err_invalid_constexpr)
       << 1;
@@ -4606,7 +4590,7 @@ bool Sema::inferObjCARCLifetime(ValueDecl *decl) {
   if (VarDecl *var = dyn_cast<VarDecl>(decl)) {
     // Thread-local variables cannot have lifetime.
     if (lifetime && lifetime != Qualifiers::OCL_ExplicitNone &&
-        var->isThreadSpecified()) {
+        var->getTLSKind()) {
       Diag(var->getLocation(), diag::err_arc_thread_ownership)
         << var->getType();
       return true;
@@ -4696,8 +4680,7 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
          "Parser allowed 'typedef' as storage class VarDecl.");
   VarDecl::StorageClass SC = StorageClassSpecToVarDeclStorageClass(SCSpec);
 
-  if (getLangOpts().OpenCL && !getOpenCLOptions().cl_khr_fp16)
-  {
+  if (getLangOpts().OpenCL && !getOpenCLOptions().cl_khr_fp16) {
     // OpenCL v1.2 s6.1.1.1: reject declaring variables of the half and
     // half array type (unless the cl_khr_fp16 extension is enabled).
     if (Context.getBaseElementType(R)->isHalfType()) {
@@ -4713,6 +4696,16 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     D.setInvalidType();
     SC = SC_None;
   }
+
+  // C++11 [dcl.stc]p4:
+  //   When thread_local is applied to a variable of block scope the
+  //   storage-class-specifier static is implied if it does not appear
+  //   explicitly.
+  // Core issue: 'static' is not implied if the variable is declared 'extern'.
+  if (SCSpec == DeclSpec::SCS_unspecified &&
+      D.getDeclSpec().getThreadStorageClassSpec() ==
+          DeclSpec::TSCS_thread_local && DC->isFunctionOrMethod())
+    SC = SC_Static;
 
   IdentifierInfo *II = Name.getAsIdentifierInfo();
   if (!II) {
@@ -4871,13 +4864,18 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   // lexical context will be different from the semantic context.
   NewVD->setLexicalDeclContext(CurContext);
 
-  if (D.getDeclSpec().isThreadSpecified()) {
+  if (DeclSpec::TSCS TSCS = D.getDeclSpec().getThreadStorageClassSpec()) {
     if (NewVD->hasLocalStorage())
-      Diag(D.getDeclSpec().getThreadSpecLoc(), diag::err_thread_non_global);
+      Diag(D.getDeclSpec().getThreadStorageClassSpecLoc(),
+           diag::err_thread_non_global)
+        << DeclSpec::getSpecifierName(TSCS);
     else if (!Context.getTargetInfo().isTLSSupported())
-      Diag(D.getDeclSpec().getThreadSpecLoc(), diag::err_thread_unsupported);
+      Diag(D.getDeclSpec().getThreadStorageClassSpecLoc(),
+           diag::err_thread_unsupported);
     else
-      NewVD->setThreadSpecified(true);
+      NewVD->setTLSKind(TSCS == DeclSpec::TSCS_thread_local
+                          ? VarDecl::TLS_Dynamic
+                          : VarDecl::TLS_Static);
   }
 
   // C99 6.7.4p3
@@ -5836,8 +5834,10 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   DeclarationName Name = NameInfo.getName();
   FunctionDecl::StorageClass SC = getFunctionStorageClass(*this, D);
 
-  if (D.getDeclSpec().isThreadSpecified())
-    Diag(D.getDeclSpec().getThreadSpecLoc(), diag::err_invalid_thread);
+  if (DeclSpec::TSCS TSCS = D.getDeclSpec().getThreadStorageClassSpec())
+    Diag(D.getDeclSpec().getThreadStorageClassSpecLoc(),
+         diag::err_invalid_thread)
+      << DeclSpec::getSpecifierName(TSCS);
 
   // Do not allow returning a objc interface by-value.
   if (R->getAs<FunctionType>()->getResultType()->isObjCObjectType()) {
@@ -6680,8 +6680,11 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
     // there's no more work to do here; we'll just add the new
     // function to the scope.
     if (!AllowOverloadingOfFunction(Previous, Context)) {
-      Redeclaration = true;
-      OldDecl = Previous.getFoundDecl();
+      NamedDecl *Candidate = Previous.getFoundDecl();
+      if (shouldLinkPossiblyHiddenDecl(Candidate, NewFD)) {
+        Redeclaration = true;
+        OldDecl = Candidate;
+      }
     } else {
       switch (CheckOverload(S, NewFD, Previous, OldDecl,
                             /*NewIsUsingDecl*/ false)) {
@@ -7629,6 +7632,19 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     // C99 6.7.8p4. All file scoped initializers need to be constant.
     if (!getLangOpts().CPlusPlus && !VDecl->isInvalidDecl())
       CheckForConstantInitializer(Init, DclT);
+    else if (VDecl->getTLSKind() == VarDecl::TLS_Static &&
+             !VDecl->isInvalidDecl() && !DclT->isDependentType() &&
+             !Init->isValueDependent() && !VDecl->isConstexpr() &&
+             !Init->isConstantInitializer(
+                 Context, VDecl->getType()->isReferenceType())) {
+      // GNU C++98 edits for __thread, [basic.start.init]p4:
+      //   An object of thread storage duration shall not require dynamic
+      //   initialization.
+      // FIXME: Need strict checking here.
+      Diag(VDecl->getLocation(), diag::err_thread_dynamic_init);
+      if (getLangOpts().CPlusPlus11)
+        Diag(VDecl->getLocation(), diag::note_use_thread_local);
+    }
   }
 
   // We will represent direct-initialization similarly to copy-initialization:
@@ -7974,6 +7990,16 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       Diag(var->getLocation(), diag::warn_missing_variable_declarations) << var;
   }
 
+  if (var->getTLSKind() == VarDecl::TLS_Static &&
+      var->getType().isDestructedType()) {
+    // GNU C++98 edits for __thread, [basic.start.term]p3:
+    //   The type of an object with thread storage duration shall not
+    //   have a non-trivial destructor.
+    Diag(var->getLocation(), diag::err_thread_nontrivial_dtor);
+    if (getLangOpts().CPlusPlus11)
+      Diag(var->getLocation(), diag::note_use_thread_local);
+  }
+
   // All the following checks are C++ only.
   if (!getLangOpts().CPlusPlus) return;
 
@@ -8235,13 +8261,14 @@ Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D) {
     D.getMutableDeclSpec().ClearStorageClassSpecs();
   }
 
-  if (D.getDeclSpec().isThreadSpecified())
-    Diag(D.getDeclSpec().getThreadSpecLoc(), diag::err_invalid_thread);
-  if (D.getDeclSpec().isConstexprSpecified())
-    Diag(D.getDeclSpec().getConstexprSpecLoc(), diag::err_invalid_constexpr)
+  if (DeclSpec::TSCS TSCS = DS.getThreadStorageClassSpec())
+    Diag(DS.getThreadStorageClassSpecLoc(), diag::err_invalid_thread)
+      << DeclSpec::getSpecifierName(TSCS);
+  if (DS.isConstexprSpecified())
+    Diag(DS.getConstexprSpecLoc(), diag::err_invalid_constexpr)
       << 0;
 
-  DiagnoseFunctionSpecifiers(D.getDeclSpec());
+  DiagnoseFunctionSpecifiers(DS);
 
   TypeSourceInfo *TInfo = GetTypeForDeclarator(D, S);
   QualType parmDeclType = TInfo->getType();
@@ -10361,8 +10388,10 @@ FieldDecl *Sema::HandleField(Scope *S, RecordDecl *Record,
 
   DiagnoseFunctionSpecifiers(D.getDeclSpec());
 
-  if (D.getDeclSpec().isThreadSpecified())
-    Diag(D.getDeclSpec().getThreadSpecLoc(), diag::err_invalid_thread);
+  if (DeclSpec::TSCS TSCS = D.getDeclSpec().getThreadStorageClassSpec())
+    Diag(D.getDeclSpec().getThreadStorageClassSpecLoc(),
+         diag::err_invalid_thread)
+      << DeclSpec::getSpecifierName(TSCS);
 
   // Check to see if this name was declared as a member previously
   NamedDecl *PrevDecl = 0;

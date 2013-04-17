@@ -2409,6 +2409,7 @@ void InitializationSequence::Step::Destroy() {
   case SK_QualificationConversionRValue:
   case SK_QualificationConversionXValue:
   case SK_QualificationConversionLValue:
+  case SK_LValueToRValue:
   case SK_ListInitialization:
   case SK_ListConstructorCall:
   case SK_UnwrapInitList:
@@ -2551,6 +2552,15 @@ void InitializationSequence::AddQualificationConversionStep(QualType Ty,
     S.Kind = SK_QualificationConversionLValue;
     break;
   }
+  S.Type = Ty;
+  Steps.push_back(S);
+}
+
+void InitializationSequence::AddLValueToRValueStep(QualType Ty) {
+  assert(!Ty.hasQualifiers() && "rvalues may not have qualifiers");
+
+  Step S;
+  S.Kind = SK_LValueToRValue;
   S.Type = Ty;
   Steps.push_back(S);
 }
@@ -3351,6 +3361,57 @@ static void TryReferenceInitialization(Sema &S,
                                  T1Quals, cv2T2, T2, T2Quals, Sequence);
 }
 
+/// Converts the target of reference initialization so that it has the
+/// appropriate qualifiers and value kind.
+///
+/// In this case, 'x' is an 'int' lvalue, but it needs to be 'const int'.
+/// \code
+///   int x;
+///   const int &r = x;
+/// \endcode
+///
+/// In this case the reference is binding to a bitfield lvalue, which isn't
+/// valid. Perform a load to create a lifetime-extended temporary instead.
+/// \code
+///   const int &r = someStruct.bitfield;
+/// \endcode
+static ExprValueKind
+convertQualifiersAndValueKindIfNecessary(Sema &S,
+                                         InitializationSequence &Sequence,
+                                         Expr *Initializer,
+                                         QualType cv1T1,
+                                         Qualifiers T1Quals,
+                                         Qualifiers T2Quals,
+                                         bool IsLValueRef) {
+  bool IsNonAddressableType = Initializer->getBitField() ||
+                              Initializer->refersToVectorElement();
+
+  if (IsNonAddressableType) {
+    // C++11 [dcl.init.ref]p5: [...] Otherwise, the reference shall be an
+    // lvalue reference to a non-volatile const type, or the reference shall be
+    // an rvalue reference.
+    //
+    // If not, we can't make a temporary and bind to that. Give up and allow the
+    // error to be diagnosed later.
+    if (IsLValueRef && (!T1Quals.hasConst() || T1Quals.hasVolatile())) {
+      assert(Initializer->isGLValue());
+      return Initializer->getValueKind();
+    }
+
+    // Force a load so we can materialize a temporary.
+    Sequence.AddLValueToRValueStep(cv1T1.getUnqualifiedType());
+    return VK_RValue;
+  }
+
+  if (T1Quals != T2Quals) {
+    Sequence.AddQualificationConversionStep(cv1T1,
+                                            Initializer->getValueKind());
+  }
+
+  return Initializer->getValueKind();
+}
+
+
 /// \brief Reference initialization without resolving overloaded functions.
 static void TryReferenceInitializationCore(Sema &S,
                                            const InitializedEntity &Entity,
@@ -3406,11 +3467,11 @@ static void TryReferenceInitializationCore(Sema &S,
         Sequence.AddObjCObjectConversionStep(
                                      S.Context.getQualifiedType(T1, T2Quals));
 
-      if (T1Quals != T2Quals)
-        Sequence.AddQualificationConversionStep(cv1T1, VK_LValue);
-      bool BindingTemporary = T1Quals.hasConst() && !T1Quals.hasVolatile() &&
-        (Initializer->getBitField() || Initializer->refersToVectorElement());
-      Sequence.AddReferenceBindingStep(cv1T1, BindingTemporary);
+      ExprValueKind ValueKind =
+        convertQualifiersAndValueKindIfNecessary(S, Sequence, Initializer,
+                                                 cv1T1, T1Quals, T2Quals,
+                                                 isLValueRef);
+      Sequence.AddReferenceBindingStep(cv1T1, ValueKind == VK_RValue);
       return;
     }
 
@@ -3493,10 +3554,12 @@ static void TryReferenceInitializationCore(Sema &S,
       Sequence.AddObjCObjectConversionStep(
                                        S.Context.getQualifiedType(T1, T2Quals));
 
-    if (T1Quals != T2Quals)
-      Sequence.AddQualificationConversionStep(cv1T1, ValueKind);
-    Sequence.AddReferenceBindingStep(cv1T1,
-                                 /*bindingTemporary=*/InitCategory.isPRValue());
+    ValueKind = convertQualifiersAndValueKindIfNecessary(S, Sequence,
+                                                         Initializer, cv1T1,
+                                                         T1Quals, T2Quals,
+                                                         isLValueRef);
+
+    Sequence.AddReferenceBindingStep(cv1T1, ValueKind == VK_RValue);
     return;
   }
 
@@ -4073,6 +4136,21 @@ InitializationSequence::InitializationSequence(Sema &S,
     : FailedCandidateSet(Kind.getLocation()) {
   ASTContext &Context = S.Context;
 
+  // Eliminate non-overload placeholder types in the arguments.  We
+  // need to do this before checking whether types are dependent
+  // because lowering a pseudo-object expression might well give us
+  // something of dependent type.
+  for (unsigned I = 0; I != NumArgs; ++I)
+    if (Args[I]->getType()->isNonOverloadPlaceholderType()) {
+      // FIXME: should we be doing this here?
+      ExprResult result = S.CheckPlaceholderExpr(Args[I]);
+      if (result.isInvalid()) {
+        SetFailed(FK_PlaceholderType);
+        return;
+      }
+      Args[I] = result.take();
+    }
+
   // C++0x [dcl.init]p16:
   //   The semantics of initializers are as follows. The destination type is
   //   the type of the object or reference being initialized and the source
@@ -4089,18 +4167,6 @@ InitializationSequence::InitializationSequence(Sema &S,
 
   // Almost everything is a normal sequence.
   setSequenceKind(NormalSequence);
-
-  for (unsigned I = 0; I != NumArgs; ++I)
-    if (Args[I]->getType()->isNonOverloadPlaceholderType()) {
-      // FIXME: should we be doing this here?
-      ExprResult result = S.CheckPlaceholderExpr(Args[I]);
-      if (result.isInvalid()) {
-        SetFailed(FK_PlaceholderType);
-        return;
-      }
-      Args[I] = result.take();
-    }
-
 
   QualType SourceType;
   Expr *Initializer = 0;
@@ -4988,6 +5054,7 @@ InitializationSequence::Perform(Sema &S,
   case SK_QualificationConversionLValue:
   case SK_QualificationConversionXValue:
   case SK_QualificationConversionRValue:
+  case SK_LValueToRValue:
   case SK_ConversionSequence:
   case SK_ListInitialization:
   case SK_UnwrapInitList:
@@ -5104,6 +5171,9 @@ InitializationSequence::Perform(Sema &S,
       break;
 
     case SK_BindReferenceToTemporary:
+      // Make sure the "temporary" is actually an rvalue.
+      assert(CurInit.get()->isRValue() && "not a temporary");
+
       // Check exception specifications
       if (S.CheckExceptionSpecCompatibility(CurInit.get(), DestType))
         return ExprError();
@@ -5238,6 +5308,16 @@ InitializationSequence::Perform(Sema &S,
                    VK_XValue :
                    VK_RValue);
       CurInit = S.ImpCastExprToType(CurInit.take(), Step->Type, CK_NoOp, VK);
+      break;
+    }
+
+    case SK_LValueToRValue: {
+      assert(CurInit.get()->isGLValue() && "cannot load from a prvalue");
+      CurInit = S.Owned(ImplicitCastExpr::Create(S.Context, Step->Type,
+                                                 CK_LValueToRValue,
+                                                 CurInit.take(),
+                                                 /*BasePath=*/0,
+                                                 VK_RValue));
       break;
     }
 
@@ -6183,6 +6263,10 @@ void InitializationSequence::dump(raw_ostream &OS) const {
 
     case SK_QualificationConversionLValue:
       OS << "qualification conversion (lvalue)";
+      break;
+
+    case SK_LValueToRValue:
+      OS << "load (lvalue to rvalue)";
       break;
 
     case SK_ConversionSequence:

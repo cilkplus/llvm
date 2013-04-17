@@ -219,10 +219,6 @@ public:
     return getLinkage() == ExternalLinkage;
   }
 
-  /// \brief True if this decl has external linkage. Don't cache the linkage,
-  /// because we are not finished setting up the redecl chain for the decl.
-  bool hasExternalLinkageUncached() const;
-
   /// \brief Determines the visibility of this entity.
   Visibility getVisibility() const {
     return getLinkageAndVisibility().getVisibility();
@@ -641,6 +637,13 @@ public:
     ListInit  ///< Direct list-initialization (C++11)
   };
 
+  /// \brief Kinds of thread-local storage.
+  enum TLSKind {
+    TLS_None,   ///< Not a TLS variable.
+    TLS_Static, ///< TLS with a known-constant initializer.
+    TLS_Dynamic ///< TLS with a dynamic initializer.
+  };
+
 protected:
   /// \brief Placeholder type used in Init to denote an unparsed C++ default
   /// argument.
@@ -664,7 +667,7 @@ private:
     friend class ASTDeclReader;
 
     unsigned SClass : 3;
-    unsigned ThreadSpecified : 1;
+    unsigned TLSKind : 2;
     unsigned InitStyle : 2;
 
     /// \brief Whether this variable is the exception variable in a C++ catch
@@ -687,7 +690,7 @@ private:
     /// \brief Whether this variable is (C++0x) constexpr.
     unsigned IsConstexpr : 1;
   };
-  enum { NumVarDeclBits = 14 };
+  enum { NumVarDeclBits = 12 };
 
   friend class ASTDeclReader;
   friend class StmtIteratorBase;
@@ -771,9 +774,9 @@ public:
   }
   void setStorageClass(StorageClass SC);
 
-  void setThreadSpecified(bool T) { VarDeclBits.ThreadSpecified = T; }
-  bool isThreadSpecified() const {
-    return VarDeclBits.ThreadSpecified;
+  void setTLSKind(TLSKind TLS) { VarDeclBits.TLSKind = TLS; }
+  TLSKind getTLSKind() const {
+    return static_cast<TLSKind>(VarDeclBits.TLSKind);
   }
 
   /// hasLocalStorage - Returns true if a variable with function scope
@@ -3173,6 +3176,32 @@ public:
   }
   static BlockDecl *castFromDeclContext(const DeclContext *DC) {
     return static_cast<BlockDecl *>(const_cast<DeclContext*>(DC));
+  }
+};
+
+/// \brief This represents the body of a CapturedStmt, and serves as its
+/// DeclContext.
+class CapturedDecl : public Decl, public DeclContext {
+private:
+  Stmt *Body;
+
+  explicit CapturedDecl(DeclContext *DC)
+    : Decl(Captured, DC, SourceLocation()), DeclContext(Captured) { }
+
+public:
+  static CapturedDecl *Create(ASTContext &C, DeclContext *DC);
+
+  Stmt *getBody() const { return Body; }
+  void setBody(Stmt *B) { Body = B; }
+
+  // Implement isa/cast/dyncast/etc.
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == Captured; }
+  static DeclContext *castToDeclContext(const CapturedDecl *D) {
+    return static_cast<DeclContext *>(const_cast<CapturedDecl *>(D));
+  }
+  static CapturedDecl *castFromDeclContext(const DeclContext *DC) {
+    return static_cast<CapturedDecl *>(const_cast<DeclContext *>(DC));
   }
 };
 

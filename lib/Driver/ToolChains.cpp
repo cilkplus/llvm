@@ -1086,6 +1086,7 @@ Generic_GCC::GCCInstallationDetector::GCCInstallationDetector(
   };
   static const char *const ARMHFTriples[] = {
     "arm-linux-gnueabihf",
+    "armv7hl-redhat-linux-gnueabi"
   };
 
   static const char *const X86_64LibDirs[] = { "/lib64", "/lib" };
@@ -2452,7 +2453,10 @@ DragonFly::DragonFly(const Driver &D, const llvm::Triple& Triple, const ArgList 
 
   getFilePaths().push_back(getDriver().Dir + "/../lib");
   getFilePaths().push_back("/usr/lib");
-  getFilePaths().push_back("/usr/lib/gcc41");
+  if (llvm::sys::fs::exists("/usr/lib/gcc47"))
+    getFilePaths().push_back("/usr/lib/gcc47");
+  else
+    getFilePaths().push_back("/usr/lib/gcc44");
 }
 
 Tool *DragonFly::buildAssembler() const {

@@ -758,6 +758,7 @@ void Sema::CheckCXXThisCapture(SourceLocation Loc, bool Explicit) {
       if (CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_LambdaByref ||
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_LambdaByval ||
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_Block ||
+          CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_CapturedRegion ||
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_ParallelRegion ||
           Explicit) {
         // This closure can capture 'this'; continue looking upwards.
@@ -783,6 +784,9 @@ void Sema::CheckCXXThisCapture(SourceLocation Loc, bool Explicit) {
     if (LambdaScopeInfo *LSI = dyn_cast<LambdaScopeInfo>(CSI))
       // For lambda expressions, build a field and an initializing expression.
       ThisExpr = captureThis(Context, LSI->Lambda, ThisTy, Loc);
+    else if (CapturedRegionScopeInfo *RSI
+        = dyn_cast<CapturedRegionScopeInfo>(FunctionScopes[idx]))
+      ThisExpr = captureThis(Context, RSI->TheRecordDecl, ThisTy, Loc);
     else if (ParallelRegionScopeInfo *RSI
         = dyn_cast<ParallelRegionScopeInfo>(FunctionScopes[idx]))
       ThisExpr = captureThis(Context, RSI->TheRecordDecl, ThisTy, Loc);
@@ -1181,6 +1185,11 @@ Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
 
   QualType ResultType = Context.getPointerType(AllocType);
     
+  if (ArraySize && ArraySize->getType()->isNonOverloadPlaceholderType()) {
+    ExprResult result = CheckPlaceholderExpr(ArraySize);
+    if (result.isInvalid()) return ExprError();
+    ArraySize = result.take();
+  }
   // C++98 5.3.4p6: "The expression in a direct-new-declarator shall have
   //   integral or enumeration type with a non-negative value."
   // C++11 [expr.new]p6: The expression [...] shall be of integral or unscoped

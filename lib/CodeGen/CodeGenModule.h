@@ -67,7 +67,6 @@ namespace clang {
   class VarDecl;
   class LangOptions;
   class CodeGenOptions;
-  class TargetOptions;
   class DiagnosticsEngine;
   class AnnotateAttr;
   class CXXDestructorDecl;
@@ -234,15 +233,22 @@ class CodeGenModule : public CodeGenTypeCache {
   ASTContext &Context;
   const LangOptions &LangOpts;
   const CodeGenOptions &CodeGenOpts;
-  const TargetOptions &TargetOpts;
   llvm::Module &TheModule;
-  const llvm::DataLayout &TheDataLayout;
-  mutable const TargetCodeGenInfo *TheTargetCodeGenInfo;
   DiagnosticsEngine &Diags;
+  const llvm::DataLayout &TheDataLayout;
+  const TargetInfo &Target;
   CGCXXABI &ABI;
-  CodeGenTypes Types;
-  CodeGenTBAA *TBAA;
+  llvm::LLVMContext &VMContext;
 
+  CodeGenTBAA *TBAA;
+  
+  mutable const TargetCodeGenInfo *TheTargetCodeGenInfo;
+  
+  // This should not be moved earlier, since its initialization depends on some
+  // of the previous reference members being already initialized and also checks
+  // if TheTargetCodeGenInfo is NULL
+  CodeGenTypes Types;
+ 
   /// VTables - Holds information about C++ vtables.
   CodeGenVTables VTables;
   friend class CodeGenVTables;
@@ -262,8 +268,8 @@ class CodeGenModule : public CodeGenTypeCache {
                  const DeprecatedCapturedStmt*> CaptureDeclMap;
 
   // WeakRefReferences - A set of references that have only been seen via
-  // a weakref so far. This is used to remove the weak of the reference if we ever
-  // see a direct reference or a definition.
+  // a weakref so far. This is used to remove the weak of the reference if we
+  // ever see a direct reference or a definition.
   llvm::SmallPtrSet<llvm::GlobalValue*, 10> WeakRefReferences;
 
   /// DeferredDecls - This contains all the decls which have definitions but
@@ -314,10 +320,9 @@ class CodeGenModule : public CodeGenTypeCache {
 
   /// Map used to track internal linkage functions declared within
   /// extern "C" regions.
-  typedef llvm::DenseMap<IdentifierInfo *,
-                         llvm::GlobalValue *> StaticExternCMap;
+  typedef llvm::MapVector<IdentifierInfo *,
+                          llvm::GlobalValue *> StaticExternCMap;
   StaticExternCMap StaticExternCValues;
-  std::vector<IdentifierInfo*> StaticExternCIdents;
 
   /// CXXGlobalInits - Global variables with initializers that need to run
   /// before main.
@@ -354,11 +359,11 @@ class CodeGenModule : public CodeGenTypeCache {
 
   /// CFConstantStringClassRef - Cached reference to the class for constant
   /// strings. This value has type int * but is actually an Obj-C class pointer.
-  llvm::Constant *CFConstantStringClassRef;
+  llvm::WeakVH CFConstantStringClassRef;
 
   /// ConstantStringClassRef - Cached reference to the class for constant
   /// strings. This value has type int * but is actually an Obj-C class pointer.
-  llvm::Constant *ConstantStringClassRef;
+  llvm::WeakVH ConstantStringClassRef;
 
   /// \brief The LLVM type corresponding to NSConstantString.
   llvm::StructType *NSConstantStringType;
@@ -378,7 +383,6 @@ class CodeGenModule : public CodeGenTypeCache {
 
   bool isTriviallyRecursive(const FunctionDecl *F);
   bool shouldEmitFunction(const FunctionDecl *F);
-  llvm::LLVMContext &VMContext;
 
   /// @name Cache for Blocks Runtime Globals
   /// @{
@@ -411,8 +415,8 @@ class CodeGenModule : public CodeGenTypeCache {
   /// @}
 public:
   CodeGenModule(ASTContext &C, const CodeGenOptions &CodeGenOpts,
-                const TargetOptions &TargetOpts, llvm::Module &M,
-                const llvm::DataLayout &TD, DiagnosticsEngine &Diags);
+                llvm::Module &M, const llvm::DataLayout &TD,
+                DiagnosticsEngine &Diags);
 
   ~CodeGenModule();
 
@@ -456,9 +460,6 @@ public:
   const CaptureDeclMapTy& getCaptureDeclMap() const {
     return CaptureDeclMap;
   }
-
-  /// getCXXABI() - Return a reference to the configured C++ ABI.
-  CGCXXABI &getCXXABI() { return ABI; }
 
   ARCEntrypoints &getARCEntrypoints() const {
     assert(getLangOpts().ObjCAutoRefCount && ARCData != 0);
@@ -513,20 +514,23 @@ public:
   }
 
   ASTContext &getContext() const { return Context; }
-  const CodeGenOptions &getCodeGenOpts() const { return CodeGenOpts; }
   const LangOptions &getLangOpts() const { return LangOpts; }
+  const CodeGenOptions &getCodeGenOpts() const { return CodeGenOpts; }
   llvm::Module &getModule() const { return TheModule; }
-  CodeGenTypes &getTypes() { return Types; }
-  CodeGenVTables &getVTables() { return VTables; }
-  VTableContext &getVTableContext() { return VTables.getVTableContext(); }
   DiagnosticsEngine &getDiags() const { return Diags; }
   const llvm::DataLayout &getDataLayout() const { return TheDataLayout; }
-  const TargetInfo &getTarget() const { return Context.getTargetInfo(); }
+  const TargetInfo &getTarget() const { return Target; }
+  CGCXXABI &getCXXABI() { return ABI; }
   llvm::LLVMContext &getLLVMContext() { return VMContext; }
-  const TargetCodeGenInfo &getTargetCodeGenInfo();
-  bool isTargetDarwin() const;
-
+  
   bool shouldUseTBAA() const { return TBAA != 0; }
+
+  const TargetCodeGenInfo &getTargetCodeGenInfo(); 
+  
+  CodeGenTypes &getTypes() { return Types; }
+ 
+  CodeGenVTables &getVTables() { return VTables; }
+  VTableContext &getVTableContext() { return VTables.getVTableContext(); }
 
   llvm::MDNode *getTBAAInfo(QualType QTy);
   llvm::MDNode *getTBAAInfoForVTablePtr();
@@ -542,8 +546,13 @@ public:
   bool isPaddedAtomicType(QualType type);
   bool isPaddedAtomicType(const AtomicType *type);
 
-  static void DecorateInstruction(llvm::Instruction *Inst,
-                                  llvm::MDNode *TBAAInfo);
+  /// Decorate the instruction with a TBAA tag. For scalar TBAA, the tag
+  /// is the same as the type. For struct-path aware TBAA, the tag
+  /// is different from the type: base type, access type and offset.
+  /// When ConvertTypeToTag is true, we create a tag based on the scalar type.
+  void DecorateInstruction(llvm::Instruction *Inst,
+                           llvm::MDNode *TBAAInfo,
+                           bool ConvertTypeToTag = true);
 
   /// getSize - Emit the given number of characters as a value of type size_t.
   llvm::ConstantInt *getSize(CharUnits numChars);
@@ -593,8 +602,8 @@ public:
       return GetAddrOfGlobalVar(cast<VarDecl>(GD.getDecl()));
   }
 
-  /// CreateOrReplaceCXXRuntimeVariable - Will return a global variable of the given
-  /// type. If a variable with a different type already exists then a new 
+  /// CreateOrReplaceCXXRuntimeVariable - Will return a global variable of the
+  /// given type. If a variable with a different type already exists then a new 
   /// variable with the right type will be created and all uses of the old
   /// variable will be replaced with a bitcast to the new variable.
   llvm::GlobalVariable *

@@ -751,9 +751,13 @@ void Sema::ActOnEndOfTranslationUnit() {
         if (DiagD->isReferenced()) {
           Diag(DiagD->getLocation(), diag::warn_unneeded_internal_decl)
                 << /*variable*/1 << DiagD->getDeclName();
-        } else {
+        } else if (getSourceManager().isFromMainFile(DiagD->getLocation())) {
+          // If the declaration is in a header which is included into multiple
+          // TUs, it will declare one variable per TU, and one of the other
+          // variables may be used. So, only warn if the declaration is in the
+          // main file.
           Diag(DiagD->getLocation(), diag::warn_unused_variable)
-                << DiagD->getDeclName();
+              << DiagD->getDeclName();
         }
       }
     }
@@ -798,7 +802,7 @@ DeclContext *Sema::getFunctionLevelDeclContext() {
   DeclContext *DC = CurContext;
 
   while (true) {
-    if (isa<BlockDecl>(DC) || isa<EnumDecl>(DC) || isa<CilkForDecl>(DC)) {
+    if (isa<BlockDecl>(DC) || isa<EnumDecl>(DC) || isa<CapturedDecl>(DC) || isa<CilkForDecl>(DC)) {
       DC = DC->getParent();
     } else if (isa<FunctionDecl>(DC) &&
                cast<FunctionDecl>(DC)->isParallelRegion()) {
@@ -1103,7 +1107,8 @@ void Sema::ActOnComment(SourceRange Comment) {
   if (!LangOpts.RetainCommentsFromSystemHeaders &&
       SourceMgr.isInSystemHeader(Comment.getBegin()))
     return;
-  RawComment RC(SourceMgr, Comment);
+  RawComment RC(SourceMgr, Comment, false,
+                LangOpts.CommentOpts.ParseAllComments);
   if (RC.isAlmostTrailingComment()) {
     SourceRange MagicMarkerRange(Comment.getBegin(),
                                  Comment.getBegin().getLocWithOffset(3));
@@ -1338,4 +1343,19 @@ IdentifierInfo *Sema::getSuperIdentifier() const {
   if (!Ident_super)
     Ident_super = &Context.Idents.get("super");
   return Ident_super;
+}
+
+void Sema::PushCapturedRegionScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
+                                   CapturedRegionScopeInfo::CapturedRegionKind K) {
+  CapturingScopeInfo *CSI = new CapturedRegionScopeInfo(getDiagnostics(),
+                                                        S, CD, RD, K);
+  CSI->ReturnType = Context.VoidTy;
+  FunctionScopes.push_back(CSI);
+}
+
+CapturedRegionScopeInfo *Sema::getCurCapturedRegion() {
+  if (FunctionScopes.empty())
+    return 0;
+
+  return dyn_cast<CapturedRegionScopeInfo>(FunctionScopes.back());
 }

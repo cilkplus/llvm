@@ -32,6 +32,7 @@ namespace llvm {
 namespace clang {
   class ASTContext;
   class Attr;
+  class CapturedDecl;
   class CilkForDecl;
   class Decl;
   class Expr;
@@ -1886,6 +1887,168 @@ public:
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == SEHTryStmtClass;
   }
+};
+
+/// \brief This captures a statement into a function. For example, the following
+/// pragma annotated compound statement can be represented as a CapturedStmt,
+/// and this compound statement is the body of an anonymous outlined function.
+/// @code
+/// #pragma omp parallel
+/// {
+///   compute();
+/// }
+/// @endcode
+class CapturedStmt : public Stmt {
+public:
+  /// \brief The different capture forms: by 'this' or by reference, etc.
+  enum VariableCaptureKind {
+    VCK_This,
+    VCK_ByRef,
+    VCK_ByCopy
+  };
+
+  /// \brief Describes the capture of either a variable or 'this'.
+  class Capture {
+    VarDecl *Var;
+    VariableCaptureKind Kind;
+    SourceLocation Loc;
+
+  public:
+    /// \brief Create a new capture.
+    ///
+    /// \param Loc The source location associated with this capture.
+    ///
+    /// \param Kind The kind of capture (this, ByRef, ...).
+    ///
+    /// \param Var The variable being captured, or null if capturing this.
+    ///
+    Capture(SourceLocation Loc, VariableCaptureKind Kind, VarDecl *Var = 0)
+      : Var(Var), Kind(Kind), Loc(Loc) {
+      switch (Kind) {
+      case VCK_This:
+        assert(Var == 0 && "'this' capture cannot have a variable!");
+        break;
+      case VCK_ByRef:
+      case VCK_ByCopy:
+        assert(Var && "capturing by reference / copy must have a variable!");
+        break;
+      }
+    }
+
+    /// \brief Determine the kind of capture.
+    VariableCaptureKind getCaptureKind() const { return Kind; }
+
+    /// \brief Retrieve the source location at which the variable or 'this' was
+    /// first used.
+    SourceLocation getLocation() const { return Loc; }
+
+    /// \brief Determine whether this capture handles the C++ 'this' pointer.
+    bool capturesThis() const { return Kind == VCK_This; }
+
+    /// \brief Determine whether this capture handles a variable.
+    bool capturesVariable() const { return Kind != VCK_This; }
+
+    /// \brief Retrieve the declaration of the variable being captured.
+    ///
+    /// This operation is only valid if this capture does not capture 'this'.
+    VarDecl *getCapturedVar() const {
+      assert(!capturesThis() && "No variable available for 'this' capture");
+      return Var;
+    }
+  };
+
+private:
+  /// \brief The number of variable captured, including 'this'.
+  unsigned NumCaptures;
+
+  /// \brief The implicit outlined function.
+  CapturedDecl *TheCapturedDecl;
+
+  /// \brief The record for captured variables, a RecordDecl or CXXRecordDecl.
+  RecordDecl *TheRecordDecl;
+
+  /// \brief Construct a captured statement.
+  CapturedStmt(Stmt *S, ArrayRef<Capture> Captures,
+               ArrayRef<Expr *> CaptureInits,
+               CapturedDecl *CD, RecordDecl *RD);
+
+  /// \brief Construct an empty captured statement.
+  CapturedStmt(EmptyShell Empty, unsigned NumCaptures);
+
+  Stmt **getStoredStmts() const {
+    return reinterpret_cast<Stmt **>(const_cast<CapturedStmt *>(this) + 1);
+  }
+
+  Capture *getStoredCaptures() const;
+
+public:
+  static CapturedStmt *Create(ASTContext &Context, Stmt *S,
+                              ArrayRef<Capture> Captures,
+                              ArrayRef<Expr *> CaptureInits,
+                              CapturedDecl *CD, RecordDecl *RD);
+
+  static CapturedStmt *CreateDeserialized(ASTContext &Context,
+                                          unsigned NumCaptures);
+
+  /// \brief Retrieve the statement being captured.
+  Stmt *getCapturedStmt() { return getStoredStmts()[NumCaptures]; }
+  const Stmt *getCapturedStmt() const {
+    return const_cast<CapturedStmt *>(this)->getCapturedStmt();
+  }
+
+  /// \brief Retrieve the outlined function declaration.
+  CapturedDecl *getCapturedDecl() const { return TheCapturedDecl; }
+
+  /// \brief Retrieve the record declaration for captured variables.
+  const RecordDecl *getCapturedRecordDecl() const { return TheRecordDecl; }
+
+  /// \brief True if this variable has been captured.
+  bool capturesVariable(const VarDecl *Var) const;
+
+  /// \brief An iterator that walks over the captures.
+  typedef const Capture *capture_iterator;
+
+  /// \brief Retrieve an iterator pointing to the first capture.
+  capture_iterator capture_begin() const { return getStoredCaptures(); }
+
+  /// \brief Retrieve an iterator pointing past the end of the sequence of
+  /// captures.
+  capture_iterator capture_end() const {
+    return getStoredCaptures() + NumCaptures;
+  }
+
+  /// \brief Retrieve the number of captures, including 'this'.
+  unsigned capture_size() const { return NumCaptures; }
+
+  /// \brief Iterator that walks over the capture initialization arguments.
+  typedef Expr **capture_init_iterator;
+
+  /// \brief Retrieve the first initialization argument.
+  capture_init_iterator capture_init_begin() const {
+    return reinterpret_cast<Expr **>(getStoredStmts());
+  }
+
+  /// \brief Retrieve the iterator pointing one past the last initialization
+  /// argument.
+  capture_init_iterator capture_init_end() const {
+    return capture_init_begin() + NumCaptures;
+  }
+
+  SourceLocation getLocStart() const LLVM_READONLY {
+    return getCapturedStmt()->getLocStart();
+  }
+  SourceLocation getLocEnd() const LLVM_READONLY {
+    return getCapturedStmt()->getLocEnd();
+  }
+  SourceRange getSourceRange() const LLVM_READONLY {
+    return getCapturedStmt()->getSourceRange();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CapturedStmtClass;
+  }
+
+  child_range children();
 };
 
 /// CilkSyncStmt - This represents a _Cilk_sync

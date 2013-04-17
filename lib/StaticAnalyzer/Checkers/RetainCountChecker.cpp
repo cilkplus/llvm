@@ -37,6 +37,8 @@
 #include "llvm/ADT/StringExtras.h"
 #include <cstdarg>
 
+#include "AllocationDiagnostics.h"
+
 using namespace clang;
 using namespace ento;
 using llvm::StrInStrNoCase;
@@ -1773,11 +1775,11 @@ namespace {
 
   class CFRefLeakReport : public CFRefReport {
     const MemRegion* AllocBinding;
-
   public:
     CFRefLeakReport(CFRefBug &D, const LangOptions &LOpts, bool GCEnabled,
                     const SummaryLogTy &Log, ExplodedNode *n, SymbolRef sym,
-                    CheckerContext &Ctx);
+                    CheckerContext &Ctx,
+                    bool IncludeAllocationLine);
 
     PathDiagnosticLocation getLocation(const SourceManager &SM) const {
       assert(Location.isValid());
@@ -2134,30 +2136,84 @@ PathDiagnosticPiece *CFRefReportVisitor::VisitNode(const ExplodedNode *N,
 // Find the first node in the current function context that referred to the
 // tracked symbol and the memory location that value was stored to. Note, the
 // value is only reported if the allocation occurred in the same function as
-// the leak.
-static std::pair<const ExplodedNode*,const MemRegion*>
+// the leak. The function can also return a location context, which should be
+// treated as interesting.
+struct AllocationInfo {
+  const ExplodedNode* N;
+  const MemRegion *R;
+  const LocationContext *InterestingMethodContext;
+  AllocationInfo(const ExplodedNode *InN,
+                 const MemRegion *InR,
+                 const LocationContext *InInterestingMethodContext) :
+    N(InN), R(InR), InterestingMethodContext(InInterestingMethodContext) {}
+};
+
+static AllocationInfo
 GetAllocationSite(ProgramStateManager& StateMgr, const ExplodedNode *N,
                   SymbolRef Sym) {
-  const ExplodedNode *Last = N;
+  const ExplodedNode *AllocationNode = N;
+  const ExplodedNode *AllocationNodeInCurrentContext = N;
   const MemRegion* FirstBinding = 0;
   const LocationContext *LeakContext = N->getLocationContext();
 
+  // The location context of the init method called on the leaked object, if
+  // available.
+  const LocationContext *InitMethodContext = 0;
+
   while (N) {
     ProgramStateRef St = N->getState();
+    const LocationContext *NContext = N->getLocationContext();
 
     if (!getRefBinding(St, Sym))
       break;
 
     StoreManager::FindUniqueBinding FB(Sym);
     StateMgr.iterBindings(St, FB);
-    if (FB) FirstBinding = FB.getRegion();
+    
+    if (FB) {
+      const MemRegion *R = FB.getRegion();
+      const VarRegion *VR = R->getBaseRegion()->getAs<VarRegion>();
+      // Do not show local variables belonging to a function other than
+      // where the error is reported.
+      if (!VR || VR->getStackFrame() == LeakContext->getCurrentStackFrame())
+        FirstBinding = R;
+    }
 
-    // Allocation node, is the last node in the current context in which the
-    // symbol was tracked.
-    if (N->getLocationContext() == LeakContext)
-      Last = N;
+    // AllocationNode is the last node in which the symbol was tracked.
+    AllocationNode = N;
+
+    // AllocationNodeInCurrentContext, is the last node in the current context
+    // in which the symbol was tracked.
+    if (NContext == LeakContext)
+      AllocationNodeInCurrentContext = N;
+
+    // Find the last init that was called on the given symbol and store the
+    // init method's location context.
+    if (!InitMethodContext)
+      if (Optional<CallEnter> CEP = N->getLocation().getAs<CallEnter>()) {
+        const Stmt *CE = CEP->getCallExpr();
+        if (const ObjCMessageExpr *ME = dyn_cast<ObjCMessageExpr>(CE)) {
+          const Stmt *RecExpr = ME->getInstanceReceiver();
+          if (RecExpr) {
+            SVal RecV = St->getSVal(RecExpr, NContext);
+            if (ME->getMethodFamily() == OMF_init && RecV.getAsSymbol() == Sym)
+              InitMethodContext = CEP->getCalleeContext();
+          }
+        }
+      }
 
     N = N->pred_empty() ? NULL : *(N->pred_begin());
+  }
+
+  // If we are reporting a leak of the object that was allocated with alloc,
+  // mark its init method as interesting.
+  const LocationContext *InterestingMethodContext = 0;
+  if (InitMethodContext) {
+    const ProgramPoint AllocPP = AllocationNode->getLocation();
+    if (Optional<StmtPoint> SP = AllocPP.getAs<StmtPoint>())
+      if (const ObjCMessageExpr *ME = SP->getStmtAs<ObjCMessageExpr>())
+        if (ME->getMethodFamily() == OMF_alloc)
+          InterestingMethodContext = InitMethodContext;
   }
 
   // If allocation happened in a function different from the leak node context,
@@ -2167,7 +2223,9 @@ GetAllocationSite(ProgramStateManager& StateMgr, const ExplodedNode *N,
     FirstBinding = 0;
   }
 
-  return std::make_pair(Last, FirstBinding);
+  return AllocationInfo(AllocationNodeInCurrentContext,
+                        FirstBinding,
+                        InterestingMethodContext);
 }
 
 PathDiagnosticPiece*
@@ -2190,11 +2248,11 @@ CFRefLeakReportVisitor::getEndPath(BugReporterContext &BRC,
   // We are reporting a leak.  Walk up the graph to get to the first node where
   // the symbol appeared, and also get the first VarDecl that tracked object
   // is stored to.
-  const ExplodedNode *AllocNode = 0;
-  const MemRegion* FirstBinding = 0;
-
-  llvm::tie(AllocNode, FirstBinding) =
+  AllocationInfo AllocI =
     GetAllocationSite(BRC.getStateManager(), EndN, Sym);
+
+  const MemRegion* FirstBinding = AllocI.R;
+  BR.markInteresting(AllocI.InterestingMethodContext);
 
   SourceManager& SM = BRC.getSourceManager();
 
@@ -2267,8 +2325,9 @@ CFRefLeakReportVisitor::getEndPath(BugReporterContext &BRC,
 CFRefLeakReport::CFRefLeakReport(CFRefBug &D, const LangOptions &LOpts,
                                  bool GCEnabled, const SummaryLogTy &Log, 
                                  ExplodedNode *n, SymbolRef sym,
-                                 CheckerContext &Ctx)
-: CFRefReport(D, LOpts, GCEnabled, Log, n, sym, false) {
+                                 CheckerContext &Ctx,
+                                 bool IncludeAllocationLine)
+  : CFRefReport(D, LOpts, GCEnabled, Log, n, sym, false) {
 
   // Most bug reports are cached at the location where they occurred.
   // With leaks, we want to unique them by the location where they were
@@ -2282,8 +2341,12 @@ CFRefLeakReport::CFRefLeakReport(CFRefBug &D, const LangOptions &LOpts,
 
   const SourceManager& SMgr = Ctx.getSourceManager();
 
-  llvm::tie(AllocNode, AllocBinding) =  // Set AllocBinding.
+  AllocationInfo AllocI =
     GetAllocationSite(Ctx.getStateManager(), getErrorNode(), sym);
+
+  AllocNode = AllocI.N;
+  AllocBinding = AllocI.R;
+  markInteresting(AllocI.InterestingMethodContext);
 
   // Get the SourceLocation for the allocation site.
   // FIXME: This will crash the analyzer if an allocation comes from an
@@ -2305,9 +2368,13 @@ CFRefLeakReport::CFRefLeakReport(CFRefBug &D, const LangOptions &LOpts,
     os << "(when using garbage collection) ";
   os << "of an object";
 
-  // FIXME: AllocBinding doesn't get populated for RegionStore yet.
-  if (AllocBinding)
+  if (AllocBinding) {
     os << " stored into '" << AllocBinding->getString() << '\'';
+    if (IncludeAllocationLine) {
+      FullSourceLoc SL(AllocStmt->getLocStart(), Ctx.getSourceManager());
+      os << " (allocated on line " << SL.getSpellingLineNumber() << ")";
+    }
+  }
 
   addVisitor(new CFRefLeakReportVisitor(sym, GCEnabled, Log));
 }
@@ -2348,8 +2415,14 @@ class RetainCountChecker
   mutable SummaryLogTy SummaryLog;
   mutable bool ShouldResetSummaryLog;
 
+  /// Optional setting to indicate if leak reports should include
+  /// the allocation line.
+  mutable bool IncludeAllocationLine;
+
 public:  
-  RetainCountChecker() : ShouldResetSummaryLog(false) {}
+  RetainCountChecker(AnalyzerOptions &AO)
+    : ShouldResetSummaryLog(false),
+      IncludeAllocationLine(shouldIncludeAllocationSiteInLeakDiagnostics(AO)) {}
 
   virtual ~RetainCountChecker() {
     DeleteContainerSeconds(DeadSymbolTags);
@@ -3294,7 +3367,8 @@ void RetainCountChecker::checkReturnWithRetEffect(const ReturnStmt *S,
           CFRefReport *report =
             new CFRefLeakReport(*getLeakAtReturnBug(LOpts, GCEnabled),
                                 LOpts, GCEnabled, SummaryLog,
-                                N, Sym, C);
+                                N, Sym, C, IncludeAllocationLine);
+
           C.emitReport(report);
         }
       }
@@ -3534,7 +3608,8 @@ RetainCountChecker::processLeaks(ProgramStateRef state,
       assert(BT && "BugType not initialized.");
 
       CFRefLeakReport *report = new CFRefLeakReport(*BT, LOpts, GCEnabled, 
-                                                    SummaryLog, N, *I, Ctx);
+                                                    SummaryLog, N, *I, Ctx,
+                                                    IncludeAllocationLine);
       Ctx.emitReport(report);
     }
   }
@@ -3656,6 +3731,6 @@ void RetainCountChecker::printState(raw_ostream &Out, ProgramStateRef State,
 //===----------------------------------------------------------------------===//
 
 void ento::registerRetainCountChecker(CheckerManager &Mgr) {
-  Mgr.registerChecker<RetainCountChecker>();
+  Mgr.registerChecker<RetainCountChecker>(Mgr.getAnalyzerOptions());
 }
 

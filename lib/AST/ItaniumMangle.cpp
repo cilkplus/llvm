@@ -1095,6 +1095,15 @@ void CXXNameMangler::mangleUnqualifiedName(const NamedDecl *ND,
       mangleSourceName(FD->getIdentifier());
       break;
     }
+
+    // Class extensions have no name as a category, and it's possible
+    // for them to be the semantic parent of certain declarations
+    // (primarily, tag decls defined within declarations).  Such
+    // declarations will always have internal linkage, so the name
+    // doesn't really matter, but we shouldn't crash on them.  For
+    // safety, just handle all ObjC containers here.
+    if (isa<ObjCContainerDecl>(ND))
+      break;
     
     // We must have an anonymous struct.
     const TagDecl *TD = cast<TagDecl>(ND);
@@ -2389,6 +2398,7 @@ recurse:
   case Expr::ImplicitValueInitExprClass:
   case Expr::ParenListExprClass:
   case Expr::LambdaExprClass:
+  case Expr::MSPropertyRefExprClass:
     llvm_unreachable("unexpected statement kind");
 
   // FIXME: invent manglings for all these.

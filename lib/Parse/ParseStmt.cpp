@@ -291,6 +291,9 @@ Retry:
     HandlePragmaOpenCLExtension();
     return StmtEmpty();
 
+  case tok::annot_pragma_captured:
+    return HandlePragmaCaptured();
+
   case tok::kw__Cilk_sync:
     if (!getLangOpts().CilkPlus) {
       Diag(Tok, diag::err_cilkplus_disable);

@@ -127,10 +127,21 @@ public:
   virtual void FileChanged(SourceLocation Loc, FileChangeReason Reason,
                            SrcMgr::CharacteristicKind FileType,
                            FileID PrevFID);
+  virtual void InclusionDirective(SourceLocation HashLoc,
+                                  const Token &IncludeTok,
+                                  StringRef FileName,
+                                  bool IsAngled,
+                                  CharSourceRange FilenameRange,
+                                  const FileEntry *File,
+                                  StringRef SearchPath,
+                                  StringRef RelativePath,
+                                  const Module *Imported);
   virtual void Ident(SourceLocation Loc, const std::string &str);
+  virtual void PragmaCaptured(SourceLocation Loc, StringRef Str);
   virtual void PragmaComment(SourceLocation Loc, const IdentifierInfo *Kind,
                              const std::string &Str);
   virtual void PragmaMessage(SourceLocation Loc, StringRef Str);
+  virtual void PragmaDebug(SourceLocation Loc, StringRef DebugType);
   virtual void PragmaDiagnosticPush(SourceLocation Loc,
                                     StringRef Namespace);
   virtual void PragmaDiagnosticPop(SourceLocation Loc,
@@ -305,6 +316,26 @@ void PrintPPOutputPPCallbacks::FileChanged(SourceLocation Loc,
   }
 }
 
+void PrintPPOutputPPCallbacks::InclusionDirective(SourceLocation HashLoc,
+                                                  const Token &IncludeTok,
+                                                  StringRef FileName,
+                                                  bool IsAngled,
+                                                  CharSourceRange FilenameRange,
+                                                  const FileEntry *File,
+                                                  StringRef SearchPath,
+                                                  StringRef RelativePath,
+                                                  const Module *Imported) {
+  // When preprocessing, turn implicit imports into @imports.
+  // FIXME: This is a stop-gap until a more comprehensive "preprocessing with
+  // modules" solution is introduced.
+  if (Imported) {
+    startNewLineIfNeeded();
+    MoveToLine(HashLoc);
+    OS << "@import " << Imported->getFullModuleName() << ";"
+       << " /* clang -E: implicit import for \"" << File->getName() << "\" */";
+  }
+}
+
 /// Ident - Handle #ident directives when read by the preprocessor.
 ///
 void PrintPPOutputPPCallbacks::Ident(SourceLocation Loc, const std::string &S) {
@@ -313,6 +344,15 @@ void PrintPPOutputPPCallbacks::Ident(SourceLocation Loc, const std::string &S) {
   OS.write("#ident ", strlen("#ident "));
   OS.write(&S[0], S.size());
   EmittedTokensOnThisLine = true;
+}
+
+void PrintPPOutputPPCallbacks::PragmaCaptured(SourceLocation Loc,
+                                              StringRef Str) {
+  startNewLineIfNeeded();
+  MoveToLine(Loc);
+  OS << "#pragma captured";
+
+  setEmittedDirectiveOnThisLine();
 }
 
 /// MacroDefined - This hook is called whenever a macro definition is seen.
@@ -387,6 +427,17 @@ void PrintPPOutputPPCallbacks::PragmaMessage(SourceLocation Loc,
   OS << '"';
 
   OS << ')';
+  setEmittedDirectiveOnThisLine();
+}
+
+void PrintPPOutputPPCallbacks::PragmaDebug(SourceLocation Loc,
+                                           StringRef DebugType) {
+  startNewLineIfNeeded();
+  MoveToLine(Loc);
+
+  OS << "#pragma clang __debug ";
+  OS << DebugType;
+
   setEmittedDirectiveOnThisLine();
 }
 

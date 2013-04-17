@@ -270,6 +270,10 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     K = CXCursor_DeclStmt;
     break;
 
+  case Stmt::CapturedStmtClass:
+    K = CXCursor_UnexposedStmt;
+    break;
+
   case Stmt::IntegerLiteralClass:
     K = CXCursor_IntegerLiteral;
     break;
@@ -442,6 +446,7 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::CXXDependentScopeMemberExprClass:
   case Stmt::CXXPseudoDestructorExprClass:
   case Stmt::MemberExprClass:            
+  case Stmt::MSPropertyRefExprClass:
   case Stmt::ObjCIsaExprClass:
   case Stmt::ObjCIvarRefExprClass:    
   case Stmt::ObjCPropertyRefExprClass: 

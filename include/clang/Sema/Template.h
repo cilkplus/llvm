@@ -187,10 +187,10 @@ namespace clang {
     /// this template instantiation.
     Sema &SemaRef;
 
-    typedef llvm::DenseMap<const Decl *, 
-                           llvm::PointerUnion<Decl *, DeclArgumentPack *> >
-      LocalDeclsMap;
-    
+    typedef llvm::SmallDenseMap<
+        const Decl *, llvm::PointerUnion<Decl *, DeclArgumentPack *>, 4>
+    LocalDeclsMap;
+
     /// \brief A mapping from local declarations that occur
     /// within a template to their instantiations.
     ///
@@ -401,6 +401,7 @@ namespace clang {
     Decl *VisitVarDecl(VarDecl *D);
     Decl *VisitAccessSpecDecl(AccessSpecDecl *D);
     Decl *VisitFieldDecl(FieldDecl *D);
+    Decl *VisitMSPropertyDecl(MSPropertyDecl *D);
     Decl *VisitIndirectFieldDecl(IndirectFieldDecl *D);
     Decl *VisitStaticAssertDecl(StaticAssertDecl *D);
     Decl *VisitEnumDecl(EnumDecl *D);

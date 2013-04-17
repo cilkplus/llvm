@@ -147,7 +147,7 @@ class MallocChecker : public Checker<check::DeadSymbols,
                                      check::PointerEscape,
                                      check::ConstPointerEscape,
                                      check::PreStmt<ReturnStmt>,
-                                     check::PreStmt<CallExpr>,
+                                     check::PreCall,
                                      check::PostStmt<CallExpr>,
                                      check::PostStmt<CXXNewExpr>,
                                      check::PreStmt<CXXDeleteExpr>,
@@ -181,7 +181,7 @@ public:
 
   ChecksFilter Filter;
 
-  void checkPreStmt(const CallExpr *S, CheckerContext &C) const;
+  void checkPreCall(const CallEvent &Call, CheckerContext &C) const;
   void checkPostStmt(const CallExpr *CE, CheckerContext &C) const;
   void checkPostStmt(const CXXNewExpr *NE, CheckerContext &C) const;
   void checkPreStmt(const CXXDeleteExpr *DE, CheckerContext &C) const;
@@ -294,12 +294,13 @@ private:
                                   PointerEscapeKind Kind,
                                   bool(*CheckRefState)(const RefState*)) const;
 
-  // Used to suppress warnings if they are not related to the tracked family
-  // (derived from Sym or AllocDeallocStmt).
-  bool isTrackedFamily(AllocationFamily Family) const;
-  bool isTrackedFamily(CheckerContext &C, const Stmt *AllocDeallocStmt) const;
-  bool isTrackedFamily(CheckerContext &C, SymbolRef Sym) const;
-
+  ///@{
+  /// Tells if a given family/call/symbol is tracked by the current checker.
+  bool isTrackedByCurrentChecker(AllocationFamily Family) const;
+  bool isTrackedByCurrentChecker(CheckerContext &C,
+                                 const Stmt *AllocDeallocStmt) const;
+  bool isTrackedByCurrentChecker(CheckerContext &C, SymbolRef Sym) const;
+  ///@}
   static bool SummarizeValue(raw_ostream &os, SVal V);
   static bool SummarizeRegion(raw_ostream &os, const MemRegion *MR);
   void ReportBadFree(CheckerContext &C, SVal ArgVal, SourceRange Range, 
@@ -1081,7 +1082,7 @@ ProgramStateRef MallocChecker::FreeMemAux(CheckerContext &C,
                                  RefState::getReleased(Family, ParentExpr));
 }
 
-bool MallocChecker::isTrackedFamily(AllocationFamily Family) const {
+bool MallocChecker::isTrackedByCurrentChecker(AllocationFamily Family) const {
   switch (Family) {
   case AF_Malloc: {
     if (!Filter.CMallocOptimistic && !Filter.CMallocPessimistic)
@@ -1101,16 +1102,18 @@ bool MallocChecker::isTrackedFamily(AllocationFamily Family) const {
   llvm_unreachable("unhandled family");
 }
 
-bool MallocChecker::isTrackedFamily(CheckerContext &C, 
-                                    const Stmt *AllocDeallocStmt) const {
-  return isTrackedFamily(getAllocationFamily(C, AllocDeallocStmt));
+bool
+MallocChecker::isTrackedByCurrentChecker(CheckerContext &C, 
+                                         const Stmt *AllocDeallocStmt) const {
+  return isTrackedByCurrentChecker(getAllocationFamily(C, AllocDeallocStmt));
 }
 
-bool MallocChecker::isTrackedFamily(CheckerContext &C, SymbolRef Sym) const {
+bool MallocChecker::isTrackedByCurrentChecker(CheckerContext &C,
+                                              SymbolRef Sym) const {
 
   const RefState *RS = C.getState()->get<RegionState>(Sym);
   assert(RS);
-  return isTrackedFamily(RS->getAllocationFamily());
+  return isTrackedByCurrentChecker(RS->getAllocationFamily());
 }
 
 bool MallocChecker::SummarizeValue(raw_ostream &os, SVal V) {
@@ -1208,7 +1211,7 @@ void MallocChecker::ReportBadFree(CheckerContext &C, SVal ArgVal,
       !Filter.CNewDeleteChecker)
     return;
 
-  if (!isTrackedFamily(C, DeallocExpr))
+  if (!isTrackedByCurrentChecker(C, DeallocExpr))
     return;
 
   if (ExplodedNode *N = C.generateSink()) {
@@ -1296,7 +1299,7 @@ void MallocChecker::ReportOffsetFree(CheckerContext &C, SVal ArgVal,
       !Filter.CNewDeleteChecker)
     return;
 
-  if (!isTrackedFamily(C, AllocExpr))
+  if (!isTrackedByCurrentChecker(C, AllocExpr))
     return;
 
   ExplodedNode *N = C.generateSink();
@@ -1348,7 +1351,7 @@ void MallocChecker::ReportUseAfterFree(CheckerContext &C, SourceRange Range,
       !Filter.CNewDeleteChecker)
     return;
 
-  if (!isTrackedFamily(C, Sym))
+  if (!isTrackedByCurrentChecker(C, Sym))
     return;
 
   if (ExplodedNode *N = C.generateSink()) {
@@ -1373,7 +1376,7 @@ void MallocChecker::ReportDoubleFree(CheckerContext &C, SourceRange Range,
       !Filter.CNewDeleteChecker)
     return;
 
-  if (!isTrackedFamily(C, Sym))
+  if (!isTrackedByCurrentChecker(C, Sym))
     return;
 
   if (ExplodedNode *N = C.generateSink()) {
@@ -1527,13 +1530,19 @@ MallocChecker::getAllocationSite(const ExplodedNode *N, SymbolRef Sym,
 
     // Find the most recent expression bound to the symbol in the current
     // context.
-    if (!ReferenceRegion) {
-      if (const MemRegion *MR = C.getLocationRegionIfPostStore(N)) {
-        SVal Val = State->getSVal(MR);
-        if (Val.getAsLocSymbol() == Sym)
-          ReferenceRegion = MR;
+      if (!ReferenceRegion) {
+        if (const MemRegion *MR = C.getLocationRegionIfPostStore(N)) {
+          SVal Val = State->getSVal(MR);
+          if (Val.getAsLocSymbol() == Sym) {
+            const VarRegion* VR = MR->getBaseRegion()->getAs<VarRegion>();
+            // Do not show local variables belonging to a function other than
+            // where the error is reported.
+            if (!VR ||
+                (VR->getStackFrame() == LeakContext->getCurrentStackFrame()))
+              ReferenceRegion = MR;
+          }
+        }
       }
-    }
 
     // Allocation node, is the last node in the current context in which the
     // symbol was tracked.
@@ -1555,7 +1564,7 @@ void MallocChecker::reportLeak(SymbolRef Sym, ExplodedNode *N,
   const RefState *RS = C.getState()->get<RegionState>(Sym);
   assert(RS && "cannot leak an untracked symbol");
   AllocationFamily Family = RS->getAllocationFamily();
-  if (!isTrackedFamily(Family))
+  if (!isTrackedByCurrentChecker(Family))
     return;
 
   // Special case for new and new[]; these are controlled by a separate checker
@@ -1597,9 +1606,8 @@ void MallocChecker::reportLeak(SymbolRef Sym, ExplodedNode *N,
   SmallString<200> buf;
   llvm::raw_svector_ostream os(buf);
   if (Region && Region->canPrintPretty()) {
-    os << "Potential leak of memory pointed to by '";
+    os << "Potential leak of memory pointed to by ";
     Region->printPretty(os);
-    os << '\'';
   } else {
     os << "Potential memory leak";
   }
@@ -1665,26 +1673,39 @@ void MallocChecker::checkDeadSymbols(SymbolReaper &SymReaper,
   C.addTransition(state->set<RegionState>(RS), N);
 }
 
-void MallocChecker::checkPreStmt(const CallExpr *CE, CheckerContext &C) const {
+void MallocChecker::checkPreCall(const CallEvent &Call,
+                                 CheckerContext &C) const {
+
   // We will check for double free in the post visit.
-  if ((Filter.CMallocOptimistic || Filter.CMallocPessimistic) &&
-      isFreeFunction(C.getCalleeDecl(CE), C.getASTContext()))
-    return;
+  if (const AnyFunctionCall *FC = dyn_cast<AnyFunctionCall>(&Call)) {
+    const FunctionDecl *FD = FC->getDecl();
+    if (!FD)
+      return;
 
-  if (Filter.CNewDeleteChecker &&
-      isStandardNewDelete(C.getCalleeDecl(CE), C.getASTContext()))
-    return;
+    if ((Filter.CMallocOptimistic || Filter.CMallocPessimistic) &&
+        isFreeFunction(FD, C.getASTContext()))
+      return;
 
-  // Check use after free, when a freed pointer is passed to a call.
-  ProgramStateRef State = C.getState();
-  for (CallExpr::const_arg_iterator I = CE->arg_begin(),
-                                    E = CE->arg_end(); I != E; ++I) {
-    const Expr *A = *I;
-    if (A->getType().getTypePtr()->isAnyPointerType()) {
-      SymbolRef Sym = C.getSVal(A).getAsSymbol();
+    if (Filter.CNewDeleteChecker &&
+        isStandardNewDelete(FD, C.getASTContext()))
+      return;
+  }
+
+  // Check if the callee of a method is deleted.
+  if (const CXXInstanceCall *CC = dyn_cast<CXXInstanceCall>(&Call)) {
+    SymbolRef Sym = CC->getCXXThisVal().getAsSymbol();
+    if (!Sym || checkUseAfterFree(Sym, C, CC->getCXXThisExpr()))
+      return;
+  }
+
+  // Check arguments for being used after free.
+  for (unsigned I = 0, E = Call.getNumArgs(); I != E; ++I) {
+    SVal ArgSVal = Call.getArgSVal(I);
+    if (ArgSVal.getAs<Loc>()) {
+      SymbolRef Sym = ArgSVal.getAsSymbol();
       if (!Sym)
         continue;
-      if (checkUseAfterFree(Sym, C, A))
+      if (checkUseAfterFree(Sym, C, Call.getArgExpr(I)))
         return;
     }
   }
@@ -2071,7 +2092,7 @@ MallocChecker::MallocBugVisitor::VisitNode(const ExplodedNode *N,
     } else if (isReleased(RS, RSPrev, S)) {
       Msg = "Memory is released";
       StackHint = new StackHintGeneratorForSymbol(Sym,
-                                                  "Returned released memory");
+                                             "Returning; memory was released");
     } else if (isRelinquished(RS, RSPrev, S)) {
       Msg = "Memory ownership is transfered";
       StackHint = new StackHintGeneratorForSymbol(Sym, "");
@@ -2131,6 +2152,14 @@ void MallocChecker::printState(raw_ostream &Out, ProgramStateRef State,
   }
 }
 
+void ento::registerNewDeleteLeaksChecker(CheckerManager &mgr) {
+  registerCStringCheckerBasic(mgr);
+  mgr.registerChecker<MallocChecker>()->Filter.CNewDeleteLeaksChecker = true;
+  // We currently treat NewDeleteLeaks checker as a subchecker of NewDelete 
+  // checker.
+  mgr.registerChecker<MallocChecker>()->Filter.CNewDeleteChecker = true;
+}
+
 #define REGISTER_CHECKER(name) \
 void ento::register##name(CheckerManager &mgr) {\
   registerCStringCheckerBasic(mgr); \
@@ -2140,5 +2169,4 @@ void ento::register##name(CheckerManager &mgr) {\
 REGISTER_CHECKER(MallocPessimistic)
 REGISTER_CHECKER(MallocOptimistic)
 REGISTER_CHECKER(NewDeleteChecker)
-REGISTER_CHECKER(NewDeleteLeaksChecker)
 REGISTER_CHECKER(MismatchedDeallocatorChecker)

@@ -324,6 +324,10 @@ void ASTStmtReader::VisitMSAsmStmt(MSAsmStmt *S) {
   VisitStmt(S);
 }
 
+void ASTStmtReader::VisitCapturedStmt(CapturedStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
 void ASTStmtReader::VisitExpr(Expr *E) {
   VisitStmt(E);
   E->setType(Reader.readType(F, Record, Idx));
@@ -1498,6 +1502,15 @@ void ASTStmtReader::VisitOpaqueValueExpr(OpaqueValueExpr *E) {
 //===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements
 //===----------------------------------------------------------------------===//
+void ASTStmtReader::VisitMSPropertyRefExpr(MSPropertyRefExpr *E) {
+  VisitExpr(E);
+  E->IsArrow = (Record[Idx++] != 0);
+  E->BaseExpr = Reader.ReadSubExpr();
+  E->QualifierLoc = Reader.ReadNestedNameSpecifierLoc(F, Record, Idx);
+  E->MemberLoc = ReadSourceLocation(Record, Idx);
+  E->TheDecl = ReadDeclAs<MSPropertyDecl>(Record, Idx);
+}
+
 void ASTStmtReader::VisitCXXUuidofExpr(CXXUuidofExpr *E) {
   VisitExpr(E);
   E->setSourceRange(ReadSourceRange(Record, Idx));
@@ -1730,6 +1743,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case STMT_MSASM:
       S = new (Context) MSAsmStmt(Empty);
+      break;
+
+    case STMT_CAPTURED:
+      llvm_unreachable("not implemented yet");
       break;
 
     case EXPR_PREDEFINED:
@@ -2089,6 +2106,9 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
     case EXPR_CXX_UUIDOF_EXPR:
       S = new (Context) CXXUuidofExpr(Empty, true);
+      break;
+    case EXPR_CXX_PROPERTY_REF_EXPR:
+      S = new (Context) MSPropertyRefExpr(Empty);
       break;
     case EXPR_CXX_UUIDOF_TYPE:
       S = new (Context) CXXUuidofExpr(Empty, false);

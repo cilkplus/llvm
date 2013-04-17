@@ -27,6 +27,7 @@ def DeclStmt  : Stmt;
 def SwitchCase : Stmt<1>;
 def CaseStmt : DStmt<SwitchCase>;
 def DefaultStmt : DStmt<SwitchCase>;
+def CapturedStmt : Stmt;
 
 // Asm statements
 def AsmStmt : Stmt<1>;
@@ -163,6 +164,7 @@ def BlockExpr : DStmt<Expr>;
 def OpaqueValueExpr : DStmt<Expr>;
 
 // Microsoft Extensions.
+def MSPropertyRefExpr : DStmt<Expr>;
 def CXXUuidofExpr : DStmt<Expr>; 
 def SEHTryStmt : Stmt;
 def SEHExceptStmt : Stmt;

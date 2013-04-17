@@ -490,8 +490,7 @@ public: // Part of public interface to class.
 
   SVal getBindingForFieldOrElementCommon(RegionBindingsConstRef B,
                                          const TypedValueRegion *R,
-                                         QualType Ty,
-                                         const MemRegion *superR);
+                                         QualType Ty);
   
   SVal getLazyBinding(const SubRegion *LazyBindingRegion,
                       RegionBindingsRef LazyBinding);
@@ -604,6 +603,17 @@ ento::CreateFieldsOnlyRegionStoreManager(ProgramStateManager &StMgr) {
 //===----------------------------------------------------------------------===//
 
 namespace {
+/// Used to determine which global regions are automatically included in the
+/// initial worklist of a ClusterAnalysis.
+enum GlobalsFilterKind {
+  /// Don't include any global regions.
+  GFK_None,
+  /// Only include system globals.
+  GFK_SystemOnly,
+  /// Include all global regions.
+  GFK_All
+};
+
 template <typename DERIVED>
 class ClusterAnalysis  {
 protected:
@@ -620,19 +630,36 @@ protected:
   SValBuilder &svalBuilder;
 
   RegionBindingsRef B;
-  
-  const bool includeGlobals;
 
+private:
+  GlobalsFilterKind GlobalsFilter;
+
+protected:
   const ClusterBindings *getCluster(const MemRegion *R) {
     return B.lookup(R);
   }
 
+  /// Returns true if the memory space of the given region is one of the global
+  /// regions specially included at the start of analysis.
+  bool isInitiallyIncludedGlobalRegion(const MemRegion *R) {
+    switch (GlobalsFilter) {
+    case GFK_None:
+      return false;
+    case GFK_SystemOnly:
+      return isa<GlobalSystemSpaceRegion>(R->getMemorySpace());
+    case GFK_All:
+      return isa<NonStaticGlobalSpaceRegion>(R->getMemorySpace());
+    }
+
+    llvm_unreachable("unknown globals filter");
+  }
+
 public:
   ClusterAnalysis(RegionStoreManager &rm, ProgramStateManager &StateMgr,
-                  RegionBindingsRef b, const bool includeGlobals)
+                  RegionBindingsRef b, GlobalsFilterKind GFK)
     : RM(rm), Ctx(StateMgr.getContext()),
       svalBuilder(StateMgr.getSValBuilder()),
-      B(b), includeGlobals(includeGlobals) {}
+      B(b), GlobalsFilter(GFK) {}
 
   RegionBindingsRef getRegionBindings() const { return B; }
 
@@ -650,9 +677,9 @@ public:
       assert(!Cluster.isEmpty() && "Empty clusters should be removed");
       static_cast<DERIVED*>(this)->VisitAddedToCluster(Base, Cluster);
 
-      if (includeGlobals)
-        if (isa<NonStaticGlobalSpaceRegion>(Base->getMemorySpace()))
-          AddToWorkList(Base, &Cluster);
+      // If this is an interesting global region, add it the work list up front.
+      if (isInitiallyIncludedGlobalRegion(Base))
+        AddToWorkList(WorkListElement(Base), &Cluster);
     }
   }
 
@@ -905,8 +932,8 @@ public:
                           InvalidatedSymbols &is,
                           InvalidatedSymbols &inConstIS,
                           StoreManager::InvalidatedRegions *r,
-                          bool includeGlobals)
-    : ClusterAnalysis<invalidateRegionsWorker>(rm, stateMgr, b, includeGlobals),
+                          GlobalsFilterKind GFK)
+    : ClusterAnalysis<invalidateRegionsWorker>(rm, stateMgr, b, GFK),
       Ex(ex), Count(count), LCtx(lctx), IS(is), ConstIS(inConstIS), Regions(r){}
 
   /// \param IsConst Specifies if the region we are invalidating is constant.
@@ -1013,7 +1040,13 @@ void invalidateRegionsWorker::VisitCluster(const MemRegion *baseR,
   const TypedValueRegion *TR = cast<TypedValueRegion>(baseR);
   QualType T = TR->getValueType();
 
-    // Invalidate the binding.
+  if (isInitiallyIncludedGlobalRegion(baseR)) {
+    // If the region is a global and we are invalidating all globals,
+    // erasing the entry is good enough.  This causes all globals to be lazily
+    // symbolicated from the same base symbol.
+    return;
+  }
+
   if (T->isStructureOrClassType()) {
     // Invalidate the region by setting its default value to
     // conjured symbol. The type of the symbol is irrelavant.
@@ -1031,16 +1064,6 @@ void invalidateRegionsWorker::VisitCluster(const MemRegion *baseR,
     B = B.addBinding(baseR, BindingKey::Default, V);
     return;
   }
-  
-  if (includeGlobals && 
-      isa<NonStaticGlobalSpaceRegion>(baseR->getMemorySpace())) {
-    // If the region is a global and we are invalidating all globals,
-    // just erase the entry.  This causes all globals to be lazily
-    // symbolicated from the same base symbol.
-    B = B.removeBinding(baseR);
-    return;
-  }
-  
 
   DefinedOrUnknownSVal V = svalBuilder.conjureSymbolVal(baseR, Ex, LCtx,
                                                         T,Count);
@@ -1116,9 +1139,19 @@ RegionStoreManager::invalidateRegions(Store store,
                                       InvalidatedRegions *TopLevelRegions,
                                       InvalidatedRegions *TopLevelConstRegions,
                                       InvalidatedRegions *Invalidated) {
-  RegionBindingsRef B = RegionStoreManager::getRegionBindings(store);
+  GlobalsFilterKind GlobalsFilter;
+  if (Call) {
+    if (Call->isInSystemHeader())
+      GlobalsFilter = GFK_SystemOnly;
+    else
+      GlobalsFilter = GFK_All;
+  } else {
+    GlobalsFilter = GFK_None;
+  }
+
+  RegionBindingsRef B = getRegionBindings(store);
   invalidateRegionsWorker W(*this, StateMgr, B, Ex, Count, LCtx, IS, ConstIS,
-                            Invalidated, false);
+                            Invalidated, GlobalsFilter);
 
   // Scan the bindings and generate the clusters.
   W.GenerateClusters();
@@ -1138,14 +1171,17 @@ RegionStoreManager::invalidateRegions(Store store,
   // invalidate them. (Note that function-static and immutable globals are never
   // invalidated by this.)
   // TODO: This could possibly be more precise with modules.
-  if (Call) {
+  switch (GlobalsFilter) {
+  case GFK_All:
+    B = invalidateGlobalRegion(MemRegion::GlobalInternalSpaceRegionKind,
+                               Ex, Count, LCtx, B, Invalidated);
+    // FALLTHROUGH
+  case GFK_SystemOnly:
     B = invalidateGlobalRegion(MemRegion::GlobalSystemSpaceRegionKind,
                                Ex, Count, LCtx, B, Invalidated);
-
-    if (!Call->isInSystemHeader()) {
-      B = invalidateGlobalRegion(MemRegion::GlobalInternalSpaceRegionKind,
-                                 Ex, Count, LCtx, B, Invalidated);
-    }
+    // FALLTHROUGH
+  case GFK_None:
+    break;
   }
 
   return StoreRef(B.asStore(), *this);
@@ -1506,7 +1542,7 @@ SVal RegionStoreManager::getBindingForElement(RegionBindingsConstRef B,
       }
     }
   }
-  return getBindingForFieldOrElementCommon(B, R, R->getElementType(),superR);
+  return getBindingForFieldOrElementCommon(B, R, R->getElementType());
 }
 
 SVal RegionStoreManager::getBindingForField(RegionBindingsConstRef B,
@@ -1517,7 +1553,7 @@ SVal RegionStoreManager::getBindingForField(RegionBindingsConstRef B,
     return *V;
 
   QualType Ty = R->getValueType();
-  return getBindingForFieldOrElementCommon(B, R, Ty, R->getSuperRegion());
+  return getBindingForFieldOrElementCommon(B, R, Ty);
 }
 
 Optional<SVal>
@@ -1580,8 +1616,7 @@ SVal RegionStoreManager::getLazyBinding(const SubRegion *LazyBindingRegion,
 SVal
 RegionStoreManager::getBindingForFieldOrElementCommon(RegionBindingsConstRef B,
                                                       const TypedValueRegion *R,
-                                                      QualType Ty,
-                                                      const MemRegion *superR) {
+                                                      QualType Ty) {
 
   // At this point we have already checked in either getBindingForElement or
   // getBindingForField if 'R' has a direct binding.
@@ -1614,8 +1649,9 @@ RegionStoreManager::getBindingForFieldOrElementCommon(RegionBindingsConstRef B,
   // quickly result in a warning.
   bool hasPartialLazyBinding = false;
 
-  const SubRegion *Base = dyn_cast<SubRegion>(superR);
-  while (Base) {
+  const SubRegion *SR = dyn_cast<SubRegion>(R);
+  while (SR) {
+    const MemRegion *Base = SR->getSuperRegion();
     if (Optional<SVal> D = getBindingForDerivedDefaultValue(B, Base, R, Ty)) {
       if (D->getAs<nonloc::LazyCompoundVal>()) {
         hasPartialLazyBinding = true;
@@ -1633,7 +1669,7 @@ RegionStoreManager::getBindingForFieldOrElementCommon(RegionBindingsConstRef B,
     
     // If our super region is a field or element itself, walk up the region
     // hierarchy to see if there is a default value installed in an ancestor.
-    Base = dyn_cast<SubRegion>(Base->getSuperRegion());
+    SR = dyn_cast<SubRegion>(Base);
   }
 
   if (R->hasStackNonParametersStorage()) {
@@ -1641,7 +1677,7 @@ RegionStoreManager::getBindingForFieldOrElementCommon(RegionBindingsConstRef B,
       // Currently we don't reason specially about Clang-style vectors.  Check
       // if superR is a vector and if so return Unknown.
       if (const TypedValueRegion *typedSuperR = 
-            dyn_cast<TypedValueRegion>(superR)) {
+            dyn_cast<TypedValueRegion>(R->getSuperRegion())) {
         if (typedSuperR->getValueType()->isVectorType())
           return UnknownVal();
       }
@@ -2115,8 +2151,7 @@ public:
                            ProgramStateManager &stateMgr,
                            RegionBindingsRef b, SymbolReaper &symReaper,
                            const StackFrameContext *LCtx)
-    : ClusterAnalysis<removeDeadBindingsWorker>(rm, stateMgr, b,
-                                                /* includeGlobals = */ false),
+    : ClusterAnalysis<removeDeadBindingsWorker>(rm, stateMgr, b, GFK_None),
       SymReaper(symReaper), CurrentLCtx(LCtx) {}
 
   // Called by ClusterAnalysis.

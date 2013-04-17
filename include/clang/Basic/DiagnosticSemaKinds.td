@@ -296,9 +296,9 @@ def warn_exit_time_destructor : Warning<
   InGroup<ExitTimeDestructors>, DefaultIgnore;
 
 def err_invalid_thread : Error<
-  "'__thread' is only allowed on variable declarations">;
+  "'%0' is only allowed on variable declarations">;
 def err_thread_non_global : Error<
-  "'__thread' variables must have global storage">;
+  "'%0' variables must have global storage">;
 def err_thread_unsupported : Error<
   "thread-local storage is unsupported for the current target">;
 
@@ -1809,6 +1809,19 @@ def err_attribute_section_local_variable : Error<
   "'section' attribute is not valid on local variables">;
 def warn_mismatched_section : Warning<
   "section does not match previous declaration">, InGroup<Section>;
+
+def err_anonymous_property: Error<
+  "anonymous property is not supported">;
+def err_property_is_variably_modified: Error<
+  "property '%0' has a variably modified type">;
+def err_no_getter_for_property : Error<
+  "no getter defined for property '%0'">;
+def err_no_setter_for_property : Error<
+  "no setter defined for property '%0'">;
+def error_cannot_find_suitable_getter : Error<
+  "cannot find suitable getter for property '%0'">;
+def error_cannot_find_suitable_setter : Error<
+  "cannot find suitable setter for property '%0'">;
 
 def err_attribute_aligned_not_power_of_two : Error<
   "requested alignment is not a power of 2">;
@@ -3369,6 +3382,9 @@ def err_non_thread_thread : Error<
   "non-thread-local declaration of %0 follows thread-local declaration">;
 def err_thread_non_thread : Error<
   "thread-local declaration of %0 follows non-thread-local declaration">;
+def err_thread_thread_different_kind : Error<
+  "thread-local declaration of %0 with %select{static|dynamic}1 initialization "
+  "follows declaration with %select{dynamic|static}1 initialization">;
 def err_redefinition_different_type : Error<
   "redefinition of %0 with a different type%diff{: $ vs $|}1,2">;
 def err_redefinition_different_kind : Error<
@@ -4025,6 +4041,13 @@ def warn_bitwise_and_in_bitwise_or : Warning<
 def warn_logical_and_in_logical_or : Warning<
   "'&&' within '||'">, InGroup<LogicalOpParentheses>;
 
+def warn_overloaded_shift_in_comparison :Warning<
+  "overloaded operator %select{>>|<<}0 has lower precedence than "
+  "comparison operator">,
+  InGroup<OverloadedShiftOpParentheses>;
+def note_evaluate_comparison_first :Note<
+  "place parentheses around comparison expression to evaluate it first">;
+
 def warn_addition_in_bitshift : Warning<
   "operator '%0' has lower precedence than '%1'; "
   "'%1' will be evaluated first">, InGroup<ShiftOpParentheses>;
@@ -4473,8 +4496,7 @@ def err_catch_param_not_objc_type : Error<
 def err_illegal_qualifiers_on_catch_parm : Error<
   "illegal qualifiers on @catch parameter">;
 def err_storage_spec_on_catch_parm : Error<
-  "@catch parameter cannot have storage specifier %select{|'typedef'|'extern'|"
-  "'static'|'auto'|'register'|'__private_extern__'|'mutable'}0">;
+  "@catch parameter cannot have storage specifier '%0'">;
 def warn_register_objc_catch_parm : Warning<
   "'register' storage specifier on @catch parameter will be ignored">;
 def err_qualified_objc_catch_parm : Error<
@@ -4788,6 +4810,9 @@ let CategoryName = "Lambda Issue" in {
     "implicit capture of lambda object due to conversion to block pointer "
     "here">;
 }
+
+def err_return_in_captured_stmt : Error<
+  "cannot return from %0">;
 
 def err_operator_arrow_circular : Error<
   "circular pointer delegation detected">;
@@ -5415,6 +5440,13 @@ def err_in_class_initializer_references_def_ctor : Error<
 def ext_in_class_initializer_non_constant : Extension<
   "in-class initializer for static data member is not a constant expression; "
   "folding it to a constant is a GNU extension">, InGroup<GNU>;
+
+def err_thread_dynamic_init : Error<
+  "initializer for thread-local variable must be a constant expression">;
+def err_thread_nontrivial_dtor : Error<
+  "type of thread-local variable has non-trivial destruction">;
+def note_use_thread_local : Note<
+  "use 'thread_local' to allow this">;
 
 // C++ anonymous unions and GNU anonymous structs/unions
 def ext_anonymous_union : Extension<
