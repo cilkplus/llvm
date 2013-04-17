@@ -175,7 +175,7 @@ def AsTypeExpr : DStmt<Expr>;
 // Cilk Plus Extensions.
 def CilkSyncStmt : Stmt;
 
-def CapturedStmt : Stmt<1>;
-def CilkSpawnCapturedStmt : DStmt<CapturedStmt>;
+def DeprecatedCapturedStmt : Stmt<1>;
+def CilkSpawnDeprecatedCapturedStmt : DStmt<DeprecatedCapturedStmt>;
 
 def CilkForStmt : Stmt;

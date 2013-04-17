@@ -1206,15 +1206,15 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       Builder.CreateStore(Zero, ReturnValue);
     }
 
-    // Initialize CurCGCapturedStmtInfo
+    // Initialize CurCGDeprecatedCapturedStmtInfo
     if (FD->isParallelRegion()) {
       typedef CodeGenModule::CaptureDeclMapTy::const_iterator const_iterator;
       const_iterator I = CGM.getCaptureDeclMap().find(FD);
       assert(I != CGM.getCaptureDeclMap().end()
-             && "cannot find its associate CapturedStmt");
+             && "cannot find its associate DeprecatedCapturedStmt");
 
-      CurCGCapturedStmtInfo = new CGCapturedStmtInfo();
-      CurCGCapturedStmtInfo->initCGCapturedStmtInfo(I->second);
+      CurCGDeprecatedCapturedStmtInfo = new CGDeprecatedCapturedStmtInfo();
+      CurCGDeprecatedCapturedStmtInfo->initCGDeprecatedCapturedStmtInfo(I->second);
     }
   }
 

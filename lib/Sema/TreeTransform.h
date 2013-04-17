@@ -9384,7 +9384,7 @@ TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
 
 template<typename Derived>
 StmtResult
-TreeTransform<Derived>::TransformCilkSpawnCapturedStmt(CilkSpawnCapturedStmt *S) {
+TreeTransform<Derived>::TransformCilkSpawnDeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmt *S) {
   return Owned(S);
 }
 

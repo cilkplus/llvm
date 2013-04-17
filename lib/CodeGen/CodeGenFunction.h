@@ -607,9 +607,9 @@ public:
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
 
-  class CGCapturedStmtInfo {
+  class CGDeprecatedCapturedStmtInfo {
   public:
-    CGCapturedStmtInfo()
+    CGDeprecatedCapturedStmtInfo()
       : ThisValue(0), CXXThisFieldDecl(0), ReceiverFieldDecl(0),
         ReceiverTmpFieldDecl(0), ThisParmVarDecl(0),
         ReceiverAddr(0), ReceiverTmp(0), ReceiverDecl(0) { }
@@ -641,19 +641,19 @@ public:
     llvm::Value *getReceiverTmp() const { return ReceiverTmp; }
     void setReceiverTmp(llvm::Value *val) { ReceiverTmp = val; }
 
-    void initCGCapturedStmtInfo(const CapturedStmt *S) {
+    void initCGDeprecatedCapturedStmtInfo(const DeprecatedCapturedStmt *S) {
       RecordDecl::field_iterator Field = S->getRecordDecl()->field_begin();
-      for (CapturedStmt::capture_const_iterator I = S->capture_begin(),
+      for (DeprecatedCapturedStmt::capture_const_iterator I = S->capture_begin(),
                                                 E = S->capture_end();
                                                 I != E; ++I, ++Field) {
         switch (I->getCaptureKind()) {
-        case CapturedStmt::LCK_This:
+        case DeprecatedCapturedStmt::LCK_This:
           CXXThisFieldDecl = *Field;
           break;
-        case CapturedStmt::LCK_Receiver:
+        case DeprecatedCapturedStmt::LCK_Receiver:
           ReceiverFieldDecl = *Field;
           break;
-        case CapturedStmt::LCK_ReceiverTmp:
+        case DeprecatedCapturedStmt::LCK_ReceiverTmp:
           ReceiverTmpFieldDecl = *Field;
           break;
         default:
@@ -704,7 +704,7 @@ public:
   };
 
   /// \brief Hold CodeGen info for captured statements
-  CGCapturedStmtInfo *CurCGCapturedStmtInfo;
+  CGDeprecatedCapturedStmtInfo *CurCGDeprecatedCapturedStmtInfo;
 
     /// \brief API for captured statement code generation.
   class CGCilkForStmtInfo {
@@ -759,7 +759,7 @@ public:
     VarDecl *ThisParmVarDecl;
   };
 
-  CGCilkForStmtInfo *CapturedStmtInfo;
+  CGCilkForStmtInfo *DeprecatedCapturedStmtInfo;
 
   /// \brief Information about implicit syncs used during code generation.
   CGCilkImplicitSyncInfo *CurCGCilkImplicitSyncInfo;
@@ -2309,8 +2309,8 @@ public:
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
-  void EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S);
-  void EmitCapturedStmt(const CapturedStmt &S);
+  void EmitCilkSpawnDeprecatedCapturedStmt(const CilkSpawnDeprecatedCapturedStmt &S);
+  void EmitDeprecatedCapturedStmt(const DeprecatedCapturedStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S);
   llvm::Function *GenerateCapturedFunction(GlobalDecl GD,
                                            const CilkForDecl *CD,
@@ -2849,16 +2849,16 @@ public:
   //                         Cilk Emission
   //===--------------------------------------------------------------------===//
 
-  /// \brief Initialize the CGCapturedStmtInfo
-  void SetCurCGCapturedStmtInfo(CGCapturedStmtInfo *Info) {
-    if (CurCGCapturedStmtInfo)
-      delete CurCGCapturedStmtInfo;
+  /// \brief Initialize the CGDeprecatedCapturedStmtInfo
+  void SetCurCGDeprecatedCapturedStmtInfo(CGDeprecatedCapturedStmtInfo *Info) {
+    if (CurCGDeprecatedCapturedStmtInfo)
+      delete CurCGDeprecatedCapturedStmtInfo;
 
-    CurCGCapturedStmtInfo = Info;
+    CurCGDeprecatedCapturedStmtInfo = Info;
   }
 
-  /// \brief Retrieve the current CGCapturedStmtInfo
-  CGCapturedStmtInfo *GetCurCGCapturedStmtInfo() { return CurCGCapturedStmtInfo; }
+  /// \brief Retrieve the current CGDeprecatedCapturedStmtInfo
+  CGDeprecatedCapturedStmtInfo *GetCurCGDeprecatedCapturedStmtInfo() { return CurCGDeprecatedCapturedStmtInfo; }
 
   /// \brief Emit the receiver declaration for a captured statement.
   /// Only allocation and cleanup will be emitted, and initialization will be

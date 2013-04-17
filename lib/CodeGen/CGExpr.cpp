@@ -196,11 +196,11 @@ CodeGenFunction::CreateReferenceTemporary(QualType Type,
   }
 
   // In a captured statement, don't alloca the receiver temp; it is passed in.
-  if (CurCGCapturedStmtInfo &&
-      CurCGCapturedStmtInfo->isReceiverDecl(InitializedDecl)) {
-    assert(CurCGCapturedStmtInfo->getReceiverTmp() &&
+  if (CurCGDeprecatedCapturedStmtInfo &&
+      CurCGDeprecatedCapturedStmtInfo->isReceiverDecl(InitializedDecl)) {
+    assert(CurCGDeprecatedCapturedStmtInfo->getReceiverTmp() &&
            "Expected receiver temporary in captured statement");
-    return CurCGCapturedStmtInfo->getReceiverTmp();
+    return CurCGDeprecatedCapturedStmtInfo->getReceiverTmp();
   }
 
   return CreateMemTemp(Type, "ref.tmp");
@@ -430,7 +430,7 @@ CodeGenFunction::EmitReferenceBindingToExpr(const Expr *E,
 
   // If we are inside a Cilk spawn helper, then the cleanups for the destructor
   // are emitted in the spawning function, rather than the helper.
-  if (CurCGCapturedStmtInfo)
+  if (CurCGDeprecatedCapturedStmtInfo)
     return RValue::get(Value);
 
   if (!ReferenceTemporaryDtor && !ReferenceInitializerList &&
@@ -1852,19 +1852,19 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
         LValue LambdaLV = MakeNaturalAlignAddrLValue(CXXABIThisValue,
                                                      LambdaTagType);
         return EmitLValueForField(LambdaLV, FD);
-      } else if (CurCGCapturedStmtInfo) {
-        if (const FieldDecl *FD = CurCGCapturedStmtInfo->lookup(VD)) {
+      } else if (CurCGDeprecatedCapturedStmtInfo) {
+        if (const FieldDecl *FD = CurCGDeprecatedCapturedStmtInfo->lookup(VD)) {
           QualType TagType = getContext().getTagDeclType(FD->getParent());
           LValue LV
-            = MakeNaturalAlignAddrLValue(CurCGCapturedStmtInfo->getThisValue(),
+            = MakeNaturalAlignAddrLValue(CurCGDeprecatedCapturedStmtInfo->getThisValue(),
                                          TagType);
           return EmitLValueForField(LV, FD);
         }
-      } else if (CapturedStmtInfo) {
-        if (const FieldDecl *FD = CapturedStmtInfo->lookup(VD)) {
+      } else if (DeprecatedCapturedStmtInfo) {
+        if (const FieldDecl *FD = DeprecatedCapturedStmtInfo->lookup(VD)) {
           QualType TagType = getContext().getTagDeclType(FD->getParent());
           LValue LV
-            = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
+            = MakeNaturalAlignAddrLValue(DeprecatedCapturedStmtInfo->getThisValue(),
                                          TagType);
 
           return EmitLValueForField(LV, FD);

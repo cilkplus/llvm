@@ -582,7 +582,7 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       DiagnoseCilkSpawn(Elts[i], HasError);
       if (!Dependent && !HasError) {
         StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
-        if (!Spawn.isInvalid() && isa<CilkSpawnCapturedStmt>(Spawn.get()))
+        if (!Spawn.isInvalid() && isa<CilkSpawnDeprecatedCapturedStmt>(Spawn.get()))
           Elts[i] = Spawn.take();
       }
     }
@@ -3236,7 +3236,7 @@ public:
   }
 
   /// Skip captured statements
-  bool TraverseCapturedStmt(CapturedStmt *) { return true; }
+  bool TraverseDeprecatedCapturedStmt(DeprecatedCapturedStmt *) { return true; }
 
   bool VisitCXXThisExpr(CXXThisExpr *E) {
     S.CheckCXXThisCapture(E->getLocStart(), /*explicit*/false);
@@ -3247,7 +3247,7 @@ public:
 } // anonymous namespace
 
 RecordDecl*
-Sema::CreateCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
+Sema::CreateDeprecatedCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
                                    IdentifierInfo *MangledName) {
   DeclContext *DC = CurContext;
   while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
@@ -3289,24 +3289,24 @@ Sema::CreateCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
   return RD;
 }
 
-SmallVector<CapturedStmt::Capture, 4>
-Sema::buildCapturedStmtCaptureList(SmallVector<CapturingScopeInfo::Capture, 4>
+SmallVector<DeprecatedCapturedStmt::Capture, 4>
+Sema::buildDeprecatedCapturedStmtCaptureList(SmallVector<CapturingScopeInfo::Capture, 4>
                                      &Candidates) {
 
-  SmallVector<CapturedStmt::Capture, 4> Captures;
+  SmallVector<DeprecatedCapturedStmt::Capture, 4> Captures;
   for (unsigned I = 0, N = Candidates.size(); I != N; I++) {
     CapturingScopeInfo::Capture &Cap = Candidates[I];
 
     if (Cap.isThisCapture()) {
-      Captures.push_back(CapturedStmt::Capture(CapturedStmt::LCK_This,
+      Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_This,
                                                Cap.getCopyExpr()));
       continue;
     }
 
     VarDecl *Var = Cap.getVariable();
     assert(!Cap.isCopyCapture() &&
-           "CapturedStmt by-copy capture not implemented yet");
-    Captures.push_back(CapturedStmt::Capture(CapturedStmt::LCK_ByRef,
+           "DeprecatedCapturedStmt by-copy capture not implemented yet");
+    Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_ByRef,
                                              Cap.getCopyExpr(), Var));
   }
 
@@ -3336,7 +3336,7 @@ static QualType GetReceiverTmpType(const Expr *E) {
   return E->getType();
 }
 
-static void GetReceiverType(ASTContext &Context, CilkSpawnCapturedStmt *S,
+static void GetReceiverType(ASTContext &Context, CilkSpawnDeprecatedCapturedStmt *S,
                             QualType &ReceiverType, QualType &ReceiverTmpType) {
   Stmt *SubStmt = S->getSubStmt();
   if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(SubStmt)) {
@@ -3361,10 +3361,10 @@ static FieldDecl *CreateReceiverField(ASTContext& Context, RecordDecl *RD,
 }
 
 static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
-                                   CilkSpawnCapturedStmt *Spawn) {
+                                   CilkSpawnDeprecatedCapturedStmt *Spawn) {
   // Create a caputred recored decl and start its definition
   FunctionDecl *FD = 0;
-  RecordDecl *RD = S.CreateCapturedStmtRecordDecl(FD, SourceLocation(),
+  RecordDecl *RD = S.CreateDeprecatedCapturedStmtRecordDecl(FD, SourceLocation(),
                                                   GetMangledHelperName(S));
 
   // Enter the capturing scope for this parallel region
@@ -3383,9 +3383,9 @@ static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
   Builder.TraverseStmt(Spawn->getSubStmt());
 
 
-  // Build the CilkSpawnCapturedStmt
-  SmallVector<CapturedStmt::Capture, 4> Captures
-      = S.buildCapturedStmtCaptureList(RSI->Captures);
+  // Build the CilkSpawnDeprecatedCapturedStmt
+  SmallVector<DeprecatedCapturedStmt::Capture, 4> Captures
+      = S.buildDeprecatedCapturedStmtCaptureList(RSI->Captures);
 
 
 
@@ -3397,12 +3397,12 @@ static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
     GetReceiverType(S.Context, Spawn, ReceiverType, ReceiverTmpType);
     ReceiverType = S.Context.getPointerType(ReceiverType);
 
-    Captures.push_back(CapturedStmt::Capture(CapturedStmt::LCK_Receiver, 0, VD));
+    Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_Receiver, 0, VD));
     RD->addDecl(CreateReceiverField(S.Context, RD, ReceiverType));
 
     if (!ReceiverTmpType.isNull()) {
       ReceiverTmpType = S.Context.getPointerType(ReceiverTmpType);
-      Captures.push_back(CapturedStmt::Capture(CapturedStmt::LCK_ReceiverTmp,
+      Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_ReceiverTmp,
                                                0, VD));
       RD->addDecl(CreateReceiverField(S.Context, RD, ReceiverTmpType));
     }
@@ -3419,7 +3419,7 @@ static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
   S.PopFunctionScopeInfo();
 }
 
-static Stmt *tryCreateCilkSpawnCapturedStmt(Sema &SemaRef, Stmt *S) {
+static Stmt *tryCreateCilkSpawnDeprecatedCapturedStmt(Sema &SemaRef, Stmt *S) {
   if (!S)
     return S;
 
@@ -3428,7 +3428,7 @@ static Stmt *tryCreateCilkSpawnCapturedStmt(Sema &SemaRef, Stmt *S) {
   if (!Helper.hasSpawn())
     return S;
 
-  CilkSpawnCapturedStmt *R = new (SemaRef.Context) CilkSpawnCapturedStmt(S);
+  CilkSpawnDeprecatedCapturedStmt *R = new (SemaRef.Context) CilkSpawnDeprecatedCapturedStmt(S);
   buildCilkSpawnCaptures(SemaRef, SemaRef.getCurScope(), R);
 
   return R;
@@ -3452,7 +3452,7 @@ static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
   case Stmt::CallExprClass:
   case Stmt::CXXOperatorCallExprClass:
   case Stmt::CXXMemberCallExprClass:
-    S = tryCreateCilkSpawnCapturedStmt(SemaRef, S);
+    S = tryCreateCilkSpawnDeprecatedCapturedStmt(SemaRef, S);
     break;
   case Stmt::DoStmtClass: {
     DoStmt *DS = cast<DoStmt>(S);

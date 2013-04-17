@@ -32,7 +32,7 @@ namespace llvm {
 
 namespace clang {
 
-class CilkSpawnCapturedStmt;
+class CilkSpawnDeprecatedCapturedStmt;
 class CilkSyncStmt;
 class CXXThrowExpr;
 class CXXTryStmt;
@@ -51,7 +51,7 @@ public:
     ImpSyncAndRelFrameCleanup = ImplicitSyncCleanup | ReleaseFrameCleanup
   };
 
-  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnCapturedStmt &S);
+  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnDeprecatedCapturedStmt &S);
 
   void EmitCilkSync(CodeGenFunction &CGF);
 

@@ -1024,7 +1024,7 @@ SEHFinallyStmt* SEHFinallyStmt::Create(ASTContext &C,
   return new(C)SEHFinallyStmt(Loc,Block);
 }
 
-void CapturedStmt::setCaptures(ASTContext &Context,
+void DeprecatedCapturedStmt::setCaptures(ASTContext &Context,
                                const Capture *begin,
                                const Capture *end) {
   if (begin == end) {
@@ -1042,7 +1042,7 @@ void CapturedStmt::setCaptures(ASTContext &Context,
   Captures = static_cast<Capture*>(buffer);
 }
 
-bool CapturedStmt::capturesVariable(const VarDecl *variable) const {
+bool DeprecatedCapturedStmt::capturesVariable(const VarDecl *variable) const {
   for (capture_const_iterator I = capture_begin(),
                               E = capture_end(); I != E; ++I) {
     // Only auto vars can be captured, so no redeclaration worries.

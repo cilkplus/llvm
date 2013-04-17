@@ -170,8 +170,8 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHTryStmtClass:
     // FIXME Not yet implemented
     break;
-  case Stmt::CilkSpawnCapturedStmtClass:
-    EmitCilkSpawnCapturedStmt(cast<CilkSpawnCapturedStmt>(*S));
+  case Stmt::CilkSpawnDeprecatedCapturedStmtClass:
+    EmitCilkSpawnDeprecatedCapturedStmt(cast<CilkSpawnDeprecatedCapturedStmt>(*S));
     break;
   case Stmt::CilkForStmtClass:
     EmitCilkForStmt(cast<CilkForStmt>(*S));
@@ -1750,7 +1750,7 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
 }
 
 void
-CodeGenFunction::EmitCilkSpawnCapturedStmt(const CilkSpawnCapturedStmt &S) {
+CodeGenFunction::EmitCilkSpawnDeprecatedCapturedStmt(const CilkSpawnDeprecatedCapturedStmt &S) {
   CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
 }
 
@@ -1778,8 +1778,8 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
 
   CGCilkForStmtInfo CSInfo(S);
   CodeGenFunction CGF(CGM, true);
-  CGF.CapturedStmtInfo = &CSInfo;
-  CGF.CapturedStmtInfo->setThisParmVarDecl(CFD->getContextParam());
+  CGF.DeprecatedCapturedStmtInfo = &CSInfo;
+  CGF.DeprecatedCapturedStmtInfo->setThisParmVarDecl(CFD->getContextParam());
 
   FunctionArgList HelperArgs;
   //TODO: use the loop count type instead of the increment
@@ -1859,8 +1859,8 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
                                           const CilkForDecl *CFD,
                                           const RecordDecl *RD,
                                           FunctionArgList &Args) {
-  assert(CapturedStmtInfo &&
-    "CapturedStmtInfo should be set when generating the captured function");
+  assert(DeprecatedCapturedStmtInfo &&
+    "DeprecatedCapturedStmtInfo should be set when generating the captured function");
 
   // Check if we should generate debug info for this function.
   maybeInitializeDebugInfo();
@@ -1909,7 +1909,7 @@ static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
     CGF.PushDestructorCleanup(Dtor, ReceiverTmp);
 }
 
-void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
+void CodeGenFunction::EmitDeprecatedCapturedStmt(const DeprecatedCapturedStmt &S) {
   const FunctionDecl *HelperDecl = S.getFunctionDecl();
   assert((HelperDecl->getNumParams() >= 1) && "at least one argument expected");
   assert(HelperDecl->hasBody() && "missing function body");
@@ -1926,17 +1926,17 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
                                  Slot.getAlignment());
 
   RecordDecl::field_iterator CurField = RD->field_begin();
-  for (CapturedStmt::capture_const_iterator I = S.capture_begin(),
+  for (DeprecatedCapturedStmt::capture_const_iterator I = S.capture_begin(),
                                             E = S.capture_end();
        I != E; ++I, ++CurField) {
     LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
     ArrayRef<VarDecl *> ArrayIndexes;
 
     switch (I->getCaptureKind()) {
-    case CapturedStmt::LCK_Receiver:
+    case DeprecatedCapturedStmt::LCK_Receiver:
       EmitStoreOfScalar(GetAddrOfLocalVar(I->getCapturedVar()), LV, true);
       break;
-    case CapturedStmt::LCK_ReceiverTmp: {
+    case DeprecatedCapturedStmt::LCK_ReceiverTmp: {
       InitTy = CurField->getType()->getPointeeType();
       ReceiverTmp = CreateMemTemp(InitTy);
       EmitStoreOfScalar(ReceiverTmp, LV, true);
@@ -1953,7 +1953,7 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
 
   CGM.getCaptureDeclMap().insert(
       std::pair<const FunctionDecl*,
-                const CapturedStmt*>(HelperDecl, &S));
+                const DeprecatedCapturedStmt*>(HelperDecl, &S));
 
   // Emit the helper function
   CGM.EmitTopLevelDecl(const_cast<FunctionDecl*>(HelperDecl));

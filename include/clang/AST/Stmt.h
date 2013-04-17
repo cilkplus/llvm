@@ -1916,7 +1916,7 @@ public:
 };
 
 // \brief the base class for capturing a statement into a seperate function
-class CapturedStmt : public Stmt {
+class DeprecatedCapturedStmt : public Stmt {
 public:
   enum CaptureKind {
     LCK_This,
@@ -1973,11 +1973,11 @@ protected:
   Capture *Captures;
   unsigned NumCaptures;
   
-  CapturedStmt(StmtClass SC, Stmt *S)
+  DeprecatedCapturedStmt(StmtClass SC, Stmt *S)
     : Stmt(SC), TheDecl(0), TheRecordDecl(0), SubStmt(S), Captures(0),
       NumCaptures(0) { }
 
-  CapturedStmt(StmtClass SC, EmptyShell Empty)
+  DeprecatedCapturedStmt(StmtClass SC, EmptyShell Empty)
     : Stmt(SC, Empty), TheDecl(0), TheRecordDecl(0), SubStmt(0),
       NumCaptures(0) { }
 
@@ -2025,8 +2025,8 @@ public:
                    const Capture *end);
 
   static bool classof(const Stmt *T) {
-    // Currently the only subclass is CilkSpawnCapturedStmt
-    return T->getStmtClass() == CilkSpawnCapturedStmtClass;
+    // Currently the only subclass is CilkSpawnDeprecatedCapturedStmt
+    return T->getStmtClass() == CilkSpawnDeprecatedCapturedStmtClass;
   }
 
   child_range children() {
@@ -2034,26 +2034,26 @@ public:
   }
 };
 
-class CilkSpawnCapturedStmt : public CapturedStmt {
+class CilkSpawnDeprecatedCapturedStmt : public DeprecatedCapturedStmt {
 public:
-  explicit CilkSpawnCapturedStmt(Stmt *S)
-    : CapturedStmt(CilkSpawnCapturedStmtClass, S) { }
+  explicit CilkSpawnDeprecatedCapturedStmt(Stmt *S)
+    : DeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmtClass, S) { }
 
-  explicit CilkSpawnCapturedStmt(EmptyShell Empty)
-    : CapturedStmt(CilkSpawnCapturedStmtClass, Empty) { }
+  explicit CilkSpawnDeprecatedCapturedStmt(EmptyShell Empty)
+    : DeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmtClass, Empty) { }
 
   SourceLocation getLocStart() const LLVM_READONLY {
-    return CapturedStmt::getLocStart();
+    return DeprecatedCapturedStmt::getLocStart();
   }
   SourceLocation getLocEnd() const LLVM_READONLY {
-    return CapturedStmt::getLocEnd();
+    return DeprecatedCapturedStmt::getLocEnd();
   }
   SourceRange getSourceRange() const LLVM_READONLY {
-    return CapturedStmt::getSourceRange();
+    return DeprecatedCapturedStmt::getSourceRange();
   }
 
   static bool classof(const Stmt *T) {
-    return T->getStmtClass() == CilkSpawnCapturedStmtClass;
+    return T->getStmtClass() == CilkSpawnDeprecatedCapturedStmtClass;
   }
 };
 

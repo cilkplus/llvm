@@ -259,7 +259,7 @@ class CodeGenModule : public CodeGenTypeCache {
   /// \brief A map between function decls to be emitted and its associated
   /// captured statements.
   llvm::DenseMap<const FunctionDecl*,
-                 const CapturedStmt*> CaptureDeclMap;
+                 const DeprecatedCapturedStmt*> CaptureDeclMap;
 
   // WeakRefReferences - A set of references that have only been seen via
   // a weakref so far. This is used to remove the weak of the reference if we ever
@@ -448,7 +448,7 @@ public:
   }
 
   typedef llvm::DenseMap<const FunctionDecl*,
-                         const CapturedStmt*> CaptureDeclMapTy;
+                         const DeprecatedCapturedStmt*> CaptureDeclMapTy;
 
   CaptureDeclMapTy& getCaptureDeclMap() {
     return CaptureDeclMap;

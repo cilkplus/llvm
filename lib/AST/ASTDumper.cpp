@@ -244,7 +244,7 @@ namespace  {
     void VisitAttributedStmt(const AttributedStmt *Node);
     void VisitLabelStmt(const LabelStmt *Node);
     void VisitGotoStmt(const GotoStmt *Node);
-    void VisitCapturedStmt(const CapturedStmt *Node);
+    void VisitDeprecatedCapturedStmt(const DeprecatedCapturedStmt *Node);
 
     // Exprs
     void VisitExpr(const Expr *Node);
@@ -1383,21 +1383,21 @@ void ASTDumper::VisitGotoStmt(const GotoStmt *Node) {
   dumpPointer(Node->getLabel());
 }
 
-void ASTDumper::VisitCapturedStmt(const CapturedStmt *Node) {
+void ASTDumper::VisitDeprecatedCapturedStmt(const DeprecatedCapturedStmt *Node) {
   VisitStmt(Node);
-  for (CapturedStmt::capture_iterator I = Node->capture_begin(),
+  for (DeprecatedCapturedStmt::capture_iterator I = Node->capture_begin(),
                                       E = Node->capture_end(); I != E; ++I) {
     IndentScope Indent(*this);
     OS << "Capture ";
     switch (I->getCaptureKind()) {
-    case CapturedStmt::LCK_This:
+    case DeprecatedCapturedStmt::LCK_This:
       OS << "this";
       break;
-    case CapturedStmt::LCK_Receiver:
+    case DeprecatedCapturedStmt::LCK_Receiver:
       OS << "receiver ";
       dumpDeclRef(I->getCapturedVar());
       break;
-    case CapturedStmt::LCK_ReceiverTmp:
+    case DeprecatedCapturedStmt::LCK_ReceiverTmp:
       OS << "receiver temp for ";
       dumpDeclRef(I->getCapturedVar());
       break;

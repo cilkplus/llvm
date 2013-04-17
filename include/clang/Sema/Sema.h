@@ -2772,11 +2772,11 @@ public:
   ExprResult BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   StmtResult ActOnCilkSpawnStmt(Stmt *S);
 
-  RecordDecl *CreateCapturedStmtRecordDecl(FunctionDecl *&FD,
+  RecordDecl *CreateDeprecatedCapturedStmtRecordDecl(FunctionDecl *&FD,
                                            SourceLocation Loc,
                                            IdentifierInfo *MangledName);
-  SmallVector<CapturedStmt::Capture, 4>
-  buildCapturedStmtCaptureList(SmallVector<sema::CapturingScopeInfo::Capture, 4>
+  SmallVector<DeprecatedCapturedStmt::Capture, 4>
+  buildDeprecatedCapturedStmtCaptureList(SmallVector<sema::CapturingScopeInfo::Capture, 4>
                                  &Candidates);
 
   const VarDecl *getCopyElisionCandidate(QualType ReturnType, Expr *E,

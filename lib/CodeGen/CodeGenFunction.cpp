@@ -37,8 +37,8 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   : CodeGenTypeCache(cgm), CGM(cgm),
     Target(CGM.getContext().getTargetInfo()),
     Builder(cgm.getModule().getContext()),
-    CurCGCapturedStmtInfo(0),
-    CapturedStmtInfo(0),
+    CurCGDeprecatedCapturedStmtInfo(0),
+    DeprecatedCapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getSanOpts().Null |
                              CGM.getSanOpts().Alignment |
@@ -76,7 +76,7 @@ CodeGenFunction::~CodeGenFunction() {
     destroyBlockInfos(FirstBlockInfo);
 
   delete CurCGCilkImplicitSyncInfo;
-  delete CurCGCapturedStmtInfo;
+  delete CurCGDeprecatedCapturedStmtInfo;
 }
 
 
@@ -625,19 +625,19 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 
   // If CFG is emitting a captured statement and 'this' is captured,
   // load it into CXXThisValue;
-  if (CurCGCapturedStmtInfo && CurCGCapturedStmtInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = CurCGCapturedStmtInfo->getThisFieldDecl();
+  if (CurCGDeprecatedCapturedStmtInfo && CurCGDeprecatedCapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CurCGDeprecatedCapturedStmtInfo->getThisFieldDecl();
     QualType TagType = getContext().getTagDeclType(FD->getParent());
-    LValue LV = MakeNaturalAlignAddrLValue(CurCGCapturedStmtInfo->getThisValue(), TagType);
+    LValue LV = MakeNaturalAlignAddrLValue(CurCGDeprecatedCapturedStmtInfo->getThisValue(), TagType);
     LValue ThisLValue = EmitLValueForField(LV, FD);
 
     CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
   }
 
-  if (CapturedStmtInfo && CapturedStmtInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
+  if (DeprecatedCapturedStmtInfo && DeprecatedCapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = DeprecatedCapturedStmtInfo->getThisFieldDecl();
     QualType TagType = getContext().getTagDeclType(FD->getParent());
-    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
+    LValue LV = MakeNaturalAlignAddrLValue(DeprecatedCapturedStmtInfo->getThisValue(),
                                            TagType);
     LValue ThisLValue = EmitLValueForField(LV, FD);
 
