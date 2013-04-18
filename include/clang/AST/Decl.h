@@ -3325,13 +3325,23 @@ class CilkForDecl : public Decl, public DeclContext {
 
   explicit CilkForDecl(DeclContext *DC)
     : Decl(CilkFor, DC, SourceLocation()), DeclContext(CilkFor),
-      ContextRecordDecl(0), InnerLoopControlVar(0) { }
+      ContextRecordDecl(0), LoopControlVar(0), InnerLoopControlVar(0),
+      InnerLoopVarAdjust(0) {
+    Args[0] = Args[1] = Args[2] = 0;
+  }
 
   /// \brief The variable capturing C or C++ RecordDecl.
   RecordDecl *ContextRecordDecl;
 
+  /// \brief The loop control variable.
+  const VarDecl *LoopControlVar;
+
   /// \brief The local copy of the loop control variable.
   VarDecl *InnerLoopControlVar;
+
+  /// \brief The implicit generated full expression for adjusting
+  /// the inner loop control variable.
+  Expr *InnerLoopVarAdjust;
 
   /// \brief The implicit parameters for the outlined function.
   /// \code
@@ -3345,6 +3355,9 @@ public:
   RecordDecl *getContextRecordDecl() const { return ContextRecordDecl; }
   void setContextRecordDecl(RecordDecl *RD) { ContextRecordDecl = RD; }
 
+  const VarDecl *getLoopControlVar() const { return LoopControlVar; }
+  void setLoopControlVar(const VarDecl *V) { LoopControlVar = V; }
+
   VarDecl *getInnerLoopControlVar() const { return InnerLoopControlVar; }
   void setInnerLoopControlVar(VarDecl *V) { InnerLoopControlVar = V; }
 
@@ -3356,6 +3369,9 @@ public:
   void setLowHighParams(ImplicitParamDecl *Low, ImplicitParamDecl *High) {
     Args[1] = Low, Args[2] = High;
   }
+
+  Expr *getInnerLoopVarAdjust() const { return InnerLoopVarAdjust; }
+  void setInnerLoopVarAdjust(Expr *E) { InnerLoopVarAdjust = E; }
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == CilkFor; }

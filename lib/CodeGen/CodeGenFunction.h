@@ -711,8 +711,8 @@ public:
   public:
 
     explicit CGCilkForStmtInfo(const CilkForStmt &S)
-      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) {
-
+      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0),
+        LoopControlVar(0), InnerLoopControlVarAddr(0) {
       RecordDecl::field_iterator Field =
         S.getCilkForDecl()->getContextRecordDecl()->field_begin();
       for (CilkForStmt::capture_iterator I = S.capture_begin(),
@@ -744,6 +744,17 @@ public:
       ThisParmVarDecl = V;
     }
 
+    void setLoopControlVar(const VarDecl *VD) { LoopControlVar = VD; }
+    bool isLoopControlVar(const VarDecl *VD) const {
+      return VD && (LoopControlVar == VD);
+    }
+    void setInnerLoopControlVarAddr(llvm::Value *Addr) {
+      InnerLoopControlVarAddr = Addr;
+    }
+    llvm::Value *getInnerLoopControlVarAddr() const {
+      return InnerLoopControlVarAddr;
+    }
+
   private:
     /// \brief Keep the map between VarDecl and FieldDecl.
     llvm::SmallDenseMap<const VarDecl *, FieldDecl *> CaptureFields;
@@ -757,6 +768,13 @@ public:
 
     /// \brief The captured record parameter to the helper function.
     VarDecl *ThisParmVarDecl;
+
+    /// \brief The loop control variable.
+    const VarDecl *LoopControlVar;
+
+    /// \brief The address of the inner loop control variable. Any reference
+    /// to the loop control variable needs to load this the value instead.
+    llvm::Value *InnerLoopControlVarAddr;
   };
 
   CGCilkForStmtInfo *CapturedStmtInfo;

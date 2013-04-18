@@ -2000,8 +2000,22 @@ void CodeGenFunction::EmitCilkForHelperBody(const CilkForStmt &S) {
     // Initialize Low.
     Builder.CreateStore(Builder.CreateLoad(Low), Index);
 
-    // FIXME: Emit the inner loop control variable. This copy initialization
-    // may have cleanups.
+    // Initialize the inner loop control variable.
+    const VarDecl *D = CFD->getInnerLoopControlVar();
+    AutoVarEmission Emission = EmitAutoVarAlloca(*D);
+    EmitAutoVarInit(Emission);
+    EmitAutoVarCleanups(Emission);
+
+    // Keep track of the loop control variable and the address of its
+    // corresponding inner copy so that any reference to the loop control
+    // variable will reference its inner adjusted copy instead and this
+    // correction allows nested _Cilk_for statements.
+    llvm::Value *Addr = Emission.getAllocatedAddress();
+    CapturedStmtInfo->setInnerLoopControlVarAddr(Addr);
+    CapturedStmtInfo->setLoopControlVar(CFD->getLoopControlVar());
+
+    // Emit the adjustment on the inner loop control varialbe.
+    EmitStmt(CFD->getInnerLoopVarAdjust());
   }
 
   // Emit the loop condition.
@@ -2021,6 +2035,12 @@ void CodeGenFunction::EmitCilkForHelperBody(const CilkForStmt &S) {
     llvm::Value *CondVal = Builder.CreateICmpULT(Builder.CreateLoad(Index),
                                                  Builder.CreateLoad(High));
     Builder.CreateCondBr(CondVal, LoopBody, ExitBlock);
+
+    if (ExitBlock != LoopExit.getBlock()) {
+      EmitBlock(ExitBlock);
+      EmitBranchThroughCleanup(LoopExit);
+    }
+
     EmitBlock(LoopBody);
   }
 

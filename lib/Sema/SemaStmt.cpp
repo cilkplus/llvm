@@ -4090,7 +4090,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
       ImpCastExprToType(LoopCount, LoopCountType, CK_IntegralCast).get();
 
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
-                          Third.get(), RParenLoc, Body, LoopCount);
+                          Third.get(), RParenLoc, Body, LoopCount, StrideExpr);
 }
 
 static
@@ -4121,7 +4121,7 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *Init, Expr *Cond, Expr *Inc,
                                   SourceLocation RParenLoc, Stmt *Body,
-                                  Expr *LoopCount) {
+                                  Expr *LoopCount, Expr *Stride) {
   CilkForScopeInfo *FSI = getCurCilkFor();
   assert(FSI && "CilkForScopeInfo is out of sync");
 
@@ -4135,29 +4135,63 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
 
   CilkForDecl *CFD = FSI->TheCilkForDecl;
   CFD->setContextRecordDecl(RD);
+  CFD->setLoopControlVar(FSI->LoopControlVar);
   CFD->setInnerLoopControlVar(FSI->InnerLoopControlVar);
 
   // Set parameters for the outlined function.
-  {
+  // Build the initial value for the inner loop control variable.
+  QualType Ty = LoopCount->getType().getNonReferenceType();
+  if (!Ty->isDependentType()) {
     // Context for variable capturing.
     CFD->setContextParam(FSI->ContextParam);
-
-    // FIXME: Use the loop count type.
-    QualType Ty = Inc->getType();
     DeclContext *DC = CilkForDecl::castToDeclContext(CFD);
-    SourceLocation EmptyLoc;
+
+    // In the following, the source location of the loop control variable
+    // will be used for diagnostics.
+    SourceLocation VarLoc = FSI->LoopControlVar->getLocation();
+    assert(VarLoc.isValid() && "invalid source location");
 
     ImplicitParamDecl *Low
-      = ImplicitParamDecl::Create(Context, DC, EmptyLoc,
+      = ImplicitParamDecl::Create(Context, DC, VarLoc,
                                   &Context.Idents.get("__low"), Ty);
     DC->addDecl(Low);
 
     ImplicitParamDecl *High
-      = ImplicitParamDecl::Create(Context, DC, EmptyLoc,
+      = ImplicitParamDecl::Create(Context, DC, VarLoc,
                                   &Context.Idents.get("__high"), Ty);
     DC->addDecl(High);
 
     CFD->setLowHighParams(Low, High);
+
+    // Build a full expression "inner_loop_var += stride * low"
+    {
+      EnterExpressionEvaluationContext Scope(*this, PotentiallyEvaluated);
+
+      // Both low and stride experssions are of type integral.
+      ExprResult LowExpr = BuildDeclRefExpr(Low, Ty, VK_LValue, VarLoc);
+      assert(!LowExpr.isInvalid() && "invalid expr");
+
+      assert(Stride && "invalid null stride expression");
+      ExprResult StepExpr
+        = BuildBinOp(CurScope, VarLoc, BO_Mul, LowExpr.get(), Stride);
+      assert(!StepExpr.isInvalid() && "invalid expression");
+
+      VarDecl *InnerVar = CFD->getInnerLoopControlVar();
+      ExprResult InnerVarExpr
+        = BuildDeclRefExpr(InnerVar, InnerVar->getType(), VK_LValue, VarLoc);
+      assert(!InnerVarExpr.isInvalid() && "invalid expression");
+
+      // The '+=' operation could fail if the loop control variable is of
+      // class type and this may introduce cleanups.
+      ExprResult AdjustExpr = BuildBinOp(CurScope, VarLoc, BO_AddAssign,
+                                         InnerVarExpr.get(), StepExpr.get());
+      if (!AdjustExpr.isInvalid()) {
+        AdjustExpr = MaybeCreateExprWithCleanups(AdjustExpr);
+        CFD->setInnerLoopVarAdjust(AdjustExpr.get());
+      }
+      // FIXME: Should mark the CilkForDecl as invalid?
+      // FIXME: Should install the adjustment expression into the CilkForStmt?
+    }
   }
 
   PopExpressionEvaluationContext();

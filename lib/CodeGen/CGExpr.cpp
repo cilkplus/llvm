@@ -1862,6 +1862,15 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
         }
       } else if (CapturedStmtInfo) {
         if (const FieldDecl *FD = CapturedStmtInfo->lookup(VD)) {
+          // If referencing a loop control variable, then load its
+          // corresponding inner loop control variable.
+          if (CapturedStmtInfo->isLoopControlVar(VD)) {
+            llvm::Value *Addr = CapturedStmtInfo->getInnerLoopControlVarAddr();
+            assert(Addr && "missing inner loop control variable address");
+            return MakeAddrLValue(Addr, T, Alignment);
+          }
+
+          // Otherwise load it from the captured struct.
           QualType TagType = getContext().getTagDeclType(FD->getParent());
           LValue LV
             = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),

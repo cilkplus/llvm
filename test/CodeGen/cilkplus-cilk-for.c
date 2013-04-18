@@ -66,3 +66,7 @@ label:
     skipped_func();
   }
 }
+
+void test_pointer(float *p, float *q) {
+  _Cilk_for (float *i = p; i < q; i++) { }
+}
