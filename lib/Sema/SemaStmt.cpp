@@ -3979,8 +3979,10 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   // Check consistency between loop condition and increment only if the
   // increment amount is known at compile-time.
   if (HasConstantIncrement) {
-    if (!Stride)
+    if (!Stride) {
       Diag(IncrementRHSLoc, diag::err_cilk_for_increment_zero);
+      return StmtError();
+    }
 
     if ((CondDirection > 0 && Stride.isNegative()) ||
         (CondDirection < 0 && Stride.isStrictlyPositive())) {
@@ -3989,6 +3991,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
       Diag(Increment->getExprLoc(), diag::note_cilk_constant_stride)
         << Stride.toString(10, true)
         << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
+      return StmtError();
     }
   }
 
