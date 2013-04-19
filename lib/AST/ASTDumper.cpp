@@ -244,7 +244,7 @@ namespace  {
     void VisitAttributedStmt(const AttributedStmt *Node);
     void VisitLabelStmt(const LabelStmt *Node);
     void VisitGotoStmt(const GotoStmt *Node);
-    void VisitDeprecatedCapturedStmt(const DeprecatedCapturedStmt *Node);
+    void VisitCapturedStmt(const CapturedStmt *Node);
 
     // Exprs
     void VisitExpr(const Expr *Node);
@@ -1386,26 +1386,32 @@ void ASTDumper::VisitGotoStmt(const GotoStmt *Node) {
   dumpPointer(Node->getLabel());
 }
 
-void ASTDumper::VisitDeprecatedCapturedStmt(const DeprecatedCapturedStmt *Node) {
+void ASTDumper::VisitCapturedStmt(const CapturedStmt *Node) {
   VisitStmt(Node);
-  for (DeprecatedCapturedStmt::capture_iterator I = Node->capture_begin(),
+  for (CapturedStmt::capture_iterator I = Node->capture_begin(),
                                       E = Node->capture_end(); I != E; ++I) {
     IndentScope Indent(*this);
     OS << "Capture ";
     switch (I->getCaptureKind()) {
-    case DeprecatedCapturedStmt::LCK_This:
+    case CapturedStmt::VCK_This:
       OS << "this";
       break;
-    case DeprecatedCapturedStmt::LCK_Receiver:
+    case CapturedStmt::VCK_ByCopy:
+      OS << "bycopy ";
+      dumpDeclRef(I->getCapturedVar());
+      break;
+    case CapturedStmt::VCK_ByRef:
+      OS << "byref ";
+      dumpDeclRef(I->getCapturedVar());
+      break;
+    case CapturedStmt::VCK_Receiver:
       OS << "receiver ";
       dumpDeclRef(I->getCapturedVar());
       break;
-    case DeprecatedCapturedStmt::LCK_ReceiverTmp:
+    case CapturedStmt::VCK_ReceiverTmp:
       OS << "receiver temp for ";
       dumpDeclRef(I->getCapturedVar());
       break;
-    default:
-      dumpDeclRef(I->getCapturedVar());
     }
   }
 }

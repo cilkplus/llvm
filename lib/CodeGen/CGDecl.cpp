@@ -818,12 +818,12 @@ void CodeGenFunction::EmitCaptureReceiverDecl(const VarDecl &D) {
 /// variable declaration with auto, register, or no storage class specifier.
 /// These turn into simple stack objects, or GlobalValues depending on target.
 void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
-  if (getLangOpts().CilkPlus && CurCGDeprecatedCapturedStmtInfo) {
+  if (CapturedStmtInfo) {
     // Do initialization if this decl is inside the helper function.
-    if (CurCGDeprecatedCapturedStmtInfo->isReceiverDecl(&D)) {
+    if (CapturedStmtInfo->isReceiverDecl(&D)) {
       AutoVarEmission Emission(D);
       Emission.Alignment = getContext().getDeclAlign(&D);
-      Emission.Address = CurCGDeprecatedCapturedStmtInfo->getReceiverAddr();
+      Emission.Address = CapturedStmtInfo->getReceiverAddr();
       EmitAutoVarInit(Emission);
       return;
     }
@@ -1711,21 +1711,21 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
     CapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
 
   // The captured record (passed as the first parameter) is the base address.
-  if (CurCGDeprecatedCapturedStmtInfo && CurCGDeprecatedCapturedStmtInfo->isThisParmVarDecl(&D)) {
+  if (CapturedStmtInfo && CapturedStmtInfo->isThisParmVarDecl(&D)) {
     llvm::Value *This = Builder.CreateLoad(DeclPtr);
-    CurCGDeprecatedCapturedStmtInfo->setThisValue(This);
+    CapturedStmtInfo->setThisValue(This);
 
     // If there is a receiver, it is stored in a field of the captured record.
-    if (FieldDecl *RecFD = CurCGDeprecatedCapturedStmtInfo->getReceiverFieldDecl()) {
+    if (FieldDecl *RecFD = CapturedStmtInfo->getReceiverFieldDecl()) {
       QualType TagType = getContext().getTagDeclType(RecFD->getParent());
 
       LValue LV = MakeNaturalAlignAddrLValue(This, TagType);
-      CurCGDeprecatedCapturedStmtInfo->setReceiverAddr(
+      CapturedStmtInfo->setReceiverAddr(
         Builder.CreateLoad(EmitLValueForField(LV, RecFD).getAddress()));
 
       // Similarly for the receiver temporary.
-      if (FieldDecl *RecTmpFD = CurCGDeprecatedCapturedStmtInfo->getReceiverTmpFieldDecl()) {
-        CurCGDeprecatedCapturedStmtInfo->setReceiverTmp(
+      if (FieldDecl *RecTmpFD = CapturedStmtInfo->getReceiverTmpFieldDecl()) {
+        CapturedStmtInfo->setReceiverTmp(
           Builder.CreateLoad(EmitLValueForField(LV, RecTmpFD).getAddress()));
       }
     }

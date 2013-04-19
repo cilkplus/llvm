@@ -1204,17 +1204,6 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       llvm::Constant* Zero = llvm::Constant::getNullValue(LLVMTy);
       Builder.CreateStore(Zero, ReturnValue);
     }
-
-    // Initialize CurCGDeprecatedCapturedStmtInfo
-    if (FD->isParallelRegion()) {
-      typedef CodeGenModule::CaptureDeclMapTy::const_iterator const_iterator;
-      const_iterator I = CGM.getCaptureDeclMap().find(FD);
-      assert(I != CGM.getCaptureDeclMap().end()
-             && "cannot find its associate DeprecatedCapturedStmt");
-
-      CurCGDeprecatedCapturedStmtInfo = new CGDeprecatedCapturedStmtInfo();
-      CurCGDeprecatedCapturedStmtInfo->initCGDeprecatedCapturedStmtInfo(I->second);
-    }
   }
 
   // FIXME: We no longer need the types from FunctionArgList; lift up and

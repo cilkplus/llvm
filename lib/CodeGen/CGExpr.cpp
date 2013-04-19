@@ -200,11 +200,11 @@ CodeGenFunction::CreateReferenceTemporary(QualType Type,
   }
 
   // In a captured statement, don't alloca the receiver temp; it is passed in.
-  if (CurCGDeprecatedCapturedStmtInfo &&
-      CurCGDeprecatedCapturedStmtInfo->isReceiverDecl(InitializedDecl)) {
-    assert(CurCGDeprecatedCapturedStmtInfo->getReceiverTmp() &&
+  if (CapturedStmtInfo &&
+      CapturedStmtInfo->isReceiverDecl(InitializedDecl)) {
+    assert(CapturedStmtInfo->getReceiverTmp() &&
            "Expected receiver temporary in captured statement");
-    return CurCGDeprecatedCapturedStmtInfo->getReceiverTmp();
+    return CapturedStmtInfo->getReceiverTmp();
   }
 
   return CreateMemTemp(Type, "ref.tmp");
@@ -426,9 +426,9 @@ CodeGenFunction::EmitReferenceBindingToExpr(const Expr *E,
     EmitTypeCheck(TCK_ReferenceBinding, E->getExprLoc(), Value, Ty);
   }
 
-  // If we are inside a Cilk spawn helper, then the cleanups for the destructor
-  // are emitted in the spawning function, rather than the helper.
-  if (CurCGDeprecatedCapturedStmtInfo)
+  // If we are inside a captured statement helper, then the cleanups for the
+  // destructor are emitted in the calling function, rather than the helper.
+  if (CapturedStmtInfo && CapturedStmtInfo->isReceiverDecl(InitializedDecl))
     return RValue::get(Value);
 
   if (!ReferenceTemporaryDtor && !ReferenceInitializerList &&
@@ -1860,14 +1860,6 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
             = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
                                          TagType);
 
-          return EmitLValueForField(LV, FD);
-        }
-      } else if (CurCGDeprecatedCapturedStmtInfo) {
-        if (const FieldDecl *FD = CurCGDeprecatedCapturedStmtInfo->lookup(VD)) {
-          QualType TagType = getContext().getTagDeclType(FD->getParent());
-          LValue LV
-            = MakeNaturalAlignAddrLValue(CurCGDeprecatedCapturedStmtInfo->getThisValue(),
-                                         TagType);
           return EmitLValueForField(LV, FD);
         }
       }

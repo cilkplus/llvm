@@ -19,6 +19,7 @@
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/PrettyStackTrace.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Sema/ScopeInfo.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InlineAsm.h"
@@ -139,7 +140,7 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::GCCAsmStmtClass:   // Intentional fall-through.
   case Stmt::MSAsmStmtClass:    EmitAsmStmt(cast<AsmStmt>(*S));           break;
   case Stmt::CapturedStmtClass:
-    EmitCapturedStmt(cast<CapturedStmt>(*S));
+    EmitCapturedStmt(cast<CapturedStmt>(*S), CR_Default);
     break;
   case Stmt::ObjCAtTryStmtClass:
     EmitObjCAtTryStmt(cast<ObjCAtTryStmt>(*S));
@@ -171,8 +172,8 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHTryStmtClass:
     // FIXME Not yet implemented
     break;
-  case Stmt::CilkSpawnDeprecatedCapturedStmtClass:
-    EmitCilkSpawnDeprecatedCapturedStmt(cast<CilkSpawnDeprecatedCapturedStmt>(*S));
+  case Stmt::CilkSpawnStmtClass:
+    EmitCilkSpawnStmt(cast<CilkSpawnStmt>(*S));
     break;
   case Stmt::CilkForStmtClass:
     EmitCilkForStmt(cast<CilkForStmt>(*S));
@@ -1752,7 +1753,29 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
   }
 }
 
-static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S) {
+static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
+                                       llvm::Value *ReceiverTmp,
+                                       QualType InitTy) {
+  const RecordType *RT = InitTy->getBaseElementTypeUnsafe()->getAs<RecordType>();
+  if (!RT)
+    return;
+
+  CXXRecordDecl *ClassDecl = cast<CXXRecordDecl>(RT->getDecl());
+  if (ClassDecl->hasTrivialDestructor())
+    return;
+
+  // If required, push a cleanup to destroy the temporary.
+  const CXXDestructorDecl *Dtor = ClassDecl->getDestructor();
+  if (InitTy->isArrayType())
+    CGF.pushDestroy(NormalAndEHCleanup, ReceiverTmp,
+                    InitTy, &CodeGenFunction::destroyCXXObject,
+                    CGF.getLangOpts().Exceptions);
+  else
+    CGF.PushDestructorCleanup(Dtor, ReceiverTmp);
+}
+
+static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S,
+                                 llvm::Value *&ReceiverTmp, QualType &InitTy) {
   const RecordDecl *RD = S.getCapturedRecordDecl();
   QualType RecordTy = CGF.getContext().getRecordType(RD);
 
@@ -1762,12 +1785,25 @@ static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S) {
                                      Slot.getAlignment());
 
   RecordDecl::field_iterator CurField = RD->field_begin();
+  CapturedStmt::capture_iterator C = S.capture_begin();
   for (CapturedStmt::capture_init_iterator I = S.capture_init_begin(),
                                            E = S.capture_init_end();
-       I != E; ++I, ++CurField) {
+       I != E; ++I, ++C, ++CurField) {
     LValue LV = CGF.EmitLValueForFieldInitialization(SlotLV, *CurField);
     ArrayRef<VarDecl *> ArrayIndexes;
-    CGF.EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
+    switch (C->getCaptureKind()) {
+    case CapturedStmt::VCK_Receiver:
+      CGF.EmitStoreOfScalar(CGF.GetAddrOfLocalVar(C->getCapturedVar()), LV, true);
+      break;
+    case CapturedStmt::VCK_ReceiverTmp: {
+      InitTy = CurField->getType()->getPointeeType();
+      ReceiverTmp = CGF.CreateMemTemp(InitTy);
+      CGF.EmitStoreOfScalar(ReceiverTmp, LV, true);
+    } break;
+    default:
+      CGF.EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
+      break;
+    }
   }
 
   return SlotLV;
@@ -1775,19 +1811,30 @@ static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S) {
 
 /// Generate an outlined function for the body of a CapturedStmt, store any
 /// captured variables into the captured struct, and call the outlined function.
-void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
+llvm::Function *
+CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K) {
   CapturedDecl *CD = S.getCapturedDecl();
   const RecordDecl *RD = S.getCapturedRecordDecl();
   assert(CD->hasBody() && "missing CapturedDecl body");
 
-  LValue CapStruct = InitCapturedStruct(*this, S);
+  QualType ReceiverTmpType;
+  llvm::Value *ReceiverTmp = 0;
+  LValue CapStruct = InitCapturedStruct(*this, S, ReceiverTmp, ReceiverTmpType);
 
   // Emit the CapturedDecl
-  CGCapturedStmtInfo CSInfo(S);
   CodeGenFunction CGF(CGM, true);
-  CGF.CapturedStmtInfo = &CSInfo;
+  switch (K) {
+  case CR_CilkSpawn:
+    CGF.CapturedStmtInfo = new CGCilkSpawnStmtInfo(S);
+    break;
+  case CR_CilkFor:
+    llvm_unreachable("should have gone through EmitCilkForStmt");
+  default:
+    CGF.CapturedStmtInfo = new CGCapturedStmtInfo(S);
+  }
   CGF.CapturedStmtInfo->setThisParmVarDecl(CD->getContextParam());
   llvm::Function *F = CGF.GenerateCapturedFunction(CurGD, CD, RD);
+  delete CGF.CapturedStmtInfo;
 
   // The function argument is the address of the captured struct.
   llvm::SmallVector<llvm::Value *, 3> Args;
@@ -1795,6 +1842,13 @@ void CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S) {
 
   // Emit call to the helper function.
   EmitCallOrInvoke(F, Args);
+
+  // If this statement binds a temporary to a reference, then destroy the
+  // temporary at the end of the reference's lifetime.
+  if (ReceiverTmp)
+    maybeCleanupBoundTemporary(*this, ReceiverTmp, ReceiverTmpType);
+
+  return F;
 }
 
 /// Creates the outlined function for a CapturedStmt.
@@ -1823,11 +1877,12 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
 
   llvm::Function *F =
     llvm::Function::Create(FuncLLVMTy, llvm::GlobalValue::InternalLinkage,
-                           "__captured_stmt", &CGM.getModule());
+                          CapturedStmtInfo->getHelperName(), &CGM.getModule());
   CGM.SetInternalFunctionAttributes(CD, F, FuncInfo);
 
   // Generate the function.
   StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getBody()->getLocStart());
+  CapturedStmtInfo->EmitPrologue(*this);
   EmitStmt(CD->getBody());
   FinishFunction(CD->getBodyRBrace());
 
@@ -1835,7 +1890,7 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
 }
 
 void
-CodeGenFunction::EmitCilkSpawnDeprecatedCapturedStmt(const CilkSpawnDeprecatedCapturedStmt &S) {
+CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
   CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
 }
 
@@ -1887,7 +1942,10 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
     // TODO: calculate grainsize
 
     // Initialize the captured struct.
-    LValue CapStruct = InitCapturedStruct(*this, *S.getBody());
+    QualType Ty;
+    llvm::Value *ReceiverTmp = 0;
+    LValue CapStruct = InitCapturedStruct(*this, *S.getBody(), ReceiverTmp, Ty);
+    assert(ReceiverTmp == 0 && Ty.isNull() && "_Cilk_for cannot have receiver");
 
     llvm::LLVMContext &Ctx = CGM.getLLVMContext();
 
@@ -1925,83 +1983,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
   EmitBlock(ContBlock, true);
 }
 
-static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
-                                       llvm::Value *ReceiverTmp,
-                                       QualType InitTy) {
-  const RecordType *RT = InitTy->getBaseElementTypeUnsafe()->getAs<RecordType>();
-  if (!RT)
-    return;
-
-  CXXRecordDecl *ClassDecl = cast<CXXRecordDecl>(RT->getDecl());
-  if (ClassDecl->hasTrivialDestructor())
-    return;
-
-  // If required, push a cleanup to destroy the temporary.
-  const CXXDestructorDecl *Dtor = ClassDecl->getDestructor();
-  if (InitTy->isArrayType())
-    CGF.pushDestroy(NormalAndEHCleanup, ReceiverTmp,
-                    InitTy, &CodeGenFunction::destroyCXXObject,
-                    CGF.getLangOpts().Exceptions);
-  else
-    CGF.PushDestructorCleanup(Dtor, ReceiverTmp);
-}
-
-void CodeGenFunction::EmitDeprecatedCapturedStmt(const DeprecatedCapturedStmt &S) {
-  const FunctionDecl *HelperDecl = S.getFunctionDecl();
-  assert((HelperDecl->getNumParams() >= 1) && "at least one argument expected");
-  assert(HelperDecl->hasBody() && "missing function body");
-
-  const RecordDecl *RD = S.getRecordDecl();
-  QualType RecordTy = getContext().getRecordType(RD);
-
-  QualType InitTy;
-  llvm::Value *ReceiverTmp = 0;
-
-  // Initialize the captured struct
-  AggValueSlot Slot = CreateAggTemp(RecordTy, "agg.captured");
-  LValue SlotLV = MakeAddrLValue(Slot.getAddr(), RecordTy,
-                                 Slot.getAlignment());
-
-  RecordDecl::field_iterator CurField = RD->field_begin();
-  for (DeprecatedCapturedStmt::capture_const_iterator I = S.capture_begin(),
-                                            E = S.capture_end();
-       I != E; ++I, ++CurField) {
-    LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
-    ArrayRef<VarDecl *> ArrayIndexes;
-
-    switch (I->getCaptureKind()) {
-    case DeprecatedCapturedStmt::LCK_Receiver:
-      EmitStoreOfScalar(GetAddrOfLocalVar(I->getCapturedVar()), LV, true);
-      break;
-    case DeprecatedCapturedStmt::LCK_ReceiverTmp: {
-      InitTy = CurField->getType()->getPointeeType();
-      ReceiverTmp = CreateMemTemp(InitTy);
-      EmitStoreOfScalar(ReceiverTmp, LV, true);
-    } break;
-    default:
-      EmitInitializerForField(*CurField, LV, I->getCopyExpr(), ArrayIndexes);
-      break;
-    }
-  }
-
-  // The first argument is the address of captured struct
-  llvm::SmallVector<llvm::Value *, 1> Args;
-  Args.push_back(SlotLV.getAddress());
-
-  CGM.getCaptureDeclMap().insert(
-      std::pair<const FunctionDecl*,
-                const DeprecatedCapturedStmt*>(HelperDecl, &S));
-
-  // Emit the helper function
-  CGM.EmitTopLevelDecl(const_cast<FunctionDecl*>(HelperDecl));
-  llvm::Function *H
-    = dyn_cast<llvm::Function>(CGM.GetAddrOfFunction(GlobalDecl(HelperDecl)));
-
-  // Emit call to the helper function
-  EmitCallOrInvoke(H, Args);
-
-  // If this spawn binds a temporary to a reference, then destroy the
-  // temporary at the end of the reference's lifetime.
-  if (ReceiverTmp)
-    maybeCleanupBoundTemporary(*this, ReceiverTmp, InitTy);
+void
+CodeGenFunction::CGCilkSpawnStmtInfo::EmitPrologue(CodeGenFunction &CGF) {
+  CGF.CGM.getCilkPlusRuntime().EmitCilkHelperStackFrame(CGF);
 }

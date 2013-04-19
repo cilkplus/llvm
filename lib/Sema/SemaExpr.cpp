@@ -11234,9 +11234,6 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
              cast<CXXMethodDecl>(DC)->getOverloadedOperator() == OO_Call &&
              cast<CXXRecordDecl>(DC->getParent())->isLambda())
       ParentDC = DC->getParent()->getParent();
-    else if (isa<FunctionDecl>(DC) &&
-             cast<FunctionDecl>(DC)->isParallelRegion())
-      ParentDC = DC->getParent();
     else {
       if (BuildAndDiagnose)
         diagnoseUncapturableValueReference(*this, Loc, Var, DC);
@@ -11427,10 +11424,7 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       continue;
     }
 
-    bool IsCilkFor = isa<CilkForScopeInfo>(CSI);
-    bool IsParallelRegion = isa<ParallelRegionScopeInfo>(CSI);
-
-    if (isa<CapturedRegionScopeInfo>(CSI) || IsCilkFor || IsParallelRegion) {
+    if (isa<CapturedRegionScopeInfo>(CSI)) {
       // By default, capture variables by reference.
       bool ByRef = true;
 
@@ -11450,16 +11444,9 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       // Actually capture the variable.
       Expr *CopyExpr = 0;
       if (BuildAndDiagnose) {
-        ExprResult Result;
-        if (isa<CapturedRegionScopeInfo>(CSI))
-          Result = captureInCapturedRegion(*this, cast<CapturedRegionScopeInfo>(CSI), Var, CaptureType,
-                                           DeclRefType, Loc, Nested);
-        else if (IsCilkFor)
-          Result = captureInRegion(*this, cast<CilkForScopeInfo>(CSI),
-                                   Var, CaptureType, DeclRefType, Loc, Nested);
-        else
-          Result = captureInRegion(*this, cast<ParallelRegionScopeInfo>(CSI),
-                                   Var, CaptureType, DeclRefType, Loc, Nested);
+        ExprResult Result =
+            captureInCapturedRegion(*this, cast<CapturedRegionScopeInfo>(CSI),
+                                    Var, CaptureType, DeclRefType, Loc, Nested);
 
         if (!Result.isInvalid())
           CopyExpr = Result.take();

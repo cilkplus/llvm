@@ -1058,7 +1058,7 @@ static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
 namespace {
 /// \brief Helper to find the spawn call.
 ///
-/// This CallExpr should be cached into CilkSpawnDeprecatedCapturedStmt.
+/// This CallExpr should be cached into CilkSpawnStmt.
 ///
 class FindSpawnCallExpr : public RecursiveASTVisitor<FindSpawnCallExpr> {
 public:
@@ -1087,7 +1087,7 @@ public:
 /// analysis, since codegen will try to compute this attribute by
 /// scanning the function body of the spawned function.
 void setHelperAttributes(CodeGenFunction &CGF,
-                         const CilkSpawnDeprecatedCapturedStmt &S,
+                         const CilkSpawnStmt &S,
                          Function *Helper) {
   FindSpawnCallExpr Finder(const_cast<Stmt *>(S.getSubStmt()));
   assert(Finder.Spawn && "spawn call expected");
@@ -1118,9 +1118,9 @@ void setHelperAttributes(CodeGenFunction &CGF,
 namespace clang {
 namespace CodeGen {
 
-/// \brief Emit code for a CilkSpawnDeprecatedCapturedStmt.
+/// \brief Emit code for a CilkSpawnStmt.
 void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                      const CilkSpawnDeprecatedCapturedStmt &S) {
+                                      const CilkSpawnStmt &S) {
   // Get the __cilkrts_stack_frame
   Value *SF = LookupStackFrame(CGF);
   assert(SF && "null stack frame unexpected");
@@ -1160,11 +1160,7 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
     }
 
     // Emit call to the helper function
-    CGF.EmitDeprecatedCapturedStmt(S);
-
-    // Register the spawn helper function.
-    GlobalDecl GD(S.getFunctionDecl());
-    Function *Helper = cast<Function>(CGF.CGM.GetAddrOfFunction(GD));
+    Function *Helper = CGF.EmitCapturedStmt(*S.getCapturedStmt(), CR_CilkSpawn);
 
     // Register the spawn helper function.
     registerSpawnFunction(CGF, Helper);
@@ -1375,7 +1371,7 @@ void CGCilkPlusRuntime::EmitCilkHelperPrologue(CodeGenFunction &CGF) {
 static CXXTryStmt *getEnclosingTryBlock(Stmt *S, const Stmt *Top,
                                         const ParentMap &PMap) {
   assert(S && "NULL Statement");
-  assert((isa<CilkSpawnDeprecatedCapturedStmt>(S) ||
+  assert((isa<CilkSpawnStmt>(S) ||
           isa<CXXThrowExpr>(S)) && "unexpected statement");
 
   while (true) {
@@ -1432,7 +1428,7 @@ public:
   bool TraverseLambdaExpr(LambdaExpr *E) { return true; }
   bool TraverseBlockExpr(BlockExpr *E) { return true; }
 
-  bool TraverseCilkSpawnDeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmt *S) {
+  bool TraverseCilkSpawnStmt(CilkSpawnStmt *S) {
     CXXTryStmt *TS = getEnclosingTryBlock(S, Body, PMap);
 
     // If a spawn statement is not enclosed by any try-block, then

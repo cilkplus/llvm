@@ -759,7 +759,6 @@ void Sema::CheckCXXThisCapture(SourceLocation Loc, bool Explicit) {
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_LambdaByval ||
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_Block ||
           CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_CapturedRegion ||
-          CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_ParallelRegion ||
           Explicit) {
         // This closure can capture 'this'; continue looking upwards.
         NumClosures++;
@@ -786,9 +785,6 @@ void Sema::CheckCXXThisCapture(SourceLocation Loc, bool Explicit) {
       ThisExpr = captureThis(Context, LSI->Lambda, ThisTy, Loc);
     else if (CapturedRegionScopeInfo *RSI
         = dyn_cast<CapturedRegionScopeInfo>(FunctionScopes[idx]))
-      ThisExpr = captureThis(Context, RSI->TheRecordDecl, ThisTy, Loc);
-    else if (ParallelRegionScopeInfo *RSI
-        = dyn_cast<ParallelRegionScopeInfo>(FunctionScopes[idx]))
       ThisExpr = captureThis(Context, RSI->TheRecordDecl, ThisTy, Loc);
     else if (CilkForScopeInfo *FSI
         = dyn_cast<CilkForScopeInfo>(FunctionScopes[idx]))

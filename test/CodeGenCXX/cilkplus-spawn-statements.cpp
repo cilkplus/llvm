@@ -356,12 +356,12 @@ namespace capture_array_by_value {
     invoke_multi<float, 3, 5>();
     invoke_multi<S, 11, 7>();
 
-    // CHECK-CILK12: %struct.capture.{{.*}} = type { [17 x float]* }
-    // CHECK-CILK12: %struct.capture.{{.*}} = type { [19 x %struct.S]* }
-    // CHECK-CILK12: %struct.capture.{{.*}} = type { [21 x float]* }
-    // CHECK-CILK12: %struct.capture.{{.*}} = type { [23 x %struct.S]* }
-    // CHECK-CILK12: %struct.capture.{{.*}} = type { [3 x [5 x float]]* }
-    // CHECK-CILK12: %struct.capture.{{.*}} = type { [11 x [7 x %struct.S]]* }
+    // CHECK-CILK12: %struct.anon{{.*}} = type { [17 x float]* }
+    // CHECK-CILK12: %struct.anon{{.*}} = type { [19 x %struct.S]* }
+    // CHECK-CILK12: %struct.anon{{.*}} = type { [21 x float]* }
+    // CHECK-CILK12: %struct.anon{{.*}} = type { [23 x %struct.S]* }
+    // CHECK-CILK12: %struct.anon{{.*}} = type { [3 x [5 x float]]* }
+    // CHECK-CILK12: %struct.anon{{.*}} = type { [11 x [7 x %struct.S]]* }
   }
 }
 
@@ -591,7 +591,7 @@ void test_implicit_conversions() {
   double d = _Cilk_spawn foo<float, 3001>();
   // CHECK-CILK27: define {{.*}}test_implicit_conversions
   // CHECK-CILK27:   alloca double
-  // CHECK-CILK27:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
+  // CHECK-CILK27:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK27: define internal void @[[Helper]]
   // CHECK-CILK27:   call {{.*}}foo{{.*}}3001
@@ -600,7 +600,7 @@ void test_implicit_conversions() {
   void *p = _Cilk_spawn foo<int*, 3002>();
   // CHECK-CILK28: define {{.*}}test_implicit_conversions
   // CHECK-CILK28:   alloca i8*
-  // CHECK-CILK28:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
+  // CHECK-CILK28:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK28: define internal void @[[Helper]]
   // CHECK-CILK28:   call {{.*}}foo{{.*}}3002
@@ -609,7 +609,7 @@ void test_implicit_conversions() {
   const Base &b = _Cilk_spawn foo<Derived, 3003>();
   // CHECK-CILK29: define {{.*}}test_implicit_conversions
   // CHECK-CILK29:   alloca %"struct.spawn_variable_initialization::Base"*
-  // CHECK-CILK29:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
+  // CHECK-CILK29:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK29: define internal void @[[Helper]]
   // CHECK-CILK29:   call {{.*}}foo{{.*}}3003
@@ -618,7 +618,7 @@ void test_implicit_conversions() {
   Class2 c = _Cilk_spawn foo<Class, 3004>();
   // CHECK-CILK30: define {{.*}}test_implicit_conversions
   // CHECK-CILK30:   alloca %"struct.spawn_variable_initialization::Class2"
-  // CHECK-CILK30:   call void @[[Helper:.*__cilk_spawn_helper.*capture[^)]*]](
+  // CHECK-CILK30:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK30: define internal void @[[Helper]]
   // CHECK-CILK30:   call void @{{.*}}foo{{.*}}3004

@@ -9412,7 +9412,8 @@ TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
 
 template<typename Derived>
 StmtResult
-TreeTransform<Derived>::TransformCilkSpawnDeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmt *S) {
+TreeTransform<Derived>::TransformCilkSpawnStmt(CilkSpawnStmt *S) {
+  // FIXME: not implemented yet
   return Owned(S);
 }
 

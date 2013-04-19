@@ -7,7 +7,7 @@ void test1() {
   int v = 1;
   _Cilk_spawn f1(v);
   //CHECK: define void @_Z5test1v
-  //CHECK: call void @_Z21__cilk_spawn_helper
+  //CHECK: call void @__cilk_spawn_helper
   //CHECK: cilk.sync.excepting{{[.a-z0-9]*}}:
   //CHECK-NEXT: br label %__cilk_sync.exit
   //CHECK: }

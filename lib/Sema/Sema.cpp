@@ -804,9 +804,6 @@ DeclContext *Sema::getFunctionLevelDeclContext() {
   while (true) {
     if (isa<BlockDecl>(DC) || isa<EnumDecl>(DC) || isa<CapturedDecl>(DC)) {
       DC = DC->getParent();
-    } else if (isa<FunctionDecl>(DC) &&
-               cast<FunctionDecl>(DC)->isParallelRegion()) {
-      DC = DC->getParent();
     } else if (isa<CXXMethodDecl>(DC) &&
                cast<CXXMethodDecl>(DC)->getOverloadedOperator() == OO_Call &&
                cast<CXXRecordDecl>(DC->getParent())->isLambda()) {
@@ -1016,11 +1013,6 @@ void Sema::PushBlockScope(Scope *BlockScope, BlockDecl *Block) {
                                               BlockScope, Block));
 }
 
-void Sema::PushParallelRegionScope(Scope *S, FunctionDecl *FD, RecordDecl *RD) {
-  FunctionScopes.push_back(new ParallelRegionScopeInfo(getDiagnostics(),
-                                                       S, FD, RD));
-}
-
 void Sema::PushCilkForScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
                             const VarDecl *LoopControlVariable,
                             SourceLocation CilkForLoc) {
@@ -1083,13 +1075,6 @@ BlockScopeInfo *Sema::getCurBlock() {
     return 0;
 
   return dyn_cast<BlockScopeInfo>(FunctionScopes.back());
-}
-
-ParallelRegionScopeInfo *Sema::getCurParallelRegion() {
-  if (FunctionScopes.empty())
-    return 0;
-
-  return dyn_cast<ParallelRegionScopeInfo>(FunctionScopes.back());
 }
 
 CilkForScopeInfo *Sema::getCurCilkFor() {
@@ -1349,7 +1334,7 @@ IdentifierInfo *Sema::getSuperIdentifier() const {
 }
 
 void Sema::PushCapturedRegionScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
-                                   CapturedRegionScopeInfo::CapturedRegionKind K) {
+                                   CapturedRegionKind K) {
   CapturingScopeInfo *CSI = new CapturedRegionScopeInfo(getDiagnostics(), S, CD, RD,
                                                         CD->getContextParam(), K);
   CSI->ReturnType = Context.VoidTy;

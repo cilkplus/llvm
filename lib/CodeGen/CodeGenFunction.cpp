@@ -37,7 +37,6 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
     Builder(cgm.getModule().getContext()),
     CapturedStmtInfo(0),
-    CurCGDeprecatedCapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getSanOpts().Null |
                              CGM.getSanOpts().Alignment |
@@ -75,7 +74,6 @@ CodeGenFunction::~CodeGenFunction() {
     destroyBlockInfos(FirstBlockInfo);
 
   delete CurCGCilkImplicitSyncInfo;
-  delete CurCGDeprecatedCapturedStmtInfo;
 }
 
 
@@ -197,8 +195,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
 
   // Pop a Cilk spawn helper's catch scope.
   if (getLangOpts().Exceptions && getLangOpts().CilkPlus) {
-    const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CurFuncDecl);
-    if (FD && FD->isParallelRegion()) {
+    if (CapturedStmtInfo && CapturedStmtInfo->getKind() == CR_CilkSpawn) {
       EHScopeStack::iterator Catch = EHStack.begin();
       for (EHScopeStack::iterator End = EHStack.end(); Catch != End; ++Catch)
         if (isa<EHCatchScope>(*Catch)) break;
@@ -590,8 +587,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
           CGCilkPlusRuntime::ReleaseFrameCleanup;
 
       CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this, Kind);
-    } else if (FD && FD->isParallelRegion())
-      CGM.getCilkPlusRuntime().EmitCilkHelperStackFrame(*this);
+    }
   }
 
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);
@@ -629,17 +625,6 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     QualType TagType = getContext().getTagDeclType(FD->getParent());
     LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
                                            TagType);
-    LValue ThisLValue = EmitLValueForField(LV, FD);
-
-    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
-  }
-
-  // If CFG is emitting a captured statement and 'this' is captured,
-  // load it into CXXThisValue;
-  if (CurCGDeprecatedCapturedStmtInfo && CurCGDeprecatedCapturedStmtInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = CurCGDeprecatedCapturedStmtInfo->getThisFieldDecl();
-    QualType TagType = getContext().getTagDeclType(FD->getParent());
-    LValue LV = MakeNaturalAlignAddrLValue(CurCGDeprecatedCapturedStmtInfo->getThisValue(), TagType);
     LValue ThisLValue = EmitLValueForField(LV, FD);
 
     CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();

@@ -526,10 +526,6 @@ CodeGenModule::getFunctionLinkage(const FunctionDecl *D) {
   
   if (D->hasAttr<WeakAttr>())
     return llvm::Function::WeakAnyLinkage;
-  
-  // A parallel region should be internal.
-  if (D->isParallelRegion())
-    return llvm::Function::InternalLinkage;
 
   // In C99 mode, 'inline' functions are guaranteed to have a strong
   // definition somewhere else, so we can use available_externally linkage.

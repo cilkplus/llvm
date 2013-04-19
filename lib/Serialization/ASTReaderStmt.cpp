@@ -1572,9 +1572,8 @@ void ASTStmtReader::VisitCilkSyncStmt(CilkSyncStmt *S) {
   S->SyncLoc = ReadSourceLocation(Record, Idx);
 }
 
-void ASTStmtReader::VisitCilkSpawnDeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmt *S) {
-  VisitStmt(S);
-  S->setSubStmt(Reader.ReadSubStmt());
+void ASTStmtReader::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
+  llvm_unreachable("not implemented yet");
 }
 
 void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
@@ -2271,8 +2270,8 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       S = new (Context) CilkSyncStmt(Empty);
       break;
 
-    case STMT_CILKSPAWN_CAPTURED:
-      S = new (Context) CilkSpawnDeprecatedCapturedStmt(Empty);
+    case STMT_CILKSPAWN:
+      S = new (Context) CilkSpawnStmt(Empty);
       break;
 
     case STMT_CILK_FOR:

@@ -185,7 +185,6 @@ namespace sema {
   class FunctionScopeInfo;
   class LambdaScopeInfo;
   class PossiblyUnreachableDiag;
-  class ParallelRegionScopeInfo;
   class TemplateDeductionInfo;
 }
 
@@ -924,10 +923,7 @@ public:
   void PushBlockScope(Scope *BlockScope, BlockDecl *Block);
   void PushLambdaScope(CXXRecordDecl *Lambda, CXXMethodDecl *CallOperator);
   void PushCapturedRegionScope(Scope *RegionScope, CapturedDecl *CD,
-                               RecordDecl *RD,
-                               sema::CapturedRegionScopeInfo::CapturedRegionKind K);
-  void PushParallelRegionScope(Scope *RegionScope, FunctionDecl *FD,
-                               RecordDecl *RD);
+                               RecordDecl *RD, CapturedRegionKind K);
   void PushCilkForScope(Scope *S, CapturedDecl *FD, RecordDecl *RD,
                         const VarDecl *LoopControlVariable,
                         SourceLocation CilkForLoc);
@@ -954,9 +950,6 @@ public:
 
   /// \brief Retrieve the current captured region, if any.
   sema::CapturedRegionScopeInfo *getCurCapturedRegion();
-
-  /// \brief Retrieve the current parallel region, if any.
-  sema::ParallelRegionScopeInfo *getCurParallelRegion();
 
   /// \brief Retrieve the current cilk for region, if any.
   sema::CilkForScopeInfo *getCurCilkFor();
@@ -2793,7 +2786,7 @@ public:
   StmtResult ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope);
 
   void ActOnCapturedRegionStart(SourceLocation Loc, Scope *CurScope,
-                                sema::CapturedRegionScopeInfo::CapturedRegionKind Kind);
+                                CapturedRegionKind Kind);
   StmtResult ActOnCapturedRegionEnd(Stmt *S);
   void ActOnCapturedRegionError(bool IsInstantiation = false);
   RecordDecl *CreateCapturedStmtRecordDecl(CapturedDecl *&CD,
@@ -2805,13 +2798,6 @@ public:
   ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   ExprResult BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   StmtResult ActOnCilkSpawnStmt(Stmt *S);
-
-  RecordDecl *CreateDeprecatedCapturedStmtRecordDecl(FunctionDecl *&FD,
-                                           SourceLocation Loc,
-                                           IdentifierInfo *MangledName);
-  SmallVector<DeprecatedCapturedStmt::Capture, 4>
-  buildDeprecatedCapturedStmtCaptureList(SmallVector<sema::CapturingScopeInfo::Capture, 4>
-                                 &Candidates);
 
   const VarDecl *getCopyElisionCandidate(QualType ReturnType, Expr *E,
                                          bool AllowFunctionParameters);

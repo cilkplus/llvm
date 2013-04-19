@@ -16,6 +16,7 @@
 #define LLVM_CLANG_SEMA_SCOPE_INFO_H
 
 #include "clang/AST/Type.h"
+#include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/PartialDiagnostic.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
@@ -84,7 +85,6 @@ protected:
     SK_Block,
     SK_Lambda,
     SK_CapturedRegion,
-    SK_ParallelRegion,
     SK_CilkFor
   };
   
@@ -332,8 +332,7 @@ class CapturingScopeInfo : public FunctionScopeInfo {
 public:
   enum ImplicitCaptureStyle {
     ImpCap_None, ImpCap_LambdaByval, ImpCap_LambdaByref, ImpCap_Block,
-    ImpCap_CapturedRegion,
-    ImpCap_ParallelRegion
+    ImpCap_CapturedRegion
   };
 
   ImplicitCaptureStyle ImpCaptureStyle;
@@ -477,7 +476,6 @@ public:
   static bool classof(const FunctionScopeInfo *FSI) { 
     return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda
                                  || FSI->Kind == SK_CapturedRegion
-                                 || FSI->Kind == SK_ParallelRegion
                                  || FSI->Kind == SK_CilkFor;
   }
 };
@@ -512,12 +510,6 @@ public:
 /// \brief Retains information about a captured region.
 class CapturedRegionScopeInfo: public CapturingScopeInfo {
 public:
-
-  enum CapturedRegionKind {
-    CR_Default,
-    CR_CilkFor
-  };
-
   /// \brief The CapturedDecl for this statement.
   CapturedDecl *TheCapturedDecl;
   /// \brief The captured record type.
@@ -548,6 +540,8 @@ public:
     switch (CapRegionKind) {
     case CR_Default:
       return "default captured statement";
+    case CR_CilkSpawn:
+      return "_Cilk_spawn";
     case CR_CilkFor:
       return "_Cilk_for";
     }
@@ -555,33 +549,6 @@ public:
 
   static bool classof(const FunctionScopeInfo *FSI) {
     return FSI->Kind == SK_CapturedRegion || FSI->Kind == SK_CilkFor;
-  }
-};
-
-/// \brief Retains information about a parallel region
-class ParallelRegionScopeInfo : public CapturingScopeInfo {
-public:
-  /// \brief the helper function
-  FunctionDecl *TheFunctionDecl;
-  /// \brief The captured record type
-  RecordDecl *TheRecordDecl;
-  /// \brief This is the enclosing scope of the parallel region.
-  Scope *TheScope;
-  /// \brief Whether any of the capture expressions requires cleanups.
-  bool ExprNeedsCleanups;
-
-  ParallelRegionScopeInfo(DiagnosticsEngine &Diag, Scope *S, FunctionDecl *FD,
-                          RecordDecl *RD)
-    : CapturingScopeInfo(Diag, ImpCap_ParallelRegion),
-      TheFunctionDecl(FD), TheRecordDecl(RD), TheScope(S),
-      ExprNeedsCleanups(false) {
-    Kind = SK_ParallelRegion;
-  }
-
-  virtual ~ParallelRegionScopeInfo();
-
-  static bool classof(const FunctionScopeInfo *FSI) {
-    return FSI->Kind == SK_ParallelRegion;
   }
 };
 

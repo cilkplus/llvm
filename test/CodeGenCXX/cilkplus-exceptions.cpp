@@ -34,7 +34,7 @@ namespace stack_frame_cleanup {
     // CHECK_PARENT: define {{.*}} @_ZN19stack_frame_cleanup7test_f1IiLi23EEEvv
     // CHECK_PARENT: alloca %__cilkrts_stack_frame
     // CHECK_PARENT-NEXT: call void @__cilk_parent_prologue
-    // CHECK_PARENT: invoke void @_ZN19stack_frame_cleanup{{[0-9]+}}__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i23{{.*}}capture
+    // CHECK_PARENT: invoke void @__cilk_spawn_helper
     //
     // * Normal exit *
     //
@@ -49,7 +49,10 @@ namespace stack_frame_cleanup {
 
   void helper_stack_frame_test() {
     test_f1<C, 29>();
-    // CHECK_HELPER_F1: define internal void @_ZN19stack_frame_cleanup{{[0-9]+}}__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i29{{.*}}capture
+    // CHECK_HELPER_F1: define {{.*}}@{{.*}}helper_stack_frame_test
+    // CHECK_HELPER_F1:   invoke void @[[Helper:__cilk_spawn_helper[0-9]*]]
+    //
+    // CHECK_HELPER_F1: define internal void @[[Helper]]
     // CHECK_HELPER_F1: alloca %__cilkrts_stack_frame
     // CHECK_HELPER_F1: call void @__cilk_reset_worker
     //
@@ -76,9 +79,11 @@ namespace stack_frame_cleanup {
   void helper_check_assignment() {
     int x = 0;
     test_f2<int, 37>(x);
-    // CHECK_HELPER_F2: define internal void @_ZN19stack_frame_cleanup{{[0-9]+}}__cilk_spawn_helperV{{[0-9]+}}EPZNS{{.*}}i37{{.*}}capture
+    // CHECK_HELPER_F2: define {{.*}}@{{.*}}helper_check_assignment
+    // CHECK_HELPER_F2:   invoke void @[[Helper:__cilk_spawn_helper[0-9]*]]
     //
-    // CHECK_HELPER_F2: [[REG:%[a-zA-Z0-9]+]] = getelementptr inbounds %struct.capture
+    // CHECK_HELPER_F2: define internal void @[[Helper]]
+    // CHECK_HELPER_F2: [[REG:%[a-zA-Z0-9]+]] = getelementptr inbounds %struct
     // CHECK_HELPER_F2-NEXT: load i32** [[REG]]
     // CHECK_HELPER_F2-NEXT: call void @__cilk_helper_prologue
     // CHECK_HELPER_F2-NEXT: [[RET_REG:%[a-zA-Z0-9]+]] = invoke i32 @_ZN19stack_frame_cleanup2f2IiEET_S1_
@@ -390,7 +395,7 @@ void test_value() {
     Class c = _Cilk_spawn makeClass();
   } catch (...) { }
   // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_valueEv()
-  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_value
+  // CHECK_INIT: invoke void @__cilk_spawn_helper
   // CHECK_INIT-NOT: ret
   //
   // Normal exit:
@@ -408,7 +413,7 @@ void test_rvalue_ref() {
     maybeThrow();
   } catch (...) { }
   // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_rvalue_refEv()
-  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_rvalue_ref
+  // CHECK_INIT: invoke void @__cilk_spawn_helper
   // CHECK_INIT-NOT: ret
   //
   // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}maybeThrow
@@ -428,7 +433,7 @@ void test_const_ref() {
     maybeThrow();
   } catch (...) { }
   // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_const_refEv()
-  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_const_ref
+  // CHECK_INIT: invoke void @__cilk_spawn_helper
   // CHECK_INIT-NOT: ret
   //
   // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}maybeThrow
@@ -448,7 +453,7 @@ void test_no_destruct_uninitialized() {
     Class &&c = _Cilk_spawn makeClass();
   } catch (...) { }
   // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_no_destruct_uninitialized
-  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_no_destruct_uninitialized
+  // CHECK_INIT: invoke void @__cilk_spawn_helper
   // CHECK_INIT-NOT: ret
   //
   // Normal exit:
@@ -476,7 +481,7 @@ void test_bind_to_base_type() {
   // CHECK_INIT: define void @{{.*}}spawn_variable_initialization{{.*}}test_bind_to_base_type
   // CHECK_INIT: alloca {{.*}}Base"*
   // CHECK_INIT: alloca {{.*}}Derived"
-  // CHECK_INIT: invoke void @{{.*}}spawn_variable_initialization{{.*}}__cilk_spawn_helper{{.*}}test_bind_to_base_type
+  // CHECK_INIT: invoke void @__cilk_spawn_helper
   // CHECK_INIT-NOT: ret
   //
   // CHECK_INIT: call void @{{.*}}DerivedD1Ev

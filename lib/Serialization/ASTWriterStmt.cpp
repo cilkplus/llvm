@@ -1547,10 +1547,10 @@ void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
   Code = serialization::STMT_CILKSYNC;
 }
 
-void ASTStmtWriter::VisitCilkSpawnDeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmt *S) {
+void ASTStmtWriter::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
   VisitStmt(S);
   Writer.AddStmt(S->getSubStmt());
-  Code = serialization::STMT_CILKSPAWN_CAPTURED;
+  Code = serialization::STMT_CILKSPAWN;
 }
 
 void ASTStmtWriter::VisitCilkForStmt(CilkForStmt *S) {

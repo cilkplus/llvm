@@ -1902,9 +1902,11 @@ class CapturedStmt : public Stmt {
 public:
   /// \brief The different capture forms: by 'this' or by reference, etc.
   enum VariableCaptureKind {
-    VCK_This,
-    VCK_ByRef,
-    VCK_ByCopy
+    VCK_This,            // Capture 'this'
+    VCK_ByRef,           // Capture by reference
+    VCK_ByCopy,          // Capture by copy
+    VCK_Receiver,   // Result of a Cilk spawn, when used as a DeclStmt
+    VCK_ReceiverTmp // Temporary for receiver when binding reference
   };
 
   /// \brief Describes the capture of either a variable or 'this'.
@@ -1931,6 +1933,10 @@ public:
       case VCK_ByRef:
       case VCK_ByCopy:
         assert(Var && "capturing by reference / copy must have a variable!");
+        break;
+      case VCK_Receiver:
+      case VCK_ReceiverTmp:
+        assert(Var && "receiver must have a variable!");
         break;
       }
     }
@@ -2078,145 +2084,36 @@ public:
   child_range children() { return child_range(); }
 };
 
-// \brief the base class for capturing a statement into a seperate function
-class DeprecatedCapturedStmt : public Stmt {
+/// \brief Represents a _Cilk_spawn statement.
+class CilkSpawnStmt : public Stmt {
+  CapturedStmt *TheCapturedStmt;
 public:
-  enum CaptureKind {
-    LCK_This,
-    LCK_ByRef,
-    LCK_Receiver,
-    LCK_ReceiverTmp
-  };
+  explicit CilkSpawnStmt(CapturedStmt *S)
+    : Stmt(CilkSpawnStmtClass), TheCapturedStmt(S) { }
 
-  /// \brief Describes the capture of either a variable or 'this'.
-  class Capture {
-    VarDecl *Var;
-    CaptureKind Kind;
-    Expr *CopyExpr;
+  explicit CilkSpawnStmt(EmptyShell Empty)
+    : Stmt(CilkSpawnStmtClass, Empty) { }
 
-  public:
-    /// \brief Create a new capture.
-    Capture(CaptureKind Kind, Expr *E, VarDecl *Var = 0)
-      : Var(Var), Kind(Kind), CopyExpr(E) {
-       switch (Kind) {
-       case LCK_This: 
-         assert(Var == 0 && "'this' capture cannot have a variable!");
-         break;
-       case LCK_ByRef:
-         assert(Var && "capture must have a variable!");
-         break;
-       case LCK_Receiver:
-       case LCK_ReceiverTmp:
-         assert(Var != 0 && "receiver capture must have a variable!");
-         break;
-       }
-    }
-
-    /// \brief Determine the kind of capture.
-    CaptureKind getCaptureKind() const { return Kind; }
-
-    /// \brief Determine whether this capture handles the C++ 'this'  pointer.
-    bool capturesThis() const { return Var == 0; }
-
-    /// \brief Retrieve the declaration of the local variable being captured.
-    ///
-    /// This operation is only valid if this capture does not capture 'this'.
-    VarDecl *getCapturedVar() const { 
-      assert(!capturesThis() && "No variable available for 'this' capture");
-      return Var;
-    }
-
-    Expr *getCopyExpr() const { return CopyExpr; }
-  };
-
-protected:
-  FunctionDecl *TheDecl;
-  RecordDecl *TheRecordDecl;
-  Stmt *SubStmt;
-  Capture *Captures;
-  unsigned NumCaptures;
-  
-  DeprecatedCapturedStmt(StmtClass SC, Stmt *S)
-    : Stmt(SC), TheDecl(0), TheRecordDecl(0), SubStmt(S), Captures(0),
-      NumCaptures(0) { }
-
-  DeprecatedCapturedStmt(StmtClass SC, EmptyShell Empty)
-    : Stmt(SC, Empty), TheDecl(0), TheRecordDecl(0), SubStmt(0),
-      NumCaptures(0) { }
-
-public:
-  FunctionDecl *getFunctionDecl() { return TheDecl; }
-  const FunctionDecl *getFunctionDecl() const { return TheDecl; }
-  void setFunctionDecl(FunctionDecl *D) { TheDecl = D; }
-
-  RecordDecl *getRecordDecl() { return TheRecordDecl; }
-  const RecordDecl *getRecordDecl() const { return TheRecordDecl; }
-  void setRecordDecl(RecordDecl *D) { TheRecordDecl = D; }
-
-  Stmt *getSubStmt() { return SubStmt; }
-  const Stmt *getSubStmt() const { return SubStmt; }
-  void setSubStmt(Stmt *S) { SubStmt = S; }
-
-  /// \brief True if this captured region(or its nested regions) captures
-  /// anything of local storage from its enclosing scopes.
-  bool hasCaptures() const { return NumCaptures != 0; }
-
-  /// \brief Returns the number of captured variables.
-  /// Does not include an entry for 'this'.
-  unsigned getNumCaptures() const { return NumCaptures; }
-
-  typedef const Capture *capture_iterator;
-  typedef const Capture *capture_const_iterator;
-  capture_iterator capture_begin() { return Captures; }
-  capture_iterator capture_end() { return Captures + NumCaptures; }
-  capture_const_iterator capture_begin() const { return Captures; }
-  capture_const_iterator capture_end() const { return Captures + NumCaptures; }
+  CapturedStmt *getCapturedStmt() const { return TheCapturedStmt; }
+  Stmt *getSubStmt() const { return TheCapturedStmt->getCapturedStmt(); }
 
   SourceLocation getLocStart() const LLVM_READONLY {
-    return SubStmt->getLocStart();
+    return TheCapturedStmt->getLocStart();
   }
   SourceLocation getLocEnd() const LLVM_READONLY {
-    return SubStmt->getLocEnd();
+    return TheCapturedStmt->getLocEnd();
   }
   SourceRange getSourceRange() const LLVM_READONLY {
-    return SubStmt->getSourceRange();
+    return TheCapturedStmt->getSourceRange();
   }
-
-  bool capturesVariable(const VarDecl *var) const;
-  void setCaptures(ASTContext &Context,
-                   const Capture *begin,
-                   const Capture *end);
 
   static bool classof(const Stmt *T) {
-    // Currently the only subclass is CilkSpawnDeprecatedCapturedStmt
-    return T->getStmtClass() == CilkSpawnDeprecatedCapturedStmtClass;
+    return T->getStmtClass() == CilkSpawnStmtClass;
   }
+  static bool classof(CilkSpawnStmt *) { return true; }
 
   child_range children() {
-    return child_range(&SubStmt, &SubStmt + 1);
-  }
-};
-
-class CilkSpawnDeprecatedCapturedStmt : public DeprecatedCapturedStmt {
-public:
-  explicit CilkSpawnDeprecatedCapturedStmt(Stmt *S)
-    : DeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmtClass, S) { }
-
-  explicit CilkSpawnDeprecatedCapturedStmt(EmptyShell Empty)
-    : DeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmtClass, Empty) { }
-
-  SourceLocation getLocStart() const LLVM_READONLY {
-    return DeprecatedCapturedStmt::getLocStart();
-  }
-  SourceLocation getLocEnd() const LLVM_READONLY {
-    return DeprecatedCapturedStmt::getLocEnd();
-  }
-  SourceRange getSourceRange() const LLVM_READONLY {
-    return DeprecatedCapturedStmt::getSourceRange();
-  }
-
-  static bool classof(const Stmt *T) {
-    return T->getStmtClass() == CilkSpawnDeprecatedCapturedStmtClass;
+    return child_range((Stmt**)&TheCapturedStmt, (Stmt**)&TheCapturedStmt+1);
   }
 };
 

@@ -23,6 +23,7 @@
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/ABI.h"
+#include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -611,20 +612,39 @@ public:
   class CGCapturedStmtInfo {
   public:
 
-    explicit CGCapturedStmtInfo(const CapturedStmt &S)
-      : ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0) {
+    explicit CGCapturedStmtInfo(const CapturedStmt &S,
+                                CapturedRegionKind K = CR_Default)
+      : Kind(K), ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0),
+        ReceiverDecl(0), ReceiverFieldDecl(0), ReceiverTmpFieldDecl(0),
+        ReceiverAddr(0), ReceiverTmp(0) { 
 
       RecordDecl::field_iterator Field =
         S.getCapturedRecordDecl()->field_begin();
       for (CapturedStmt::capture_iterator I = S.capture_begin(),
                                           E = S.capture_end();
            I != E; ++I, ++Field) {
-        if (I->capturesThis())
+        switch (I->getCaptureKind()) {
+        case CapturedStmt::VCK_This:
           CXXThisFieldDecl = *Field;
-        else
+          break;
+        case CapturedStmt::VCK_Receiver:
+          ReceiverDecl = I->getCapturedVar();
+          ReceiverFieldDecl = *Field;
+          break;
+        case CapturedStmt::VCK_ReceiverTmp:
+          assert(ReceiverDecl == I->getCapturedVar());
+          ReceiverTmpFieldDecl = *Field;
+          break;
+        default:
           CaptureFields[I->getCapturedVar()] = *Field;
+          break;
+        }
       }
     }
+
+    virtual ~CGCapturedStmtInfo() { }
+
+    CapturedRegionKind getKind() const { return Kind; }
 
     void setThisValue(llvm::Value *V) { ThisValue = V; }
     llvm::Value *getThisValue() const { return ThisValue; }
@@ -636,6 +656,8 @@ public:
 
     bool isCXXThisExprCaptured() const { return CXXThisFieldDecl != 0; }
     FieldDecl *getThisFieldDecl() const { return CXXThisFieldDecl; }
+    FieldDecl *getReceiverFieldDecl() const { return ReceiverFieldDecl; }
+    FieldDecl *getReceiverTmpFieldDecl() const { return ReceiverTmpFieldDecl; }
 
     bool isThisParmVarDecl(const VarDecl *V) const {
       return V == ThisParmVarDecl;
@@ -643,53 +665,6 @@ public:
 
     void setThisParmVarDecl(VarDecl *V) {
       ThisParmVarDecl = V;
-    }
-
-  private:
-    /// \brief Keep the map between VarDecl and FieldDecl.
-    llvm::SmallDenseMap<const VarDecl *, FieldDecl *> CaptureFields;
-
-    /// \brief The base address of the captured record, passed in as the first
-    /// argument of the parallel region function.
-    llvm::Value *ThisValue;
-
-    /// \brief Captured 'this' type.
-    FieldDecl *CXXThisFieldDecl;
-
-    /// \brief The captured record parameter to the helper function.
-    VarDecl *ThisParmVarDecl;
-  };
-  CGCapturedStmtInfo *CapturedStmtInfo;
-
-  /// \brief API for Cilk for statement code generation.
-  class CGCilkForStmtInfo : public CGCapturedStmtInfo {
-  public:
-    explicit CGCilkForStmtInfo(const CilkForStmt &S)
-      : CGCapturedStmtInfo(*S.getBody()) { }
-  };
-
-  class CGDeprecatedCapturedStmtInfo {
-  public:
-    CGDeprecatedCapturedStmtInfo()
-      : ThisValue(0), CXXThisFieldDecl(0), ReceiverFieldDecl(0),
-        ReceiverTmpFieldDecl(0), ThisParmVarDecl(0),
-        ReceiverAddr(0), ReceiverTmp(0), ReceiverDecl(0) { }
-
-    void setThisValue(llvm::Value *V) { ThisValue = V; }
-    llvm::Value *getThisValue() const { return ThisValue; }
-
-    /// \brief Lookup the captured field decl for a variable
-    const FieldDecl *lookup(const VarDecl *VD) const {
-      return CaptureFields.lookup(VD);
-    }
-
-    bool isCXXThisExprCaptured() const { return CXXThisFieldDecl != 0; }
-    FieldDecl *getThisFieldDecl() const { return CXXThisFieldDecl; }
-    FieldDecl *getReceiverFieldDecl() const { return ReceiverFieldDecl; }
-    FieldDecl *getReceiverTmpFieldDecl() const { return ReceiverTmpFieldDecl; }
-
-    bool isThisParmVarDecl(const NamedDecl *V) const {
-      return V && V == ThisParmVarDecl;
     }
 
     bool isReceiverDecl(const NamedDecl *V) const {
@@ -702,48 +677,31 @@ public:
     llvm::Value *getReceiverTmp() const { return ReceiverTmp; }
     void setReceiverTmp(llvm::Value *val) { ReceiverTmp = val; }
 
-    void initCGDeprecatedCapturedStmtInfo(const DeprecatedCapturedStmt *S) {
-      RecordDecl::field_iterator Field = S->getRecordDecl()->field_begin();
-      for (DeprecatedCapturedStmt::capture_const_iterator I = S->capture_begin(),
-                                                E = S->capture_end();
-                                                I != E; ++I, ++Field) {
-        switch (I->getCaptureKind()) {
-        case DeprecatedCapturedStmt::LCK_This:
-          CXXThisFieldDecl = *Field;
-          break;
-        case DeprecatedCapturedStmt::LCK_Receiver:
-          ReceiverFieldDecl = *Field;
-          break;
-        case DeprecatedCapturedStmt::LCK_ReceiverTmp:
-          ReceiverTmpFieldDecl = *Field;
-          break;
-        default:
-          CaptureFields[I->getCapturedVar()] = *Field;
-          break;
-        }
-      }
+    /// \brief Emit a prologue for the captured helper.
+    virtual void EmitPrologue(CodeGenFunction &CGF) { }
 
-      const FunctionDecl *FD = S->getFunctionDecl();
-      assert(FD && (FD->getNumParams() > 0) && "unexpected helper function");
-      ThisParmVarDecl = FD->getParamDecl(0);
-
-      const Stmt *SubStmt = S->getSubStmt();
-      if (const DeclStmt *DS = dyn_cast<DeclStmt>(SubStmt)) {
-        assert(DS->isSingleDecl() && "single decl expected");
-        ReceiverDecl = cast<VarDecl>(DS->getSingleDecl());
-      }
-    }
+    /// \brief Get the name of the capture helper.
+    virtual StringRef getHelperName() const { return "__captured_stmt"; }
 
   private:
-    /// \brief Keep the map between VarDecl and FieldDecl
+    /// \brief The kind of captured statement being generated.
+    CapturedRegionKind Kind;
+
+    /// \brief Keep the map between VarDecl and FieldDecl.
     llvm::SmallDenseMap<const VarDecl *, FieldDecl *> CaptureFields;
 
     /// \brief The base address of the captured record, passed in as the first
     /// argument of the parallel region function.
     llvm::Value *ThisValue;
 
-    /// \brief Captured field for 'this'.
+    /// \brief Captured 'this' type.
     FieldDecl *CXXThisFieldDecl;
+
+    /// \brief The captured record parameter to the helper function.
+    VarDecl *ThisParmVarDecl;
+
+    /// \brief The receiver declariation.
+    VarDecl *ReceiverDecl;
 
     /// \brief Captured field for the receiver.
     FieldDecl *ReceiverFieldDecl;
@@ -751,21 +709,30 @@ public:
     /// \brief Captured field for the receiver temporary.
     FieldDecl *ReceiverTmpFieldDecl;
 
-    /// \brief The captured record parameter to the helper function.
-    const ParmVarDecl *ThisParmVarDecl;
-
     /// \brief The address of the receiver.
     llvm::Value *ReceiverAddr;
 
     /// \brief The address of the receiver temporary.
     llvm::Value *ReceiverTmp;
+  };
+  CGCapturedStmtInfo *CapturedStmtInfo;
 
-    /// \brief The receiver declariation.
-    const VarDecl *ReceiverDecl;
+  /// \brief API for Cilk for statement code generation.
+  class CGCilkForStmtInfo : public CGCapturedStmtInfo {
+  public:
+    explicit CGCilkForStmtInfo(const CilkForStmt &S)
+      : CGCapturedStmtInfo(*S.getBody(), CR_CilkFor) { }
+    virtual StringRef getHelperName() const { return "__cilk_for_helper"; }
   };
 
-  /// \brief Hold CodeGen info for captured statements
-  CGDeprecatedCapturedStmtInfo *CurCGDeprecatedCapturedStmtInfo;
+  class CGCilkSpawnStmtInfo : public CGCapturedStmtInfo {
+  public:
+    explicit CGCilkSpawnStmtInfo(const CapturedStmt &S)
+      : CGCapturedStmtInfo(S, CR_CilkSpawn) { }
+
+    virtual void EmitPrologue(CodeGenFunction &CGF);
+    virtual StringRef getHelperName() const { return "__cilk_spawn_helper"; }
+  };
 
   /// \brief Information about implicit syncs used during code generation.
   CGCilkImplicitSyncInfo *CurCGCilkImplicitSyncInfo;
@@ -2317,13 +2284,12 @@ public:
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
 
-  void EmitCapturedStmt(const CapturedStmt &S);
+  llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedFunction(GlobalDecl GD,
                                            const CapturedDecl *CD,
                                            const RecordDecl *RD);
 
-  void EmitCilkSpawnDeprecatedCapturedStmt(const CilkSpawnDeprecatedCapturedStmt &S);
-  void EmitDeprecatedCapturedStmt(const DeprecatedCapturedStmt &S);
+  void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S);
 
   //===--------------------------------------------------------------------===//
@@ -2858,17 +2824,6 @@ public:
   //===--------------------------------------------------------------------===//
   //                         Cilk Emission
   //===--------------------------------------------------------------------===//
-
-  /// \brief Initialize the CGDeprecatedCapturedStmtInfo
-  void SetCurCGDeprecatedCapturedStmtInfo(CGDeprecatedCapturedStmtInfo *Info) {
-    if (CurCGDeprecatedCapturedStmtInfo)
-      delete CurCGDeprecatedCapturedStmtInfo;
-
-    CurCGDeprecatedCapturedStmtInfo = Info;
-  }
-
-  /// \brief Retrieve the current CGDeprecatedCapturedStmtInfo
-  CGDeprecatedCapturedStmtInfo *GetCurCGDeprecatedCapturedStmtInfo() { return CurCGDeprecatedCapturedStmtInfo; }
 
   /// \brief Emit the receiver declaration for a captured statement.
   /// Only allocation and cleanup will be emitted, and initialization will be

@@ -1387,7 +1387,6 @@ private:
   bool HasImplicitReturnZero : 1;
   bool IsLateTemplateParsed : 1;
   bool IsConstexpr : 1;
-  bool IsParallelRegion : 1;
   bool IsSpawning: 1;
 
   /// \brief Indicates if the function was a definition but its body was
@@ -1478,7 +1477,6 @@ protected:
       IsDefaulted(false), IsExplicitlyDefaulted(false),
       HasImplicitReturnZero(false), IsLateTemplateParsed(false),
       IsConstexpr(isConstexprSpecified),
-      IsParallelRegion(false),
       IsSpawning(false),
       HasSkippedBody(false),
       EndRangeLoc(NameInfo.getEndLoc()),
@@ -1656,11 +1654,6 @@ public:
   /// Whether this is a (C++11) constexpr function or constexpr constructor.
   bool isConstexpr() const { return IsConstexpr; }
   void setConstexpr(bool IC) { IsConstexpr = IC; }
-
-  /// \brief Whether this function is for a parallel region. For Cilk Plus,
-  /// the helper function is a parallel region.
-  bool isParallelRegion() const { return IsParallelRegion; }
-  void setParallelRegion(bool v = true) { IsParallelRegion = v; }
 
   /// \brief Whether this function is a Cilk spawning function.
   bool isSpawning() const { return IsSpawning; }

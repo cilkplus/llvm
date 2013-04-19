@@ -582,7 +582,7 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       DiagnoseCilkSpawn(Elts[i], HasError);
       if (!Dependent && !HasError) {
         StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
-        if (!Spawn.isInvalid() && isa<CilkSpawnDeprecatedCapturedStmt>(Spawn.get()))
+        if (!Spawn.isInvalid() && isa<CilkSpawnStmt>(Spawn.get()))
           Elts[i] = Spawn.take();
       }
     }
@@ -3255,7 +3255,7 @@ static void buildCapturedStmtCaptureList(
 }
 
 void Sema::ActOnCapturedRegionStart(SourceLocation Loc, Scope *CurScope,
-                                    CapturedRegionScopeInfo::CapturedRegionKind Kind) {
+                                    CapturedRegionKind Kind) {
   CapturedDecl *CD = 0;
   RecordDecl *RD = CreateCapturedStmtRecordDecl(CD, Loc);
 
@@ -3292,6 +3292,45 @@ void Sema::ActOnCapturedRegionError(bool IsInstantiation) {
   PopFunctionScopeInfo();
 }
 
+static QualType GetReceiverTmpType(const Expr *E) {
+  do {
+    if (const ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
+      E = EWC->getSubExpr();
+    const MaterializeTemporaryExpr *M = NULL;
+    E = E->findMaterializedTemporary(M);
+  } while (isa<ExprWithCleanups>(E));
+
+  // Skip any implicit casts.
+  SmallVector<SubobjectAdjustment, 2> Adjustments;
+  E = E->skipRValueSubobjectAdjustments(Adjustments);
+
+  return E->getType();
+}
+
+static void GetReceiverType(ASTContext &Context, Stmt *S,
+                            QualType &ReceiverType, QualType &ReceiverTmpType) {
+  if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(S)) {
+    if (VarDecl *VD = cast<VarDecl>(DS->getSingleDecl())) {
+      ReceiverType = Context.getCanonicalType(VD->getType());
+      if (VD->getType()->isReferenceType() &&
+          VD->extendsLifetimeOfTemporary())
+        ReceiverTmpType = GetReceiverTmpType(VD->getInit());
+    }
+  }
+}
+
+static FieldDecl *CreateReceiverField(ASTContext& Context, RecordDecl *RD,
+                                      QualType ReceiverType) {
+  FieldDecl *Field = FieldDecl::Create(
+      Context, RD, SourceLocation(), SourceLocation(), 0, ReceiverType,
+      Context.getTrivialTypeSourceInfo(ReceiverType, SourceLocation()),
+      0, false, ICIS_NoInit);
+
+  Field->setImplicit(true);
+  Field->setAccess(AS_private);
+  return Field;
+}
+
 StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
   CapturedRegionScopeInfo *RSI = getCurCapturedRegion();
 
@@ -3301,6 +3340,30 @@ StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
 
   CapturedDecl *CD = RSI->TheCapturedDecl;
   RecordDecl *RD = RSI->TheRecordDecl;
+
+  // If the captured statement is a DeclStmt, then implicitly capture the
+  // receiver (and possibly receiver temporary).
+  if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(S)) {
+    VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
+    QualType ReceiverType;
+    QualType ReceiverTmpType;
+    GetReceiverType(Context, S, ReceiverType, ReceiverTmpType);
+    ReceiverType = Context.getPointerType(ReceiverType);
+
+    Captures.push_back(CapturedStmt::Capture(VD->getLocation(),
+                                             CapturedStmt::VCK_Receiver, VD));
+    CaptureInits.push_back(0); // Init created in codegen.
+    RD->addDecl(CreateReceiverField(Context, RD, ReceiverType));
+
+    if (!ReceiverTmpType.isNull()) {
+      ReceiverTmpType = Context.getPointerType(ReceiverTmpType);
+      Captures.push_back(CapturedStmt::Capture(VD->getLocation(),
+                                               CapturedStmt::VCK_ReceiverTmp,
+                                               VD));
+      CaptureInits.push_back(0); // Init created in codegen.
+      RD->addDecl(CreateReceiverField(Context, RD, ReceiverTmpType));
+    }
+  }
 
   CapturedStmt *Res = CapturedStmt::Create(getASTContext(), S, Captures,
                                            CaptureInits, CD, RD);
@@ -3364,7 +3427,7 @@ public:
   }
 
   /// Skip captured statements
-  bool TraverseDeprecatedCapturedStmt(DeprecatedCapturedStmt *) { return true; }
+  bool TraverseCapturedStmt(CapturedStmt *) { return true; }
 
   bool VisitCXXThisExpr(CXXThisExpr *E) {
     S.CheckCXXThisCapture(E->getLocStart(), /*explicit*/false);
@@ -3374,180 +3437,7 @@ public:
 
 } // anonymous namespace
 
-RecordDecl*
-Sema::CreateDeprecatedCapturedStmtRecordDecl(FunctionDecl *&FD, SourceLocation Loc,
-                                   IdentifierInfo *MangledName) {
-  DeclContext *DC = CurContext;
-  while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
-    DC = DC->getParent();
-
-  IdentifierInfo *Id = &PP.getIdentifierTable().get("capture");
-  RecordDecl *RD = RecordDecl::Create(Context, TTK_Struct, DC, Loc, Loc, Id);
-
-  DC->addDecl(RD);
-  RD->setImplicit();
-  RD->startDefinition();
-
-  QualType CapParamType = Context.getPointerType(Context.getTagDeclType(RD));
-
-  QualType FunctionTy;
-  FunctionProtoType::ExtProtoInfo EPI;
-  FunctionTy = Context.getFunctionType(Context.VoidTy, CapParamType, EPI);
-
-  TypeSourceInfo *FuncTyInfo = Context.getTrivialTypeSourceInfo(FunctionTy);
-  FD = FunctionDecl::Create(Context, CurContext, SourceLocation(),
-                            SourceLocation(), MangledName, FunctionTy,
-                            FuncTyInfo, SC_None, SC_None);
-  ParmVarDecl *CapParam = 0;
-  {
-    IdentifierInfo *IdThis = &PP.getIdentifierTable().get("this");
-    TypeSourceInfo *TyInfo = Context.getTrivialTypeSourceInfo(CapParamType);
-    CapParam = ParmVarDecl::Create(Context, FD, SourceLocation(),
-                                   SourceLocation(), IdThis, CapParamType,
-                                   TyInfo, SC_None, /* DefaultArg =*/0);
-  }
-
-  FD->setParams(CapParam);
-
-  FD->setImplicit(true);
-  FD->setUsed(true);
-  FD->setParallelRegion();
-  DC->addDecl(FD);
-
-  return RD;
-}
-
-SmallVector<DeprecatedCapturedStmt::Capture, 4>
-Sema::buildDeprecatedCapturedStmtCaptureList(SmallVector<CapturingScopeInfo::Capture, 4>
-                                     &Candidates) {
-
-  SmallVector<DeprecatedCapturedStmt::Capture, 4> Captures;
-  for (unsigned I = 0, N = Candidates.size(); I != N; I++) {
-    CapturingScopeInfo::Capture &Cap = Candidates[I];
-
-    if (Cap.isThisCapture()) {
-      Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_This,
-                                               Cap.getCopyExpr()));
-      continue;
-    }
-
-    VarDecl *Var = Cap.getVariable();
-    assert(!Cap.isCopyCapture() &&
-           "DeprecatedCapturedStmt by-copy capture not implemented yet");
-    Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_ByRef,
-                                             Cap.getCopyExpr(), Var));
-  }
-
-  return Captures;
-}
-
-/// Helper functions are required to be internal,  not mangling accross
-/// translation units.
-static IdentifierInfo *GetMangledHelperName(Sema &S) {
-  static unsigned count = 0;
-  StringRef name("__cilk_spawn_helperV");
-  return &S.PP.getIdentifierTable().get((name + llvm::Twine(count++)).str());
-}
-
-static QualType GetReceiverTmpType(const Expr *E) {
-  do {
-    if (const ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
-      E = EWC->getSubExpr();
-    const MaterializeTemporaryExpr *M = NULL;
-    E = E->findMaterializedTemporary(M);
-  } while (isa<ExprWithCleanups>(E));
-
-  // Skip any implicit casts.
-  SmallVector<SubobjectAdjustment, 2> Adjustments;
-  E = E->skipRValueSubobjectAdjustments(Adjustments);
-
-  return E->getType();
-}
-
-static void GetReceiverType(ASTContext &Context, CilkSpawnDeprecatedCapturedStmt *S,
-                            QualType &ReceiverType, QualType &ReceiverTmpType) {
-  Stmt *SubStmt = S->getSubStmt();
-  if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(SubStmt)) {
-    if (VarDecl *VD = cast<VarDecl>(DS->getSingleDecl())) {
-      ReceiverType = Context.getCanonicalType(VD->getType());
-      if (VD->getType()->isReferenceType() &&
-          VD->extendsLifetimeOfTemporary())
-        ReceiverTmpType = GetReceiverTmpType(VD->getInit());
-    }
-  }
-}
-
-static FieldDecl *CreateReceiverField(ASTContext& Context, RecordDecl *RD,
-                                      QualType ReceiverType) {
-  FieldDecl *Field = FieldDecl::Create(
-      Context, RD, SourceLocation(), SourceLocation(), 0, ReceiverType,
-      Context.getTrivialTypeSourceInfo(ReceiverType, SourceLocation()),
-      0, false, ICIS_NoInit);
-
-  Field->setImplicit(true);
-  return Field;
-}
-
-static void buildCilkSpawnCaptures(Sema &S, Scope *CurScope,
-                                   CilkSpawnDeprecatedCapturedStmt *Spawn) {
-  // Create a caputred recored decl and start its definition
-  FunctionDecl *FD = 0;
-  RecordDecl *RD = S.CreateDeprecatedCapturedStmtRecordDecl(FD, SourceLocation(),
-                                                  GetMangledHelperName(S));
-
-  // Enter the capturing scope for this parallel region
-  S.PushParallelRegionScope(CurScope, FD, RD);
-
-  if (CurScope)
-    S.PushDeclContext(CurScope, FD);
-  else
-    S.CurContext = FD;
-
-  // Scan the statement to find variables to be captured.
-  ParallelRegionScopeInfo *RSI
-    = cast<ParallelRegionScopeInfo>(S.FunctionScopes.back());
-
-  CaptureBuilder Builder(S);
-  Builder.TraverseStmt(Spawn->getSubStmt());
-
-
-  // Build the CilkSpawnDeprecatedCapturedStmt
-  SmallVector<DeprecatedCapturedStmt::Capture, 4> Captures
-      = S.buildDeprecatedCapturedStmtCaptureList(RSI->Captures);
-
-
-
-  // Add implicit captures for receiver and/or receiver temporary.
-  if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(Spawn->getSubStmt())) {
-    VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
-    QualType ReceiverType;
-    QualType ReceiverTmpType;
-    GetReceiverType(S.Context, Spawn, ReceiverType, ReceiverTmpType);
-    ReceiverType = S.Context.getPointerType(ReceiverType);
-
-    Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_Receiver, 0, VD));
-    RD->addDecl(CreateReceiverField(S.Context, RD, ReceiverType));
-
-    if (!ReceiverTmpType.isNull()) {
-      ReceiverTmpType = S.Context.getPointerType(ReceiverTmpType);
-      Captures.push_back(DeprecatedCapturedStmt::Capture(DeprecatedCapturedStmt::LCK_ReceiverTmp,
-                                               0, VD));
-      RD->addDecl(CreateReceiverField(S.Context, RD, ReceiverTmpType));
-    }
-  }
-
-  Spawn->setCaptures(S.Context, Captures.begin(), Captures.end());
-  Spawn->setRecordDecl(RD);
-  Spawn->setFunctionDecl(FD);
-
-  FD->setBody(Spawn->getSubStmt());
-  RD->completeDefinition();
-
-  S.PopDeclContext();
-  S.PopFunctionScopeInfo();
-}
-
-static Stmt *tryCreateCilkSpawnDeprecatedCapturedStmt(Sema &SemaRef, Stmt *S) {
+static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   if (!S)
     return S;
 
@@ -3556,8 +3446,14 @@ static Stmt *tryCreateCilkSpawnDeprecatedCapturedStmt(Sema &SemaRef, Stmt *S) {
   if (!Helper.hasSpawn())
     return S;
 
-  CilkSpawnDeprecatedCapturedStmt *R = new (SemaRef.Context) CilkSpawnDeprecatedCapturedStmt(S);
-  buildCilkSpawnCaptures(SemaRef, SemaRef.getCurScope(), R);
+  SemaRef.ActOnCapturedRegionStart(S->getLocStart(), SemaRef.getCurScope(),
+                                   CR_CilkSpawn);
+  CaptureBuilder Builder(SemaRef);
+  Builder.TraverseStmt(S);
+  StmtResult CS = SemaRef.ActOnCapturedRegionEnd(S);
+
+  CilkSpawnStmt *R = new (SemaRef.Context)
+    CilkSpawnStmt(cast<CapturedStmt>(CS.release()));
 
   return R;
 }
@@ -3580,7 +3476,7 @@ static void BuildCilkSpawnStmt(Sema &SemaRef, Stmt *&S) {
   case Stmt::CallExprClass:
   case Stmt::CXXOperatorCallExprClass:
   case Stmt::CXXMemberCallExprClass:
-    S = tryCreateCilkSpawnDeprecatedCapturedStmt(SemaRef, S);
+    S = tryCreateCilkSpawnStmt(SemaRef, S);
     break;
   case Stmt::DoStmtClass: {
     DoStmt *DS = cast<DoStmt>(S);

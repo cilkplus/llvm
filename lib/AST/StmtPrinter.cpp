@@ -1883,8 +1883,8 @@ void StmtPrinter::VisitCilkSyncStmt(CilkSyncStmt *) {
   Indent() << "_Cilk_sync;\n";
 }
 
-void StmtPrinter::VisitCilkSpawnDeprecatedCapturedStmt(CilkSpawnDeprecatedCapturedStmt *Node) {
-  PrintStmt(Node->getSubStmt());
+void StmtPrinter::VisitCilkSpawnStmt(CilkSpawnStmt *Node) {
+  PrintStmt(Node->getCapturedStmt());
 }
 
 void StmtPrinter::VisitCilkForStmt(CilkForStmt *Node) {
