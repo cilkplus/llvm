@@ -738,7 +738,9 @@ multiclass SteamOutputExportPattern<Instruction ExportInst,
       4095, imm:$mask, buf3inst, 0)>;
 }
 
-let usesCustomInserter = 1 in {
+// Export Instructions should not be duplicated by TailDuplication pass
+// (which assumes that duplicable instruction are affected by exec mask)
+let usesCustomInserter = 1, isNotDuplicable = 1 in {
 
 class ExportSwzInst : InstR600ISA<(
     outs),
@@ -1423,7 +1425,7 @@ let Predicates = [isR600] in {
     (MUL R600_Reg32:$src, (RECIPSQRT_CLAMPED_r600 R600_Reg32:$src))>;
 
   def R600_ExportSwz : ExportSwzInst {
-    let Word1{20-17} = 1; // BURST_COUNT
+    let Word1{20-17} = 0; // BURST_COUNT
     let Word1{21} = eop;
     let Word1{22} = 1; // VALID_PIXEL_MODE
     let Word1{30-23} = inst;
@@ -1432,7 +1434,7 @@ let Predicates = [isR600] in {
   defm : ExportPattern<R600_ExportSwz, 39>;
 
   def R600_ExportBuf : ExportBufInst {
-    let Word1{20-17} = 1; // BURST_COUNT
+    let Word1{20-17} = 0; // BURST_COUNT
     let Word1{21} = eop;
     let Word1{22} = 1; // VALID_PIXEL_MODE
     let Word1{30-23} = inst;
@@ -1622,7 +1624,7 @@ let hasSideEffects = 1 in {
     (FLT_TO_UINT_eg (TRUNC R600_Reg32:$src0))>;
 
   def EG_ExportSwz : ExportSwzInst {
-    let Word1{19-16} = 1; // BURST_COUNT
+    let Word1{19-16} = 0; // BURST_COUNT
     let Word1{20} = 1; // VALID_PIXEL_MODE
     let Word1{21} = eop;
     let Word1{29-22} = inst;
@@ -1632,7 +1634,7 @@ let hasSideEffects = 1 in {
   defm : ExportPattern<EG_ExportSwz, 83>;
 
   def EG_ExportBuf : ExportBufInst {
-    let Word1{19-16} = 1; // BURST_COUNT
+    let Word1{19-16} = 0; // BURST_COUNT
     let Word1{20} = 1; // VALID_PIXEL_MODE
     let Word1{21} = eop;
     let Word1{29-22} = inst;
@@ -1923,10 +1925,11 @@ def : COS_PAT <COS_cm>;
 defm DIV_cm : DIV_Common<RECIP_IEEE_cm>;
 
 // RECIP_UINT emulation for Cayman
+// The multiplication scales from [0,1] to the unsigned integer range
 def : Pat <
   (AMDGPUurecip R600_Reg32:$src0),
   (FLT_TO_UINT_eg (MUL_IEEE (RECIP_IEEE_cm (UINT_TO_FLT_eg R600_Reg32:$src0)),
-                            (MOV_IMM_I32 0x4f800000)))
+                            (MOV_IMM_I32 CONST.FP_UINT_MAX_PLUS_1)))
 >;
 
 

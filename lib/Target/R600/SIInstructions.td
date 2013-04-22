@@ -602,8 +602,8 @@ defm V_READFIRSTLANE_B32 : VOP1_32 <0x00000002, "V_READFIRSTLANE_B32", []>;
 defm V_CVT_F32_I32 : VOP1_32 <0x00000005, "V_CVT_F32_I32",
   [(set VReg_32:$dst, (sint_to_fp VSrc_32:$src0))]
 >;
-//defm V_CVT_F32_U32 : VOP1_32 <0x00000006, "V_CVT_F32_U32", []>;
-//defm V_CVT_U32_F32 : VOP1_32 <0x00000007, "V_CVT_U32_F32", []>;
+defm V_CVT_F32_U32 : VOP1_32 <0x00000006, "V_CVT_F32_U32", []>;
+defm V_CVT_U32_F32 : VOP1_32 <0x00000007, "V_CVT_U32_F32", []>;
 defm V_CVT_I32_F32 : VOP1_32 <0x00000008, "V_CVT_I32_F32",
   [(set (i32 VReg_32:$dst), (fp_to_sint VSrc_32:$src0))]
 >;
@@ -1219,49 +1219,48 @@ def : Pat <
 
 /* int_SI_sample for simple 1D texture lookup */
 def : Pat <
-  (int_SI_sample imm:$writemask, VReg_32:$addr,
-                 SReg_256:$rsrc, SReg_128:$sampler, imm),
-  (IMAGE_SAMPLE imm:$writemask, 0, 0, 0, 0, 0, 0, 0, VReg_32:$addr,
+  (int_SI_sample VReg_32:$addr, SReg_256:$rsrc, SReg_128:$sampler, imm),
+  (IMAGE_SAMPLE 0xf, 0, 0, 0, 0, 0, 0, 0, VReg_32:$addr,
                 SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
 class SamplePattern<Intrinsic name, MIMG opcode, RegisterClass addr_class,
                     ValueType addr_type> : Pat <
-    (name imm:$writemask, (addr_type addr_class:$addr),
+    (name (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, imm),
-    (opcode imm:$writemask, 0, 0, 0, 0, 0, 0, 0, addr_class:$addr,
+    (opcode 0xf, 0, 0, 0, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
 class SampleRectPattern<Intrinsic name, MIMG opcode, RegisterClass addr_class,
                         ValueType addr_type> : Pat <
-    (name imm:$writemask, (addr_type addr_class:$addr),
+    (name (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_RECT),
-    (opcode imm:$writemask, 1, 0, 0, 0, 0, 0, 0, addr_class:$addr,
+    (opcode 0xf, 1, 0, 0, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
 class SampleArrayPattern<Intrinsic name, MIMG opcode, RegisterClass addr_class,
                          ValueType addr_type> : Pat <
-    (name imm:$writemask, (addr_type addr_class:$addr),
+    (name (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_ARRAY),
-    (opcode imm:$writemask, 0, 0, 1, 0, 0, 0, 0, addr_class:$addr,
+    (opcode 0xf, 0, 0, 1, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
 class SampleShadowPattern<Intrinsic name, MIMG opcode,
                           RegisterClass addr_class, ValueType addr_type> : Pat <
-    (name imm:$writemask, (addr_type addr_class:$addr),
+    (name (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_SHADOW),
-    (opcode imm:$writemask, 0, 0, 0, 0, 0, 0, 0, addr_class:$addr,
+    (opcode 0xf, 0, 0, 0, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
 class SampleShadowArrayPattern<Intrinsic name, MIMG opcode,
                                RegisterClass addr_class, ValueType addr_type> : Pat <
-    (name imm:$writemask, (addr_type addr_class:$addr),
+    (name (addr_type addr_class:$addr),
           SReg_256:$rsrc, SReg_128:$sampler, TEX_SHADOW_ARRAY),
-    (opcode imm:$writemask, 0, 0, 1, 0, 0, 0, 0, addr_class:$addr,
+    (opcode 0xf, 0, 0, 1, 0, 0, 0, 0, addr_class:$addr,
           SReg_256:$rsrc, SReg_128:$sampler)
 >;
 
@@ -1513,6 +1512,14 @@ def : Pat <
 def : Pat <
   (int_SI_load_const SReg_128:$sbase, VReg_32:$voff),
   (BUFFER_LOAD_DWORD 0, 1, 0, 0, 0, 0, VReg_32:$voff, SReg_128:$sbase, 0, 0, 0)
+>;
+
+// The multiplication scales from [0,1] to the unsigned integer range
+def : Pat <
+  (AMDGPUurecip i32:$src0),
+  (V_CVT_U32_F32_e32
+    (V_MUL_F32_e32 CONST.FP_UINT_MAX_PLUS_1,
+                   (V_RCP_IFLAG_F32_e32 (V_CVT_F32_U32_e32 $src0))))
 >;
 
 /********** ================== **********/

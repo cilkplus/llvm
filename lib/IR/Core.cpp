@@ -1301,6 +1301,53 @@ void LLVMSetGlobalConstant(LLVMValueRef GlobalVar, LLVMBool IsConstant) {
   unwrap<GlobalVariable>(GlobalVar)->setConstant(IsConstant != 0);
 }
 
+LLVMThreadLocalMode LLVMGetThreadLocalMode(LLVMValueRef GlobalVar) {
+  switch (unwrap<GlobalVariable>(GlobalVar)->getThreadLocalMode()) {
+  case GlobalVariable::NotThreadLocal:
+    return LLVMNotThreadLocal;
+  case GlobalVariable::GeneralDynamicTLSModel:
+    return LLVMGeneralDynamicTLSModel;
+  case GlobalVariable::LocalDynamicTLSModel:
+    return LLVMLocalDynamicTLSModel;
+  case GlobalVariable::InitialExecTLSModel:
+    return LLVMInitialExecTLSModel;
+  case GlobalVariable::LocalExecTLSModel:
+    return LLVMLocalExecTLSModel;
+  }
+
+  llvm_unreachable("Invalid GlobalVariable thread local mode");
+}
+
+void LLVMSetThreadLocalMode(LLVMValueRef GlobalVar, LLVMThreadLocalMode Mode) {
+  GlobalVariable *GV = unwrap<GlobalVariable>(GlobalVar);
+
+  switch (Mode) {
+  case LLVMNotThreadLocal:
+    GV->setThreadLocalMode(GlobalVariable::NotThreadLocal);
+    break;
+  case LLVMGeneralDynamicTLSModel:
+    GV->setThreadLocalMode(GlobalVariable::GeneralDynamicTLSModel);
+    break;
+  case LLVMLocalDynamicTLSModel:
+    GV->setThreadLocalMode(GlobalVariable::LocalDynamicTLSModel);
+    break;
+  case LLVMInitialExecTLSModel:
+    GV->setThreadLocalMode(GlobalVariable::InitialExecTLSModel);
+    break;
+  case LLVMLocalExecTLSModel:
+    GV->setThreadLocalMode(GlobalVariable::LocalExecTLSModel);
+    break;
+  }
+}
+
+LLVMBool LLVMIsExternallyInitialized(LLVMValueRef GlobalVar) {
+  return unwrap<GlobalVariable>(GlobalVar)->isExternallyInitialized();
+}
+
+void LLVMSetExternallyInitialized(LLVMValueRef GlobalVar, LLVMBool IsExtInit) {
+  unwrap<GlobalVariable>(GlobalVar)->setExternallyInitialized(IsExtInit);
+}
+
 /*--.. Operations on aliases ......................................--*/
 
 LLVMValueRef LLVMAddAlias(LLVMModuleRef M, LLVMTypeRef Ty, LLVMValueRef Aliasee,
@@ -1394,6 +1441,17 @@ void LLVMAddFunctionAttr(LLVMValueRef Fn, LLVMAttribute PA) {
                       AttributeSet::get(Func->getContext(),
                                         AttributeSet::FunctionIndex, B));
   Func->setAttributes(PALnew);
+}
+
+void LLVMAddTargetDependentFunctionAttr(LLVMValueRef Fn, const char *A,
+                                        const char *V) {
+  Function *Func = unwrap<Function>(Fn);
+  int Idx = AttributeSet::FunctionIndex;
+  AttrBuilder B;
+
+  B.addAttribute(A, V);
+  AttributeSet Set = AttributeSet::get(Func->getContext(), Idx, B);
+  Func->addAttributes(Idx, Set);
 }
 
 void LLVMRemoveFunctionAttr(LLVMValueRef Fn, LLVMAttribute PA) {
@@ -2397,6 +2455,13 @@ LLVMMemoryBufferRef LLVMCreateMemoryBufferWithMemoryRangeCopy(
       StringRef(BufferName)));
 }
 
+const char* LLVMGetBufferStart(LLVMMemoryBufferRef MemBuf) {
+  return unwrap(MemBuf)->getBufferStart();
+}
+
+size_t LLVMGetBufferSize(LLVMMemoryBufferRef MemBuf) {
+  return unwrap(MemBuf)->getBufferSize();
+}
 
 void LLVMDisposeMemoryBuffer(LLVMMemoryBufferRef MemBuf) {
   delete unwrap(MemBuf);

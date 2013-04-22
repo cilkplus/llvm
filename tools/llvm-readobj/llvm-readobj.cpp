@@ -120,6 +120,14 @@ namespace opts {
   // -needed-libs
   cl::opt<bool> NeededLibraries("needed-libs",
     cl::desc("Display the needed libraries"));
+
+  // -program-headers
+  cl::opt<bool> ProgramHeaders("program-headers",
+    cl::desc("Display ELF program headers"));
+
+  // -expand-relocs
+  cl::opt<bool> ExpandRelocs("expand-relocs",
+    cl::desc("Expand each shown relocation to multiple lines"));
 } // namespace opts
 
 namespace llvm {
@@ -211,6 +219,8 @@ static void dumpObject(const ObjectFile *Obj) {
     Dumper->printDynamicTable();
   if (opts::NeededLibraries)
     Dumper->printNeededLibraries();
+  if (opts::ProgramHeaders)
+    Dumper->printProgramHeaders();
 }
 
 

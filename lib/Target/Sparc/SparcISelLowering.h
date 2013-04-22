@@ -71,6 +71,7 @@ namespace llvm {
     getRegForInlineAsmConstraint(const std::string &Constraint, EVT VT) const;
 
     virtual bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const;
+    virtual MVT getScalarShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
 
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
@@ -121,6 +122,10 @@ namespace llvm {
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
 
     unsigned getSRetArgSize(SelectionDAG &DAG, SDValue Callee) const;
+    SDValue withTargetFlags(SDValue Op, unsigned TF, SelectionDAG &DAG) const;
+    SDValue makeHiLoPair(SDValue Op, unsigned HiTF, unsigned LoTF,
+                         SelectionDAG &DAG) const;
+    SDValue makeAddress(SDValue Op, SelectionDAG &DAG) const;
   };
 } // end namespace llvm
 
