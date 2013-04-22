@@ -2064,7 +2064,8 @@ class CilkSyncStmt : public Stmt {
   friend class ASTStmtReader;
 
 public:
-  explicit CilkSyncStmt(SourceLocation SL) : Stmt(CilkSyncStmtClass), SyncLoc(SL) {}
+  explicit CilkSyncStmt(SourceLocation SL)
+    : Stmt(CilkSyncStmtClass), SyncLoc(SL) { }
   explicit CilkSyncStmt(EmptyShell E) : Stmt(CilkSyncStmtClass, E) { }
 
   SourceLocation getSyncLoc() const { return SyncLoc; }
@@ -2127,7 +2128,7 @@ class CilkForStmt : public Stmt {
 private:
   /// \brief An enumeration for accessing stored statements in a Cilk for
   /// statement.
-  enum { INIT, COND, INC, BODY, LAST };
+  enum { INIT, COND, INC, BODY, LOOP_COUNT, LAST };
 
   Stmt *SubExprs[LAST]; // SubExprs[INIT] is an expression or declstmt.
                         // SubExprs[BODY] is a CapturedStmt.
@@ -2141,13 +2142,21 @@ private:
   /// \brief The source location of closing parenthesis.
   SourceLocation RParenLoc;
 
+  /// \brief The loop control variable.
+  const VarDecl *LoopControlVar;
+
   /// \brief The local copy of the loop control variable.
   VarDecl *InnerLoopControlVar;
+
+  /// \brief The implicit generated full expression for adjusting
+  /// the inner loop control variable.
+  Expr *InnerLoopVarAdjust;
 
 public:
   /// \brief Construct a Cilk for statement.
   CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
-              SourceLocation FL, SourceLocation LP, SourceLocation RP);
+              Expr *LoopCount, SourceLocation FL, SourceLocation LP,
+              SourceLocation RP);
 
   /// \brief Construct an empty Cilk for statement.
   explicit CilkForStmt(EmptyShell Empty);
@@ -2176,8 +2185,22 @@ public:
     return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]); 
   }
 
+  /// \brief Retrieve the loop count expression.
+  Expr *getLoopCount() {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_COUNT]);
+  }
+  const Expr *getLoopCount() const {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_COUNT]);
+  }
+
+  const VarDecl *getLoopControlVar() const { return LoopControlVar; }
+  void setLoopControlVar(const VarDecl *V) { LoopControlVar = V; }
+
   VarDecl *getInnerLoopControlVar() const { return InnerLoopControlVar; }
   void setInnerLoopControlVar(VarDecl *V) { InnerLoopControlVar = V; }
+
+  Expr *getInnerLoopVarAdjust() const { return InnerLoopVarAdjust; }
+  void setInnerLoopVarAdjust(Expr *E) { InnerLoopVarAdjust = E; }
 
   SourceLocation getCilkForLoc() const LLVM_READONLY { return CilkForLoc; }
   SourceLocation getLParenLoc() const LLVM_READONLY { return LParenLoc; }

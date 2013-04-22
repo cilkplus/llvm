@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -fcilkplus -emit-llvm %s -o %t
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK1 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK2 %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK3 %s
 
 void test1(void) {
   // CHECK1: test1
@@ -48,4 +49,24 @@ void test2(void) {
   // CHECK2: icmp slt i32 {{.*}}, [[Limit]]
   //
   // CHECK2: call void @__cilkrts_cilk_for_32
+}
+
+void test_jump(void) {
+  extern int skip(void);
+  extern void skipped_func(void);
+
+  _Cilk_for (int i = 0; i < 10; i++) {
+label:
+    if (skip())
+      continue;
+    else
+      goto label;
+    // CHECK3: call i32 @skip()
+    // CHECK3-NOT: call void @skipped_func
+    skipped_func();
+  }
+}
+
+void test_pointer(float *p, float *q) {
+  _Cilk_for (float *i = p; i < q; i++) { }
 }

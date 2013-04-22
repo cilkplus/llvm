@@ -680,6 +680,11 @@ public:
     /// \brief Emit a prologue for the captured helper.
     virtual void EmitPrologue(CodeGenFunction &CGF) { }
 
+    /// \brief Emit the captured statement body.
+    virtual void EmitBody(CodeGenFunction &CGF, Stmt *S) {
+      CGF.EmitStmt(S);
+    }
+
     /// \brief Get the name of the capture helper.
     virtual StringRef getHelperName() const { return "__captured_stmt"; }
 
@@ -721,8 +726,31 @@ public:
   class CGCilkForStmtInfo : public CGCapturedStmtInfo {
   public:
     explicit CGCilkForStmtInfo(const CilkForStmt &S)
-      : CGCapturedStmtInfo(*S.getBody(), CR_CilkFor) { }
+      : CGCapturedStmtInfo(*S.getBody(), CR_CilkFor), TheCilkFor(S),
+        InnerLoopControlVarAddr(0) { }
+
     virtual StringRef getHelperName() const { return "__cilk_for_helper"; }
+
+    virtual void EmitBody(CodeGenFunction &CGF, Stmt *S) {
+      CGF.EmitCilkForHelperBody(S);
+    }
+
+    const CilkForStmt &getCilkForStmt() const { return TheCilkFor; }
+
+    void setInnerLoopControlVarAddr(llvm::Value *Addr) {
+      InnerLoopControlVarAddr = Addr;
+    }
+    llvm::Value *getInnerLoopControlVarAddr() const {
+      return InnerLoopControlVarAddr;
+    }
+
+  private:
+    /// \brief
+    const CilkForStmt &TheCilkFor;
+
+    /// \brief The address of the inner loop control variable. Any reference
+    /// to the loop control variable needs to load this the value instead.
+    llvm::Value *InnerLoopControlVarAddr;
   };
 
   class CGCilkSpawnStmtInfo : public CGCapturedStmtInfo {
@@ -2291,6 +2319,7 @@ public:
 
   void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S);
+  void EmitCilkForHelperBody(const Stmt *S);
 
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission

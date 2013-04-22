@@ -3198,7 +3198,7 @@ public:
   }
 
   void addParam(ImplicitParamDecl *P) { Params.push_back(P); }
-  ImplicitParamDecl *getParam(unsigned i) { return Params[i]; }
+  ImplicitParamDecl *getParam(unsigned i) const { return Params[i]; }
 
   const SmallVectorImpl<ImplicitParamDecl *>& getParams() const { return Params; }
 

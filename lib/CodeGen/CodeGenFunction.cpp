@@ -630,6 +630,16 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
   }
 
+  if (CapturedStmtInfo && CapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
+    QualType TagType = getContext().getTagDeclType(FD->getParent());
+    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
+                                           TagType);
+    LValue ThisLValue = EmitLValueForField(LV, FD);
+
+    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
+  }
+
   // If any of the arguments have a variably modified type, make sure to
   // emit the type size.
   for (FunctionArgList::const_iterator i = Args.begin(), e = Args.end();

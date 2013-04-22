@@ -1128,22 +1128,26 @@ bool CapturedStmt::capturesVariable(const VarDecl *Var) const {
 
 /// \brief Construct an empty Cilk for statement.
 CilkForStmt::CilkForStmt(EmptyShell Empty)
-  : Stmt(CilkForStmtClass, Empty), InnerLoopControlVar(0) {
+  : Stmt(CilkForStmtClass, Empty), LoopControlVar(0), InnerLoopControlVar(0),
+    InnerLoopVarAdjust(0) {
   SubExprs[INIT] = 0;
   SubExprs[COND] = 0;
   SubExprs[INC] = 0;
   SubExprs[BODY] = 0;
+  SubExprs[LOOP_COUNT] = 0;
 }
 
 /// \brief Construct a Cilk for statement.
 CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                         SourceLocation FL, SourceLocation LP, SourceLocation RP)
+                         Expr *LoopCount, SourceLocation FL, SourceLocation LP,
+                         SourceLocation RP)
   : Stmt(CilkForStmtClass), CilkForLoc(FL), LParenLoc(LP), RParenLoc(RP),
-    InnerLoopControlVar(0) {
+    LoopControlVar(0), InnerLoopControlVar(0), InnerLoopVarAdjust(0) {
   assert(Init && Cond && Inc && Body && "null argument unexpected");
 
   SubExprs[INIT] = Init;
   SubExprs[COND] = Cond;
   SubExprs[INC] = Inc;
   SubExprs[BODY] = Body;
+  SubExprs[LOOP_COUNT] = LoopCount;
 }

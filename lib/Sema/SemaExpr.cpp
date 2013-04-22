@@ -11026,65 +11026,6 @@ static ExprResult captureInCapturedRegion(Sema &S, CapturedRegionScopeInfo *RSI,
   return Result;
 }
 
-/// \brief Capture the given variable in the parallel region.
-template <typename ScopeInfoType>
-static ExprResult captureInRegion(Sema &S, ScopeInfoType *SI, VarDecl *Var,
-                                  QualType FieldType, QualType DeclRefType,
-                                  SourceLocation Loc,
-                                  bool RefersToEnclosingLocal) {
-  // The current implemention assumes that all variables are captured
-  // by reference or by copy, and an array is only captured by reference.
-  //
-  RecordDecl *RD = SI->TheRecordDecl;
-
-  FieldDecl *Field
-    = FieldDecl::Create(S.Context, RD, Loc, Loc, 0, FieldType,
-                        S.Context.getTrivialTypeSourceInfo(FieldType, Loc),
-                        0, false, ICIS_NoInit);
-  Field->setImplicit(true);
-  Field->setAccess(AS_private);
-  RD->addDecl(Field);
-
-  // Introduce a new evaluation context for the initialization.
-  S.PushExpressionEvaluationContext(Sema::PotentiallyEvaluated);
-
-  Expr *Ref = new (S.Context) DeclRefExpr(Var, RefersToEnclosingLocal,
-                                          DeclRefType, VK_LValue, Loc);
-  Var->setReferenced(true);
-  Var->setUsed(true);
-
-  assert((!FieldType->isArrayType() || FieldType->isReferenceType()) &&
-         "capture an array by copy is not implemented");
-
-  // Use the same InitializedEntity as lambda expressions.
-  InitializedEntity Entity
-    = InitializedEntity::InitializeLambdaCapture(Var, Field, Loc);
-
-  InitializationKind InitKind = InitializationKind::CreateDirect(Loc, Loc, Loc);
-  InitializationSequence Init(S, Entity, InitKind, &Ref, 1);
-
-  ExprResult Result(true);
-  if (!Init.Diagnose(S, Entity, InitKind, &Ref, 1))
-    Result = Init.Perform(S, Entity, InitKind, Ref);
-
-  // If this initialization requires any cleanups (e.g., due to a
-  // default argument to a copy constructor), note that for the
-  // capturing constructs.
-  if (S.ExprNeedsCleanups)
-    SI->ExprNeedsCleanups = true;
-
-  // Exit the expression evaluation context used for the capture.
-  S.CleanupVarDeclMarking();
-  S.DiscardCleanupsInEvaluationContext();
-  S.PopExpressionEvaluationContext();
-
-  // Only build for a Cilk for.
-  if (llvm::is_same<ScopeInfoType, CilkForScopeInfo>::value)
-    buildInnerLoopControlVar(S, cast<CilkForScopeInfo>(SI), Var, Field);
-
-  return Result;
-}
-
 /// \brief Capture the given variable in the given lambda expression.
 static ExprResult captureInLambda(Sema &S, LambdaScopeInfo *LSI,
                                   VarDecl *Var, QualType FieldType, 

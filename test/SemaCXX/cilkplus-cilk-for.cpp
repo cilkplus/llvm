@@ -80,13 +80,12 @@ struct NoCopyCtor : public Base {
   NoCopyCtor(const NoCopyCtor &) = delete; // expected-note {{function has been explicitly marked deleted here}}
 };
 
-// This list is not complete. Some extra operators like
-//
-// int operator+(int, ...)
-// int operator-(int, ...)
-//
-// may be needed for computing the loop count.
-//
+struct NoAddAssign : public Base {
+  NoAddAssign();
+  NoAddAssign(int);
+  NoAddAssign operator+=(int) = delete; // expected-note {{candidate function has been explicitly deleted}}
+};
+
 void f2() {
   _Cilk_for (DC i; i < 10; ++i); // OK
 
@@ -95,6 +94,8 @@ void f2() {
   _Cilk_for (NoLessThan i; i < 10; ++i); // expected-error {{overload resolution selected deleted operator '<'}}
 
   _Cilk_for (NoPreIncrement i; i < 10; ++i); // expected-error {{overload resolution selected deleted operator '++'}}
+
+  _Cilk_for (NoAddAssign i; i < 10; i++); // expected-error {{overload resolution selected deleted operator '+='}}
 }
 
 struct NoOps : public Base {
@@ -214,7 +215,8 @@ struct ToCRef: public Base {
 void conversions() {
   _Cilk_for (C c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect user-defined conversion in loop condition}}
   _Cilk_for (D d; d < 5; d++); // expected-warning {{'_Cilk_for' loop count does not respect user-defined conversion in loop condition}}
-  _Cilk_for (From c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect constructor conversion in loop condition}}
+  _Cilk_for (From c; c < 5; c++); // expected-warning {{'_Cilk_for' loop count does not respect constructor conversion in loop condition}} \
+                                  // expected-error {{no viable overloaded '+='}}
   _Cilk_for (ToInt c; c < 5; c++); // OK
   _Cilk_for (ToPtr c; c < 5; c++); // OK
   _Cilk_for (ToRef c; c < 5; c++); // OK
