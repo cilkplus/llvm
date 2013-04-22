@@ -4052,25 +4052,34 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     getCurCompoundScope().setHasEmptyLoopBodies();
 
   // Generate the loop count expression according to the following:
-  //
-  // if var < limit or limit > var     then span+(stride-1)/stride
-  // if var > limit or limit < var     then span+(stride-1)/-stride
-  // if var <= limit or limit >= var   then (span+1)+(stride-1)/stride
-  // if var >= limit or limit <= var   then (span+1)+(stride-1)/-stride
-  // if var != limit or limit != var   then if stride is positive,
-  //                                                 span+(stride-1)/stride
-  //                                      otherwise, span+(stride-1)/-stride
+  // ===========================================================================
+  // |     Condition syntax             |       Loop count                     |
+  // ===========================================================================
+  // | if var < limit or limit > var    | (span+(stride-1))/stride             |
+  // ---------------------------------------------------------------------------
+  // | if var > limit or limit < var    | (span+(stride-1))/-stride            |
+  // ---------------------------------------------------------------------------
+  // | if var <= limit or limit >= var  | ((span+1)+(stride-1))/stride         |
+  // ---------------------------------------------------------------------------
+  // | if var >= limit or limit <= var  | ((span+1)+(stride-1))/-stride        |
+  // ---------------------------------------------------------------------------
+  // | if var != limit or limit != var  | if stride is positive,               |
+  // |                                  |            span/stride               |
+  // |                                  | otherwise, span/-stride              |
+  // |                                  | We don't need "+(stride-1)" for the  |
+  // |                                  | span in this case since the incr/decr|
+  // |                                  | operator should add up to the        |
+  // |                                  | limit exactly for a valid loop.      |
+  // ---------------------------------------------------------------------------
   Expr *LoopCount = 0;
   // Build "-stride"
   Expr *NegativeStride = BuildUnaryOp(getCurScope(), Increment->getExprLoc(),
                                       UO_Minus, StrideExpr).get();
   // Build "stride-1"
   Expr *StrideMinusOne =
-      BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub, StrideExpr,
+      BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub,
+                 (CondDirection == 1) ? StrideExpr : NegativeStride,
                  ActOnIntegerConstant(CilkForLoc, 1).get()).get();
-  // Updating span to be "span+(stride-1)"
-  Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span.get(),
-                    StrideMinusOne).get();
 
   if (Opcode == BO_NE) {
     // Build "stride<0"
@@ -4081,10 +4090,21 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     ExprResult StrideCondExpr = ActOnConditionalOp(
         CilkForLoc, CilkForLoc, StrideLessThanZero, NegativeStride, StrideExpr);
 
+    // Build "-span"
+    Expr *NegativeSpan =
+        BuildUnaryOp(getCurScope(), CilkForLoc, UO_Minus, Span.get()).get();
+
+    // Updating span to be "(stride<0)?-span:span"
+    Span = ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
+                              NegativeSpan, Span.get());
+
     // Build "span/(stride<0)?-stride:stride"
     LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
                            StrideCondExpr.get()).get();
   } else {
+    // Updating span to be "span+(stride-1)"
+    Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span.get(),
+                      StrideMinusOne);
     if (Opcode == BO_LE || Opcode == BO_GE)
       // Updating span to be "span+1"
       Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span.get(),
