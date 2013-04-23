@@ -3230,6 +3230,16 @@ void Parser::ParseStructUnionBody(SourceLocation RecordLoc,
       continue;
     }
 
+    if (Tok.is(tok::annot_pragma_pack)) {
+      HandlePragmaPack();
+      continue;
+    }
+
+    if (Tok.is(tok::annot_pragma_align)) {
+      HandlePragmaAlign();
+      continue;
+    }
+
     if (!Tok.is(tok::at)) {
       struct CFieldCallback : FieldCallback {
         Parser &P;
@@ -3357,9 +3367,9 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
   bool IsScopedUsingClassTag = false;
 
   // In C++11, recognize 'enum class' and 'enum struct'.
-  if (getLangOpts().CPlusPlus11 &&
-      (Tok.is(tok::kw_class) || Tok.is(tok::kw_struct))) {
-    Diag(Tok, diag::warn_cxx98_compat_scoped_enum);
+  if (Tok.is(tok::kw_class) || Tok.is(tok::kw_struct)) {
+    Diag(Tok, getLangOpts().CPlusPlus11 ? diag::warn_cxx98_compat_scoped_enum
+                                        : diag::ext_scoped_enum);
     IsScopedUsingClassTag = Tok.is(tok::kw_class);
     ScopedEnumKWLoc = ConsumeToken();
 
@@ -5005,7 +5015,8 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
       Sema::CXXThisScopeRAII ThisScope(Actions,
                                dyn_cast<CXXRecordDecl>(Actions.CurContext),
                                DS.getTypeQualifiers() |
-                               (D.getDeclSpec().isConstexprSpecified()
+                               (D.getDeclSpec().isConstexprSpecified() &&
+                                !getLangOpts().CPlusPlus1y
                                   ? Qualifiers::Const : 0),
                                IsCXX11MemberFunction);
 

@@ -1572,6 +1572,7 @@ QualType Sema::BuildArrayType(QualType T, ArrayType::ArraySizeModifier ASM,
   if (!getLangOpts().C99) {
     if (T->isVariableArrayType()) {
       // Prohibit the use of non-POD types in VLAs.
+      // FIXME: C++1y allows this.
       QualType BaseT = Context.getBaseElementType(T);
       if (!T->isDependentType() &&
           !BaseT.isPODType(Context) &&
@@ -1587,7 +1588,9 @@ QualType Sema::BuildArrayType(QualType T, ArrayType::ArraySizeModifier ASM,
       }
       // Just extwarn about VLAs.
       else
-        Diag(Loc, diag::ext_vla);
+        Diag(Loc, getLangOpts().CPlusPlus1y
+                      ? diag::warn_cxx11_compat_array_of_runtime_bound
+                      : diag::ext_vla);
     } else if (ASM != ArrayType::Normal || Quals != 0)
       Diag(Loc,
            getLangOpts().CPlusPlus? diag::err_c99_array_usage_cxx
@@ -4806,7 +4809,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
   QualType ElemType = Context.getBaseElementType(T);
   RequireCompleteType(Loc, ElemType, 0);
 
-  if (T->isLiteralType())
+  if (T->isLiteralType(Context))
     return false;
 
   if (Diagnoser.Suppressed)
@@ -4848,7 +4851,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
   } else if (RD->hasNonLiteralTypeFieldsOrBases()) {
     for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
          E = RD->bases_end(); I != E; ++I) {
-      if (!I->getType()->isLiteralType()) {
+      if (!I->getType()->isLiteralType(Context)) {
         Diag(I->getLocStart(),
              diag::note_non_literal_base_class)
           << RD << I->getType() << I->getSourceRange();
@@ -4857,7 +4860,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
     }
     for (CXXRecordDecl::field_iterator I = RD->field_begin(),
          E = RD->field_end(); I != E; ++I) {
-      if (!I->getType()->isLiteralType() ||
+      if (!I->getType()->isLiteralType(Context) ||
           I->getType().isVolatileQualified()) {
         Diag(I->getLocation(), diag::note_non_literal_field)
           << RD << *I << I->getType()

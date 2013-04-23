@@ -801,6 +801,11 @@ void StmtProfiler::VisitCXXDefaultArgExpr(const CXXDefaultArgExpr *S) {
   VisitDecl(S->getParam());
 }
 
+void StmtProfiler::VisitCXXDefaultInitExpr(const CXXDefaultInitExpr *S) {
+  VisitExpr(S);
+  VisitDecl(S->getField());
+}
+
 void StmtProfiler::VisitCXXBindTemporaryExpr(const CXXBindTemporaryExpr *S) {
   VisitExpr(S);
   VisitDecl(

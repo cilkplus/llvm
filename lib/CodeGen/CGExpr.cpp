@@ -916,6 +916,10 @@ LValue CodeGenFunction::EmitLValue(const Expr *E) {
     return EmitNullInitializationLValue(cast<CXXScalarValueInitExpr>(E));
   case Expr::CXXDefaultArgExprClass:
     return EmitLValue(cast<CXXDefaultArgExpr>(E)->getExpr());
+  case Expr::CXXDefaultInitExprClass: {
+    CXXDefaultInitExprScope Scope(*this);
+    return EmitLValue(cast<CXXDefaultInitExpr>(E)->getExpr());
+  }
   case Expr::CXXTypeidExprClass:
     return EmitCXXTypeidLValue(cast<CXXTypeidExpr>(E));
 
@@ -1837,8 +1841,12 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
 
   if (const VarDecl *VD = dyn_cast<VarDecl>(ND)) {
     // Check if this is a global variable.
-    if (VD->hasLinkage() || VD->isStaticDataMember())
+    if (VD->hasLinkage() || VD->isStaticDataMember()) {
+      // If it's thread_local, emit a call to its wrapper function instead.
+      if (VD->getTLSKind() == VarDecl::TLS_Dynamic)
+        return CGM.getCXXABI().EmitThreadLocalDeclRefExpr(*this, E);
       return EmitGlobalVarDeclLValue(*this, E, VD);
+    }
 
     bool isBlockVariable = VD->hasAttr<BlocksAttr>();
 

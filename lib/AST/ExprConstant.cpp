@@ -290,7 +290,7 @@ namespace {
 
     // Note that we intentionally use std::map here so that references to
     // values are stable.
-    typedef std::map<const Expr*, APValue> MapTy;
+    typedef std::map<const void*, APValue> MapTy;
     typedef MapTy::const_iterator temp_iterator;
     /// Temporaries - Temporary lvalues materialized within this stack frame.
     MapTy Temporaries;
@@ -299,6 +299,22 @@ namespace {
                    const FunctionDecl *Callee, const LValue *This,
                    const APValue *Arguments);
     ~CallStackFrame();
+  };
+
+  /// Temporarily override 'this'.
+  class ThisOverrideRAII {
+  public:
+    ThisOverrideRAII(CallStackFrame &Frame, const LValue *NewThis, bool Enable)
+        : Frame(Frame), OldThis(Frame.This) {
+      if (Enable)
+        Frame.This = NewThis;
+    }
+    ~ThisOverrideRAII() {
+      Frame.This = OldThis;
+    }
+  private:
+    CallStackFrame &Frame;
+    const LValue *OldThis;
   };
 
   /// A partial diagnostic which we might know in advance that we are not going
@@ -897,6 +913,14 @@ static bool EvaluateComplex(const Expr *E, ComplexValue &Res, EvalInfo &Info);
 // Misc utilities
 //===----------------------------------------------------------------------===//
 
+/// Evaluate an expression to see if it had side-effects, and discard its
+/// result.
+static void EvaluateIgnoredValue(EvalInfo &Info, const Expr *E) {
+  APValue Scratch;
+  if (!Evaluate(Scratch, Info, E))
+    Info.EvalStatus.HasSideEffects = true;
+}
+
 /// Should this call expression be treated as a string literal?
 static bool IsStringLiteralCall(const CallExpr *E) {
   unsigned Builtin = E->isBuiltinCall();
@@ -1030,7 +1054,7 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
 /// Check that this core constant expression is of literal type, and if not,
 /// produce an appropriate diagnostic.
 static bool CheckLiteralType(EvalInfo &Info, const Expr *E) {
-  if (!E->isRValue() || E->getType()->isLiteralType())
+  if (!E->isRValue() || E->getType()->isLiteralType(Info.Ctx))
     return true;
 
   // Prvalue constant expressions must be of literal types.
@@ -1445,6 +1469,15 @@ static bool EvaluateVarDeclInit(EvalInfo &Info, const Expr *E,
     return true;
   }
 
+  // If this is a local variable, dig out its value.
+  if (VD->hasLocalStorage() && Frame && Frame->Index > 1) {
+    Result = Frame->Temporaries[VD];
+    // If we've carried on past an unevaluatable local variable initializer,
+    // we can't go any further. This can happen during potential constant
+    // expression checking.
+    return !Result.isUninit();
+  }
+
   // Dig out the initializer, and use the declaration which it's attached to.
   const Expr *Init = VD->getAnyInitializer(VD);
   if (!Init || Init->isValueDependent()) {
@@ -1787,7 +1820,9 @@ static bool HandleLValueToRValueConversion(EvalInfo &Info, const Expr *Conv,
       return false;
     }
 
-    if (!isa<ParmVarDecl>(VD)) {
+    // Unless we're looking at a local variable or argument in a constexpr call,
+    // the variable we're reading must be const.
+    if (LVal.CallIndex <= 1 || !VD->hasLocalStorage()) {
       if (VD->isConstexpr()) {
         // OK, we can read this variable.
       } else if (VT->isIntegralOrEnumerationType()) {
@@ -1895,7 +1930,7 @@ static bool EvaluateObjectArgument(EvalInfo &Info, const Expr *Object,
   if (Object->isGLValue())
     return EvaluateLValue(Object, This, Info);
 
-  if (Object->getType()->isLiteralType())
+  if (Object->getType()->isLiteralType(Info.Ctx))
     return EvaluateTemporary(Object, This, Info);
 
   return false;
@@ -2044,20 +2079,61 @@ enum EvalStmtResult {
 };
 }
 
+static bool EvaluateDecl(EvalInfo &Info, const Decl *D) {
+  if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+    // We don't need to evaluate the initializer for a static local.
+    if (!VD->hasLocalStorage())
+      return true;
+
+    LValue Result;
+    Result.set(VD, Info.CurrentCall->Index);
+    APValue &Val = Info.CurrentCall->Temporaries[VD];
+
+    if (!EvaluateInPlace(Val, Info, Result, VD->getInit())) {
+      // Wipe out any partially-computed value, to allow tracking that this
+      // evaluation failed.
+      Val = APValue();
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Evaluate a statement.
 static EvalStmtResult EvaluateStmt(APValue &Result, EvalInfo &Info,
                                    const Stmt *S) {
+  // FIXME: Mark all temporaries in the current frame as destroyed at
+  // the end of each full-expression.
   switch (S->getStmtClass()) {
   default:
+    if (const Expr *E = dyn_cast<Expr>(S)) {
+      EvaluateIgnoredValue(Info, E);
+      // Don't bother evaluating beyond an expression-statement which couldn't
+      // be evaluated.
+      if (Info.EvalStatus.HasSideEffects && !Info.keepEvaluatingAfterFailure())
+        return ESR_Failed;
+      return ESR_Succeeded;
+    }
+
+    Info.Diag(S->getLocStart());
     return ESR_Failed;
 
   case Stmt::NullStmtClass:
-  case Stmt::DeclStmtClass:
     return ESR_Succeeded;
+
+  case Stmt::DeclStmtClass: {
+    const DeclStmt *DS = cast<DeclStmt>(S);
+    for (DeclStmt::const_decl_iterator DclIt = DS->decl_begin(),
+           DclEnd = DS->decl_end(); DclIt != DclEnd; ++DclIt)
+      if (!EvaluateDecl(Info, *DclIt) && !Info.keepEvaluatingAfterFailure())
+        return ESR_Failed;
+    return ESR_Succeeded;
+  }
 
   case Stmt::ReturnStmtClass: {
     const Expr *RetExpr = cast<ReturnStmt>(S)->getRetValue();
-    if (!Evaluate(Result, Info, RetExpr))
+    if (RetExpr && !Evaluate(Result, Info, RetExpr))
       return ESR_Failed;
     return ESR_Returned;
   }
@@ -2067,6 +2143,28 @@ static EvalStmtResult EvaluateStmt(APValue &Result, EvalInfo &Info,
     for (CompoundStmt::const_body_iterator BI = CS->body_begin(),
            BE = CS->body_end(); BI != BE; ++BI) {
       EvalStmtResult ESR = EvaluateStmt(Result, Info, *BI);
+      if (ESR != ESR_Succeeded)
+        return ESR;
+    }
+    return ESR_Succeeded;
+  }
+
+  case Stmt::IfStmtClass: {
+    const IfStmt *IS = cast<IfStmt>(S);
+
+    // Evaluate the condition, as either a var decl or as an expression.
+    bool Cond;
+    if (VarDecl *CondDecl = IS->getConditionVariable()) {
+      if (!EvaluateDecl(Info, CondDecl))
+        return ESR_Failed;
+      if (!HandleConversionToBool(Info.CurrentCall->Temporaries[CondDecl],
+                                  Cond))
+        return ESR_Failed;
+    } else if (!EvaluateAsBooleanCondition(IS->getCond(), Cond, Info))
+      return ESR_Failed;
+
+    if (const Stmt *SubStmt = Cond ? IS->getThen() : IS->getElse()) {
+      EvalStmtResult ESR = EvaluateStmt(Result, Info, SubStmt);
       if (ESR != ESR_Succeeded)
         return ESR;
     }
@@ -2165,7 +2263,10 @@ static bool HandleFunctionCall(SourceLocation CallLoc,
     return false;
 
   CallStackFrame Frame(Info, CallLoc, Callee, This, ArgValues.data());
-  return EvaluateStmt(Result, Info, Body) == ESR_Returned;
+  EvalStmtResult ESR = EvaluateStmt(Result, Info, Body);
+  if (ESR == ESR_Succeeded)
+    Info.Diag(Callee->getLocEnd(), diag::note_constexpr_no_return);
+  return ESR == ESR_Returned;
 }
 
 /// Evaluate a constructor call.
@@ -2191,7 +2292,9 @@ static bool HandleConstructorCall(SourceLocation CallLoc, const LValue &This,
   // If it's a delegating constructor, just delegate.
   if (Definition->isDelegatingConstructor()) {
     CXXConstructorDecl::init_const_iterator I = Definition->init_begin();
-    return EvaluateInPlace(Result, Info, This, (*I)->getInit());
+    if (!EvaluateInPlace(Result, Info, This, (*I)->getInit()))
+      return false;
+    return EvaluateStmt(Result, Info, Definition->getBody()) != ESR_Failed;
   }
 
   // For a trivial copy or move constructor, perform an APValue copy. This is
@@ -2291,7 +2394,8 @@ static bool HandleConstructorCall(SourceLocation CallLoc, const LValue &This,
     }
   }
 
-  return Success;
+  return Success &&
+         EvaluateStmt(Result, Info, Definition->getBody()) != ESR_Failed;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2396,6 +2500,8 @@ public:
   RetTy VisitSubstNonTypeTemplateParmExpr(const SubstNonTypeTemplateParmExpr *E)
     { return StmtVisitorTy::Visit(E->getReplacement()); }
   RetTy VisitCXXDefaultArgExpr(const CXXDefaultArgExpr *E)
+    { return StmtVisitorTy::Visit(E->getExpr()); }
+  RetTy VisitCXXDefaultInitExpr(const CXXDefaultInitExpr *E)
     { return StmtVisitorTy::Visit(E->getExpr()); }
   // We cannot create any objects for which cleanups are required, so there is
   // nothing to do here; all cleanups must come from unevaluated subexpressions.
@@ -2642,9 +2748,7 @@ public:
 
   /// Visit a value which is evaluated, but whose value is ignored.
   void VisitIgnoredValue(const Expr *E) {
-    APValue Scratch;
-    if (!Evaluate(Scratch, Info, E))
-      Info.EvalStatus.HasSideEffects = true;
+    EvaluateIgnoredValue(Info, E);
   }
 };
 
@@ -2850,7 +2954,7 @@ bool LValueExprEvaluator::VisitDeclRefExpr(const DeclRefExpr *E) {
 
 bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
   if (!VD->getType()->isReferenceType()) {
-    if (isa<ParmVarDecl>(VD)) {
+    if (VD->hasLocalStorage() && Info.CurrentCall->Index > 1) {
       Result.set(VD, Info.CurrentCall->Index);
       return true;
     }
@@ -3398,12 +3502,20 @@ bool RecordExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
 
     // If the initializer list for a union does not contain any elements, the
     // first element of the union is value-initialized.
+    // FIXME: The element should be initialized from an initializer list.
+    //        Is this difference ever observable for initializer lists which
+    //        we don't build?
     ImplicitValueInitExpr VIE(Field->getType());
     const Expr *InitExpr = E->getNumInits() ? E->getInit(0) : &VIE;
 
     LValue Subobject = This;
     if (!HandleLValueMember(Info, InitExpr, Subobject, Field, &Layout))
       return false;
+
+    // Temporarily override This, in case there's a CXXDefaultInitExpr in here.
+    ThisOverrideRAII ThisOverride(*Info.CurrentCall, &This,
+                                  isa<CXXDefaultInitExpr>(InitExpr));
+
     return EvaluateInPlace(Result.getUnionValue(), Info, Subobject, InitExpr);
   }
 
@@ -3433,10 +3545,14 @@ bool RecordExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
     // Perform an implicit value-initialization for members beyond the end of
     // the initializer list.
     ImplicitValueInitExpr VIE(HaveInit ? Info.Ctx.IntTy : Field->getType());
+    const Expr *Init = HaveInit ? E->getInit(ElementNo++) : &VIE;
 
-    if (!EvaluateInPlace(
-          Result.getStructField(Field->getFieldIndex()),
-          Info, Subobject, HaveInit ? E->getInit(ElementNo++) : &VIE)) {
+    // Temporarily override This, in case there's a CXXDefaultInitExpr in here.
+    ThisOverrideRAII ThisOverride(*Info.CurrentCall, &This,
+                                  isa<CXXDefaultInitExpr>(Init));
+
+    if (!EvaluateInPlace(Result.getStructField(Field->getFieldIndex()), Info,
+                         Subobject, Init)) {
       if (!Info.keepEvaluatingAfterFailure())
         return false;
       Success = false;
@@ -3764,6 +3880,9 @@ namespace {
 
     bool VisitInitListExpr(const InitListExpr *E);
     bool VisitCXXConstructExpr(const CXXConstructExpr *E);
+    bool VisitCXXConstructExpr(const CXXConstructExpr *E,
+                               const LValue &Subobject,
+                               APValue *Value, QualType Type);
   };
 } // end anonymous namespace
 
@@ -3797,8 +3916,16 @@ bool ArrayExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
   if (Result.isArray() && Result.hasArrayFiller())
     Filler = Result.getArrayFiller();
 
-  Result = APValue(APValue::UninitArray(), E->getNumInits(),
-                   CAT->getSize().getZExtValue());
+  unsigned NumEltsToInit = E->getNumInits();
+  unsigned NumElts = CAT->getSize().getZExtValue();
+  const Expr *FillerExpr = E->hasArrayFiller() ? E->getArrayFiller() : 0;
+
+  // If the initializer might depend on the array index, run it for each
+  // array element. For now, just whitelist non-class value-initialization.
+  if (NumEltsToInit != NumElts && !isa<ImplicitValueInitExpr>(FillerExpr))
+    NumEltsToInit = NumElts;
+
+  Result = APValue(APValue::UninitArray(), NumEltsToInit, NumElts);
 
   // If the array was previously zero-initialized, preserve the
   // zero-initialized values.
@@ -3811,12 +3938,12 @@ bool ArrayExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
 
   LValue Subobject = This;
   Subobject.addArray(Info, E, CAT);
-  unsigned Index = 0;
-  for (InitListExpr::const_iterator I = E->begin(), End = E->end();
-       I != End; ++I, ++Index) {
+  for (unsigned Index = 0; Index != NumEltsToInit; ++Index) {
+    const Expr *Init =
+        Index < E->getNumInits() ? E->getInit(Index) : FillerExpr;
     if (!EvaluateInPlace(Result.getArrayInitializedElt(Index),
-                         Info, Subobject, cast<Expr>(*I)) ||
-        !HandleLValueArrayAdjustment(Info, cast<Expr>(*I), Subobject,
+                         Info, Subobject, Init) ||
+        !HandleLValueArrayAdjustment(Info, Init, Subobject,
                                      CAT->getElementType(), 1)) {
       if (!Info.keepEvaluatingAfterFailure())
         return false;
@@ -3824,39 +3951,54 @@ bool ArrayExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
     }
   }
 
-  if (!Result.hasArrayFiller()) return Success;
-  assert(E->hasArrayFiller() && "no array filler for incomplete init list");
-  // FIXME: The Subobject here isn't necessarily right. This rarely matters,
-  // but sometimes does:
-  //   struct S { constexpr S() : p(&p) {} void *p; };
-  //   S s[10] = {};
-  return EvaluateInPlace(Result.getArrayFiller(), Info,
-                         Subobject, E->getArrayFiller()) && Success;
+  if (!Result.hasArrayFiller())
+    return Success;
+
+  // If we get here, we have a trivial filler, which we can just evaluate
+  // once and splat over the rest of the array elements.
+  assert(FillerExpr && "no array filler for incomplete init list");
+  return EvaluateInPlace(Result.getArrayFiller(), Info, Subobject,
+                         FillerExpr) && Success;
 }
 
 bool ArrayExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E) {
-  // FIXME: The Subobject here isn't necessarily right. This rarely matters,
-  // but sometimes does:
-  //   struct S { constexpr S() : p(&p) {} void *p; };
-  //   S s[10];
-  LValue Subobject = This;
+  return VisitCXXConstructExpr(E, This, &Result, E->getType());
+}
 
-  APValue *Value = &Result;
-  bool HadZeroInit = true;
-  QualType ElemTy = E->getType();
-  while (const ConstantArrayType *CAT =
-           Info.Ctx.getAsConstantArrayType(ElemTy)) {
-    Subobject.addArray(Info, E, CAT);
-    HadZeroInit &= !Value->isUninit();
-    if (!HadZeroInit)
-      *Value = APValue(APValue::UninitArray(), 0, CAT->getSize().getZExtValue());
-    if (!Value->hasArrayFiller())
-      return true;
-    Value = &Value->getArrayFiller();
-    ElemTy = CAT->getElementType();
+bool ArrayExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E,
+                                               const LValue &Subobject,
+                                               APValue *Value,
+                                               QualType Type) {
+  bool HadZeroInit = !Value->isUninit();
+
+  if (const ConstantArrayType *CAT = Info.Ctx.getAsConstantArrayType(Type)) {
+    unsigned N = CAT->getSize().getZExtValue();
+
+    // Preserve the array filler if we had prior zero-initialization.
+    APValue Filler =
+      HadZeroInit && Value->hasArrayFiller() ? Value->getArrayFiller()
+                                             : APValue();
+
+    *Value = APValue(APValue::UninitArray(), N, N);
+
+    if (HadZeroInit)
+      for (unsigned I = 0; I != N; ++I)
+        Value->getArrayInitializedElt(I) = Filler;
+
+    // Initialize the elements.
+    LValue ArrayElt = Subobject;
+    ArrayElt.addArray(Info, E, CAT);
+    for (unsigned I = 0; I != N; ++I)
+      if (!VisitCXXConstructExpr(E, ArrayElt, &Value->getArrayInitializedElt(I),
+                                 CAT->getElementType()) ||
+          !HandleLValueArrayAdjustment(Info, E, ArrayElt,
+                                       CAT->getElementType(), 1))
+        return false;
+
+    return true;
   }
 
-  if (!ElemTy->isRecordType())
+  if (!Type->isRecordType())
     return Error(E);
 
   const CXXConstructorDecl *FD = E->getConstructor();
@@ -3867,7 +4009,7 @@ bool ArrayExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E) {
       return true;
 
     if (ZeroInit) {
-      ImplicitValueInitExpr VIE(ElemTy);
+      ImplicitValueInitExpr VIE(Type);
       return EvaluateInPlace(*Value, Info, Subobject, &VIE);
     }
 
@@ -3888,7 +4030,7 @@ bool ArrayExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E) {
     return false;
 
   if (ZeroInit && !HadZeroInit) {
-    ImplicitValueInitExpr VIE(ElemTy);
+    ImplicitValueInitExpr VIE(Type);
     if (!EvaluateInPlace(*Value, Info, Subobject, &VIE))
       return false;
   }
@@ -6807,6 +6949,8 @@ static ICEDiag CheckICE(const Expr* E, ASTContext &Ctx) {
   }
   case Expr::CXXDefaultArgExprClass:
     return CheckICE(cast<CXXDefaultArgExpr>(E)->getExpr(), Ctx);
+  case Expr::CXXDefaultInitExprClass:
+    return CheckICE(cast<CXXDefaultInitExpr>(E)->getExpr(), Ctx);
   case Expr::ChooseExprClass: {
     return CheckICE(cast<ChooseExpr>(E)->getChosenSubExpr(Ctx), Ctx);
   }

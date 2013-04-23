@@ -445,14 +445,11 @@ public:
     : SemaRef(Ref), AsmLoc(Loc), AsmToks(Toks), TokOffsets(Offsets) { }
   ~MCAsmParserSemaCallbackImpl() {}
 
-  void *LookupInlineAsmIdentifier(StringRef Name, void *SrcLoc,
-                                  unsigned &Length, unsigned &Size,
-                                  unsigned &Type, bool &IsVarDecl){
-    SourceLocation Loc = SourceLocation::getFromPtrEncoding(SrcLoc);
-
-    NamedDecl *OpDecl = SemaRef.LookupInlineAsmIdentifier(Name, Loc, Length,
-                                                          Size, Type,
-                                                          IsVarDecl);
+  void *LookupInlineAsmIdentifier(StringRef &LineBuf,
+                                  InlineAsmIdentifierInfo &Info) {
+    SourceLocation Loc = SourceLocation::getFromPtrEncoding(LineBuf.data());
+    NamedDecl *OpDecl = SemaRef.LookupInlineAsmIdentifier(LineBuf, Loc, Info);
+    Info.OpDecl = static_cast<void *>(OpDecl);
     return static_cast<void *>(OpDecl);
   }
 
@@ -494,14 +491,39 @@ public:
 
 }
 
-NamedDecl *Sema::LookupInlineAsmIdentifier(StringRef Name, SourceLocation Loc,
-                                           unsigned &Length, unsigned &Size, 
-                                           unsigned &Type, bool &IsVarDecl) {
-  Length = 1;
-  Size = 0;
-  Type = 0;
-  IsVarDecl = false;
-  LookupResult Result(*this, &Context.Idents.get(Name), Loc,
+// FIXME: Temporary hack until the frontend parser is hooked up to parse 
+// variables.
+static bool isIdentifierChar(char c) {
+  return isalnum(c) || c == '_' || c == '$' || c == '.' || c == '@';
+}
+
+static void lexIdentifier(const char *&CurPtr) {
+  while (isIdentifierChar(*CurPtr))
+    ++CurPtr;
+}
+
+static StringRef parseIdentifier(StringRef Identifier) {
+  const char *StartPtr = Identifier.data(), *EndPtr, *CurPtr;
+  EndPtr = StartPtr + Identifier.size();
+  CurPtr = StartPtr;
+  while(CurPtr <= EndPtr) {
+    if (isIdentifierChar(*CurPtr))
+      lexIdentifier(CurPtr);
+    else if (CurPtr[0] == ':' && CurPtr[1] == ':')
+      CurPtr += 2;
+    else
+      break;
+  }
+  return StringRef(StartPtr, CurPtr - StartPtr);
+}
+
+NamedDecl *Sema::LookupInlineAsmIdentifier(StringRef &LineBuf, SourceLocation Loc,
+                                           InlineAsmIdentifierInfo &Info) {
+  Info.clear();
+  // FIXME: Temporary hack until the frontend parser is hooked up to parse 
+  // variables.
+  LineBuf = parseIdentifier(LineBuf);
+  LookupResult Result(*this, &Context.Idents.get(LineBuf), Loc,
                       Sema::LookupOrdinaryName);
 
   if (!LookupName(Result, getCurScope())) {
@@ -520,13 +542,13 @@ NamedDecl *Sema::LookupInlineAsmIdentifier(StringRef Name, SourceLocation Loc,
     return FoundDecl;
   if (VarDecl *Var = dyn_cast<VarDecl>(FoundDecl)) {
     QualType Ty = Var->getType();
-    Type = Size = Context.getTypeSizeInChars(Ty).getQuantity();
+    Info.Type = Info.Size = Context.getTypeSizeInChars(Ty).getQuantity();
     if (Ty->isArrayType()) {
       const ArrayType *ATy = Context.getAsArrayType(Ty);
-      Type = Context.getTypeSizeInChars(ATy->getElementType()).getQuantity();
-      Length = Size / Type;
+      Info.Type = Context.getTypeSizeInChars(ATy->getElementType()).getQuantity();
+      Info.Length = Info.Size / Info.Type;
     }
-    IsVarDecl = true;
+    Info.IsVarDecl = true;
     return FoundDecl;
   }
 
@@ -622,7 +644,7 @@ StmtResult Sema::ActOnMSAsmStmt(SourceLocation AsmLoc, SourceLocation LBraceLoc,
   llvm::SourceMgr SrcMgr;
   llvm::MCContext Ctx(*MAI, *MRI, MOFI.get(), &SrcMgr);
   llvm::MemoryBuffer *Buffer =
-    llvm::MemoryBuffer::getMemBuffer(AsmString, "<inline asm>");
+    llvm::MemoryBuffer::getMemBuffer(AsmString, "<MS inline asm>");
 
   // Tell SrcMgr about this buffer, which is what the parser will pick up.
   SrcMgr.AddNewSourceBuffer(Buffer, llvm::SMLoc());

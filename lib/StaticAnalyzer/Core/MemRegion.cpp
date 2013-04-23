@@ -555,11 +555,11 @@ void StackLocalsSpaceRegion::dumpToStream(raw_ostream &os) const {
 }
 
 bool MemRegion::canPrintPretty() const {
-  return false;
+  return canPrintPrettyAsExpr();
 }
 
 bool MemRegion::canPrintPrettyAsExpr() const {
-  return canPrintPretty();
+  return false;
 }
 
 void MemRegion::printPretty(raw_ostream &os) const {
@@ -575,7 +575,7 @@ void MemRegion::printPrettyAsExpr(raw_ostream &os) const {
   return;
 }
 
-bool VarRegion::canPrintPretty() const {
+bool VarRegion::canPrintPrettyAsExpr() const {
   return true;
 }
 
@@ -583,7 +583,7 @@ void VarRegion::printPrettyAsExpr(raw_ostream &os) const {
   os << getDecl()->getName();
 }
 
-bool ObjCIvarRegion::canPrintPretty() const {
+bool ObjCIvarRegion::canPrintPrettyAsExpr() const {
   return true;
 }
 
@@ -1078,6 +1078,17 @@ const MemRegion *MemRegion::StripCasts(bool StripBaseCasts) const {
       return R;
     }
   }
+}
+
+const SymbolicRegion *MemRegion::getSymbolicBase() const {
+  const SubRegion *SubR = dyn_cast<SubRegion>(this);
+
+  while (SubR) {
+    if (const SymbolicRegion *SymR = dyn_cast<SymbolicRegion>(SubR))
+      return SymR;
+    SubR = dyn_cast<SubRegion>(SubR->getSuperRegion());
+  }
+  return 0;
 }
 
 // FIXME: Merge with the implementation of the same method in Store.cpp

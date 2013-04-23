@@ -89,7 +89,7 @@ void CGDebugInfo::setLocation(SourceLocation Loc) {
 }
 
 /// getContextDescriptor - Get context info for the decl.
-llvm::DIDescriptor CGDebugInfo::getContextDescriptor(const Decl *Context) {
+llvm::DIScope CGDebugInfo::getContextDescriptor(const Decl *Context) {
   if (!Context)
     return TheCU;
 
@@ -97,20 +97,17 @@ llvm::DIDescriptor CGDebugInfo::getContextDescriptor(const Decl *Context) {
     I = RegionMap.find(Context);
   if (I != RegionMap.end()) {
     llvm::Value *V = I->second;
-    return llvm::DIDescriptor(dyn_cast_or_null<llvm::MDNode>(V));
+    return llvm::DIScope(dyn_cast_or_null<llvm::MDNode>(V));
   }
 
   // Check namespace.
   if (const NamespaceDecl *NSDecl = dyn_cast<NamespaceDecl>(Context))
-    return llvm::DIDescriptor(getOrCreateNameSpace(NSDecl));
+    return getOrCreateNameSpace(NSDecl);
 
-  if (const RecordDecl *RDecl = dyn_cast<RecordDecl>(Context)) {
-    if (!RDecl->isDependentType()) {
-      llvm::DIType Ty = getOrCreateType(CGM.getContext().getTypeDeclType(RDecl),
+  if (const RecordDecl *RDecl = dyn_cast<RecordDecl>(Context))
+    if (!RDecl->isDependentType())
+      return getOrCreateType(CGM.getContext().getTypeDeclType(RDecl),
                                         getOrCreateMainFile());
-      return llvm::DIDescriptor(Ty);
-    }
-  }
   return TheCU;
 }
 
@@ -1699,7 +1696,7 @@ llvm::DIType CGDebugInfo::CreateEnumType(const EnumDecl *ED) {
   unsigned Line = getLineNumber(ED->getLocation());
   llvm::DIDescriptor EnumContext = 
     getContextDescriptor(cast<Decl>(ED->getDeclContext()));
-  llvm::DIType ClassTy = ED->isScopedUsingClassTag() ?
+  llvm::DIType ClassTy = ED->isFixed() ?
     getOrCreateType(ED->getIntegerType(), DefUnit) : llvm::DIType();
   llvm::DIType DbgTy = 
     DBuilder.createEnumerationType(EnumContext, ED->getName(), DefUnit, Line,
@@ -2930,6 +2927,13 @@ void CGDebugInfo::EmitGlobalVariable(const ValueDecl *VD,
                                 getLineNumber(VD->getLocation()),
                                 Ty, true, Init,
                                 getStaticDataMemberDeclaration(VD));
+}
+
+void CGDebugInfo::EmitUsingDirective(const UsingDirectiveDecl &UD) {
+  DBuilder.createImportedModule(
+      getContextDescriptor(cast<Decl>(UD.getDeclContext())),
+      getOrCreateNameSpace(UD.getNominatedNamespace()),
+      getLineNumber(UD.getLocation()));
 }
 
 /// getOrCreateNamesSpace - Return namespace descriptor for the given

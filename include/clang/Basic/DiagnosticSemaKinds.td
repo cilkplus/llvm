@@ -78,6 +78,9 @@ def ext_vla : Extension<"variable length arrays are a C99 feature">,
   InGroup<VLAExtension>;
 def warn_vla_used : Warning<"variable length array used">,
   InGroup<VLA>, DefaultIgnore;
+def warn_cxx11_compat_array_of_runtime_bound : Warning<
+  "arrays of runtime bound are incompatible with C++ standards before C++1y">,
+  InGroup<CXXPre1yCompatPedantic>, DefaultIgnore;
 def err_vla_non_pod : Error<"variable length array of non-POD element type %0">;
 def err_vla_in_sfinae : Error<
   "variable length array cannot be formed during template argument deduction">;
@@ -639,6 +642,10 @@ def warn_objc_isa_use : Warning<
 def warn_objc_isa_assign : Warning<
   "assignment to Objective-C's isa is deprecated in favor of "
   "object_setClass()">, InGroup<DeprecatedObjCIsaUsage>;
+def warn_objc_pointer_masking : Warning<
+  "bitmasking for introspection of Objective-C object pointers is strongly "
+  "discouraged in favor of using runtime APIs">,
+  InGroup<DiagGroup<"deprecated-objc-pointer-introspection">>;
 def warn_objc_property_default_assign_on_object : Warning<
   "default property attribute 'assign' not appropriate for non-GC object">,
   InGroup<ObjCPropertyNoAttribute>;
@@ -1547,6 +1554,11 @@ def note_for_range_begin_end : Note<
 def warn_cxx98_compat_constexpr : Warning<
   "'constexpr' specifier is incompatible with C++98">,
   InGroup<CXX98Compat>, DefaultIgnore;
+// FIXME: Maybe this should also go in -Wc++1y-compat?
+def warn_cxx1y_compat_constexpr_not_const : Warning<
+  "'constexpr' non-static member function will not be implicitly 'const' "
+  "in C++1y; add 'const' to avoid a change in behavior">,
+  InGroup<DiagGroup<"constexpr-not-const">>;
 def err_invalid_constexpr : Error<
   "%select{function parameter|typedef|non-static data member}0 "
   "cannot be constexpr">;
@@ -1585,20 +1597,54 @@ def err_constexpr_non_literal_param : Error<
   "not a literal type">;
 def err_constexpr_body_invalid_stmt : Error<
   "statement not allowed in constexpr %select{function|constructor}0">;
-def err_constexpr_type_definition : Error<
-  "types cannot be defined in a constexpr %select{function|constructor}0">;
+def ext_constexpr_body_invalid_stmt : ExtWarn<
+  "use of this statement in a constexpr %select{function|constructor}0 "
+  "is a C++1y extension">, InGroup<CXX1y>;
+def warn_cxx11_compat_constexpr_body_invalid_stmt : Warning<
+  "use of this statement in a constexpr %select{function|constructor}0 "
+  "is incompatible with C++ standards before C++1y">,
+  InGroup<CXXPre1yCompat>, DefaultIgnore;
+def ext_constexpr_type_definition : ExtWarn<
+  "type definition in a constexpr %select{function|constructor}0 "
+  "is a C++1y extension">, InGroup<CXX1y>;
+def warn_cxx11_compat_constexpr_type_definition : Warning<
+  "type definition in a constexpr %select{function|constructor}0 "
+  "is incompatible with C++ standards before C++1y">,
+  InGroup<CXXPre1yCompat>, DefaultIgnore;
 def err_constexpr_vla : Error<
   "variably-modified type %0 cannot be used in a constexpr "
   "%select{function|constructor}1">;
-def err_constexpr_var_declaration : Error<
-  "variables cannot be declared in a constexpr %select{function|constructor}0">;
+def ext_constexpr_local_var : ExtWarn<
+  "variable declaration in a constexpr %select{function|constructor}0 "
+  "is a C++1y extension">, InGroup<CXX1y>;
+def warn_cxx11_compat_constexpr_local_var : Warning<
+  "variable declaration in a constexpr %select{function|constructor}0 "
+  "is incompatible with C++ standards before C++1y">,
+  InGroup<CXXPre1yCompat>, DefaultIgnore;
+def err_constexpr_local_var_static : Error<
+  "%select{static|thread_local}1 variable not permitted in a constexpr "
+  "%select{function|constructor}0">;
+def err_constexpr_local_var_non_literal_type : Error<
+  "variable of non-literal type %1 cannot be defined in a constexpr "
+  "%select{function|constructor}0">;
+def err_constexpr_local_var_no_init : Error<
+  "variables defined in a constexpr %select{function|constructor}0 must be "
+  "initialized">;
 def ext_constexpr_function_never_constant_expr : ExtWarn<
   "constexpr %select{function|constructor}0 never produces a "
   "constant expression">, InGroup<DiagGroup<"invalid-constexpr">>, DefaultError;
 def err_constexpr_body_no_return : Error<
   "no return statement in constexpr function">;
-def err_constexpr_body_multiple_return : Error<
-  "multiple return statements in constexpr function">;
+def warn_cxx11_compat_constexpr_body_no_return : Warning<
+  "constexpr function with no return statements is incompatible with C++ "
+  "standards before C++1y">, InGroup<CXXPre1yCompat>, DefaultIgnore;
+def ext_constexpr_body_multiple_return : ExtWarn<
+  "multiple return statements in constexpr function is a C++1y extension">,
+  InGroup<CXX1y>;
+def warn_cxx11_compat_constexpr_body_multiple_return : Warning<
+  "multiple return statements in constexpr function "
+  "is incompatible with C++ standards before C++1y">,
+  InGroup<CXXPre1yCompat>, DefaultIgnore;
 def note_constexpr_body_previous_return : Note<
   "previous return statement is here">;
 def err_constexpr_function_try_block : Error<
@@ -4789,9 +4835,6 @@ let CategoryName = "Lambda Issue" in {
     "incomplete result type %0 in lambda expression">;
   def err_lambda_objc_object_result : Error<
     "non-pointer Objective-C class type %0 in lambda expression result">;
-  def ext_lambda_default_arguments : ExtWarn<
-    "C++11 forbids default arguments for lambda expressions">,
-    InGroup<LambdaExtensions>;
   def err_noreturn_lambda_has_return_expr : Error<
     "lambda declared 'noreturn' should not return">;
   def warn_maybe_falloff_nonvoid_lambda : Warning<

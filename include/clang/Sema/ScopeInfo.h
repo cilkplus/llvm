@@ -545,6 +545,7 @@ public:
     case CR_CilkFor:
       return "_Cilk_for";
     }
+    llvm_unreachable("Invalid captured region kind!");
   }
 
   static bool classof(const FunctionScopeInfo *FSI) {
