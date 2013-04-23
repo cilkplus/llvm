@@ -230,6 +230,9 @@
 /* Define to 1 if you have the `udis86' library (-ludis86). */
 #undef HAVE_LIBUDIS86
 
+/* Define to 1 if you have the 'z' library (-lz). */
+#cmakedefine HAVE_LIBZ ${HAVE_LIBZ}
+
 /* Define to 1 if you have the <limits.h> header file. */
 #cmakedefine HAVE_LIMITS_H ${HAVE_LIMITS_H}
 
@@ -498,6 +501,9 @@
 /* Define if the xdot.py program is available */
 #cmakedefine HAVE_XDOT_PY ${HAVE_XDOT_PY}
 
+/* Define to 1 if you have the <zlib.h> header file. */
+#cmakedefine HAVE_ZLIB_H ${HAVE_ZLIB_H}
+
 /* Have host's _alloca */
 #cmakedefine HAVE__ALLOCA ${HAVE__ALLOCA}
 
@@ -569,6 +575,9 @@
 
 /* Define if threads enabled */
 #cmakedefine01 LLVM_ENABLE_THREADS
+
+/* Define if zlib compression is available */
+#cmakedefine01 LLVM_ENABLE_ZLIB
 
 /* Installation directory for config files */
 #cmakedefine LLVM_ETCDIR "${LLVM_ETCDIR}"

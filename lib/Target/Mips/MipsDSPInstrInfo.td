@@ -26,6 +26,8 @@ def SDT_MipsShilo : SDTypeProfile<1, 2, [SDTCisVT<0, untyped>,
                                          SDTCisSameAs<0, 2>, SDTCisVT<1, i32>]>;
 def SDT_MipsDPA : SDTypeProfile<1, 3, [SDTCisVT<0, untyped>, SDTCisSameAs<0, 3>,
                                        SDTCisVT<1, i32>, SDTCisSameAs<1, 2>]>;
+def SDT_MipsSHIFT_DSP : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0, 1>,
+                                             SDTCisVT<2, i32>]>;
 
 class MipsDSPBase<string Opc, SDTypeProfile Prof> :
   SDNode<!strconcat("MipsISD::", Opc), Prof>;
@@ -74,6 +76,9 @@ def MipsMADD_DSP : MipsDSPBase<"MADD_DSP", SDT_MipsDPA>;
 def MipsMADDU_DSP : MipsDSPBase<"MADDU_DSP", SDT_MipsDPA>;
 def MipsMSUB_DSP : MipsDSPBase<"MSUB_DSP", SDT_MipsDPA>;
 def MipsMSUBU_DSP : MipsDSPBase<"MSUBU_DSP", SDT_MipsDPA>;
+def MipsSHLL_DSP : MipsDSPBase<"SHLL_DSP", SDT_MipsSHIFT_DSP>;
+def MipsSHRA_DSP : MipsDSPBase<"SHRA_DSP", SDT_MipsSHIFT_DSP>;
+def MipsSHRL_DSP : MipsDSPBase<"SHRL_DSP", SDT_MipsSHIFT_DSP>;
 
 // Flags.
 class UseAC {
@@ -145,6 +150,10 @@ class MAQ_S_W_PHL_ENC : DPA_W_PH_FMT<0b10100>;
 class MAQ_S_W_PHR_ENC : DPA_W_PH_FMT<0b10110>;
 class MAQ_SA_W_PHL_ENC : DPA_W_PH_FMT<0b10000>;
 class MAQ_SA_W_PHR_ENC : DPA_W_PH_FMT<0b10010>;
+class MFHI_ENC : MFHI_FMT<0b010000>;
+class MFLO_ENC : MFHI_FMT<0b010010>;
+class MTHI_ENC : MTHI_FMT<0b010001>;
+class MTLO_ENC : MTHI_FMT<0b010011>;
 class DPAU_H_QBL_ENC : DPA_W_PH_FMT<0b00011>;
 class DPAU_H_QBR_ENC : DPA_W_PH_FMT<0b00111>;
 class DPSU_H_QBL_ENC : DPA_W_PH_FMT<0b01011>;
@@ -344,6 +353,7 @@ class SHLL_QB_R2_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
   list<dag> Pattern = [(set RC:$rd, (OpNode RC:$rt, ImmPat:$rs_sa))];
   InstrItinClass Itinerary = itin;
   list<Register> Defs = [DSPCtrl];
+  bit hasSideEffects = 1;
 }
 
 class LX_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
@@ -480,6 +490,20 @@ class MADD_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
   InstrItinClass Itinerary = itin;
   int AddedComplexity = 20;
   string Constraints = "$acin = $ac";
+}
+
+class MFHI_DESC_BASE<string instr_asm, RegisterClass RC, InstrItinClass itin> {
+  dag OutOperandList = (outs CPURegs:$rd);
+  dag InOperandList = (ins RC:$ac);
+  string AsmString = !strconcat(instr_asm, "\t$rd, $ac");
+  InstrItinClass Itinerary = itin;
+}
+
+class MTHI_DESC_BASE<string instr_asm, RegisterClass RC, InstrItinClass itin> {
+  dag OutOperandList = (outs RC:$ac);
+  dag InOperandList = (ins CPURegs:$rs);
+  string AsmString = !strconcat(instr_asm, "\t$rs, $ac");
+  InstrItinClass Itinerary = itin;
 }
 
 class BPOSGE32_PSEUDO_DESC_BASE<SDPatternOperator OpNode, InstrItinClass itin> :
@@ -641,19 +665,19 @@ class PRECEU_PH_QBRA_DESC : ABSQ_S_PH_R2_DESC_BASE<"preceu.ph.qbra",
                             ClearDefs;
 
 // Shift
-class SHLL_QB_DESC : SHLL_QB_R2_DESC_BASE<"shll.qb", int_mips_shll_qb, immZExt3,
+class SHLL_QB_DESC : SHLL_QB_R2_DESC_BASE<"shll.qb", null_frag, immZExt3,
                                           NoItinerary, DSPRegs>;
 
 class SHLLV_QB_DESC : SHLL_QB_R3_DESC_BASE<"shllv.qb", int_mips_shll_qb,
                                            NoItinerary, DSPRegs>;
 
-class SHRL_QB_DESC : SHLL_QB_R2_DESC_BASE<"shrl.qb", int_mips_shrl_qb, immZExt3,
+class SHRL_QB_DESC : SHLL_QB_R2_DESC_BASE<"shrl.qb", null_frag, immZExt3,
                                           NoItinerary, DSPRegs>, ClearDefs;
 
 class SHRLV_QB_DESC : SHLL_QB_R3_DESC_BASE<"shrlv.qb", int_mips_shrl_qb,
                                            NoItinerary, DSPRegs>, ClearDefs;
 
-class SHLL_PH_DESC : SHLL_QB_R2_DESC_BASE<"shll.ph", int_mips_shll_ph, immZExt4,
+class SHLL_PH_DESC : SHLL_QB_R2_DESC_BASE<"shll.ph", null_frag, immZExt4,
                                           NoItinerary, DSPRegs>;
 
 class SHLLV_PH_DESC : SHLL_QB_R3_DESC_BASE<"shllv.ph", int_mips_shll_ph,
@@ -665,7 +689,7 @@ class SHLL_S_PH_DESC : SHLL_QB_R2_DESC_BASE<"shll_s.ph", int_mips_shll_s_ph,
 class SHLLV_S_PH_DESC : SHLL_QB_R3_DESC_BASE<"shllv_s.ph", int_mips_shll_s_ph,
                                              NoItinerary, DSPRegs>;
 
-class SHRA_PH_DESC : SHLL_QB_R2_DESC_BASE<"shra.ph", int_mips_shra_ph, immZExt4,
+class SHRA_PH_DESC : SHLL_QB_R2_DESC_BASE<"shra.ph", null_frag, immZExt4,
                                           NoItinerary, DSPRegs>, ClearDefs;
 
 class SHRAV_PH_DESC : SHLL_QB_R3_DESC_BASE<"shrav.ph", int_mips_shra_ph,
@@ -724,6 +748,12 @@ class MAQ_S_W_PHR_DESC : DPA_W_PH_DESC_BASE<"maq_s.w.phr", MipsMAQ_S_W_PHR>;
 class MAQ_SA_W_PHL_DESC : DPA_W_PH_DESC_BASE<"maq_sa.w.phl", MipsMAQ_SA_W_PHL>;
 
 class MAQ_SA_W_PHR_DESC : DPA_W_PH_DESC_BASE<"maq_sa.w.phr", MipsMAQ_SA_W_PHR>;
+
+// Move from/to hi/lo.
+class MFHI_DESC : MFHI_DESC_BASE<"mfhi", HIRegsDSP, NoItinerary>;
+class MFLO_DESC : MFHI_DESC_BASE<"mflo", LORegsDSP, NoItinerary>;
+class MTHI_DESC : MTHI_DESC_BASE<"mthi", HIRegsDSP, NoItinerary>;
+class MTLO_DESC : MTHI_DESC_BASE<"mtlo", LORegsDSP, NoItinerary>;
 
 // Dot product with accumulate/subtract
 class DPAU_H_QBL_DESC : DPA_W_PH_DESC_BASE<"dpau.h.qbl", MipsDPAU_H_QBL>;
@@ -1004,7 +1034,7 @@ class PRECR_SRA_R_PH_W_DESC : PRECR_SRA_PH_W_DESC_BASE<"precr_sra_r.ph.w",
                                                        CPURegs>, ClearDefs;
 
 // Shift
-class SHRA_QB_DESC : SHLL_QB_R2_DESC_BASE<"shra.qb", int_mips_shra_qb, immZExt3,
+class SHRA_QB_DESC : SHLL_QB_R2_DESC_BASE<"shra.qb", null_frag, immZExt3,
                                           NoItinerary, DSPRegs>, ClearDefs;
 
 class SHRAV_QB_DESC : SHLL_QB_R3_DESC_BASE<"shrav.qb", int_mips_shra_qb,
@@ -1017,7 +1047,7 @@ class SHRA_R_QB_DESC : SHLL_QB_R2_DESC_BASE<"shra_r.qb", int_mips_shra_r_qb,
 class SHRAV_R_QB_DESC : SHLL_QB_R3_DESC_BASE<"shrav_r.qb", int_mips_shra_r_qb,
                                              NoItinerary, DSPRegs>, ClearDefs;
 
-class SHRL_PH_DESC : SHLL_QB_R2_DESC_BASE<"shrl.ph", int_mips_shrl_ph, immZExt4,
+class SHRL_PH_DESC : SHLL_QB_R2_DESC_BASE<"shrl.ph", null_frag, immZExt4,
                                           NoItinerary, DSPRegs>, ClearDefs;
 
 class SHRLV_PH_DESC : SHLL_QB_R3_DESC_BASE<"shrlv.ph", int_mips_shrl_ph,
@@ -1094,6 +1124,10 @@ def MAQ_S_W_PHL : MAQ_S_W_PHL_ENC, MAQ_S_W_PHL_DESC;
 def MAQ_S_W_PHR : MAQ_S_W_PHR_ENC, MAQ_S_W_PHR_DESC;
 def MAQ_SA_W_PHL : MAQ_SA_W_PHL_ENC, MAQ_SA_W_PHL_DESC;
 def MAQ_SA_W_PHR : MAQ_SA_W_PHR_ENC, MAQ_SA_W_PHR_DESC;
+def MFHI_DSP : MFHI_ENC, MFHI_DESC;
+def MFLO_DSP : MFLO_ENC, MFLO_DESC;
+def MTHI_DSP : MTHI_ENC, MTHI_DESC;
+def MTLO_DSP : MTLO_ENC, MTLO_DESC;
 def DPAU_H_QBL : DPAU_H_QBL_ENC, DPAU_H_QBL_DESC;
 def DPAU_H_QBR : DPAU_H_QBR_ENC, DPAU_H_QBR_DESC;
 def DPSU_H_QBL : DPSU_H_QBL_ENC, DPSU_H_QBL_DESC;
@@ -1251,6 +1285,24 @@ def : DSPBinPat<ADDSC, i32, int_mips_addsc>;
 def : DSPBinPat<ADDSC, i32, addc>;
 def : DSPBinPat<ADDWC, i32, int_mips_addwc>;
 def : DSPBinPat<ADDWC, i32, adde>;
+
+// Shift immediate patterns.
+class DSPShiftPat<Instruction Inst, ValueType ValTy, SDPatternOperator Node,
+                  SDPatternOperator Imm, Predicate Pred = HasDSP> :
+  DSPPat<(Node ValTy:$a, Imm:$shamt), (Inst ValTy:$a, Imm:$shamt), Pred>;
+
+def : DSPShiftPat<SHLL_PH, v2i16, MipsSHLL_DSP, imm>;
+def : DSPShiftPat<SHRA_PH, v2i16, MipsSHRA_DSP, imm>;
+def : DSPShiftPat<SHRL_PH, v2i16, MipsSHRL_DSP, imm, HasDSPR2>;
+def : DSPShiftPat<SHLL_PH, v2i16, int_mips_shll_ph, immZExt4>;
+def : DSPShiftPat<SHRA_PH, v2i16, int_mips_shra_ph, immZExt4>;
+def : DSPShiftPat<SHRL_PH, v2i16, int_mips_shrl_ph, immZExt4, HasDSPR2>;
+def : DSPShiftPat<SHLL_QB, v4i8, MipsSHLL_DSP, imm>;
+def : DSPShiftPat<SHRA_QB, v4i8, MipsSHRA_DSP, imm, HasDSPR2>;
+def : DSPShiftPat<SHRL_QB, v4i8, MipsSHRL_DSP, imm>;
+def : DSPShiftPat<SHLL_QB, v4i8, int_mips_shll_qb, immZExt3>;
+def : DSPShiftPat<SHRA_QB, v4i8, int_mips_shra_qb, immZExt3, HasDSPR2>;
+def : DSPShiftPat<SHRL_QB, v4i8, int_mips_shrl_qb, immZExt3>;
 
 // Extr patterns.
 class EXTR_W_TY1_R2_Pat<SDPatternOperator OpNode, Instruction Instr> :

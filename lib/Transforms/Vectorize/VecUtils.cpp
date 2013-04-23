@@ -1,4 +1,4 @@
-//===- VecUtils.h --- Vectorization Utilities -----------------------------===//
+//===- VecUtils.cpp --- Vectorization Utilities ---------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,6 +18,7 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/Verifier.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -44,8 +45,8 @@ static const unsigned RecursionMaxDepth = 6;
 namespace llvm {
 
 BoUpSLP::BoUpSLP(BasicBlock *Bb, ScalarEvolution *S, DataLayout *Dl,
-                             TargetTransformInfo *Tti, AliasAnalysis *Aa) :
-                             BB(Bb), SE(S), DL(Dl), TTI(Tti), AA(Aa) {
+                 TargetTransformInfo *Tti, AliasAnalysis *Aa, Loop *Lp) :
+  BB(Bb), SE(S), DL(Dl), TTI(Tti), AA(Aa), L(Lp)  {
   numberInstructions();
 }
 
@@ -94,15 +95,15 @@ bool BoUpSLP::isConsecutiveAccess(Value *A, Value *B) {
   // Non constant distance.
   if (!ConstOffSCEV) return false;
 
-  unsigned Offset = ConstOffSCEV->getValue()->getSExtValue();
+  int64_t Offset = ConstOffSCEV->getValue()->getSExtValue();
   Type *Ty = cast<PointerType>(PtrA->getType())->getElementType();
   // The Instructions are connsecutive if the size of the first load/store is
   // the same as the offset.
-  unsigned Sz = DL->getTypeStoreSize(Ty);
+  int64_t Sz = DL->getTypeStoreSize(Ty);
   return ((-Offset) == Sz);
 }
 
-bool BoUpSLP::vectorizeStoreChain(ValueList &Chain, int CostThreshold) {
+bool BoUpSLP::vectorizeStoreChain(ArrayRef<Value *> Chain, int CostThreshold) {
   Type *StoreTy = cast<StoreInst>(Chain[0])->getValueOperand()->getType();
   unsigned Sz = DL->getTypeSizeInBits(StoreTy);
   unsigned VF = MinVecRegSize / Sz;
@@ -114,14 +115,14 @@ bool BoUpSLP::vectorizeStoreChain(ValueList &Chain, int CostThreshold) {
   for (unsigned i = 0, e = Chain.size(); i < e; ++i) {
     if (i + VF > e) return Changed;
     DEBUG(dbgs()<<"SLP: Analyzing " << VF << " stores at offset "<< i << "\n");
-    ValueList Operands(&Chain[i], &Chain[i] + VF);
+    ArrayRef<Value *> Operands = Chain.slice(i, VF);
 
     int Cost = getTreeCost(Operands);
     DEBUG(dbgs() << "SLP: Found cost=" << Cost << " for VF=" << VF << "\n");
     if (Cost < CostThreshold) {
       DEBUG(dbgs() << "SLP: Decided to vectorize cost=" << Cost << "\n");
       vectorizeTree(Operands, VF);
-      i += VF;
+      i += VF - 1;
       Changed = true;
     }
   }
@@ -129,7 +130,7 @@ bool BoUpSLP::vectorizeStoreChain(ValueList &Chain, int CostThreshold) {
   return Changed;
 }
 
-bool BoUpSLP::vectorizeStores(StoreList &Stores, int costThreshold) {
+bool BoUpSLP::vectorizeStores(ArrayRef<StoreInst *> Stores, int costThreshold) {
   ValueSet Heads, Tails;
   SmallDenseMap<Value*, Value*> ConsecutiveChain;
 
@@ -177,7 +178,7 @@ bool BoUpSLP::vectorizeStores(StoreList &Stores, int costThreshold) {
   return Changed;
 }
 
-int BoUpSLP::getScalarizationCost(ValueList &VL) {
+int BoUpSLP::getScalarizationCost(ArrayRef<Value *> VL) {
   // Find the type of the operands in VL.
   Type *ScalarTy = VL[0]->getType();
   if (StoreInst *SI = dyn_cast<StoreInst>(VL[0]))
@@ -222,7 +223,7 @@ Value *BoUpSLP::isUnsafeToSink(Instruction *Src, Instruction *Dst) {
   return 0;
 }
 
-void BoUpSLP::vectorizeArith(ValueList &Operands) {
+void BoUpSLP::vectorizeArith(ArrayRef<Value *> Operands) {
   Value *Vec = vectorizeTree(Operands, Operands.size());
   BasicBlock::iterator Loc = cast<Instruction>(Vec);
   IRBuilder<> Builder(++Loc);
@@ -235,7 +236,7 @@ void BoUpSLP::vectorizeArith(ValueList &Operands) {
   }
 }
 
-int BoUpSLP::getTreeCost(ValueList &VL) {
+int BoUpSLP::getTreeCost(ArrayRef<Value *> VL) {
   // Get rid of the list of stores that were removed, and from the
   // lists of instructions with multiple users.
   MemBarrierIgnoreList.clear();
@@ -277,7 +278,7 @@ int BoUpSLP::getTreeCost(ValueList &VL) {
   return getTreeCost_rec(VL, 0);
 }
 
-void BoUpSLP::getTreeUses_rec(ValueList &VL, unsigned Depth) {
+void BoUpSLP::getTreeUses_rec(ArrayRef<Value *> VL, unsigned Depth) {
   if (Depth == RecursionMaxDepth) return;
 
   // Don't handle vectors.
@@ -327,6 +328,18 @@ void BoUpSLP::getTreeUses_rec(ValueList &VL, unsigned Depth) {
   }
 
   switch (Opcode) {
+    case Instruction::ZExt:
+    case Instruction::SExt:
+    case Instruction::FPToUI:
+    case Instruction::FPToSI:
+    case Instruction::FPExt:
+    case Instruction::PtrToInt:
+    case Instruction::IntToPtr:
+    case Instruction::SIToFP:
+    case Instruction::UIToFP:
+    case Instruction::Trunc:
+    case Instruction::FPTrunc:
+    case Instruction::BitCast:
     case Instruction::Add:
     case Instruction::FAdd:
     case Instruction::Sub:
@@ -353,6 +366,7 @@ void BoUpSLP::getTreeUses_rec(ValueList &VL, unsigned Depth) {
 
         getTreeUses_rec(Operands, Depth+1);
       }
+      return;
     }
     case Instruction::Store: {
       ValueList Operands;
@@ -366,7 +380,7 @@ void BoUpSLP::getTreeUses_rec(ValueList &VL, unsigned Depth) {
   }
 }
 
-int BoUpSLP::getTreeCost_rec(ValueList &VL, unsigned Depth) {
+int BoUpSLP::getTreeCost_rec(ArrayRef<Value *> VL, unsigned Depth) {
   Type *ScalarTy = VL[0]->getType();
 
   if (StoreInst *SI = dyn_cast<StoreInst>(VL[0]))
@@ -381,13 +395,15 @@ int BoUpSLP::getTreeCost_rec(ValueList &VL, unsigned Depth) {
   // Check if all of the operands are constants.
   bool AllConst = true;
   bool AllSameScalar = true;
+  bool MustScalarizeFlag = false;
   for (unsigned i = 0, e = VL.size(); i < e; ++i) {
     AllConst &= isa<Constant>(VL[i]);
     AllSameScalar &= (VL[0] == VL[i]);
     // Must have a single use.
     Instruction *I = dyn_cast<Instruction>(VL[i]);
-    // This instruction is outside the basic block or if it is a known hazard.
-    if (MustScalarize.count(VL[i]) || (I && I->getParent() != BB))
+    MustScalarizeFlag |= MustScalarize.count(VL[i]);
+    // This instruction is outside the basic block.
+    if (I && I->getParent() != BB)
       return getScalarizationCost(VecTy);
   }
 
@@ -395,11 +411,23 @@ int BoUpSLP::getTreeCost_rec(ValueList &VL, unsigned Depth) {
   if (AllConst) return 0;
 
   // If all of the operands are identical we can broadcast them.
-  if (AllSameScalar)
-    return TTI->getShuffleCost(TargetTransformInfo::SK_Broadcast, VecTy, 0);
-
-  // Scalarize unknown structures.
   Instruction *VL0 = dyn_cast<Instruction>(VL[0]);
+  if (AllSameScalar) {
+    // If we are in a loop, and this is not an instruction (e.g. constant or
+    // argument) or the instruction is defined outside the loop then assume
+    // that the cost is zero.
+    if (L && (!VL0 || !L->contains(VL0)))
+      return 0;
+
+    // We need to broadcast the scalar.
+    return TTI->getShuffleCost(TargetTransformInfo::SK_Broadcast, VecTy, 0);
+  }
+
+  // If this is not a constant, or a scalar from outside the loop then we
+  // need to scalarize it.
+  if (MustScalarizeFlag)
+    return getScalarizationCost(VecTy);
+
   if (!VL0) return getScalarizationCost(VecTy);
   assert(VL0->getParent() == BB && "Wrong BB");
 
@@ -429,6 +457,41 @@ int BoUpSLP::getTreeCost_rec(ValueList &VL, unsigned Depth) {
   }
 
   switch (Opcode) {
+  case Instruction::ZExt:
+  case Instruction::SExt:
+  case Instruction::FPToUI:
+  case Instruction::FPToSI:
+  case Instruction::FPExt:
+  case Instruction::PtrToInt:
+  case Instruction::IntToPtr:
+  case Instruction::SIToFP:
+  case Instruction::UIToFP:
+  case Instruction::Trunc:
+  case Instruction::FPTrunc:
+  case Instruction::BitCast: {
+    int Cost = 0;
+    ValueList Operands;
+    Type *SrcTy = VL0->getOperand(0)->getType();
+    // Prepare the operand vector.
+    for (unsigned j = 0; j < VL.size(); ++j) {
+      Operands.push_back(cast<Instruction>(VL[j])->getOperand(0));
+      // Check that the casted type is the same for all users.
+      if (cast<Instruction>(VL[j])->getOperand(0)->getType() != SrcTy)
+        return getScalarizationCost(VecTy);
+    }
+
+    Cost += getTreeCost_rec(Operands, Depth+1);
+    if (Cost >= max_cost) return max_cost;
+
+    // Calculate the cost of this instruction.
+    int ScalarCost = VL.size() * TTI->getCastInstrCost(VL0->getOpcode(),
+                                                       VL0->getType(), SrcTy);
+
+    VectorType *SrcVecTy = VectorType::get(SrcTy, VL.size());
+    int VecCost = TTI->getCastInstrCost(VL0->getOpcode(), VecTy, SrcVecTy);
+    Cost += (VecCost - ScalarCost);
+    return Cost;
+  }
   case Instruction::Add:
   case Instruction::FAdd:
   case Instruction::Sub:
@@ -501,14 +564,14 @@ int BoUpSLP::getTreeCost_rec(ValueList &VL, unsigned Depth) {
   }
 }
 
-Instruction *BoUpSLP::GetLastInstr(ValueList &VL, unsigned VF) {
+Instruction *BoUpSLP::GetLastInstr(ArrayRef<Value *> VL, unsigned VF) {
   int MaxIdx = InstrIdx[BB->getFirstNonPHI()];
   for (unsigned i = 0; i < VF; ++i )
     MaxIdx = std::max(MaxIdx, InstrIdx[VL[i]]);
   return InstrVec[MaxIdx + 1];
 }
 
-Value *BoUpSLP::Scalarize(ValueList &VL, VectorType *Ty) {
+Value *BoUpSLP::Scalarize(ArrayRef<Value *> VL, VectorType *Ty) {
   IRBuilder<> Builder(GetLastInstr(VL, Ty->getNumElements()));
   Value *Vec = UndefValue::get(Ty);
   for (unsigned i=0; i < Ty->getNumElements(); ++i) {
@@ -523,7 +586,7 @@ Value *BoUpSLP::Scalarize(ValueList &VL, VectorType *Ty) {
   return Vec;
 }
 
-Value *BoUpSLP::vectorizeTree(ValueList &VL, int VF) {
+Value *BoUpSLP::vectorizeTree(ArrayRef<Value *> VL, int VF) {
   Value *V = vectorizeTree_rec(VL, VF);
   // We moved some instructions around. We have to number them again
   // before we can do any analysis.
@@ -532,7 +595,7 @@ Value *BoUpSLP::vectorizeTree(ValueList &VL, int VF) {
   return V;
 }
 
-Value *BoUpSLP::vectorizeTree_rec(ValueList &VL, int VF) {
+Value *BoUpSLP::vectorizeTree_rec(ArrayRef<Value *> VL, int VF) {
   Type *ScalarTy = VL[0]->getType();
   if (StoreInst *SI = dyn_cast<StoreInst>(VL[0]))
     ScalarTy = SI->getValueOperand()->getType();
@@ -542,7 +605,7 @@ Value *BoUpSLP::vectorizeTree_rec(ValueList &VL, int VF) {
   bool AllConst = true;
   bool AllSameScalar = true;
   for (unsigned i = 0, e = VF; i < e; ++i) {
-    AllConst &= !!dyn_cast<Constant>(VL[i]);
+    AllConst &= isa<Constant>(VL[i]);
     AllSameScalar &= (VL[0] == VL[i]);
     // The instruction must be in the same BB, and it must be vectorizable.
     Instruction *I = dyn_cast<Instruction>(VL[i]);
@@ -567,6 +630,28 @@ Value *BoUpSLP::vectorizeTree_rec(ValueList &VL, int VF) {
   }
 
   switch (Opcode) {
+  case Instruction::ZExt:
+  case Instruction::SExt:
+  case Instruction::FPToUI:
+  case Instruction::FPToSI:
+  case Instruction::FPExt:
+  case Instruction::PtrToInt:
+  case Instruction::IntToPtr:
+  case Instruction::SIToFP:
+  case Instruction::UIToFP:
+  case Instruction::Trunc:
+  case Instruction::FPTrunc:
+  case Instruction::BitCast: {
+    ValueList INVL;
+    for (int i = 0; i < VF; ++i)
+      INVL.push_back(cast<Instruction>(VL[i])->getOperand(0));
+    Value *InVec = vectorizeTree_rec(INVL, VF);
+    IRBuilder<> Builder(GetLastInstr(VL, VF));
+    CastInst *CI = dyn_cast<CastInst>(VL0);
+    Value *V = Builder.CreateCast(CI->getOpcode(), InVec, VecTy);
+    VectorizedValues[VL0] = V;
+    return V;
+  }
   case Instruction::Add:
   case Instruction::FAdd:
   case Instruction::Sub:
@@ -594,13 +679,13 @@ Value *BoUpSLP::vectorizeTree_rec(ValueList &VL, int VF) {
     Value *RHS = vectorizeTree_rec(RHSVL, VF);
     Value *LHS = vectorizeTree_rec(LHSVL, VF);
     IRBuilder<> Builder(GetLastInstr(VL, VF));
-    BinaryOperator *BinOp = dyn_cast<BinaryOperator>(VL0);
+    BinaryOperator *BinOp = cast<BinaryOperator>(VL0);
     Value *V = Builder.CreateBinOp(BinOp->getOpcode(), RHS,LHS);
     VectorizedValues[VL0] = V;
     return V;
   }
   case Instruction::Load: {
-    LoadInst *LI = dyn_cast<LoadInst>(VL0);
+    LoadInst *LI = cast<LoadInst>(VL0);
     unsigned Alignment = LI->getAlignment();
 
     // Check if all of the loads are consecutive.
@@ -617,7 +702,7 @@ Value *BoUpSLP::vectorizeTree_rec(ValueList &VL, int VF) {
     return LI;
   }
   case Instruction::Store: {
-    StoreInst *SI = dyn_cast<StoreInst>(VL0);
+    StoreInst *SI = cast<StoreInst>(VL0);
     unsigned Alignment = SI->getAlignment();
 
     ValueList ValueOp;

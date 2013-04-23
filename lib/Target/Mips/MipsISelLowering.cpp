@@ -197,6 +197,9 @@ const char *MipsTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case MipsISD::MADDU_DSP:         return "MipsISD::MADDU_DSP";
   case MipsISD::MSUB_DSP:          return "MipsISD::MSUB_DSP";
   case MipsISD::MSUBU_DSP:         return "MipsISD::MSUBU_DSP";
+  case MipsISD::SHLL_DSP:          return "MipsISD::SHLL_DSP";
+  case MipsISD::SHRA_DSP:          return "MipsISD::SHRA_DSP";
+  case MipsISD::SHRL_DSP:          return "MipsISD::SHRL_DSP";
   default:                         return NULL;
   }
 }
@@ -445,7 +448,7 @@ static SDValue performDivRemCombine(SDNode *N, SelectionDAG &DAG,
   return SDValue();
 }
 
-static Mips::CondCode FPCondCCodeToFCC(ISD::CondCode CC) {
+static Mips::CondCode condCodeToFCC(ISD::CondCode CC) {
   switch (CC) {
   default: llvm_unreachable("Unknown fp condition code!");
   case ISD::SETEQ:
@@ -504,7 +507,7 @@ static SDValue createFPCmp(SelectionDAG &DAG, const SDValue &Op) {
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
 
   return DAG.getNode(MipsISD::FPCmp, DL, MVT::Glue, LHS, RHS,
-                     DAG.getConstant(FPCondCCodeToFCC(CC), MVT::i32));
+                     DAG.getConstant(condCodeToFCC(CC), MVT::i32));
 }
 
 // Creates and returns a CMovFPT/F node.
@@ -735,7 +738,6 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
   case ISD::FRAMEADDR:          return lowerFRAMEADDR(Op, DAG);
   case ISD::RETURNADDR:         return lowerRETURNADDR(Op, DAG);
   case ISD::EH_RETURN:          return lowerEH_RETURN(Op, DAG);
-  case ISD::MEMBARRIER:         return lowerMEMBARRIER(Op, DAG);
   case ISD::ATOMIC_FENCE:       return lowerATOMIC_FENCE(Op, DAG);
   case ISD::SHL_PARTS:          return lowerShiftLeftParts(Op, DAG);
   case ISD::SRA_PARTS:          return lowerShiftRightParts(Op, DAG, true);
@@ -1819,15 +1821,6 @@ SDValue MipsTargetLowering::lowerEH_RETURN(SDValue Op, SelectionDAG &DAG)
                      DAG.getRegister(OffsetReg, Ty),
                      DAG.getRegister(AddrReg, getPointerTy()),
                      Chain.getValue(1));
-}
-
-// TODO: set SType according to the desired memory barrier behavior.
-SDValue
-MipsTargetLowering::lowerMEMBARRIER(SDValue Op, SelectionDAG &DAG) const {
-  unsigned SType = 0;
-  DebugLoc DL = Op.getDebugLoc();
-  return DAG.getNode(MipsISD::Sync, DL, MVT::Other, Op.getOperand(0),
-                     DAG.getConstant(SType, MVT::i32));
 }
 
 SDValue MipsTargetLowering::lowerATOMIC_FENCE(SDValue Op,

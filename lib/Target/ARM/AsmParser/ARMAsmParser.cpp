@@ -610,6 +610,13 @@ public:
     int64_t Value = CE->getValue();
     return ((Value & 3) == 0) && Value >= -1020 && Value <= 1020;
   }
+  bool isImm0_4() const {
+    if (!isImm()) return false;
+    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
+    if (!CE) return false;
+    int64_t Value = CE->getValue();
+    return Value >= 0 && Value < 5;
+  }
   bool isImm0_1020s4() const {
     if (!isImm()) return false;
     const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
@@ -5015,8 +5022,8 @@ static bool isDataTypeToken(StringRef Tok) {
 static bool doesIgnoreDataTypeSuffix(StringRef Mnemonic, StringRef DT) {
   return Mnemonic.startswith("vldm") || Mnemonic.startswith("vstm");
 }
-
-static void applyMnemonicAliases(StringRef &Mnemonic, unsigned Features);
+static void applyMnemonicAliases(StringRef &Mnemonic, unsigned Features,
+                                 unsigned VariantID);
 /// Parse an arm instruction mnemonic followed by its operands.
 bool ARMAsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                     SMLoc NameLoc,
@@ -5027,7 +5034,8 @@ bool ARMAsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
   // MatchInstructionImpl(), but that's too late for aliases that include
   // any sort of suffix.
   unsigned AvailableFeatures = getAvailableFeatures();
-  applyMnemonicAliases(Name, AvailableFeatures);
+  unsigned AssemblerDialect = getParser().getAssemblerDialect();
+  applyMnemonicAliases(Name, AvailableFeatures, AssemblerDialect);
 
   // First check for the ARM-specific .req directive.
   if (Parser.getTok().is(AsmToken::Identifier) &&

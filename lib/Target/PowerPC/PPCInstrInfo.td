@@ -725,6 +725,7 @@ let isTerminator = 1, isBarrier = 1, PPC970_Unit = 7 in {
   let isBranch = 1, isIndirectBranch = 1, Uses = [CTR] in {
     def BCTR : XLForm_2_ext<19, 528, 20, 0, 0, (outs), (ins), "bctr", BrB, []>;
 
+    let isCodeGenOnly = 1 in
     def BCCTR : XLForm_2_br<19, 528, 0, (outs), (ins pred:$cond),
                             "b${cond:cc}ctr ${cond:reg}", BrB, []>;
   }
@@ -788,6 +789,8 @@ let isCall = 1, PPC970_Unit = 7, Defs = [LR] in {
     def BCTRL : XLForm_2_ext<19, 528, 20, 0, 1, (outs), (ins),
                              "bctrl", BrB, [(PPCbctrl)]>,
                 Requires<[In32BitMode]>;
+
+    let isCodeGenOnly = 1 in
     def BCCTRL : XLForm_2_br<19, 528, 1, (outs), (ins pred:$cond),
                              "b${cond:cc}ctrl ${cond:reg}", BrB, []>;
   }
@@ -1960,14 +1963,6 @@ def : Pat<(f64 (extloadf32 xaddr:$src)),
 
 def : Pat<(f64 (fextend f32:$src)),
           (COPY_TO_REGCLASS $src, F8RC)>;
-
-// Memory barriers
-def : Pat<(membarrier (i32 imm /*ll*/),
-                      (i32 imm /*ls*/),
-                      (i32 imm /*sl*/),
-                      (i32 imm /*ss*/),
-                      (i32 imm /*device*/)),
-           (SYNC)>;
 
 def : Pat<(atomic_fence (imm), (imm)), (SYNC)>;
 

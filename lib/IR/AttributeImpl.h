@@ -178,7 +178,7 @@ public:
 
   unsigned getAlignment() const;
   unsigned getStackAlignment() const;
-  std::string getAsString(bool InAttrGrp) const;
+  std::string getAsString(bool TargetIndependent, bool InAttrGrp) const;
 
   typedef SmallVectorImpl<Attribute>::iterator       iterator;
   typedef SmallVectorImpl<Attribute>::const_iterator const_iterator;
@@ -248,15 +248,15 @@ public:
   typedef AttributeSetNode::iterator       iterator;
   typedef AttributeSetNode::const_iterator const_iterator;
 
-  iterator begin(unsigned Idx)
-    { return AttrNodes[Idx].second->begin(); }
-  iterator end(unsigned Idx)
-    { return AttrNodes[Idx].second->end(); }
+  iterator begin(unsigned Slot)
+    { return AttrNodes[Slot].second->begin(); }
+  iterator end(unsigned Slot)
+    { return AttrNodes[Slot].second->end(); }
 
-  const_iterator begin(unsigned Idx) const
-    { return AttrNodes[Idx].second->begin(); }
-  const_iterator end(unsigned Idx) const
-    { return AttrNodes[Idx].second->end(); }
+  const_iterator begin(unsigned Slot) const
+    { return AttrNodes[Slot].second->begin(); }
+  const_iterator end(unsigned Slot) const
+    { return AttrNodes[Slot].second->end(); }
 
   void Profile(FoldingSetNodeID &ID) const {
     Profile(ID, AttrNodes);

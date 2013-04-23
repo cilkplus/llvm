@@ -543,6 +543,9 @@ LowerFormalArguments_64(SDValue Chain,
                  getTargetMachine(), ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_Sparc64);
 
+  // The argument array begins at %fp+BIAS+128, after the register save area.
+  const unsigned ArgArea = 128;
+
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
     if (VA.isRegLoc()) {
@@ -586,7 +589,7 @@ LowerFormalArguments_64(SDValue Chain,
     assert(VA.isMemLoc());
     // The CC_Sparc64_Full/Half functions compute stack offsets relative to the
     // beginning of the arguments area at %fp+BIAS+128.
-    unsigned Offset = VA.getLocMemOffset() + 128;
+    unsigned Offset = VA.getLocMemOffset() + ArgArea;
     unsigned ValSize = VA.getValVT().getSizeInBits() / 8;
     // Adjust offset for extended arguments, SPARC is big-endian.
     // The caller will have written the full slot with extended bytes, but we
@@ -599,6 +602,41 @@ LowerFormalArguments_64(SDValue Chain,
                                  MachinePointerInfo::getFixedStack(FI),
                                  false, false, false, 0));
   }
+
+  if (!IsVarArg)
+    return Chain;
+
+  // This function takes variable arguments, some of which may have been passed
+  // in registers %i0-%i5. Variable floating point arguments are never passed
+  // in floating point registers. They go on %i0-%i5 or on the stack like
+  // integer arguments.
+  //
+  // The va_start intrinsic needs to know the offset to the first variable
+  // argument.
+  unsigned ArgOffset = CCInfo.getNextStackOffset();
+  SparcMachineFunctionInfo *FuncInfo = MF.getInfo<SparcMachineFunctionInfo>();
+  // Skip the 128 bytes of register save area.
+  FuncInfo->setVarArgsFrameOffset(ArgOffset + ArgArea +
+                                  Subtarget->getStackPointerBias());
+
+  // Save the variable arguments that were passed in registers.
+  // The caller is required to reserve stack space for 6 arguments regardless
+  // of how many arguments were actually passed.
+  SmallVector<SDValue, 8> OutChains;
+  for (; ArgOffset < 6*8; ArgOffset += 8) {
+    unsigned VReg = MF.addLiveIn(SP::I0 + ArgOffset/8, &SP::I64RegsRegClass);
+    SDValue VArg = DAG.getCopyFromReg(Chain, DL, VReg, MVT::i64);
+    int FI = MF.getFrameInfo()->CreateFixedObject(8, ArgOffset + ArgArea, true);
+    OutChains.push_back(DAG.getStore(Chain, DL, VArg,
+                                     DAG.getFrameIndex(FI, getPointerTy()),
+                                     MachinePointerInfo::getFixedStack(FI),
+                                     false, false, 0));
+  }
+
+  if (!OutChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                        &OutChains[0], OutChains.size());
+
   return Chain;
 }
 
@@ -893,6 +931,49 @@ SparcTargetLowering::getSRetArgSize(SelectionDAG &DAG, SDValue Callee) const
   return getDataLayout()->getTypeAllocSize(ElementTy);
 }
 
+
+// Fixup floating point arguments in the ... part of a varargs call.
+//
+// The SPARC v9 ABI requires that floating point arguments are treated the same
+// as integers when calling a varargs function. This does not apply to the
+// fixed arguments that are part of the function's prototype.
+//
+// This function post-processes a CCValAssign array created by
+// AnalyzeCallOperands().
+static void fixupVariableFloatArgs(SmallVectorImpl<CCValAssign> &ArgLocs,
+                                   ArrayRef<ISD::OutputArg> Outs) {
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    const CCValAssign &VA = ArgLocs[i];
+    // FIXME: What about f32 arguments? C promotes them to f64 when calling
+    // varargs functions.
+    if (!VA.isRegLoc() || VA.getLocVT() != MVT::f64)
+      continue;
+    // The fixed arguments to a varargs function still go in FP registers.
+    if (Outs[VA.getValNo()].IsFixed)
+      continue;
+
+    // This floating point argument should be reassigned.
+    CCValAssign NewVA;
+
+    // Determine the offset into the argument array.
+    unsigned Offset = 8 * (VA.getLocReg() - SP::D0);
+    assert(Offset < 16*8 && "Offset out of range, bad register enum?");
+
+    if (Offset < 6*8) {
+      // This argument should go in %i0-%i5.
+      unsigned IReg = SP::I0 + Offset/8;
+      // Full register, just bitconvert into i64.
+      NewVA = CCValAssign::getReg(VA.getValNo(), VA.getValVT(),
+                                  IReg, MVT::i64, CCValAssign::BCvt);
+    } else {
+      // This needs to go to memory, we're out of integer registers.
+      NewVA = CCValAssign::getMem(VA.getValNo(), VA.getValVT(),
+                                  Offset, VA.getLocVT(), VA.getLocInfo());
+    }
+    ArgLocs[i] = NewVA;
+  }
+}
+
 // Lower a call for the 64-bit ABI.
 SDValue
 SparcTargetLowering::LowerCall_64(TargetLowering::CallLoweringInfo &CLI,
@@ -915,6 +996,10 @@ SparcTargetLowering::LowerCall_64(TargetLowering::CallLoweringInfo &CLI,
 
   // Keep stack frames 16-byte aligned.
   ArgsSize = RoundUpToAlignment(ArgsSize, 16);
+
+  // Varargs calls require special treatment.
+  if (CLI.IsVarArg)
+    fixupVariableFloatArgs(ArgLocs, CLI.Outs);
 
   // Adjust the stack pointer to make room for the arguments.
   // FIXME: Use hasReservedCallFrame to avoid %sp adjustments around all calls
@@ -1221,7 +1306,6 @@ SparcTargetLowering::SparcTargetLowering(TargetMachine &TM)
 
   // FIXME: There are instructions available for ATOMIC_FENCE
   // on SparcV8 and later.
-  setOperationAction(ISD::MEMBARRIER, MVT::Other, Expand);
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Expand);
 
   setOperationAction(ISD::FSIN , MVT::f64, Expand);
@@ -1525,14 +1609,13 @@ static SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG,
 
   // vastart just stores the address of the VarArgsFrameIndex slot into the
   // memory location argument.
-  DebugLoc dl = Op.getDebugLoc();
+  DebugLoc DL = Op.getDebugLoc();
   SDValue Offset =
-    DAG.getNode(ISD::ADD, dl, MVT::i32,
-                DAG.getRegister(SP::I6, MVT::i32),
-                DAG.getConstant(FuncInfo->getVarArgsFrameOffset(),
-                                MVT::i32));
+    DAG.getNode(ISD::ADD, DL, TLI.getPointerTy(),
+                DAG.getRegister(SP::I6, TLI.getPointerTy()),
+                DAG.getIntPtrConstant(FuncInfo->getVarArgsFrameOffset()));
   const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
-  return DAG.getStore(Op.getOperand(0), dl, Offset, Op.getOperand(1),
+  return DAG.getStore(Op.getOperand(0), DL, Offset, Op.getOperand(1),
                       MachinePointerInfo(SV), false, false, 0);
 }
 
@@ -1541,33 +1624,22 @@ static SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) {
   EVT VT = Node->getValueType(0);
   SDValue InChain = Node->getOperand(0);
   SDValue VAListPtr = Node->getOperand(1);
+  EVT PtrVT = VAListPtr.getValueType();
   const Value *SV = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
-  DebugLoc dl = Node->getDebugLoc();
-  SDValue VAList = DAG.getLoad(MVT::i32, dl, InChain, VAListPtr,
+  DebugLoc DL = Node->getDebugLoc();
+  SDValue VAList = DAG.getLoad(PtrVT, DL, InChain, VAListPtr,
                                MachinePointerInfo(SV), false, false, false, 0);
-  // Increment the pointer, VAList, to the next vaarg
-  SDValue NextPtr = DAG.getNode(ISD::ADD, dl, MVT::i32, VAList,
-                                  DAG.getConstant(VT.getSizeInBits()/8,
-                                                  MVT::i32));
-  // Store the incremented VAList to the legalized pointer
-  InChain = DAG.getStore(VAList.getValue(1), dl, NextPtr,
+  // Increment the pointer, VAList, to the next vaarg.
+  SDValue NextPtr = DAG.getNode(ISD::ADD, DL, PtrVT, VAList,
+                                DAG.getIntPtrConstant(VT.getSizeInBits()/8));
+  // Store the incremented VAList to the legalized pointer.
+  InChain = DAG.getStore(VAList.getValue(1), DL, NextPtr,
                          VAListPtr, MachinePointerInfo(SV), false, false, 0);
-  // Load the actual argument out of the pointer VAList, unless this is an
-  // f64 load.
-  if (VT != MVT::f64)
-    return DAG.getLoad(VT, dl, InChain, VAList, MachinePointerInfo(),
-                       false, false, false, 0);
-
-  // Otherwise, load it as i64, then do a bitconvert.
-  SDValue V = DAG.getLoad(MVT::i64, dl, InChain, VAList, MachinePointerInfo(),
-                          false, false, false, 0);
-
-  // Bit-Convert the value to f64.
-  SDValue Ops[2] = {
-    DAG.getNode(ISD::BITCAST, dl, MVT::f64, V),
-    V.getValue(1)
-  };
-  return DAG.getMergeValues(Ops, 2, dl);
+  // Load the actual argument out of the pointer VAList.
+  // We can't count on greater alignment than the word size.
+  return DAG.getLoad(VT, DL, InChain, VAList, MachinePointerInfo(),
+                     false, false, false,
+                     std::min(PtrVT.getSizeInBits(), VT.getSizeInBits())/8);
 }
 
 static SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) {

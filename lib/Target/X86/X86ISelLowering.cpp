@@ -526,15 +526,7 @@ void X86TargetLowering::resetOperationActions() {
   if (Subtarget->hasSSE1())
     setOperationAction(ISD::PREFETCH      , MVT::Other, Legal);
 
-  setOperationAction(ISD::MEMBARRIER    , MVT::Other, Custom);
   setOperationAction(ISD::ATOMIC_FENCE  , MVT::Other, Custom);
-
-  // On X86 and X86-64, atomic operations are lowered to locked instructions.
-  // Locked instructions, in turn, have implicit fence semantics (all memory
-  // operations are flushed before issuing the locked instruction, and they
-  // are not buffered), so we can fold away the common pattern of
-  // fence-atomic-fence.
-  setShouldFoldAtomicFences(true);
 
   // Expand certain atomics
   for (unsigned i = 0; i != array_lengthof(IntVTs); ++i) {
@@ -1803,7 +1795,7 @@ X86TargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
       if (isScalarFPTypeInSSEReg(VA.getValVT())) CopyVT = MVT::f80;
       SDValue Ops[] = { Chain, InFlag };
       Chain = SDValue(DAG.getMachineNode(X86::FpPOP_RETVAL, dl, CopyVT,
-                                         MVT::Other, MVT::Glue, Ops, 2), 1);
+                                         MVT::Other, MVT::Glue, Ops), 1);
       Val = Chain.getValue(0);
 
       // Round the f80 to the right size, which also moves it to the appropriate
@@ -4422,13 +4414,15 @@ static SDValue getZeroVector(EVT VT, const X86Subtarget *Subtarget,
     if (Subtarget->hasInt256()) { // AVX2
       SDValue Cst = DAG.getTargetConstant(0, MVT::i32);
       SDValue Ops[] = { Cst, Cst, Cst, Cst, Cst, Cst, Cst, Cst };
-      Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v8i32, Ops, 8);
+      Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v8i32, Ops,
+                        array_lengthof(Ops));
     } else {
       // 256-bit logic and arithmetic instructions in AVX are all
       // floating-point, no support for integer ops. Emit fp zeroed vectors.
       SDValue Cst = DAG.getTargetConstantFP(+0.0, MVT::f32);
       SDValue Ops[] = { Cst, Cst, Cst, Cst, Cst, Cst, Cst, Cst };
-      Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v8f32, Ops, 8);
+      Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v8f32, Ops,
+                        array_lengthof(Ops));
     }
   } else
     llvm_unreachable("Unexpected vector type");
@@ -4449,7 +4443,8 @@ static SDValue getOnesVector(MVT VT, bool HasInt256, SelectionDAG &DAG,
   if (VT.is256BitVector()) {
     if (HasInt256) { // AVX2
       SDValue Ops[] = { Cst, Cst, Cst, Cst, Cst, Cst, Cst, Cst };
-      Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v8i32, Ops, 8);
+      Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v8i32, Ops,
+                        array_lengthof(Ops));
     } else { // AVX
       Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v4i32, Cst, Cst, Cst, Cst);
       Vec = Concat128BitVectors(Vec, Vec, MVT::v8i32, 8, DAG, dl);
@@ -5119,7 +5114,8 @@ static SDValue EltsFromConsecutiveLoads(EVT VT, SmallVectorImpl<SDValue> &Elts,
     SDVTList Tys = DAG.getVTList(MVT::v2i64, MVT::Other);
     SDValue Ops[] = { LDBase->getChain(), LDBase->getBasePtr() };
     SDValue ResNode =
-        DAG.getMemIntrinsicNode(X86ISD::VZEXT_LOAD, DL, Tys, Ops, 2, MVT::i64,
+        DAG.getMemIntrinsicNode(X86ISD::VZEXT_LOAD, DL, Tys, Ops,
+                                array_lengthof(Ops), MVT::i64,
                                 LDBase->getPointerInfo(),
                                 LDBase->getAlignment(),
                                 false/*isVolatile*/, true/*ReadMem*/,
@@ -7642,10 +7638,10 @@ GetTLSADDR(SelectionDAG &DAG, SDValue Chain, GlobalAddressSDNode *GA,
 
   if (InFlag) {
     SDValue Ops[] = { Chain,  TGA, *InFlag };
-    Chain = DAG.getNode(CallType, dl, NodeTys, Ops, 3);
+    Chain = DAG.getNode(CallType, dl, NodeTys, Ops, array_lengthof(Ops));
   } else {
     SDValue Ops[]  = { Chain, TGA };
-    Chain = DAG.getNode(CallType, dl, NodeTys, Ops, 2);
+    Chain = DAG.getNode(CallType, dl, NodeTys, Ops, array_lengthof(Ops));
   }
 
   // TLSADDR will be codegen'ed as call. Inform MFI that function has calls.
@@ -7955,7 +7951,7 @@ SDValue X86TargetLowering::LowerShiftParts(SDValue Op, SelectionDAG &DAG) const{
   }
 
   SDValue Ops[2] = { Lo, Hi };
-  return DAG.getMergeValues(Ops, 2, dl);
+  return DAG.getMergeValues(Ops, array_lengthof(Ops), dl);
 }
 
 SDValue X86TargetLowering::LowerSINT_TO_FP(SDValue Op,
@@ -8238,8 +8234,8 @@ SDValue X86TargetLowering::LowerUINT_TO_FP(SDValue Op,
 
   SDVTList Tys = DAG.getVTList(MVT::f80, MVT::Other);
   SDValue Ops[] = { Store, StackSlot, DAG.getValueType(MVT::i64) };
-  SDValue Fild = DAG.getMemIntrinsicNode(X86ISD::FILD, dl, Tys, Ops, 3,
-                                         MVT::i64, MMO);
+  SDValue Fild = DAG.getMemIntrinsicNode(X86ISD::FILD, dl, Tys, Ops,
+                                         array_lengthof(Ops), MVT::i64, MMO);
 
   APInt FF(32, 0x5F800000ULL);
 
@@ -8331,8 +8327,8 @@ X86TargetLowering:: FP_TO_INTHelper(SDValue Op, SelectionDAG &DAG,
     MachineMemOperand *MMO =
       MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(SSFI),
                               MachineMemOperand::MOLoad, MemSize, MemSize);
-    Value = DAG.getMemIntrinsicNode(X86ISD::FLD, DL, Tys, Ops, 3,
-                                    DstTy, MMO);
+    Value = DAG.getMemIntrinsicNode(X86ISD::FLD, DL, Tys, Ops,
+                                    array_lengthof(Ops), DstTy, MMO);
     Chain = Value.getValue(1);
     SSFI = MF.getFrameInfo()->CreateStackObject(MemSize, MemSize, false);
     StackSlot = DAG.getFrameIndex(SSFI, getPointerTy());
@@ -8346,7 +8342,8 @@ X86TargetLowering:: FP_TO_INTHelper(SDValue Op, SelectionDAG &DAG,
     // Build the FP_TO_INT*_IN_MEM
     SDValue Ops[] = { Chain, Value, StackSlot };
     SDValue FIST = DAG.getMemIntrinsicNode(Opc, DL, DAG.getVTList(MVT::Other),
-                                           Ops, 3, DstTy, MMO);
+                                           Ops, array_lengthof(Ops), DstTy,
+                                           MMO);
     return std::make_pair(FIST, StackSlot);
   } else {
     SDValue ftol = DAG.getNode(X86ISD::WIN_FTOL, DL,
@@ -8358,8 +8355,8 @@ X86TargetLowering:: FP_TO_INTHelper(SDValue Op, SelectionDAG &DAG,
       MVT::i32, eax.getValue(2));
     SDValue Ops[] = { eax, edx };
     SDValue pair = IsReplace
-      ? DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i64, Ops, 2)
-      : DAG.getMergeValues(Ops, 2, DL);
+      ? DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i64, Ops, array_lengthof(Ops))
+      : DAG.getMergeValues(Ops, array_lengthof(Ops), DL);
     return std::make_pair(pair, SDValue());
   }
 }
@@ -9350,11 +9347,49 @@ static SDValue LowerVSETCC(SDValue Op, const X86Subtarget *Subtarget,
   if (Swap)
     std::swap(Op0, Op1);
 
+  // Since SSE has no unsigned integer comparisons, we need to flip  the sign
+  // bits of the inputs before performing those operations.
+  if (FlipSigns) {
+    EVT EltVT = VT.getVectorElementType();
+    SDValue SignBit = DAG.getConstant(APInt::getSignBit(EltVT.getSizeInBits()),
+                                      EltVT);
+    std::vector<SDValue> SignBits(VT.getVectorNumElements(), SignBit);
+    SDValue SignVec = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, &SignBits[0],
+                                    SignBits.size());
+    Op0 = DAG.getNode(ISD::XOR, dl, VT, Op0, SignVec);
+    Op1 = DAG.getNode(ISD::XOR, dl, VT, Op1, SignVec);
+  }
+
   // Check that the operation in question is available (most are plain SSE2,
   // but PCMPGTQ and PCMPEQQ have different requirements).
   if (VT == MVT::v2i64) {
-    if (Opc == X86ISD::PCMPGT && !Subtarget->hasSSE42())
-      return SDValue();
+    if (Opc == X86ISD::PCMPGT && !Subtarget->hasSSE42()) {
+      assert(Subtarget->hasSSE2() && "Don't know how to lower!");
+
+      // First cast everything to the right type,
+      Op0 = DAG.getNode(ISD::BITCAST, dl, MVT::v4i32, Op0);
+      Op1 = DAG.getNode(ISD::BITCAST, dl, MVT::v4i32, Op1);
+
+      // Emulate PCMPGTQ with (hi1 > hi2) | ((hi1 == hi2) & (lo1 > lo2))
+      SDValue GT = DAG.getNode(X86ISD::PCMPGT, dl, MVT::v4i32, Op0, Op1);
+      SDValue EQ = DAG.getNode(X86ISD::PCMPEQ, dl, MVT::v4i32, Op0, Op1);
+
+      // Create masks for only the low parts/high parts of the 64 bit integers.
+      const int MaskHi[] = { 1, 1, 3, 3 };
+      const int MaskLo[] = { 0, 0, 2, 2 };
+      SDValue EQHi = DAG.getVectorShuffle(MVT::v4i32, dl, EQ, EQ, MaskHi);
+      SDValue GTLo = DAG.getVectorShuffle(MVT::v4i32, dl, GT, GT, MaskLo);
+      SDValue GTHi = DAG.getVectorShuffle(MVT::v4i32, dl, GT, GT, MaskHi);
+
+      SDValue Result = DAG.getNode(ISD::AND, dl, MVT::v4i32, EQHi, GTLo);
+      Result = DAG.getNode(ISD::OR, dl, MVT::v4i32, Result, GTHi);
+
+      if (Invert)
+        Result = DAG.getNOT(dl, Result, MVT::v4i32);
+
+      return DAG.getNode(ISD::BITCAST, dl, VT, Result);
+    }
+
     if (Opc == X86ISD::PCMPEQ && !Subtarget->hasSSE41()) {
       // If pcmpeqq is missing but pcmpeqd is available synthesize pcmpeqq with
       // pcmpeqd + pshufd + pand.
@@ -9377,19 +9412,6 @@ static SDValue LowerVSETCC(SDValue Op, const X86Subtarget *Subtarget,
 
       return DAG.getNode(ISD::BITCAST, dl, VT, Result);
     }
-  }
-
-  // Since SSE has no unsigned integer comparisons, we need to flip  the sign
-  // bits of the inputs before performing those operations.
-  if (FlipSigns) {
-    EVT EltVT = VT.getVectorElementType();
-    SDValue SignBit = DAG.getConstant(APInt::getSignBit(EltVT.getSizeInBits()),
-                                      EltVT);
-    std::vector<SDValue> SignBits(VT.getVectorNumElements(), SignBit);
-    SDValue SignVec = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, &SignBits[0],
-                                    SignBits.size());
-    Op0 = DAG.getNode(ISD::XOR, dl, VT, Op0, SignVec);
-    Op1 = DAG.getNode(ISD::XOR, dl, VT, Op1, SignVec);
   }
 
   SDValue Result = DAG.getNode(Opc, dl, VT, Op0, Op1);
@@ -10955,7 +10977,7 @@ static SDValue LowerINTRINSIC_W_CHAIN(SDValue Op, SelectionDAG &DAG) {
                       SDValue(Result.getNode(), 1) };
     SDValue isValid = DAG.getNode(X86ISD::CMOV, dl,
                                   DAG.getVTList(Op->getValueType(1), MVT::Glue),
-                                  Ops, 4);
+                                  Ops, array_lengthof(Ops));
 
     // Return { result, isValid, chain }.
     return DAG.getNode(ISD::MERGE_VALUES, dl, Op->getVTList(), Result, isValid,
@@ -11253,7 +11275,8 @@ SDValue X86TargetLowering::LowerFLT_ROUNDS_(SDValue Op,
   SDValue Ops[] = { DAG.getEntryNode(), StackSlot };
   SDValue Chain = DAG.getMemIntrinsicNode(X86ISD::FNSTCW16m, DL,
                                           DAG.getVTList(MVT::Other),
-                                          Ops, 2, MVT::i16, MMO);
+                                          Ops, array_lengthof(Ops), MVT::i16,
+                                          MMO);
 
   // Load FP Control Word from stack slot
   SDValue CWD = DAG.getLoad(MVT::i16, DL, Chain, StackSlot,
@@ -12093,52 +12116,6 @@ SDValue X86TargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
   }
 }
 
-static SDValue LowerMEMBARRIER(SDValue Op, const X86Subtarget *Subtarget,
-                              SelectionDAG &DAG) {
-  DebugLoc dl = Op.getDebugLoc();
-
-  // Go ahead and emit the fence on x86-64 even if we asked for no-sse2.
-  // There isn't any reason to disable it if the target processor supports it.
-  if (!Subtarget->hasSSE2() && !Subtarget->is64Bit()) {
-    SDValue Chain = Op.getOperand(0);
-    SDValue Zero = DAG.getConstant(0, MVT::i32);
-    SDValue Ops[] = {
-      DAG.getRegister(X86::ESP, MVT::i32), // Base
-      DAG.getTargetConstant(1, MVT::i8),   // Scale
-      DAG.getRegister(0, MVT::i32),        // Index
-      DAG.getTargetConstant(0, MVT::i32),  // Disp
-      DAG.getRegister(0, MVT::i32),        // Segment.
-      Zero,
-      Chain
-    };
-    SDNode *Res =
-      DAG.getMachineNode(X86::OR32mrLocked, dl, MVT::Other, Ops,
-                          array_lengthof(Ops));
-    return SDValue(Res, 0);
-  }
-
-  unsigned isDev = cast<ConstantSDNode>(Op.getOperand(5))->getZExtValue();
-  if (!isDev)
-    return DAG.getNode(X86ISD::MEMBARRIER, dl, MVT::Other, Op.getOperand(0));
-
-  unsigned Op1 = cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
-  unsigned Op2 = cast<ConstantSDNode>(Op.getOperand(2))->getZExtValue();
-  unsigned Op3 = cast<ConstantSDNode>(Op.getOperand(3))->getZExtValue();
-  unsigned Op4 = cast<ConstantSDNode>(Op.getOperand(4))->getZExtValue();
-
-  // def : Pat<(membarrier (i8 0), (i8 0), (i8 0), (i8 1), (i8 1)), (SFENCE)>;
-  if (!Op1 && !Op2 && !Op3 && Op4)
-    return DAG.getNode(X86ISD::SFENCE, dl, MVT::Other, Op.getOperand(0));
-
-  // def : Pat<(membarrier (i8 1), (i8 0), (i8 0), (i8 0), (i8 1)), (LFENCE)>;
-  if (Op1 && !Op2 && !Op3 && !Op4)
-    return DAG.getNode(X86ISD::LFENCE, dl, MVT::Other, Op.getOperand(0));
-
-  // def : Pat<(membarrier (i8 imm), (i8 imm), (i8 imm), (i8 imm), (i8 1)),
-  //           (MFENCE)>;
-  return DAG.getNode(X86ISD::MFENCE, dl, MVT::Other, Op.getOperand(0));
-}
-
 static SDValue LowerATOMIC_FENCE(SDValue Op, const X86Subtarget *Subtarget,
                                  SelectionDAG &DAG) {
   DebugLoc dl = Op.getDebugLoc();
@@ -12167,9 +12144,7 @@ static SDValue LowerATOMIC_FENCE(SDValue Op, const X86Subtarget *Subtarget,
       Zero,
       Chain
     };
-    SDNode *Res =
-      DAG.getMachineNode(X86::OR32mrLocked, dl, MVT::Other, Ops,
-                         array_lengthof(Ops));
+    SDNode *Res = DAG.getMachineNode(X86::OR32mrLocked, dl, MVT::Other, Ops);
     return SDValue(Res, 0);
   }
 
@@ -12203,7 +12178,7 @@ static SDValue LowerCMP_SWAP(SDValue Op, const X86Subtarget *Subtarget,
   SDVTList Tys = DAG.getVTList(MVT::Other, MVT::Glue);
   MachineMemOperand *MMO = cast<AtomicSDNode>(Op)->getMemOperand();
   SDValue Result = DAG.getMemIntrinsicNode(X86ISD::LCMPXCHG_DAG, DL, Tys,
-                                           Ops, 5, T, MMO);
+                                           Ops, array_lengthof(Ops), T, MMO);
   SDValue cpOut =
     DAG.getCopyFromReg(Result.getValue(0), DL, Reg, T, Result.getValue(1));
   return cpOut;
@@ -12225,7 +12200,7 @@ static SDValue LowerREADCYCLECOUNTER(SDValue Op, const X86Subtarget *Subtarget,
     DAG.getNode(ISD::OR, dl, MVT::i64, rax, Tmp),
     rdx.getValue(1)
   };
-  return DAG.getMergeValues(Ops, 2, dl);
+  return DAG.getMergeValues(Ops, array_lengthof(Ops), dl);
 }
 
 SDValue X86TargetLowering::LowerBITCAST(SDValue Op, SelectionDAG &DAG) const {
@@ -12372,7 +12347,6 @@ SDValue X86TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default: llvm_unreachable("Should not custom lower this!");
   case ISD::SIGN_EXTEND_INREG:  return LowerSIGN_EXTEND_INREG(Op,DAG);
-  case ISD::MEMBARRIER:         return LowerMEMBARRIER(Op, Subtarget, DAG);
   case ISD::ATOMIC_FENCE:       return LowerATOMIC_FENCE(Op, Subtarget, DAG);
   case ISD::ATOMIC_CMP_SWAP:    return LowerCMP_SWAP(Op, Subtarget, DAG);
   case ISD::ATOMIC_LOAD_SUB:    return LowerLOAD_SUB(Op,DAG);
@@ -12489,7 +12463,7 @@ ReplaceATOMIC_BINARY_64(SDNode *Node, SmallVectorImpl<SDValue>&Results,
   SDValue Ops[] = { Chain, In1, In2L, In2H };
   SDVTList Tys = DAG.getVTList(MVT::i32, MVT::i32, MVT::Other);
   SDValue Result =
-    DAG.getMemIntrinsicNode(NewOp, dl, Tys, Ops, 4, MVT::i64,
+    DAG.getMemIntrinsicNode(NewOp, dl, Tys, Ops, array_lengthof(Ops), MVT::i64,
                             cast<MemSDNode>(Node)->getMemOperand());
   SDValue OpsF[] = { Result.getValue(0), Result.getValue(1)};
   Results.push_back(DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i64, OpsF, 2));
@@ -12569,7 +12543,8 @@ void X86TargetLowering::ReplaceNodeResults(SDNode *N,
                                      eax.getValue(2));
     // Use a buildpair to merge the two 32-bit values into a 64-bit one.
     SDValue Ops[] = { eax, edx };
-    Results.push_back(DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i64, Ops, 2));
+    Results.push_back(DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i64, Ops,
+                                  array_lengthof(Ops)));
     Results.push_back(edx.getValue(1));
     return;
   }
@@ -12608,7 +12583,7 @@ void X86TargetLowering::ReplaceNodeResults(SDNode *N,
     unsigned Opcode = Regs64bit ? X86ISD::LCMPXCHG16_DAG :
                                   X86ISD::LCMPXCHG8_DAG;
     SDValue Result = DAG.getMemIntrinsicNode(Opcode, dl, Tys,
-                                             Ops, 3, T, MMO);
+                                             Ops, array_lengthof(Ops), T, MMO);
     SDValue cpOutL = DAG.getCopyFromReg(Result.getValue(0), dl,
                                         Regs64bit ? X86::RAX : X86::EAX,
                                         HalfT, Result.getValue(1));
@@ -15095,7 +15070,8 @@ static SDValue PerformShuffleCombine256(SDNode *N, SelectionDAG &DAG,
         SDVTList Tys = DAG.getVTList(MVT::v4i64, MVT::Other);
         SDValue Ops[] = { Ld->getChain(), Ld->getBasePtr() };
         SDValue ResNode =
-          DAG.getMemIntrinsicNode(X86ISD::VZEXT_LOAD, dl, Tys, Ops, 2,
+          DAG.getMemIntrinsicNode(X86ISD::VZEXT_LOAD, dl, Tys, Ops,
+                                  array_lengthof(Ops),
                                   Ld->getMemoryVT(),
                                   Ld->getPointerInfo(),
                                   Ld->getAlignment(),

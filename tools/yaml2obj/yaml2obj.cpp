@@ -114,22 +114,11 @@ static bool hexStringToByteArray(StringRef Str, ContainerOut &Out) {
 // The structure of the yaml files is not an exact 1:1 match to COFF. In order
 // to use yaml::IO, we use these structures which are closer to the source.
 namespace COFFYAML {
-  struct Relocation {
-    uint32_t VirtualAddress;
-    uint32_t SymbolTableIndex;
-    COFF::RelocationTypeX86 Type;
-  };
-
   struct Section {
     COFF::SectionCharacteristics Characteristics;
     StringRef SectionData;
-    std::vector<Relocation> Relocations;
+    std::vector<COFF::relocation> Relocations;
     StringRef Name;
-  };
-
-  struct Header {
-    COFF::MachineTypes Machine;
-    COFF::Characteristics Characteristics;
   };
 
   struct Symbol {
@@ -144,7 +133,7 @@ namespace COFFYAML {
   };
 
   struct Object {
-    Header HeaderData;
+    COFF::header HeaderData;
     std::vector<Section> Sections;
     std::vector<Symbol> Symbols;
   };
@@ -407,7 +396,7 @@ void writeCOFF(COFFParser &CP, raw_ostream &OS) {
   OS.write(&CP.StringTable[0], CP.StringTable.size());
 }
 
-LLVM_YAML_IS_SEQUENCE_VECTOR(COFFYAML::Relocation)
+LLVM_YAML_IS_SEQUENCE_VECTOR(COFF::relocation)
 LLVM_YAML_IS_SEQUENCE_VECTOR(COFFYAML::Section)
 LLVM_YAML_IS_SEQUENCE_VECTOR(COFFYAML::Symbol)
 
@@ -638,17 +627,57 @@ struct MappingTraits<COFFYAML::Symbol> {
 };
 
 template <>
-struct MappingTraits<COFFYAML::Header> {
-  static void mapping(IO &IO, COFFYAML::Header &H) {
-    IO.mapRequired("Machine", H.Machine);
-    IO.mapOptional("Characteristics", H.Characteristics);
+struct MappingTraits<COFF::header> {
+  struct NMachine {
+    NMachine(IO&) : Machine(COFF::MachineTypes(0)) {
+    }
+    NMachine(IO&, uint16_t M) : Machine(COFF::MachineTypes(M)) {
+    }
+    uint16_t denormalize(IO &) {
+      return Machine;
+    }
+    COFF::MachineTypes Machine;
+  };
+
+  struct NCharacteristics {
+    NCharacteristics(IO&) : Characteristics(COFF::Characteristics(0)) {
+    }
+    NCharacteristics(IO&, uint16_t C) :
+      Characteristics(COFF::Characteristics(C)) {
+    }
+    uint16_t denormalize(IO &) {
+      return Characteristics;
+    }
+
+    COFF::Characteristics Characteristics;
+  };
+
+  static void mapping(IO &IO, COFF::header &H) {
+    MappingNormalization<NMachine, uint16_t> NM(IO, H.Machine);
+    MappingNormalization<NCharacteristics, uint16_t> NC(IO, H.Characteristics);
+
+    IO.mapRequired("Machine", NM->Machine);
+    IO.mapOptional("Characteristics", NC->Characteristics);
   }
 };
 
 template <>
-struct MappingTraits<COFFYAML::Relocation> {
-  static void mapping(IO &IO, COFFYAML::Relocation &Rel) {
-    IO.mapRequired("Type", Rel.Type);
+struct MappingTraits<COFF::relocation> {
+  struct NType {
+    NType(IO &) : Type(COFF::RelocationTypeX86(0)) {
+    }
+    NType(IO &, uint16_t T) : Type(COFF::RelocationTypeX86(T)) {
+    }
+    uint16_t denormalize(IO &) {
+      return Type;
+    }
+    COFF::RelocationTypeX86 Type;
+  };
+
+  static void mapping(IO &IO, COFF::relocation &Rel) {
+    MappingNormalization<NType, uint16_t> NT(IO, Rel.Type);
+
+    IO.mapRequired("Type", NT->Type);
     IO.mapRequired("VirtualAddress", Rel.VirtualAddress);
     IO.mapRequired("SymbolTableIndex", Rel.SymbolTableIndex);
   }

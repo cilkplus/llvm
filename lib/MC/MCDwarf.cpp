@@ -197,6 +197,8 @@ static inline void EmitDwarfLineTable(MCStreamer *MCOS,
   // actually a DW_LNE_end_sequence.
 
   // Switch to the section to be able to create a symbol at its end.
+  // TODO: keep track of the last subsection so that this symbol appears in the
+  // correct place.
   MCOS->SwitchSection(Section);
 
   MCContext &context = MCOS->getContext();
@@ -787,7 +789,7 @@ void MCGenDwarfLabelEntry::Make(MCSymbol *Symbol, MCStreamer *MCOS,
   if (Symbol->isTemporary())
     return;
   MCContext &context = MCOS->getContext();
-  if (context.getGenDwarfSection() != MCOS->getCurrentSection())
+  if (context.getGenDwarfSection() != MCOS->getCurrentSection().first)
     return;
 
   // The dwarf label's name does not have the symbol name's leading
@@ -1169,7 +1171,6 @@ void FrameEmitterImpl::EmitCompactUnwind(MCStreamer &Streamer,
 
   uint32_t Encoding = Frame.CompactUnwindEncoding;
   if (!Encoding) return;
-
   bool DwarfEHFrameOnly = (Encoding == MOFI->getCompactUnwindDwarfEHFrameOnly());
 
   // The encoding needs to know we have an LSDA.
@@ -1484,8 +1485,7 @@ void MCDwarfFrameEmitter::Emit(MCStreamer &Streamer,
   if (IsEH && MOFI->getCompactUnwindSection())
     for (unsigned i = 0, n = Streamer.getNumFrameInfos(); i < n; ++i) {
       const MCDwarfFrameInfo &Frame = Streamer.getFrameInfo(i);
-      if (Frame.CompactUnwindEncoding)
-        Emitter.EmitCompactUnwind(Streamer, Frame);
+      Emitter.EmitCompactUnwind(Streamer, Frame);
     }
 
   const MCSection &Section = IsEH ? *MOFI->getEHFrameSection() :

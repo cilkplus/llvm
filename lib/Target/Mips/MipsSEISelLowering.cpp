@@ -52,6 +52,10 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
       setOperationAction(ISD::STORE, VecTys[i], Legal);
       setOperationAction(ISD::BITCAST, VecTys[i], Legal);
     }
+
+    setTargetDAGCombine(ISD::SHL);
+    setTargetDAGCombine(ISD::SRA);
+    setTargetDAGCombine(ISD::SRL);
   }
 
   if (Subtarget->hasDSPR2())
@@ -87,7 +91,6 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
   setOperationAction(ISD::UDIVREM, MVT::i32, Custom);
   setOperationAction(ISD::SDIVREM, MVT::i64, Custom);
   setOperationAction(ISD::UDIVREM, MVT::i64, Custom);
-  setOperationAction(ISD::MEMBARRIER,         MVT::Other, Custom);
   setOperationAction(ISD::ATOMIC_FENCE,       MVT::Other, Custom);
   setOperationAction(ISD::LOAD,               MVT::i32, Custom);
   setOperationAction(ISD::STORE,              MVT::i32, Custom);
@@ -128,7 +131,8 @@ SDValue MipsSETargetLowering::LowerOperation(SDValue Op,
   case ISD::MULHU:     return lowerMulDiv(Op, MipsISD::Multu, false, true, DAG);
   case ISD::MUL:       return lowerMulDiv(Op, MipsISD::Mult, true, false, DAG);
   case ISD::SDIVREM:   return lowerMulDiv(Op, MipsISD::DivRem, true, true, DAG);
-  case ISD::UDIVREM:   return lowerMulDiv(Op, MipsISD::DivRemU, true, true, DAG);
+  case ISD::UDIVREM:   return lowerMulDiv(Op, MipsISD::DivRemU, true, true,
+                                          DAG);
   case ISD::INTRINSIC_WO_CHAIN: return lowerINTRINSIC_WO_CHAIN(Op, DAG);
   case ISD::INTRINSIC_W_CHAIN:  return lowerINTRINSIC_W_CHAIN(Op, DAG);
   }
@@ -314,6 +318,61 @@ static SDValue performSUBECombine(SDNode *N, SelectionDAG &DAG,
   return SDValue();
 }
 
+static SDValue performDSPShiftCombine(unsigned Opc, SDNode *N, EVT Ty,
+                                      SelectionDAG &DAG,
+                                      const MipsSubtarget *Subtarget) {
+  // See if this is a vector splat immediate node.
+  APInt SplatValue, SplatUndef;
+  unsigned SplatBitSize;
+  bool HasAnyUndefs;
+  unsigned EltSize = Ty.getVectorElementType().getSizeInBits();
+  BuildVectorSDNode *BV = dyn_cast<BuildVectorSDNode>(N->getOperand(1));
+
+  if (!BV ||
+      !BV->isConstantSplat(SplatValue, SplatUndef, SplatBitSize, HasAnyUndefs,
+                           EltSize,!Subtarget->isLittle()) ||
+      (SplatBitSize != EltSize) ||
+      !isUIntN(Log2_32(EltSize), SplatValue.getZExtValue()))
+    return SDValue();
+
+  return DAG.getNode(Opc, N->getDebugLoc(), Ty, N->getOperand(0),
+                     DAG.getConstant(SplatValue.getZExtValue(), MVT::i32));
+}
+
+static SDValue performSHLCombine(SDNode *N, SelectionDAG &DAG,
+                                 TargetLowering::DAGCombinerInfo &DCI,
+                                 const MipsSubtarget *Subtarget) {
+  EVT Ty = N->getValueType(0);
+
+  if ((Ty != MVT::v2i16) && (Ty != MVT::v4i8))
+    return SDValue();
+
+  return performDSPShiftCombine(MipsISD::SHLL_DSP, N, Ty, DAG, Subtarget);
+}
+
+static SDValue performSRACombine(SDNode *N, SelectionDAG &DAG,
+                                 TargetLowering::DAGCombinerInfo &DCI,
+                                 const MipsSubtarget *Subtarget) {
+  EVT Ty = N->getValueType(0);
+
+  if ((Ty != MVT::v2i16) && ((Ty != MVT::v4i8) || !Subtarget->hasDSPR2()))
+    return SDValue();
+
+  return performDSPShiftCombine(MipsISD::SHRA_DSP, N, Ty, DAG, Subtarget);
+}
+
+
+static SDValue performSRLCombine(SDNode *N, SelectionDAG &DAG,
+                                 TargetLowering::DAGCombinerInfo &DCI,
+                                 const MipsSubtarget *Subtarget) {
+  EVT Ty = N->getValueType(0);
+
+  if (((Ty != MVT::v2i16) || !Subtarget->hasDSPR2()) && (Ty != MVT::v4i8))
+    return SDValue();
+
+  return performDSPShiftCombine(MipsISD::SHRL_DSP, N, Ty, DAG, Subtarget);
+}
+
 SDValue
 MipsSETargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -323,6 +382,12 @@ MipsSETargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const {
     return performADDECombine(N, DAG, DCI, Subtarget);
   case ISD::SUBE:
     return performSUBECombine(N, DAG, DCI, Subtarget);
+  case ISD::SHL:
+    return performSHLCombine(N, DAG, DCI, Subtarget);
+  case ISD::SRA:
+    return performSRACombine(N, DAG, DCI, Subtarget);
+  case ISD::SRL:
+    return performSRLCombine(N, DAG, DCI, Subtarget);
   default:
     return MipsTargetLowering::PerformDAGCombine(N, DCI);
   }

@@ -948,6 +948,7 @@ def V_CUBEMA_F32 : VOP3_32 <0x00000147, "V_CUBEMA_F32", []>;
 def V_BFE_U32 : VOP3_32 <0x00000148, "V_BFE_U32", []>;
 def V_BFE_I32 : VOP3_32 <0x00000149, "V_BFE_I32", []>;
 def V_BFI_B32 : VOP3_32 <0x0000014a, "V_BFI_B32", []>;
+defm : BFIPatterns <V_BFI_B32>;
 def V_FMA_F32 : VOP3_32 <0x0000014b, "V_FMA_F32", []>;
 def V_FMA_F64 : VOP3_64 <0x0000014c, "V_FMA_F64", []>;
 //def V_LERP_U8 : VOP3_U8 <0x0000014d, "V_LERP_U8", []>;
@@ -990,17 +991,17 @@ def V_MUL_HI_I32 : VOP3_32 <0x0000016c, "V_MUL_HI_I32", []>;
 
 def : Pat <
   (mul VSrc_32:$src0, VReg_32:$src1),
-  (V_MUL_LO_I32 VSrc_32:$src0, VReg_32:$src1, (i32 0), 0, 0, 0, 0)
+  (V_MUL_LO_I32 VSrc_32:$src0, VReg_32:$src1, (i32 0))
 >;
 
 def : Pat <
   (mulhu VSrc_32:$src0, VReg_32:$src1),
-  (V_MUL_HI_U32 VSrc_32:$src0, VReg_32:$src1, (i32 0), 0, 0, 0, 0)
+  (V_MUL_HI_U32 VSrc_32:$src0, VReg_32:$src1, (i32 0))
 >;
 
 def : Pat <
   (mulhs VSrc_32:$src0, VReg_32:$src1),
-  (V_MUL_HI_I32 VSrc_32:$src0, VReg_32:$src1, (i32 0), 0, 0, 0, 0)
+  (V_MUL_HI_I32 VSrc_32:$src0, VReg_32:$src1, (i32 0))
 >;
 
 def V_DIV_SCALE_F32 : VOP3_32 <0x0000016d, "V_DIV_SCALE_F32", []>;
@@ -1475,20 +1476,20 @@ def : Pat <
   (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (v4f32 (IMPLICIT_DEF)),
     (V_CUBETC_F32 (EXTRACT_SUBREG VReg_128:$src, sub0),
                   (EXTRACT_SUBREG VReg_128:$src, sub1),
-                  (EXTRACT_SUBREG VReg_128:$src, sub2),
-                  0, 0, 0, 0), sub0),
+                  (EXTRACT_SUBREG VReg_128:$src, sub2)),
+                   sub0),
     (V_CUBESC_F32 (EXTRACT_SUBREG VReg_128:$src, sub0),
                   (EXTRACT_SUBREG VReg_128:$src, sub1),
-                  (EXTRACT_SUBREG VReg_128:$src, sub2),
-                  0, 0, 0, 0), sub1),
+                  (EXTRACT_SUBREG VReg_128:$src, sub2)),
+                   sub1),
     (V_CUBEMA_F32 (EXTRACT_SUBREG VReg_128:$src, sub0),
                   (EXTRACT_SUBREG VReg_128:$src, sub1),
-                  (EXTRACT_SUBREG VReg_128:$src, sub2),
-                  0, 0, 0, 0), sub2),
+                  (EXTRACT_SUBREG VReg_128:$src, sub2)),
+                   sub2),
     (V_CUBEID_F32 (EXTRACT_SUBREG VReg_128:$src, sub0),
                   (EXTRACT_SUBREG VReg_128:$src, sub1),
-                  (EXTRACT_SUBREG VReg_128:$src, sub2),
-                  0, 0, 0, 0), sub3)
+                  (EXTRACT_SUBREG VReg_128:$src, sub2)),
+                   sub3)
 >;
 
 def : Pat <
@@ -1527,8 +1528,7 @@ def : Pat <
 /********** ================== **********/
 
 def : Pat <(f32 (fadd (fmul VSrc_32:$src0, VSrc_32:$src1), VSrc_32:$src2)),
-           (V_MAD_F32 VSrc_32:$src0, VSrc_32:$src1, VSrc_32:$src2,
-            0, 0, 0, 0)>;
+           (V_MAD_F32 VSrc_32:$src0, VSrc_32:$src1, VSrc_32:$src2)>;
 
 /********** ================== **********/
 /**********   SMRD Patterns    **********/

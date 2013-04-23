@@ -763,6 +763,23 @@ void DwarfDebug::constructSubprogramDIE(CompileUnit *TheCU,
     TheCU->addGlobalName(SP.getName(), SubprogramDie);
 }
 
+void DwarfDebug::constructImportedModuleDIE(CompileUnit *TheCU,
+                                            const MDNode *N) {
+  DIImportedModule Module(N);
+  if (!Module.Verify())
+    return;
+  DIE *IMDie = new DIE(dwarf::DW_TAG_imported_module);
+  TheCU->insertDIE(Module, IMDie);
+  DIE *NSDie = TheCU->getOrCreateNameSpace(Module.getNameSpace());
+  unsigned FileID = getOrCreateSourceID(Module.getContext().getFilename(),
+                                        Module.getContext().getDirectory(),
+                                        TheCU->getUniqueID());
+  TheCU->addUInt(IMDie, dwarf::DW_AT_decl_file, 0, FileID);
+  TheCU->addUInt(IMDie, dwarf::DW_AT_decl_line, 0, Module.getLineNumber());
+  TheCU->addDIEEntry(IMDie, dwarf::DW_AT_import, dwarf::DW_FORM_ref4, NSDie);
+  TheCU->addToContextOwner(IMDie, Module.getContext());
+}
+
 // Emit all Dwarf sections that should come prior to the content. Create
 // global DIEs and emit initial debug info sections. This is invoked by
 // the target AsmPrinter.
@@ -796,11 +813,17 @@ void DwarfDebug::beginModule() {
     DIArray RetainedTypes = CUNode.getRetainedTypes();
     for (unsigned i = 0, e = RetainedTypes.getNumElements(); i != e; ++i)
       CU->getOrCreateTypeDIE(RetainedTypes.getElement(i));
+    // Emit imported_modules last so that the relevant context is already
+    // available.
+    DIArray ImportedModules = CUNode.getImportedModules();
+    for (unsigned i = 0, e = ImportedModules.getNumElements(); i != e; ++i)
+      constructImportedModuleDIE(CU, ImportedModules.getElement(i));
     // If we're splitting the dwarf out now that we've got the entire
     // CU then construct a skeleton CU based upon it.
     if (useSplitDwarf()) {
     // This should be a unique identifier when we want to build .dwp files.
-      CU->addUInt(CU->getCUDie(), dwarf::DW_AT_GNU_dwo_id, dwarf::DW_FORM_data8, 0);
+      CU->addUInt(CU->getCUDie(), dwarf::DW_AT_GNU_dwo_id,
+                  dwarf::DW_FORM_data8, 0);
       // Now construct the skeleton CU associated.
       constructSkeletonCU(CUNode);
     }
@@ -2522,13 +2545,14 @@ CompileUnit *DwarfDebug::constructSkeletonCU(const MDNode *N) {
   // This should be a unique identifier when we want to build .dwp files.
   NewCU->addUInt(Die, dwarf::DW_AT_GNU_dwo_id, dwarf::DW_FORM_data8, 0);
 
-  // Relocate to the beginning of the addr_base section, else 0 for the beginning
-  // of the one for this compile unit.
+  // Relocate to the beginning of the addr_base section, else 0 for the
+  // beginning of the one for this compile unit.
   if (Asm->MAI->doesDwarfUseRelocationsAcrossSections())
     NewCU->addLabel(Die, dwarf::DW_AT_GNU_addr_base, dwarf::DW_FORM_sec_offset,
                     DwarfAddrSectionSym);
   else
-    NewCU->addUInt(Die, dwarf::DW_AT_GNU_addr_base, dwarf::DW_FORM_sec_offset, 0);
+    NewCU->addUInt(Die, dwarf::DW_AT_GNU_addr_base,
+                   dwarf::DW_FORM_sec_offset, 0);
 
   // 2.17.1 requires that we use DW_AT_low_pc for a single entry point
   // into an entity. We're using 0, or a NULL label for this.
