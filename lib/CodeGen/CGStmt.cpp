@@ -2028,7 +2028,7 @@ void CodeGenFunction::EmitCilkForHelperBody(const Stmt *S) {
     llvm::Value *Addr = Emission.getAllocatedAddress();
     CilkForInfo->setInnerLoopControlVarAddr(Addr);
 
-    // Emit the adjustment on the inner loop control varialbe.
+    // Emit the adjustment on the inner loop control variable.
     EmitStmt(CilkFor.getInnerLoopVarAdjust());
   }
 

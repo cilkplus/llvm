@@ -3200,7 +3200,7 @@ public:
   void addParam(ImplicitParamDecl *P) { Params.push_back(P); }
   ImplicitParamDecl *getParam(unsigned i) const { return Params[i]; }
 
-  const SmallVectorImpl<ImplicitParamDecl *>& getParams() const { return Params; }
+  const SmallVectorImpl<ImplicitParamDecl *> &getParams() const { return Params; }
 
   // Implement isa/cast/dyncast/etc.
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }

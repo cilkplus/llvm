@@ -1106,8 +1106,8 @@ CapturedStmt *CapturedStmt::CreateDeserialized(ASTContext &Context,
 }
 
 Stmt::child_range CapturedStmt::children() {
-  // Children are captured field initilizers.
-  return child_range(getStoredStmts(), getStoredStmts() + NumCaptures);
+  // Children are captured field initilizers and the body.
+  return child_range(getStoredStmts(), getStoredStmts() + NumCaptures + 1);
 }
 
 bool CapturedStmt::capturesVariable(const VarDecl *Var) const {

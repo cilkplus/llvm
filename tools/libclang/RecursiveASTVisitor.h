@@ -1202,7 +1202,8 @@ DEF_TRAVERSE_DECL(BlockDecl, {
   })
 
 DEF_TRAVERSE_DECL(CapturedDecl, {
-    TRY_TO(TraverseStmt(D->getBody()));
+    // Do not traverse the body, which has been traversed by CapturedStmt.
+    //
     // This return statement makes sure the traversal of nodes in
     // decls_begin()/decls_end() (done in the DEF_TRAVERSE_DECL macro)
     // is skipped - don't remove it.

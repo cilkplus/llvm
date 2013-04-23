@@ -1398,19 +1398,19 @@ void ASTDumper::VisitCapturedStmt(const CapturedStmt *Node) {
       break;
     case CapturedStmt::VCK_ByCopy:
       OS << "bycopy ";
-      dumpDeclRef(I->getCapturedVar());
+      dumpBareDeclRef(I->getCapturedVar());
       break;
     case CapturedStmt::VCK_ByRef:
       OS << "byref ";
-      dumpDeclRef(I->getCapturedVar());
+      dumpBareDeclRef(I->getCapturedVar());
       break;
     case CapturedStmt::VCK_Receiver:
       OS << "receiver ";
-      dumpDeclRef(I->getCapturedVar());
+      dumpBareDeclRef(I->getCapturedVar());
       break;
     case CapturedStmt::VCK_ReceiverTmp:
       OS << "receiver temp for ";
-      dumpDeclRef(I->getCapturedVar());
+      dumpBareDeclRef(I->getCapturedVar());
       break;
     }
   }

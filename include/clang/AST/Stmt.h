@@ -1900,9 +1900,9 @@ class CapturedStmt : public Stmt {
 public:
   /// \brief The different capture forms: by 'this' or by reference, etc.
   enum VariableCaptureKind {
-    VCK_This,            // Capture 'this'
-    VCK_ByRef,           // Capture by reference
-    VCK_ByCopy,          // Capture by copy
+    VCK_This,       // Capture 'this'
+    VCK_ByRef,      // Capture by reference
+    VCK_ByCopy,     // Capture by copy
     VCK_Receiver,   // Result of a Cilk spawn, when used as a DeclStmt
     VCK_ReceiverTmp // Temporary for receiver when binding reference
   };
@@ -2177,10 +2177,10 @@ public:
 
   /// \brief Retrieve the loop body.
   CapturedStmt *getBody() {
-    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]); 
+    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]);
   }
   const CapturedStmt *getBody() const {
-    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]); 
+    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]);
   }
 
   /// \brief Retrieve the loop count expression.
