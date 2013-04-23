@@ -1136,8 +1136,6 @@ public:
   /// \brief Build an empty for statement.
   explicit ForStmt(EmptyShell Empty) : Stmt(ForStmtClass, Empty) { }
 
-  explicit ForStmt(StmtClass SC, EmptyShell Empty) : Stmt(SC, Empty) { }
-
   Stmt *getInit() { return SubExprs[INIT]; }
 
   /// \brief Retrieve the variable declared in this "for" statement, if any.

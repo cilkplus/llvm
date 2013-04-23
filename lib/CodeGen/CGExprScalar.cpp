@@ -1936,7 +1936,7 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
     Result = llvm::UndefValue::get(CGF.ConvertType(E->getType()));
     return LValue();
   }
-
+  
   // Emit the RHS first.  __block variables need to have the rhs evaluated
   // first, plus this should improve codegen a little.
   OpInfo.RHS = Visit(E->getRHS());
@@ -1946,7 +1946,6 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
   OpInfo.E = E;
   // Load/convert the LHS.
   LValue LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
-
 
   llvm::PHINode *atomicPHI = 0;
   if (const AtomicType *atomicTy = LHSTy->getAs<AtomicType>()) {

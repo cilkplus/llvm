@@ -21,7 +21,6 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
-#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/Basic/OpenCL.h"
 #include "clang/Basic/TargetInfo.h"
@@ -621,16 +620,6 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 
   // If CFG is emitting a captured statement and 'this' is captured,
   // load it into CXXThisValue.
-  if (CapturedStmtInfo && CapturedStmtInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
-    QualType TagType = getContext().getTagDeclType(FD->getParent());
-    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
-                                           TagType);
-    LValue ThisLValue = EmitLValueForField(LV, FD);
-
-    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
-  }
-
   if (CapturedStmtInfo && CapturedStmtInfo->isCXXThisExprCaptured()) {
     FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
     QualType TagType = getContext().getTagDeclType(FD->getParent());

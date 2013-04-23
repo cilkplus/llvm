@@ -3281,7 +3281,6 @@ void Sema::ActOnCapturedRegionError(bool IsInstantiation) {
   for (RecordDecl::field_iterator I = Record->field_begin(),
                                   E = Record->field_end(); I != E; ++I)
     Fields.push_back(*I);
-
   ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
               SourceLocation(), SourceLocation(), /*AttributeList=*/0);
 

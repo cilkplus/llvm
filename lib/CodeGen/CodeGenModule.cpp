@@ -527,7 +527,7 @@ CodeGenModule::getFunctionLinkage(const FunctionDecl *D) {
   
   if (D->hasAttr<WeakAttr>())
     return llvm::Function::WeakAnyLinkage;
-
+  
   // In C99 mode, 'inline' functions are guaranteed to have a strong
   // definition somewhere else, so we can use available_externally linkage.
   if (Linkage == GVA_C99Inline)
