@@ -164,6 +164,15 @@ bool Decl::isTemplateDecl() const {
   return isa<TemplateDecl>(this);
 }
 
+bool Decl::isSpawning() const {
+  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(this))
+    return FD->isSpawning();
+  else if (const CapturedDecl *CD = dyn_cast<CapturedDecl>(this))
+    return CD->isSpawning();
+
+  return false;
+}
+
 const DeclContext *Decl::getParentFunctionOrMethod() const {
   for (const DeclContext *DC = getDeclContext();
        DC && !DC->isTranslationUnit() && !DC->isNamespace(); 

@@ -292,16 +292,10 @@ void Sema::ActOnFinishOfCompoundStmt() {
 }
 
 sema::CompoundScopeInfo &Sema::getCurCompoundScope() const {
-  // For a Cilk for statement, skip the CilkForScopeInfo and return
-  // its enclosing CompoundScope. For example,
-  //
-  // void foo() {
-  //   _Cilk_for (int i = 0; i < 10; ++i)
-  //     bar();
-  // }
-  //
-  // The body of 'foo()' is returned.
-  //
+  return getCurFunction()->CompoundScopes.back();
+}
+
+sema::CompoundScopeInfo &Sema::getCurCompoundScopeSkipCilkFor() const {
   if (getLangOpts().CilkPlus) {
     unsigned I = FunctionScopes.size() - 1;
     while (isa<CilkForScopeInfo>(FunctionScopes[I]))
@@ -353,8 +347,23 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
   VarDecl *LHS = 0;
   Expr *RHS = 0;
   switch (S->getStmtClass()) {
+  case Stmt::AttributedStmtClass:
+    DiagnoseCilkSpawn(cast<AttributedStmt>(S)->getSubStmt(), HasError);
+    break;
+  case Stmt::CapturedStmtClass:
   case Stmt::CompoundStmtClass:
     return; // already checked
+  case Stmt::CilkForStmtClass: {
+    CilkForStmt *CF = cast<CilkForStmt>(S);
+    if (CF->getInit())
+      D.TraverseStmt(CF->getInit());
+    if (CF->getCond())
+      D.TraverseStmt(CF->getCond());
+    if (CF->getInc())
+      D.TraverseStmt(CF->getInc());
+    // The body is a CapturedStmt, which has been checked.
+    break;
+  }
   case Stmt::CXXCatchStmtClass:
     DiagnoseCilkSpawn(cast<CXXCatchStmt>(S)->getHandlerBlock(), HasError);
     break;
@@ -438,6 +447,14 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
   case Stmt::LabelStmtClass:
     DiagnoseCilkSpawn(cast<LabelStmt>(S)->getSubStmt(), HasError);
     break;
+  case Stmt::SwitchStmtClass: {
+    SwitchStmt *SS = cast<SwitchStmt>(S);
+    if (const DeclStmt *DS = SS->getConditionVariableDeclStmt())
+      D.TraverseStmt(const_cast<DeclStmt *>(DS));
+    D.TraverseStmt(SS->getCond());
+    DiagnoseCilkSpawn(SS->getBody(), HasError);
+    break;
+  }
   case Stmt::CaseStmtClass:
   case Stmt::DefaultStmtClass:
     DiagnoseCilkSpawn(cast<SwitchCase>(S)->getSubStmt(), HasError);
@@ -568,21 +585,28 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
   // If there are _Cilk_spawn expressions in this compound statement, check
   // whether they are used correctly.
   if (getCurCompoundScope().HasCilkSpawn) {
-    // The function or method that has a spawn should emit a Cilk stack frame.
+    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
     DeclContext *DC = CurContext;
     while (!DC->isFunctionOrMethod())
       DC = DC->getParent();
 
-    FunctionDecl::castFromDeclContext(DC)->setSpawning(true);
+    Decl::Kind Kind = DC->getDeclKind();
+    if (Kind >= Decl::firstFunction && Kind <= Decl::lastFunction)
+      FunctionDecl::castFromDeclContext(DC)->setSpawning();
+    else if (Decl::Captured == Kind)
+      CapturedDecl::castFromDeclContext(DC)->setSpawning();
+    else {
+      Diag(SourceLocation(), diag::err_spawn_invalid_decl)
+        << DC->getDeclKindName();
+    }
 
-    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
     bool Dependent = CurContext->isDependentContext();
     for (unsigned i = 0; i != NumElts; ++i) {
       bool HasError = false;
       DiagnoseCilkSpawn(Elts[i], HasError);
       if (!Dependent && !HasError) {
         StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
-        if (!Spawn.isInvalid() && isa<CilkSpawnStmt>(Spawn.get()))
+        if (!Spawn.isInvalid())
           Elts[i] = Spawn.take();
       }
     }
@@ -3441,8 +3465,7 @@ static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   if (!Helper.hasSpawn())
     return S;
 
-  SemaRef.ActOnCapturedRegionStart(S->getLocStart(), SemaRef.getCurScope(),
-                                   CR_CilkSpawn);
+  SemaRef.ActOnCapturedRegionStart(S->getLocStart(), /*Scope*/0, CR_CilkSpawn);
   CaptureBuilder Builder(SemaRef);
   Builder.TraverseStmt(S);
   StmtResult CS = SemaRef.ActOnCapturedRegionEnd(S);
@@ -4041,7 +4064,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   DiagnoseUnusedExprResult(Increment);
   DiagnoseUnusedExprResult(Body);
   if (isa<NullStmt>(Body))
-    getCurCompoundScope().setHasEmptyLoopBodies();
+    getCurCompoundScopeSkipCilkFor().setHasEmptyLoopBodies();
 
   // Generate the loop count expression according to the following:
   // ===========================================================================
@@ -4131,13 +4154,30 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
                                   Expr *LoopCount, Expr *Stride) {
   CilkForScopeInfo *FSI = getCurCilkFor();
   assert(FSI && "CilkForScopeInfo is out of sync");
+  CapturedDecl *CD = FSI->TheCapturedDecl;
+  RecordDecl *RD = FSI->TheRecordDecl;
+
+  // Handle the special case that the Cilk for body is not a compound statement
+  // and it has a Cilk spawn. In this case, the implicit compound scope
+  // should have this information. We check if spawn calls are used correctly,
+  // and transform them into CilkSpawnStmt's.
+  if (getCurCompoundScope().HasCilkSpawn) {
+    CD->setSpawning();
+    if (!isa<CompoundStmt>(Body)) {
+      bool HasError = false;
+      DiagnoseCilkSpawn(Body, HasError);
+      DeclContext *DC = CapturedDecl::castToDeclContext(CD);
+      if (!HasError && !DC->isDependentContext()) {
+        StmtResult NewBody = ActOnCilkSpawnStmt(Body);
+        if (!NewBody.isInvalid())
+          Body = NewBody.take();
+      }
+    }
+  }
 
   SmallVector<CapturedStmt::Capture, 4> Captures;
   SmallVector<Expr *, 4> CaptureInits;
   buildCapturedStmtCaptureList(Captures, CaptureInits, FSI->Captures);
-
-  CapturedDecl *CD = FSI->TheCapturedDecl;
-  RecordDecl *RD = FSI->TheRecordDecl;
 
   CapturedStmt *CapturedBody = CapturedStmt::Create(getASTContext(), Body,
                                                     Captures, CaptureInits,
@@ -4214,6 +4254,8 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
 
   PopExpressionEvaluationContext();
   PopDeclContext();
+  // Pop the compound scope we inserted implicitly.
+  PopCompoundScope();
   PopFunctionScopeInfo();
 
   return Owned(Result);
@@ -4280,6 +4322,13 @@ void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
   const VarDecl *VD = getLoopControlVariable(*this, FirstPart);
   PushCilkForScope(CurScope, CD, RD, VD, CilkForLoc);
 
+  // Push a compound scope for the body. This is needed for the case
+  //
+  // _Cilk_for (...)
+  //   _Cilk_spawn foo();
+  //
+  PushCompoundScope();
+
   if (CurScope)
     PushDeclContext(CurScope, CD);
   else
@@ -4306,5 +4355,7 @@ void Sema::ActOnCilkForStmtError(bool IsInstantiation) {
   ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
               SourceLocation(), SourceLocation(), /*AttributeList=*/0);
 
+  // Pop the compound scope we inserted implicitly.
+  PopCompoundScope();
   PopFunctionScopeInfo();
 }

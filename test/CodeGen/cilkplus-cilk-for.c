@@ -2,6 +2,8 @@
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK1 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK2 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK3 %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK-SPAWN %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK-SPAWN2 %s
 
 void test1(void) {
   // CHECK1: test1
@@ -68,3 +70,60 @@ void test_pointer(float *p, float *q) {
   _Cilk_for (float *i = p; i < q; i++) { }
 }
 
+void spawn_anchor(void);
+void spawn_foo(void);
+
+void test_cilk_for_cilk_spawn() {
+  _Cilk_for (int i = 0; i < 10; i++) {
+    spawn_anchor();
+    _Cilk_spawn spawn_foo();
+    spawn_anchor();
+  }
+  // The function is not a spawning function any more, and it should not
+  // initialize a stack frame.
+  //
+  // CHECK-SPAWN: define void @test_cilk_for_cilk_spawn
+  // CHECK-SPAWN-NOT: call void @__cilk_parent_prologue
+  // CHECK-SPAWN: call void @__cilkrts_cilk_for_32({{.*}} [[helper2:@__cilk_for_helper[0-9]*]]
+  //
+  // The cilk for helper function is a spawning function, and it should
+  // initialize a stack frame.
+  //
+  // CHECK-SPAWN: define internal void [[helper2]](
+  // CHECK-SPAWN: call void @__cilk_parent_prologue
+  // CHECK-SPAWN: call void @spawn_anchor()
+  // CHECK-SPAWN: call void @__cilk_spawn_helper
+  // CHECK-SPAWN: call void @spawn_anchor()
+  // CHECK-SPAWN: call void @__cilk_parent_epilogue
+  // CHECK-SPAWN-NEXT: ret void
+}
+
+int spawn_switch(void);
+void spawn_bar(void);
+
+void test_cilk_for_cilk_spawn_no_compound() {
+  _Cilk_for (int i = 0; i < 10; i++)
+    if (spawn_switch()) {
+      spawn_anchor();
+      _Cilk_spawn spawn_foo();
+      spawn_anchor();
+    } else {
+      spawn_anchor();
+      _Cilk_spawn spawn_bar();
+      spawn_anchor();
+    }
+  // CHECK-SPAWN2: define void @test_cilk_for_cilk_spawn_no_compound
+  // CHECK-SPAWN2-NOT: call void @__cilk_parent_prologue
+  // CHECK-SPAWN2: call void @__cilkrts_cilk_for_32({{.*}} [[helper3:@__cilk_for_helper[0-9]*]]
+
+  // CHECK-SPAWN2: define internal void [[helper3]](
+  // CHECK-SPAWN2: call void @__cilk_parent_prologue
+  // CHECK-SPAWN2: call void @spawn_anchor()
+  // CHECK-SPAWN2: call void @__cilk_spawn_helper
+  // CHECK-SPAWN2: call void @spawn_anchor()
+  // CHECK-SPAWN2: call void @spawn_anchor()
+  // CHECK-SPAWN2: call void @__cilk_spawn_helper
+  // CHECK-SPAWN2: call void @spawn_anchor()
+  // CHECK-SPAWN2: call void @__cilk_parent_epilogue
+  // CHECK-SPAWN2-NEXT: ret void
+}

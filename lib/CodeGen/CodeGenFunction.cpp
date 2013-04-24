@@ -577,17 +577,14 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   //
   // If emitting a helper function (parallel region), a Cilk stack frame will
   // be allocated and partially initialized before processing any parameters.
-  if (getLangOpts().CilkPlus) {
-    const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D);
-    if (FD && FD->isSpawning()) {
-      CurCGCilkImplicitSyncInfo = CreateCilkImplicitSyncInfo(*this);
-      CGCilkPlusRuntime::CilkCleanupKind Kind
-        = CurCGCilkImplicitSyncInfo->needsImplicitSync() ?
-          CGCilkPlusRuntime::ImpSyncAndRelFrameCleanup :
-          CGCilkPlusRuntime::ReleaseFrameCleanup;
+  if (getLangOpts().CilkPlus && D && D->isSpawning()) {
+    CurCGCilkImplicitSyncInfo = CreateCilkImplicitSyncInfo(*this);
+    CGCilkPlusRuntime::CilkCleanupKind Kind
+      = CurCGCilkImplicitSyncInfo->needsImplicitSync() ?
+        CGCilkPlusRuntime::ImpSyncAndRelFrameCleanup :
+        CGCilkPlusRuntime::ReleaseFrameCleanup;
 
-      CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this, Kind);
-    }
+    CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this, Kind);
   }
 
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);

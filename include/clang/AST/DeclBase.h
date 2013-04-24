@@ -804,6 +804,11 @@ public:
   /// \brief Whether this declaration is a function or function template.
   bool isFunctionOrFunctionTemplate() const;
 
+  /// \brief Whether this declaration has Cilk spawns.
+  ///
+  /// Currently only FunctionDecl and CapturedDecl can have Cilk spawns.
+  bool isSpawning() const;
+
   /// \brief Changes the namespace of this declaration to reflect that it's
   /// the object of a friend declaration.
   ///

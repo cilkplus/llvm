@@ -296,3 +296,82 @@ void empty_body() {
   _Cilk_for (int i = 0; i < 10; ++i); // OK, the next statement is not a compound statement and is aligned with _Cilk_for.
   next();
 }
+
+int bar();
+int baz(int);
+
+void cilk_for_cilk_spawn() {
+  _Cilk_for (int i = _Cilk_spawn bar(); i < 10; ++i); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < _Cilk_spawn bar(); ++i); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; i += _Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; ++i) {
+    _Cilk_spawn bar();
+    _Cilk_spawn bar();
+  }
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    _Cilk_spawn bar();
+
+  _Cilk_for (int i = 0; i < 10; ++i) {
+    _Cilk_sync;
+  }
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    _Cilk_sync;
+
+  _Cilk_for (int i = 0; i < 10; ++i); // expected-warning {{Cilk for loop has empty body}} \
+                                      // expected-note {{put the semicolon on a separate line to silence this warning}}
+   _Cilk_spawn bar();
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    if (i == 5)
+      _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+    else
+      _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  int x = 0;
+  _Cilk_for (int i = 0; i < 10; ++i)
+    x = _Cilk_spawn bar(); // OK
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    x = baz(_Cilk_spawn baz(i)); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_sync;
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+   if (1) _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    if (1) {} else _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    while (1) _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    for (;;) _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    switch (1) {
+    case 0: _Cilk_spawn baz(_Cilk_spawn bar()); break; // expected-error {{_Cilk_spawn is not at statement level}}
+    default: _Cilk_spawn baz(_Cilk_spawn bar()); break; // expected-error {{_Cilk_spawn is not at statement level}}
+    }
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    switch (_Cilk_spawn bar()) { // expected-error {{_Cilk_spawn is not at statement level}}
+    default: ;
+    }
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    do {
+      _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+    } while (_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+L: _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
+}

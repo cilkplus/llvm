@@ -1427,7 +1427,7 @@ public:
 
   bool TraverseLambdaExpr(LambdaExpr *E) { return true; }
   bool TraverseBlockExpr(BlockExpr *E) { return true; }
-
+  bool TraverseCapturedStmt(CapturedStmt *) { return true; }
   bool TraverseCilkSpawnStmt(CilkSpawnStmt *S) {
     CXXTryStmt *TS = getEnclosingTryBlock(S, Body, PMap);
 
@@ -1475,6 +1475,7 @@ public:
 
   bool TraverseLambdaExpr(LambdaExpr *E) { return true; }
   bool TraverseBlockExpr(BlockExpr *E) { return true; }
+  bool TraverseCapturedStmt(CapturedStmt *) { return true; }
   bool VisitCXXThrowExpr(CXXThrowExpr *E) {
     CXXTryStmt *TS = getEnclosingTryBlock(E, Body, PMap);
 
@@ -1501,10 +1502,15 @@ public:
 ///
 void CGCilkImplicitSyncInfo::analyze() {
   assert(CGF.getLangOpts().CilkPlus && "Not compiling a cilk plus program");
-  const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
+  Stmt *Body = 0;
 
-  // Only analyze a spawning function
-  if (!FD || !FD->isSpawning())
+  const Decl *D = CGF.CurCodeDecl;
+  if (D && D->isSpawning()) {
+    assert(D->getBody() && "empty body unexpected");
+    Body = const_cast<Stmt *>(D->getBody());
+  }
+
+  if (!Body)
     return;
 
   // The following function 'foo' does not need an implicit on exit.
@@ -1517,17 +1523,16 @@ void CGCilkImplicitSyncInfo::analyze() {
   //   }
   // }
   //
-  ParentMap PMap(FD->getBody());
+  ParentMap PMap(Body);
 
   // Check if the spawning function or a try-block needs an implicit syncs,
   // and the set of CXXTryStmt's is the analysis results.
-  TryStmtAnalyzer Analyzer(const_cast<Stmt *>(FD->getBody()), PMap, SyncSet);
+  TryStmtAnalyzer Analyzer(Body, PMap, SyncSet);
   NeedsImplicitSync = Analyzer.needsImplicitSync();
 
   // Traverse and find all CXXThrowExpr's which needs an implicit sync, and
   // the results are inserted to `SyncSet`.
-  ThrowExprAnalyzer Analyzer2(const_cast<Stmt *>(FD->getBody()), PMap,
-                              SyncSet, NeedsImplicitSync);
+  ThrowExprAnalyzer Analyzer2(Body, PMap, SyncSet, NeedsImplicitSync);
 }
 
 CGCilkImplicitSyncInfo *CreateCilkImplicitSyncInfo(CodeGenFunction &CGF) {

@@ -1657,7 +1657,7 @@ public:
 
   /// \brief Whether this function is a Cilk spawning function.
   bool isSpawning() const { return IsSpawning; }
-  void setSpawning(bool v = true) { IsSpawning = v; }
+  void setSpawning() { IsSpawning = true; }
 
   /// \brief Whether this function has been deleted.
   ///
@@ -3177,16 +3177,24 @@ public:
 class CapturedDecl : public Decl, public DeclContext {
 private:
   Stmt *Body;
+
+  /// \brief Whether this CapturedDecl contains Cilk spawns.
+  bool IsSpawning;
+
   SmallVector<ImplicitParamDecl *, 3> Params;
 
   explicit CapturedDecl(DeclContext *DC)
-    : Decl(Captured, DC, SourceLocation()), DeclContext(Captured) { }
+    : Decl(Captured, DC, SourceLocation()), DeclContext(Captured),
+      Body(0), IsSpawning(false) { }
 
 public:
   static CapturedDecl *Create(ASTContext &C, DeclContext *DC);
 
   Stmt *getBody() const { return Body; }
   void setBody(Stmt *B) { Body = B; }
+
+  void setSpawning() { IsSpawning = true; }
+  bool isSpawning() const { return IsSpawning; }
 
   void setContextParam(ImplicitParamDecl *P) {
     assert(Params.size() == 0);

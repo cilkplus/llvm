@@ -6323,6 +6323,8 @@ def err_not_a_call : Error<
   "the argument to _Cilk_spawn must be a function call">;
 def err_spawn_invalid_scope : Error<
   "_Cilk_spawn not allowed in this scope">;
+def err_spawn_invalid_decl : Error<
+  "_Cilk_spawn not supported in a '%0Decl'">;
 def err_spawn_spawn : Error<
   "consecutive _Cilk_spawn tokens not allowed">;
 def err_spawn_not_whole_expr : Error<

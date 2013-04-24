@@ -53,7 +53,9 @@ void test() {
   case 0: _Cilk_spawn bar(_Cilk_spawn foo()); break; // expected-error {{_Cilk_spawn is not at statement level}}
   default: _Cilk_spawn bar(_Cilk_spawn foo()); break; // expected-error {{_Cilk_spawn is not at statement level}}
   }
-
+  switch (_Cilk_spawn foo()) { // expected-error {{_Cilk_spawn is not at statement level}}
+  default: ;
+  }
   _Cilk_spawn bar(_Cilk_spawn foo());         // expected-error {{_Cilk_spawn is not at statement level}}
   b = _Cilk_spawn bar(_Cilk_spawn foo());     // expected-error {{_Cilk_spawn is not at statement level}}
   int c = _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{_Cilk_spawn is not at statement level}}

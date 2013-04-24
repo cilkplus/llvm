@@ -944,6 +944,18 @@ public:
 
   sema::CompoundScopeInfo &getCurCompoundScope() const;
 
+  /// \brief Retrieve the enclosing compound scope but skip Cilk for scopes.
+  /// For example, the compound scope of the function body is returned in
+  /// the following example:
+  /// \code
+  /// void func() {
+  ///   _Cilk_for (int i = 0; i < 10; ++i) {
+  ///     foo();
+  ///   }
+  /// }
+  /// \endcode
+  sema::CompoundScopeInfo &getCurCompoundScopeSkipCilkFor() const;
+
   bool hasAnyUnrecoverableErrorsInThisFunction() const;
 
   /// \brief Retrieve the current block, if any.
