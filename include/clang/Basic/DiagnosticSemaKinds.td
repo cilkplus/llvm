@@ -6390,8 +6390,10 @@ def note_cilk_for_end_expr: Note<
 def note_cilk_constant_stride: Note<
   "constant stride is %0">;
 def warn_cilk_for_cond_user_defined_conv: Warning<
-  "'_Cilk_for' loop count does not respect %select{constructor|user-defined}0 "
-  "conversion in loop condition">, InGroup<Conversion>, DefaultWarn;
+  "user-defined conversion from %0 to %1 will not be used when calculating the "
+  "number of iterations in '_Cilk_for'">, InGroup<Conversion>, DefaultWarn;
+def note_cilk_for_conversion_here : Note<
+  "conversion to type %0 declared here">;
 def err_cilk_for_cannot_return: Error<
   "cannot return from within a '_Cilk_for' loop">;
 def err_cilk_for_cannot_break: Error<

@@ -3721,15 +3721,23 @@ static bool ExtractCilkForCondition(Sema &S,
       return true;
     }
   } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Cond)) {
-    switch (ICE->getCastKind()) {
-    case CK_ConstructorConversion:
-    case CK_UserDefinedConversion:
+    if (ICE->getCastKind() == CK_UserDefinedConversion) {
+      Expr *From = ICE->getSubExprAsWritten();
+      // Note: flags copied from TryContextuallyConvertToBool
+      ImplicitConversionSequence ICS =
+          S.TryImplicitConversion(From, ICE->getType(),
+                                  /*SuppressUserConversions=*/false,
+                                  /*AllowExplicit=*/true,
+                                  /*InOverloadResolution=*/false,
+                                  /*CStyle=*/false,
+                                  /*AllowObjCWritebackConversion=*/false);
+      assert(!ICS.isBad() && ICS.getKind() ==
+                             ImplicitConversionSequence::UserDefinedConversion);
       S.Diag(Cond->getExprLoc(), diag::warn_cilk_for_cond_user_defined_conv)
-        << (ICE->getCastKind() != CK_ConstructorConversion)
-        << Cond->getSourceRange();
-      // fallthrough
-    default:
-      break;
+        << From->getType() << ICE->getType() << Cond->getSourceRange();
+      FunctionDecl *FD = ICS.UserDefined.ConversionFunction->getCanonicalDecl();
+      S.Diag(FD->getLocation(), diag::note_cilk_for_conversion_here)
+        << ICE->getType();
     }
     return ExtractCilkForCondition(S, ICE->getSubExpr(), CondOp, OpLoc, LHS, RHS);
   } else if (CXXMemberCallExpr *MC = dyn_cast<CXXMemberCallExpr>(Cond)) {
@@ -3747,23 +3755,18 @@ static bool ExtractCilkForCondition(Sema &S,
   return false;
 }
 
-static bool IsCilkForControlVarRef(Expr *E, VarDecl *ControlVar,
-                                   CastKind &HasCast) {
+static bool IsCilkForControlVarRef(Expr *E, VarDecl *ControlVar) {
   E = E->IgnoreParenNoopCasts(ControlVar->getASTContext());
   if (CXXConstructExpr *C = dyn_cast<CXXConstructExpr>(E)) {
-    if (C->getConstructor()->isConvertingConstructor(false)) {
-      HasCast = CK_ConstructorConversion;
-      return IsCilkForControlVarRef(C->getArg(0), ControlVar, HasCast);
-    }
+    if (C->getConstructor()->isConvertingConstructor(false))
+      return IsCilkForControlVarRef(C->getArg(0), ControlVar);
   } else if (MaterializeTemporaryExpr *M = dyn_cast<MaterializeTemporaryExpr>(E)) {
-    return IsCilkForControlVarRef(M->GetTemporaryExpr(), ControlVar, HasCast);
+    return IsCilkForControlVarRef(M->GetTemporaryExpr(), ControlVar);
   } else if (CastExpr *C = dyn_cast<CastExpr>(E)) {
-    HasCast = C->getCastKind();
-    return IsCilkForControlVarRef(C->getSubExpr(), ControlVar, HasCast);
-  } else if (DeclRefExpr *DR = dyn_cast<DeclRefExpr>(E)) {
+    return IsCilkForControlVarRef(C->getSubExpr(), ControlVar);
+  } else if (DeclRefExpr *DR = dyn_cast<DeclRefExpr>(E))
     if (DR->getDecl() == ControlVar)
       return true;
-  }
 
   return false;
 }
@@ -3776,33 +3779,21 @@ static bool CanonicalizeCilkForCondOperands(Sema &S, VarDecl *ControlVar,
   //   var OP shift-expression
   //   shift-expression OP var
   // where var is the control variable, optionally enclosed in parentheses.
-  CastKind HasCast = CK_NoOp;
-  if (!IsCilkForControlVarRef(LHS, ControlVar, HasCast)) {
-    HasCast = CK_NoOp;
-    if (!IsCilkForControlVarRef(RHS, ControlVar, HasCast)) {
-      S.Diag(Cond->getLocStart(), diag::err_cilk_for_cond_test_control_var)
-        << ControlVar
-        << Cond->getSourceRange();
-      S.Diag(Cond->getLocStart(), diag::note_cilk_for_cond_allowed)
-        << ControlVar;
-      return false;
-    } else {
-      std::swap(LHS, RHS);
-      Direction = -Direction;
-    }
+  if (IsCilkForControlVarRef(LHS, ControlVar))
+    return true;
+
+  if (IsCilkForControlVarRef(RHS, ControlVar)) {
+    std::swap(LHS, RHS);
+    Direction = -Direction;
+    return true;
   }
 
-  switch (HasCast) {
-  case CK_ConstructorConversion:
-  case CK_UserDefinedConversion:
-    S.Diag(LHS->getLocStart(), diag::warn_cilk_for_cond_user_defined_conv)
-      << (HasCast != CK_ConstructorConversion) << LHS->getSourceRange();
-    // fallthrough
-  default:
-    break;
-  }
-
-  return true;
+  S.Diag(Cond->getLocStart(), diag::err_cilk_for_cond_test_control_var)
+    << ControlVar
+    << Cond->getSourceRange();
+  S.Diag(Cond->getLocStart(), diag::note_cilk_for_cond_allowed)
+    << ControlVar;
+  return false;
 }
 
 static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
@@ -4110,6 +4101,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
       // Updating span to be "span+1"
       Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span.get(),
                                 ActOnIntegerConstant(CilkForLoc, 1).get());
+
     // Build "span/stride" if CondDirection==1, otherwise "span/-stride"
     LoopCount =
         BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
