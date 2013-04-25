@@ -3,6 +3,7 @@
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK2 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK3 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK4 %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK5 %s
 //
 struct Bool {
   ~Bool();
@@ -134,4 +135,26 @@ void test_cilk_for_catch_cilk_spawn() {
   // CHECK4: call void @__cilk_sync
   // CHECK4-NEXT: call void @__cilk_parent_epilogue
   // CHECK4-NEXT: br
+}
+
+template <typename T>
+void simple_template(const T &a, const T &b) {
+  _Cilk_for (T i = a; i < b; i++) { }
+}
+
+void test_simple_template() {
+  int begin = 0, end = 10;
+  simple_template<int>(begin, end);
+
+  int *pbegin = nullptr;
+  int *pend = pbegin + 10;
+  simple_template(pbegin, pend);
+
+  // CHECK5: define {{.*}} void @_Z15simple_templateIiEvRKT_S2_
+  // CHECK5: call void @__cilkrts_cilk_for_32
+  // CHECK5: ret void
+  //
+  // CHECK5: define {{.*}} void @_Z15simple_templateIPiEvRKT_S3_
+  // CHECK5: call void @__cilkrts_cilk_for_64
+  // CHECK5: ret void
 }

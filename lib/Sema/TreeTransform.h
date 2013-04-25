@@ -9442,8 +9442,62 @@ TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
-  // FIXME: not implemented yet
-  return Owned(S);
+  // Transform loop initialization.
+  StmtResult Init = getDerived().TransformStmt(S->getInit());
+  if (Init.isInvalid())
+    return StmtError();
+
+  // Transform loop condition.
+  ExprResult Cond = getDerived().TransformExpr(S->getCond());
+  if (Cond.isInvalid())
+    return StmtError();
+
+  assert(S->getCond() && "unexpected empty condition in Cilk for");
+  SourceLocation CilkForLoc = S->getCilkForLoc();
+  ExprResult CondExpr
+    = getSema().ActOnBooleanCondition(0, CilkForLoc, Cond.get());
+
+  if (CondExpr.isInvalid())
+    return StmtError();
+  Cond = CondExpr.get();
+
+  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+  if (!FullCond.get())
+    return StmtError();
+
+  // Enter the capturing region before processing loop increment.
+  getSema().ActOnStartOfCilkForStmt(CilkForLoc, /*Scope*/0, Init);
+
+  // Transform loop increment.
+  ExprResult Inc = getDerived().TransformExpr(S->getInc());
+  if (Inc.isInvalid()) {
+    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    return StmtError();
+  }
+
+  Sema::FullExprArg FullInc(getSema().MakeFullExpr(Inc.get()));
+  if (!FullInc.get()) {
+    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    return StmtError();
+  }
+
+  // Transform loop body.
+  StmtResult Body = getDerived().TransformStmt(S->getBody());
+  if (Body.isInvalid()) {
+    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    return StmtError();
+  }
+
+  StmtResult Result = getSema().ActOnCilkForStmt(CilkForLoc, S->getLParenLoc(),
+                                                 Init.take(), FullCond,
+                                                 FullInc,  S->getRParenLoc(),
+                                                 Body.take());
+  if (Result.isInvalid()) {
+    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    return StmtError();
+  }
+
+  return Result;
 }
 
 template<typename Derived>

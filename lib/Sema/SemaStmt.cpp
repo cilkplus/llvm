@@ -3598,7 +3598,10 @@ static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
 
     // The control variable shall be declared and initialized within the
     // initialization clause of the _Cilk_for loop.
-    if (!ControlVar->getInit()) {
+
+    // A template type may have a default constructor.
+    bool IsDependent = ControlVar->getType()->isDependentType();
+    if (!IsDependent && !ControlVar->getInit()) {
       S.Diag(ControlVar->getLocation(),
           diag::err_cilk_for_control_variable_not_initialized);
       return false;
@@ -3678,9 +3681,6 @@ static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
   }
 
   QualType VarType = ControlVar->getType();
-  // FIXME: incomplete types not supported
-  if (VarType->isDependentType())
-    return false;
 
   // For decltype types, get the actual type
   const Type *VarTyPtr = VarType.getTypePtrOrNull();
@@ -3705,20 +3705,23 @@ static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
   }
 
   // The variable shall have integral, pointer, or class type.
-  // struct/class types only allowed in C++
-  bool ValidType = false;
-  if (S.getLangOpts().CPlusPlus &&
-      (VarTyPtr->isClassType() || VarTyPtr->isStructureType()))
-    ValidType = true;
-  else if (VarTyPtr->isIntegralType(S.Context) || VarTyPtr->isPointerType())
-    ValidType = true;
+  // struct/class types only allowed in C++. Defer the type check for
+  // a dependent type.
+  if (!VarType->isDependentType()) {
+    bool ValidType = false;
+    if (S.getLangOpts().CPlusPlus &&
+        (VarTyPtr->isClassType() || VarTyPtr->isStructureType()))
+      ValidType = true;
+    else if (VarTyPtr->isIntegralType(S.Context) || VarTyPtr->isPointerType())
+      ValidType = true;
 
-  if (!ValidType) {
-    S.Diag(InitLoc, diag::err_cilk_for_control_variable_type);
-    if (!IsDeclStmt)
-      S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
-        << ControlVar->getIdentifier();
-    return false;
+    if (!ValidType) {
+      S.Diag(InitLoc, diag::err_cilk_for_control_variable_type);
+      if (!IsDeclStmt)
+        S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
+          << ControlVar->getIdentifier();
+      return false;
+    }
   }
 
   return true;
@@ -3944,11 +3947,19 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
   // If RHS is non-null, it's a += or -=, either built-in or overloaded.
   // We need to check that the RHS has the correct type.
   if (RHS) {
+    if (RHS->isTypeDependent())
+      return true;
+
     if (!RHS->getType()->isIntegralOrEnumerationType()) {
       S.Diag(Increment->getExprLoc(),
         diag::err_cilk_for_invalid_increment_rhs) << OperatorName;
       return false;
     }
+
+    // Handle the case like 'RHS = sizeof(T)', which is not type dependent
+    // but value dependent.
+    if (RHS->isValueDependent())
+      return true;
 
     HasConstantIncrement = RHS->EvaluateAsInt(Stride, S.Context);
     StrideExpr = RHS;
@@ -3981,12 +3992,6 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   if (!CheckCilkForInitStmt(*this, First, ControlVar))
     return StmtError();
 
-  if (ControlVar->getType()->isDependentType())
-    return StmtError();
-
-  if (ControlVar->getType()->isReferenceType())
-    return StmtError();
-
   // Check loop condition
   CheckForLoopConditionalStatement(*this, Second.get(), Increment, Body);
 
@@ -3996,8 +4001,6 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   CheckCilkForCondition(*this, CilkForLoc, ControlVar, Second.get(),
                         Limit, CondDirection, Opcode);
   if (!Limit)
-    return StmtError();
-  if (Limit->getType()->isDependentType())
     return StmtError();
 
   // Check increment
@@ -4029,36 +4032,39 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     }
   }
 
-  // Build end - begin
-  Expr *Begin = BuildDeclRefExpr(ControlVar,
-                                 ControlVar->getType().getNonReferenceType(),
-                                 VK_LValue,
-                                 ControlVar->getLocation()).release();
-  Expr *End = Limit;
-  if (CondDirection < 0)
-    std::swap(Begin, End);
+  ExprResult Span;
+  if (!CurContext->isDependentContext()) {
+    // Build end - begin
+    Expr *Begin = BuildDeclRefExpr(ControlVar,
+        ControlVar->getType().getNonReferenceType(),
+        VK_LValue,
+        ControlVar->getLocation()).release();
+    Expr *End = Limit;
+    if (CondDirection < 0)
+      std::swap(Begin, End);
 
-  ExprResult Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
+    Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
 
-  if (Span.isInvalid()) {
-    // error getting operator-()
-    Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
-    Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-      << Begin->getSourceRange();
-    Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-      << End->getSourceRange();
-    return StmtError();
-  }
+    if (Span.isInvalid()) {
+      // error getting operator-()
+      Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
+      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+        << Begin->getSourceRange();
+      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+        << End->getSourceRange();
+      return StmtError();
+    }
 
-  if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
-    // non-integral type
-    Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
-      << Span.get()->getType();
-    Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-      << Begin->getSourceRange();
-    Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-      << End->getSourceRange();
-    return StmtError();
+    if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
+      // non-integral type
+      Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
+        << Span.get()->getType();
+      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+        << Begin->getSourceRange();
+      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+        << End->getSourceRange();
+      return StmtError();
+    }
   }
 
   DiagnoseUnusedExprResult(First);
@@ -4088,61 +4094,63 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   // |                                  | limit exactly for a valid loop.      |
   // ---------------------------------------------------------------------------
   Expr *LoopCount = 0;
-  // Build "-stride"
-  Expr *NegativeStride = BuildUnaryOp(getCurScope(), Increment->getExprLoc(),
-                                      UO_Minus, StrideExpr).get();
-  // Build "stride-1"
-  Expr *StrideMinusOne =
-      BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub,
-                 (CondDirection == 1) ? StrideExpr : NegativeStride,
-                 ActOnIntegerConstant(CilkForLoc, 1).get()).get();
+  if (!CurContext->isDependentContext()) {
+    // Build "-stride"
+    Expr *NegativeStride = BuildUnaryOp(getCurScope(), Increment->getExprLoc(),
+                                        UO_Minus, StrideExpr).get();
+    // Build "stride-1"
+    Expr *StrideMinusOne =
+        BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub,
+                   (CondDirection == 1) ? StrideExpr : NegativeStride,
+                   ActOnIntegerConstant(CilkForLoc, 1).get()).get();
 
-  if (Opcode == BO_NE) {
-    // Build "stride<0"
-    Expr *StrideLessThanZero =
-        BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
-                   ActOnIntegerConstant(CilkForLoc, 0).get()).get();
-    // Build "(stride<0)?-stride:stride"
-    ExprResult StrideCondExpr = ActOnConditionalOp(
-        CilkForLoc, CilkForLoc, StrideLessThanZero, NegativeStride, StrideExpr);
+    if (Opcode == BO_NE) {
+      // Build "stride<0"
+      Expr *StrideLessThanZero =
+          BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
+                     ActOnIntegerConstant(CilkForLoc, 0).get()).get();
+      // Build "(stride<0)?-stride:stride"
+      ExprResult StrideCondExpr = ActOnConditionalOp(
+          CilkForLoc, CilkForLoc, StrideLessThanZero, NegativeStride, StrideExpr);
 
-    // Build "-span"
-    Expr *NegativeSpan =
-        BuildUnaryOp(getCurScope(), CilkForLoc, UO_Minus, Span.get()).get();
+      // Build "-span"
+      Expr *NegativeSpan =
+          BuildUnaryOp(getCurScope(), CilkForLoc, UO_Minus, Span.get()).get();
 
-    // Updating span to be "(stride<0)?-span:span"
-    Span = ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
-                              NegativeSpan, Span.get());
+      // Updating span to be "(stride<0)?-span:span"
+      Span = ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
+                                NegativeSpan, Span.get());
 
-    // Build "span/(stride<0)?-stride:stride"
-    LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
-                           StrideCondExpr.get()).get();
-  } else {
-    // Updating span to be "span+(stride-1)"
-    Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span.get(),
-                      StrideMinusOne);
-    if (Opcode == BO_LE || Opcode == BO_GE)
-      // Updating span to be "span+1"
-      Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span.get(),
-                                ActOnIntegerConstant(CilkForLoc, 1).get());
+      // Build "span/(stride<0)?-stride:stride"
+      LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
+                             StrideCondExpr.get()).get();
+    } else {
+      // Updating span to be "span+(stride-1)"
+      Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span.get(),
+                        StrideMinusOne);
+      if (Opcode == BO_LE || Opcode == BO_GE)
+        // Updating span to be "span+1"
+        Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span.get(),
+                                  ActOnIntegerConstant(CilkForLoc, 1).get());
 
-    // Build "span/stride" if CondDirection==1, otherwise "span/-stride"
+      // Build "span/stride" if CondDirection==1, otherwise "span/-stride"
+      LoopCount =
+          BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
+                     (CondDirection == 1) ? StrideExpr : NegativeStride).get();
+    }
+
+    QualType LoopCountExprType = LoopCount->getType();
+    QualType LoopCountType = Context.UnsignedLongLongTy;
+    // Loop count should be either u32 or u64 in Cilk Plus.
+    if (Context.getTypeSize(LoopCountExprType) > 64) {
+      // TODO: Emit warning about truncation to u64.
+    } else if (Context.getTypeSize(LoopCountExprType) <= 32) {
+      LoopCountType = Context.UnsignedIntTy;
+    }
+    // Implicitly casting LoopCount to u32/u64.
     LoopCount =
-        BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
-                   (CondDirection == 1) ? StrideExpr : NegativeStride).get();
+        ImpCastExprToType(LoopCount, LoopCountType, CK_IntegralCast).get();
   }
-
-  QualType LoopCountExprType = LoopCount->getType();
-  QualType LoopCountType = Context.UnsignedLongLongTy;
-  // Loop count should be either u32 or u64 in Cilk Plus.
-  if (Context.getTypeSize(LoopCountExprType) > 64) {
-    // TODO: Emit warning about truncation to u64.
-  } else if (Context.getTypeSize(LoopCountExprType) <= 32) {
-    LoopCountType = Context.UnsignedIntTy;
-  }
-  // Implicitly casting LoopCount to u32/u64.
-  LoopCount =
-      ImpCastExprToType(LoopCount, LoopCountType, CK_IntegralCast).get();
 
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
                           Third.get(), RParenLoc, Body, LoopCount, StrideExpr);
@@ -4157,6 +4165,8 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   assert(FSI && "CilkForScopeInfo is out of sync");
   CapturedDecl *CD = FSI->TheCapturedDecl;
   RecordDecl *RD = FSI->TheRecordDecl;
+  DeclContext *DC = CapturedDecl::castToDeclContext(CD);
+  bool IsDependent = DC->isDependentContext();
 
   // Handle the special case that the Cilk for body is not a compound statement
   // and it has a Cilk spawn. In this case, the implicit compound scope
@@ -4167,8 +4177,7 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
     if (!isa<CompoundStmt>(Body)) {
       bool HasError = false;
       DiagnoseCilkSpawn(Body, HasError);
-      DeclContext *DC = CapturedDecl::castToDeclContext(CD);
-      if (!HasError && !DC->isDependentContext()) {
+      if (!HasError && !IsDependent) {
         StmtResult NewBody = ActOnCilkSpawnStmt(Body);
         if (!NewBody.isInvalid())
           Body = NewBody.take();
@@ -4191,10 +4200,9 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   ExprResult AdjustExpr;
   // Set parameters for the outlined function.
   // Build the initial value for the inner loop control variable.
-  QualType Ty = LoopCount->getType().getNonReferenceType();
-  if (!Ty->isDependentType()) {
-    // Context for variable capturing.
-    DeclContext *DC = CapturedDecl::castToDeclContext(CD);
+  if (!IsDependent) {
+    assert(LoopCount && "invalid null loop count expression");
+    QualType Ty = LoopCount->getType().getNonReferenceType();
 
     // In the following, the source location of the loop control variable
     // will be used for diagnostics.
