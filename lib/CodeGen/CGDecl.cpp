@@ -1710,9 +1710,6 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
   assert(DMEntry == 0 && "Decl already exists in localdeclmap!");
   DMEntry = DeclPtr;
 
-  if (CapturedStmtInfo && CapturedStmtInfo->isThisParmVarDecl(&D))
-    CapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
-
   // The captured record (passed as the first parameter) is the base address.
   if (CapturedStmtInfo && CapturedStmtInfo->isThisParmVarDecl(&D)) {
     llvm::Value *This = Builder.CreateLoad(DeclPtr);
@@ -1733,9 +1730,6 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
       }
     }
   }
-
-  if (CapturedStmtInfo && CapturedStmtInfo->isThisParmVarDecl(&D))
-    CapturedStmtInfo->setThisValue(Builder.CreateLoad(DeclPtr));
 
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {
