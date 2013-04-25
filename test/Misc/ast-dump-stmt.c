@@ -33,3 +33,24 @@ int TestOpaqueValueExpr = 0 ?: 1;
 // CHECK-NEXT:   OpaqueValueExpr
 // CHECK-NEXT:     IntegerLiteral
 // CHECK-NEXT:   IntegerLiteral
+
+int TestCapturedStmt(int a, int b) {
+  int result;
+  #pragma clang __debug captured
+  {
+    result = a + b;
+  }
+  return result;
+}
+// CHECK:    FunctionDecl{{.*}}TestCapturedStmt
+// CHECK:      CapturedStmt
+// CHECK:        DeclRefExpr
+// CHECK-NEXT:   DeclRefExpr
+// CHECK-NEXT:   DeclRefExpr
+// CHECK-NEXT:     CompoundStmt
+// CHECK-NEXT:       BinaryOperator
+// CHECK-NEXT:         DeclRefExpr
+// CHECK-NEXT:         BinaryOperator
+// CHECK:                DeclRefExpr
+// CHECK:                DeclRefExpr
+// CHECK-NEXT:  ReturnStmt

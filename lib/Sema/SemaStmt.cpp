@@ -3384,7 +3384,8 @@ StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
     }
   }
 
-  CapturedStmt *Res = CapturedStmt::Create(getASTContext(), S, Captures,
+  CapturedStmt *Res = CapturedStmt::Create(getASTContext(), S,
+                                           RSI->CapRegionKind, Captures,
                                            CaptureInits, CD, RD);
 
   CD->setBody(Res->getCapturedStmt());
@@ -4180,6 +4181,7 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   buildCapturedStmtCaptureList(Captures, CaptureInits, FSI->Captures);
 
   CapturedStmt *CapturedBody = CapturedStmt::Create(getASTContext(), Body,
+                                                    FSI->CapRegionKind,
                                                     Captures, CaptureInits,
                                                     CD, RD);
 

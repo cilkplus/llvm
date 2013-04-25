@@ -16,6 +16,7 @@
 
 #include "clang/AST/DeclGroup.h"
 #include "clang/AST/StmtIterator.h"
+#include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/SourceLocation.h"
@@ -1965,6 +1966,9 @@ private:
   /// \brief The number of variable captured, including 'this'.
   unsigned NumCaptures;
 
+  /// \brief The kind of this statement, including 'CR_Default', etc.
+  CapturedRegionKind RegionKind;
+
   /// \brief The implicit outlined function.
   CapturedDecl *TheCapturedDecl;
 
@@ -1972,7 +1976,7 @@ private:
   RecordDecl *TheRecordDecl;
 
   /// \brief Construct a captured statement.
-  CapturedStmt(Stmt *S, ArrayRef<Capture> Captures,
+  CapturedStmt(Stmt *S, CapturedRegionKind Kind, ArrayRef<Capture> Captures,
                ArrayRef<Expr *> CaptureInits,
                CapturedDecl *CD, RecordDecl *RD);
 
@@ -1987,6 +1991,7 @@ private:
 
 public:
   static CapturedStmt *Create(ASTContext &Context, Stmt *S,
+                              CapturedRegionKind Kind,
                               ArrayRef<Capture> Captures,
                               ArrayRef<Expr *> CaptureInits,
                               CapturedDecl *CD, RecordDecl *RD);
@@ -1999,6 +2004,9 @@ public:
   const Stmt *getCapturedStmt() const {
     return const_cast<CapturedStmt *>(this)->getCapturedStmt();
   }
+
+  /// \brief Retrieve the captured region kind.
+  CapturedRegionKind getCapturedRegionKind() const { return RegionKind; }
 
   /// \brief Retrieve the outlined function declaration.
   CapturedDecl *getCapturedDecl() const { return TheCapturedDecl; }
