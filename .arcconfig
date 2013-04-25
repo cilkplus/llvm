@@ -1,4 +1,5 @@
 {
   "project_id" : "clang-cilkplus",
-  "conduit_uri" : "http://phabricator.kw.intel.com:8443"
+  "conduit_uri" : "http://phabricator.kw.intel.com:8443",
+  "history.immutable" : true
 }
