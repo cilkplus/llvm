@@ -1,4 +1,4 @@
 {
-  "project_id" : "clang",
-  "conduit_uri" : "http://llvm-reviews.chandlerc.com/"
+  "project_id" : "clang-cilkplus",
+  "conduit_uri" : "http://phabricator.kw.intel.com:8443"
 }
