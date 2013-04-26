@@ -27,6 +27,30 @@ void init3(const T &a, const T &b) {
   _Cilk_for (T i = a ; i < b; ++i);  // expected-error {{loop control variable must have an integral, pointer, or class type in '_Cilk_for'}}
 }
 
+template<typename T>
+struct MyIterator {
+  MyIterator();
+  MyIterator(T);
+  MyIterator& operator++();
+  MyIterator& operator+=(T);
+  bool operator!=(MyIterator<T>);
+  operator int();
+};
+
+template<typename T>
+struct MyClass {
+  typedef MyIterator<T> iterator;
+
+  iterator begin();
+  iterator end();
+};
+
+void init3() {
+  MyClass<float> m;
+  _Cilk_for(MyClass<float>::iterator i = m.begin(); i != m.end(); ++i); // OK
+  _Cilk_for(decltype(m)::iterator i = m.begin(); i != m.end(); ++i);    // OK
+}
+
 void test_init() {
   init1<char>();   // OK
   init1<short>();  // OK
@@ -50,11 +74,13 @@ void cond1(T t) {
 template <typename T>
 void cond2() {
   _Cilk_for (int i = 0; i < sizeof(T); ++i);
+  _Cilk_for (int i = 0; i < sizeof(sizeof(T)); ++i);
 }
 
-template <typename T>
-void cond3() {
-  _Cilk_for (int i = 0; i < sizeof(sizeof(T)); ++i);
+template <typename... T>
+void cond3(T... val) {
+  _Cilk_for (int i = 0; i < sizeof...(T); ++i);
+  _Cilk_for (int i = 0; i < sizeof(sizeof...(T)); ++i);
 }
 
 void test_cond() {
@@ -62,8 +88,8 @@ void test_cond() {
   cond1<void *>(nullptr); // expected-note {{in instantiation of function template specialization 'cond1<void *>' requested here}}
   cond2<int>();           // OK
   cond2<void *>();        // OK
-  cond3<int>();           // OK
-  cond3<void *>();        // OK
+  cond3(1, 2, 3, 4, 5);   // OK
+  cond3<int, char*>(1, nullptr); // OK
 }
 
 template <typename T>
