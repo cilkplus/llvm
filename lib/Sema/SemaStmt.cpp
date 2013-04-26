@@ -4153,17 +4153,21 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
       return StmtError();
     }
 
-    // The span may require cleanups in two cases:
-    // a) building the binary operator- requires a cleanup
-    // b) the Limit expression contains a temporary with a destructor
-    //
-    // The case (a) is handled above in BuildBinOp, but (b) must be checked
-    // explicitly, since Limit was built in a different evaluation context.
-    ExprNeedsCleanups |= Limit->hasNonTrivialCall(Context);
-
     assert(Span.get() && "missing span for cilk for loop count");
     LoopCount = CalculateCilkForLoopCount(CilkForLoc, Span.get(), Increment,
                                           StrideExpr, CondDirection, Opcode);
+
+    // The loop count calculation may require cleanups in three cases:
+    // a) building the binary operator- requires a cleanup
+    // b) the Limit expression contains a temporary with a destructor
+    // c) the Stride expression contains a temporary with a destructor
+    //
+    // The case (a) is handled above in BuildBinOp, but (b,c) must be checked
+    // explicitly, since Limit and Stride were built in a different evaluation
+    // context.
+    ExprNeedsCleanups |= Limit->hasNonTrivialCall(Context);
+    ExprNeedsCleanups |= StrideExpr->hasNonTrivialCall(Context);
+
     LoopCount = MakeFullExpr(LoopCount.get()).release();
   }
 

@@ -129,9 +129,9 @@ void test_cilk_for_loop_count() {
   // CHECK1: sdiv i32
   //
   // CHECK1: landingpad
+  // CHECK1: landingpad
   // CHECK1: call void @{{.*}}IntD1Ev
   //
-  // CHECK1: call void @{{.*}}IntD1Ev
   // CHECK1: call void @{{.*}}IntD1Ev
 
   anchor(4);
