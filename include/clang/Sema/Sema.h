@@ -2839,6 +2839,10 @@ public:
 
   void ActOnCilkForStmtError(bool IsInstantiation = false);
 
+  ExprResult CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
+                                       Expr *Increment, Expr *StrideExpr,
+                                       int Dir, BinaryOperatorKind Opcode);
+
   StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
                              bool IsVolatile, unsigned NumOutputs,
                              unsigned NumInputs, IdentifierInfo **Names,

@@ -3882,6 +3882,8 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
   Increment = Increment->IgnoreParens();
   if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(Increment))
     Increment = E->getSubExpr();
+  if (CXXBindTemporaryExpr *E = dyn_cast<CXXBindTemporaryExpr>(Increment))
+    Increment = E->getSubExpr();
 
   // Simple increment or decrement -- always OK
   if (UnaryOperator *U = dyn_cast<UnaryOperator>(Increment)) {
@@ -3977,6 +3979,87 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
   return false;
 }
 
+ExprResult
+Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
+                                Expr *Increment, Expr *StrideExpr, int Dir,
+                                BinaryOperatorKind Opcode) {
+  // Generate the loop count expression according to the following:
+  // ===========================================================================
+  // |     Condition syntax             |       Loop count                     |
+  // ===========================================================================
+  // | if var < limit or limit > var    | (span+(stride-1))/stride             |
+  // ---------------------------------------------------------------------------
+  // | if var > limit or limit < var    | (span+(stride-1))/-stride            |
+  // ---------------------------------------------------------------------------
+  // | if var <= limit or limit >= var  | ((span+1)+(stride-1))/stride         |
+  // ---------------------------------------------------------------------------
+  // | if var >= limit or limit <= var  | ((span+1)+(stride-1))/-stride        |
+  // ---------------------------------------------------------------------------
+  // | if var != limit or limit != var  | if stride is positive,               |
+  // |                                  |            span/stride               |
+  // |                                  | otherwise, span/-stride              |
+  // |                                  | We don't need "+(stride-1)" for the  |
+  // |                                  | span in this case since the incr/decr|
+  // |                                  | operator should add up to the        |
+  // |                                  | limit exactly for a valid loop.      |
+  // ---------------------------------------------------------------------------
+  // Build "-stride"
+  Expr *NegativeStride = BuildUnaryOp(getCurScope(), Increment->getExprLoc(),
+                                      UO_Minus, StrideExpr).get();
+  // Build "stride-1"
+  Expr *StrideMinusOne =
+    BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub,
+               (Dir == 1) ? StrideExpr : NegativeStride,
+               ActOnIntegerConstant(CilkForLoc, 1).get()).get();
+
+  ExprResult LoopCount;
+  if (Opcode == BO_NE) {
+    // Build "stride<0"
+    Expr *StrideLessThanZero =
+      BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
+                 ActOnIntegerConstant(CilkForLoc, 0).get()).get();
+    // Build "(stride<0)?-stride:stride"
+    ExprResult StrideCondExpr = ActOnConditionalOp(
+                                                   CilkForLoc, CilkForLoc, StrideLessThanZero, NegativeStride, StrideExpr);
+
+    // Build "-span"
+    Expr *NegativeSpan =
+      BuildUnaryOp(getCurScope(), CilkForLoc, UO_Minus, Span).get();
+
+    // Updating span to be "(stride<0)?-span:span"
+    Span = ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
+                              NegativeSpan, Span).get();
+
+    // Build "span/(stride<0)?-stride:stride"
+    LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span,
+                           StrideCondExpr.get());
+  } else {
+    // Updating span to be "span+(stride-1)"
+    Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span,
+                      StrideMinusOne).get();
+    if (Opcode == BO_LE || Opcode == BO_GE)
+      // Updating span to be "span+1"
+      Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span,
+                                ActOnIntegerConstant(CilkForLoc, 1).get()).get();
+
+    // Build "span/stride" if Dir==1, otherwise "span/-stride"
+    LoopCount =
+      BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span,
+                 (Dir == 1) ? StrideExpr : NegativeStride);
+  }
+
+  QualType LoopCountExprType = LoopCount.get()->getType();
+  QualType LoopCountType = Context.UnsignedLongLongTy;
+  // Loop count should be either u32 or u64 in Cilk Plus.
+  if (Context.getTypeSize(LoopCountExprType) > 64) {
+    // TODO: Emit warning about truncation to u64.
+  } else if (Context.getTypeSize(LoopCountExprType) <= 32) {
+    LoopCountType = Context.UnsignedIntTy;
+  }
+  // Implicitly casting LoopCount to u32/u64.
+  return ImpCastExprToType(LoopCount.get(), LoopCountType, CK_IntegralCast);
+}
+
 StmtResult
 Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                        Stmt *First, FullExprArg Second, FullExprArg Third,
@@ -4032,128 +4115,71 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     }
   }
 
-  ExprResult Span;
-  if (!CurContext->isDependentContext()) {
-    // Build end - begin
-    Expr *Begin = BuildDeclRefExpr(ControlVar,
-        ControlVar->getType().getNonReferenceType(),
-        VK_LValue,
-        ControlVar->getLocation()).release();
-    Expr *End = Limit;
-    if (CondDirection < 0)
-      std::swap(Begin, End);
+  ExprResult LoopCount;
+  {
+    // Push an evaluation context in case span needs cleanups.
+    EnterExpressionEvaluationContext EvalContext(*this, PotentiallyEvaluated);
 
-    Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
+    ExprResult Span;
+    if (!CurContext->isDependentContext()) {
+      // Build end - begin
+      Expr *Begin = BuildDeclRefExpr(ControlVar,
+                                     ControlVar->getType().getNonReferenceType(),
+                                     VK_LValue,
+                                     ControlVar->getLocation()).release();
+      Expr *End = Limit;
+      if (CondDirection < 0)
+        std::swap(Begin, End);
 
-    if (Span.isInvalid()) {
-      // error getting operator-()
-      Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
-      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-        << Begin->getSourceRange();
-      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-        << End->getSourceRange();
-      return StmtError();
+      Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
+
+      if (Span.isInvalid()) {
+        // error getting operator-()
+        Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
+        Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+          << Begin->getSourceRange();
+        Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+          << End->getSourceRange();
+        return StmtError();
+      }
+
+      if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
+        // non-integral type
+        Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
+          << Span.get()->getType();
+        Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+          << Begin->getSourceRange();
+        Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+          << End->getSourceRange();
+        return StmtError();
+      }
     }
 
-    if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
-      // non-integral type
-      Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
-        << Span.get()->getType();
-      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-        << Begin->getSourceRange();
-      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-        << End->getSourceRange();
-      return StmtError();
+    // The span may require cleanups in two cases:
+    // a) building the binary operator- requires a cleanup
+    // b) the Limit expression contains a temporary with a destructor
+    //
+    // The case (a) is handled above in BuildBinOp, but (b) must be checked
+    // explicitly, since Limit was built in a different evaluation context.
+    ExprNeedsCleanups |= Limit->hasNonTrivialCall(Context);
+
+    DiagnoseUnusedExprResult(First);
+    DiagnoseUnusedExprResult(Increment);
+    DiagnoseUnusedExprResult(Body);
+    if (isa<NullStmt>(Body))
+      getCurCompoundScopeSkipCilkFor().setHasEmptyLoopBodies();
+
+    if (!CurContext->isDependentContext()) {
+      assert(Span.get() && "missing span for cilk for loop count");
+      LoopCount = CalculateCilkForLoopCount(CilkForLoc, Span.get(), Increment,
+                                            StrideExpr, CondDirection, Opcode);
+      LoopCount = MakeFullExpr(LoopCount.get()).release();
     }
-  }
-
-  DiagnoseUnusedExprResult(First);
-  DiagnoseUnusedExprResult(Increment);
-  DiagnoseUnusedExprResult(Body);
-  if (isa<NullStmt>(Body))
-    getCurCompoundScopeSkipCilkFor().setHasEmptyLoopBodies();
-
-  // Generate the loop count expression according to the following:
-  // ===========================================================================
-  // |     Condition syntax             |       Loop count                     |
-  // ===========================================================================
-  // | if var < limit or limit > var    | (span+(stride-1))/stride             |
-  // ---------------------------------------------------------------------------
-  // | if var > limit or limit < var    | (span+(stride-1))/-stride            |
-  // ---------------------------------------------------------------------------
-  // | if var <= limit or limit >= var  | ((span+1)+(stride-1))/stride         |
-  // ---------------------------------------------------------------------------
-  // | if var >= limit or limit <= var  | ((span+1)+(stride-1))/-stride        |
-  // ---------------------------------------------------------------------------
-  // | if var != limit or limit != var  | if stride is positive,               |
-  // |                                  |            span/stride               |
-  // |                                  | otherwise, span/-stride              |
-  // |                                  | We don't need "+(stride-1)" for the  |
-  // |                                  | span in this case since the incr/decr|
-  // |                                  | operator should add up to the        |
-  // |                                  | limit exactly for a valid loop.      |
-  // ---------------------------------------------------------------------------
-  Expr *LoopCount = 0;
-  if (!CurContext->isDependentContext()) {
-    // Build "-stride"
-    Expr *NegativeStride = BuildUnaryOp(getCurScope(), Increment->getExprLoc(),
-                                        UO_Minus, StrideExpr).get();
-    // Build "stride-1"
-    Expr *StrideMinusOne =
-        BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub,
-                   (CondDirection == 1) ? StrideExpr : NegativeStride,
-                   ActOnIntegerConstant(CilkForLoc, 1).get()).get();
-
-    if (Opcode == BO_NE) {
-      // Build "stride<0"
-      Expr *StrideLessThanZero =
-          BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
-                     ActOnIntegerConstant(CilkForLoc, 0).get()).get();
-      // Build "(stride<0)?-stride:stride"
-      ExprResult StrideCondExpr = ActOnConditionalOp(
-          CilkForLoc, CilkForLoc, StrideLessThanZero, NegativeStride, StrideExpr);
-
-      // Build "-span"
-      Expr *NegativeSpan =
-          BuildUnaryOp(getCurScope(), CilkForLoc, UO_Minus, Span.get()).get();
-
-      // Updating span to be "(stride<0)?-span:span"
-      Span = ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
-                                NegativeSpan, Span.get());
-
-      // Build "span/(stride<0)?-stride:stride"
-      LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
-                             StrideCondExpr.get()).get();
-    } else {
-      // Updating span to be "span+(stride-1)"
-      Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span.get(),
-                        StrideMinusOne);
-      if (Opcode == BO_LE || Opcode == BO_GE)
-        // Updating span to be "span+1"
-        Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span.get(),
-                                  ActOnIntegerConstant(CilkForLoc, 1).get());
-
-      // Build "span/stride" if CondDirection==1, otherwise "span/-stride"
-      LoopCount =
-          BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span.get(),
-                     (CondDirection == 1) ? StrideExpr : NegativeStride).get();
-    }
-
-    QualType LoopCountExprType = LoopCount->getType();
-    QualType LoopCountType = Context.UnsignedLongLongTy;
-    // Loop count should be either u32 or u64 in Cilk Plus.
-    if (Context.getTypeSize(LoopCountExprType) > 64) {
-      // TODO: Emit warning about truncation to u64.
-    } else if (Context.getTypeSize(LoopCountExprType) <= 32) {
-      LoopCountType = Context.UnsignedIntTy;
-    }
-    // Implicitly casting LoopCount to u32/u64.
-    LoopCount =
-        ImpCastExprToType(LoopCount, LoopCountType, CK_IntegralCast).get();
   }
 
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
-                          Third.get(), RParenLoc, Body, LoopCount, StrideExpr);
+                          Third.get(), RParenLoc, Body, LoopCount.get(),
+                          StrideExpr);
 }
 
 StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,

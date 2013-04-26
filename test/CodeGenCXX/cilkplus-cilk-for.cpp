@@ -31,6 +31,7 @@ struct Int {
   Int(int);
   ~Int();
   operator int ();
+  Int operator++(int);
 };
 
 void test_init() {
@@ -47,6 +48,127 @@ void test_init() {
   //
   // CHECK1: landingpad
   // CHECK1: call void @{{.*}}IntD1Ev
+}
+
+struct Long {
+  Long();
+  Long(const Long&);
+  ~Long();
+};
+bool operator<(int, Long) noexcept;
+int operator-(Long, int) noexcept;
+
+void test_cilk_for_loop_count() {
+  // CHECK1: define void @{{.*}}test_cilk_for_loop_count
+
+  extern void anchor(int) throw();
+
+  anchor(1);
+  // CHECK1: call void @{{.*}}anchori(i32 1)
+
+  // Loop count should contain EWC from Int(10)
+  _Cilk_for (int i = 0; i < Int(10); i++) { }
+  // Condition:
+  // CHECK1: call void @{{.*}}IntC1Ei
+  // CHECK1: invoke i32 @{{.*}}IntcviEv
+  // CHECK1: icmp slt
+  // CHECK1: call void @{{.*}}IntD1Ev
+  //
+  // Loop count:
+  // CHECK1: call void @{{.*}}IntC1Ei
+  // CHECK1: invoke i32 @{{.*}}IntcviEv
+  // CHECK1: sub nsw i32
+  // CHECK1: add nsw i32
+  // CHECK1: sdiv i32
+  // CHECK1: call void @{{.*}}IntD1Ev
+  //
+  // CHECK1: landingpad
+  // CHECK1: call void @{{.*}}IntD1Ev
+  // CHECK1: landingpad
+  // CHECK1: call void @{{.*}}IntD1Ev
+
+  anchor(2);
+  // CHECK1: call void @{{.*}}anchori(i32 2)
+
+  // Same as previous, but with the temporary in a subexpr
+  _Cilk_for (int i = 0; i < 9 + Int(1); i++) { }
+  // Condition:
+  // CHECK1: call void @{{.*}}IntC1Ei
+  // CHECK1: invoke i32 @{{.*}}IntcviEv
+  // CHECK1: icmp slt
+  // CHECK1: call void @{{.*}}IntD1Ev
+  //
+  // Loop count:
+  // CHECK1: call void @{{.*}}IntC1Ei
+  // CHECK1: invoke i32 @{{.*}}IntcviEv
+  // CHECK1: sub nsw i32
+  // CHECK1: add nsw i32
+  // CHECK1: sdiv i32
+  // CHECK1: call void @{{.*}}IntD1Ev
+  //
+  // CHECK1: landingpad
+  // CHECK1: call void @{{.*}}IntD1Ev
+  // CHECK1: landingpad
+  // CHECK1: call void @{{.*}}IntD1Ev
+
+  anchor(3);
+  // CHECK1: call void @{{.*}}anchori(i32 3)
+
+  // Loop count should contain EWC from the increment
+  _Cilk_for (int i = 0; i < 10000; i += 1 + Int(2012)) { }
+  // Loop count:
+  // CHECK1: sub nsw i32
+  // CHECK1: call void @{{.*}}IntC1Ei
+  // CHECK1: invoke i32 @{{.*}}IntcviEv
+  // CHECK1: add nsw i32
+  // CHECK1: sub nsw i32
+  // CHECK1: add nsw i32
+  // CHECK1: invoke void @{{.*}}IntC1Ei
+  // CHECK1: invoke i32 @{{.*}}IntcviEv
+  // CHECK1: add nsw i32
+  // CHECK1: sdiv i32
+  //
+  // CHECK1: landingpad
+  // CHECK1: call void @{{.*}}IntD1Ev
+  //
+  // CHECK1: call void @{{.*}}IntD1Ev
+  // CHECK1: call void @{{.*}}IntD1Ev
+
+  anchor(4);
+  // CHECK1: call void @{{.*}}anchori(i32 4)
+
+  // Loop count should contain EWC from copying Long in operator<
+  _Cilk_for (int i = 0; i < Long(); i++) { }
+  // Condition:
+  // CHECK1: call void @{{.*}}LongC1Ev
+  // CHECK1-NEXT: call {{.*}}i1 @{{.*}}lti4Long
+  // CHECK1-NEXT: call void @{{.*}}LongD1Ev
+  //
+  // Loop count:
+  // CHECK1: call void @{{.*}}LongC1Ev
+  // CHECK1: call i32 @{{.*}}mi4Longi
+  // CHECK1: add nsw i32
+  // CHECK1: sdiv i32
+  // CHECK1: call void @{{.*}}LongD1Ev
+
+  anchor(5);
+  // CHECK1: call void @{{.*}}anchori(i32 5)
+
+  Long l;
+  // Loop count should contain EWC from building i < Long()
+  _Cilk_for (int i = 0; i < l; i++) { }
+  // Condition:
+  // CHECK1: call void @{{.*}}LongC1Ev
+  // CHECK1: invoke void @{{.*}}LongC1ERKS
+  // CHECK1: call {{.*}}i1 @{{.*}}lti4Long
+  // CHECK1-NEXT: call void @{{.*}}LongD1Ev
+  //
+  // Loop count:
+  // CHECK1: invoke void @{{.*}}LongC1ERKS
+  // CHECK1: call i32 @{{.*}}mi4Longi
+  // CHECK1: add nsw i32
+  // CHECK1: sdiv i32
+  // CHECK1: call void @{{.*}}LongD1Ev
 }
 
 void test_increment() {
