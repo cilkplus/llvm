@@ -4019,8 +4019,9 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
       BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
                  ActOnIntegerConstant(CilkForLoc, 0).get()).get();
     // Build "(stride<0)?-stride:stride"
-    ExprResult StrideCondExpr = ActOnConditionalOp(
-                                                   CilkForLoc, CilkForLoc, StrideLessThanZero, NegativeStride, StrideExpr);
+    ExprResult StrideCondExpr = ActOnConditionalOp(CilkForLoc, CilkForLoc,
+                                                   StrideLessThanZero,
+                                                   NegativeStride, StrideExpr);
 
     // Build "-span"
     Expr *NegativeSpan =
@@ -4116,43 +4117,40 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   }
 
   ExprResult LoopCount;
-  {
+  if (!CurContext->isDependentContext()) {
     // Push an evaluation context in case span needs cleanups.
     EnterExpressionEvaluationContext EvalContext(*this, PotentiallyEvaluated);
 
-    ExprResult Span;
-    if (!CurContext->isDependentContext()) {
-      // Build end - begin
-      Expr *Begin = BuildDeclRefExpr(ControlVar,
-                                     ControlVar->getType().getNonReferenceType(),
-                                     VK_LValue,
-                                     ControlVar->getLocation()).release();
-      Expr *End = Limit;
-      if (CondDirection < 0)
-        std::swap(Begin, End);
+    // Build end - begin
+    Expr *Begin = BuildDeclRefExpr(ControlVar,
+                                   ControlVar->getType().getNonReferenceType(),
+                                   VK_LValue,
+                                   ControlVar->getLocation()).release();
+    Expr *End = Limit;
+    if (CondDirection < 0)
+      std::swap(Begin, End);
 
-      Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
+    ExprResult Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
 
-      if (Span.isInvalid()) {
-        // error getting operator-()
-        Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
-        Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-          << Begin->getSourceRange();
-        Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-          << End->getSourceRange();
-        return StmtError();
-      }
+    if (Span.isInvalid()) {
+      // error getting operator-()
+      Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
+      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+        << Begin->getSourceRange();
+      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+        << End->getSourceRange();
+      return StmtError();
+    }
 
-      if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
-        // non-integral type
-        Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
-          << Span.get()->getType();
-        Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-          << Begin->getSourceRange();
-        Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-          << End->getSourceRange();
-        return StmtError();
-      }
+    if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
+      // non-integral type
+      Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
+        << Span.get()->getType();
+      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+        << Begin->getSourceRange();
+      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+        << End->getSourceRange();
+      return StmtError();
     }
 
     // The span may require cleanups in two cases:
@@ -4163,19 +4161,17 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     // explicitly, since Limit was built in a different evaluation context.
     ExprNeedsCleanups |= Limit->hasNonTrivialCall(Context);
 
-    DiagnoseUnusedExprResult(First);
-    DiagnoseUnusedExprResult(Increment);
-    DiagnoseUnusedExprResult(Body);
-    if (isa<NullStmt>(Body))
-      getCurCompoundScopeSkipCilkFor().setHasEmptyLoopBodies();
-
-    if (!CurContext->isDependentContext()) {
-      assert(Span.get() && "missing span for cilk for loop count");
-      LoopCount = CalculateCilkForLoopCount(CilkForLoc, Span.get(), Increment,
-                                            StrideExpr, CondDirection, Opcode);
-      LoopCount = MakeFullExpr(LoopCount.get()).release();
-    }
+    assert(Span.get() && "missing span for cilk for loop count");
+    LoopCount = CalculateCilkForLoopCount(CilkForLoc, Span.get(), Increment,
+                                          StrideExpr, CondDirection, Opcode);
+    LoopCount = MakeFullExpr(LoopCount.get()).release();
   }
+
+  DiagnoseUnusedExprResult(First);
+  DiagnoseUnusedExprResult(Increment);
+  DiagnoseUnusedExprResult(Body);
+  if (isa<NullStmt>(Body))
+    getCurCompoundScopeSkipCilkFor().setHasEmptyLoopBodies();
 
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
                           Third.get(), RParenLoc, Body, LoopCount.get(),
