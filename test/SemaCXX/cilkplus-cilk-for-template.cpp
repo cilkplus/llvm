@@ -131,3 +131,44 @@ void test_body(int *idata, float *fdata) {
   body(idata); // OK
   body(fdata); // OK
 }
+
+void bar(int); // expected-note {{candidate function not viable: cannot convert argument of incomplete type 'void *' to 'int'}}
+
+template <typename T, typename A, typename B, typename C, typename D>
+void for_errors(A a, B b, C c, D d) {
+  _Cilk_for(T i = a; i < 10; i++); // expected-error {{cannot initialize a variable of type 'int' with an lvalue of type 'void *}}
+  _Cilk_for(T i = 0; i < b; i++); // expected-error {{comparison between pointer and integer ('int' and 'void *')}}
+  _Cilk_for(T i = 0; i < 10; i += c); // expected-error {{arithmetic on a pointer to void}}
+  _Cilk_for(T i = 0; i < 10; i++) { bar(d); } // expected-error {{no matching function for call to 'bar'}}
+  _Cilk_for(int i = 0; i < 10; i++); // OK
+}
+
+void test_for_errors() {
+  for_errors<int, void*, int, int, int>(nullptr, 10, 1, 0); // expected-note {{in instantiation of function template specialization 'for_errors<int, void *, int, int, int>' requested here}}
+  for_errors<int, int, void*, int, int>(0, nullptr, 1, 0); // expected-note {{in instantiation of function template specialization 'for_errors<int, int, void *, int, int>' requested here}}
+  for_errors<int, int, int, void*, int>(0, 10, nullptr, 0); // expected-note {{in instantiation of function template specialization 'for_errors<int, int, int, void *, int>' requested here}}
+  for_errors<int, int, int, int, void*>(0, 10, 1, nullptr); // expected-note {{in instantiation of function template specialization 'for_errors<int, int, int, int, void *>' requested here}}
+}
+
+namespace NS1 {
+  struct Int {
+    Int();
+    Int(const Int&);
+  };
+  void operator++(const Int&, int);
+  bool operator<(const Int&, int);
+  int operator-(int, const Int&);
+  void operator+=(const Int&, int);
+}
+
+namespace NS2 {
+  template <typename T>
+  void foo() {
+    _Cilk_for (T i; i < 10; i++);
+  }
+
+  void test_foo() {
+    // ADL works.
+    foo<NS1::Int>();
+  }
+}

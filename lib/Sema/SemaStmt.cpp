@@ -4373,12 +4373,11 @@ void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
   PushExpressionEvaluationContext(PotentiallyEvaluated);
 }
 
-void Sema::ActOnCilkForStmtError(bool IsInstantiation) {
+void Sema::ActOnCilkForStmtError() {
   DiscardCleanupsInEvaluationContext();
   PopExpressionEvaluationContext();
 
-  if (!IsInstantiation)
-    PopDeclContext();
+  PopDeclContext();
 
   CilkForScopeInfo *FSI = getCurCilkFor();
   RecordDecl *Record = FSI->TheRecordDecl;

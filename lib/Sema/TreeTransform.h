@@ -9471,20 +9471,20 @@ TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
   // Transform loop increment.
   ExprResult Inc = getDerived().TransformExpr(S->getInc());
   if (Inc.isInvalid()) {
-    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    getSema().ActOnCilkForStmtError();
     return StmtError();
   }
 
   Sema::FullExprArg FullInc(getSema().MakeFullExpr(Inc.get()));
   if (!FullInc.get()) {
-    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    getSema().ActOnCilkForStmtError();
     return StmtError();
   }
 
   // Transform loop body.
   StmtResult Body = getDerived().TransformStmt(S->getBody());
   if (Body.isInvalid()) {
-    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    getSema().ActOnCilkForStmtError();
     return StmtError();
   }
 
@@ -9493,7 +9493,7 @@ TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
                                                  FullInc,  S->getRParenLoc(),
                                                  Body.take());
   if (Result.isInvalid()) {
-    getSema().ActOnCilkForStmtError(/*IsInstantiation*/true);
+    getSema().ActOnCilkForStmtError();
     return StmtError();
   }
 

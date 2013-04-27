@@ -2837,7 +2837,7 @@ public:
   void ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
                                StmtResult FirstPart);
 
-  void ActOnCilkForStmtError(bool IsInstantiation = false);
+  void ActOnCilkForStmtError();
 
   ExprResult CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
                                        Expr *Increment, Expr *StrideExpr,
