@@ -1928,7 +1928,10 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
 
   EmitBlock(ThenBlock);
   {
-    llvm::Value *LoopCount = EmitAnyExpr(S.getLoopCount()).getScalarVal();
+    RunCleanupsScope Scope(*this);
+
+    const Expr *LoopCountExpr = S.getLoopCount();
+    llvm::Value *LoopCount = EmitAnyExpr(LoopCountExpr).getScalarVal();
 
     // TODO: calculate grainsize
 
@@ -1945,18 +1948,17 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
     llvm::FunctionType *FTy = 0;
     {
       llvm::Module &M = CGM.getModule();
-      // TODO: check loop count type
-      bool IsCount32Bit =
-        getContext().getTypeSize(S.getInc()->getType()) <= 32;
-      if (IsCount32Bit) {
+      uint64_t SizeInBits = getContext().getTypeSize(LoopCountExpr->getType());
+      if (SizeInBits <= 32u) {
         FTy = llvm::TypeBuilder<void(void(void *, uint32_t, uint32_t),
                                      void *, uint32_t, int), false>::get(Ctx);
         CilkForABI = M.getOrInsertFunction("__cilkrts_cilk_for_32", FTy);
-      } else {
+      } else if (SizeInBits <= 64u) {
         FTy = llvm::TypeBuilder<void(void(void *, uint64_t, uint64_t),
                                      void *, uint64_t, int), false>::get(Ctx);
         CilkForABI = M.getOrInsertFunction("__cilkrts_cilk_for_64", FTy);
-      }
+      } else
+        llvm_unreachable("unexpected loop count type size");
     }
 
     // Call __cilkrts_cilk_for_*(helper, captures, count, grainsize);

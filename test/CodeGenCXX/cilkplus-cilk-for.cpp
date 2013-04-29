@@ -4,6 +4,7 @@
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK3 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK4 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK5 %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK6 %s
 //
 struct Bool {
   ~Bool();
@@ -280,3 +281,27 @@ void test_simple_template() {
   // CHECK5: call void @__cilkrts_cilk_for_64
   // CHECK5: ret void
 }
+
+namespace ns_void_increment {
+
+struct A {
+  A();
+  operator int();
+};
+
+struct Int {
+  Int(int);
+  bool operator<(int);
+};
+
+void operator+=(Int&, int);
+int operator-(int, Int);
+
+void test_void_increment() {
+  _Cilk_for (Int i = 0; i < 10; i += A());
+  // CHECK6: define void @_ZN17ns_void_increment19test_void_incrementEv
+  // CHECK6: call void @__cilkrts_cilk_for_32
+  // CHECK6: ret void
+}
+
+} // namespace
