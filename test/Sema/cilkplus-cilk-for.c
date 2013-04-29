@@ -395,3 +395,9 @@ l3:
   goto l2; // expected-error {{use of undeclared label 'l2'}}
   goto l3;
 }
+
+void test_wide_integers() {
+  _Cilk_for (__int128 i = 0; i < 10; ++i); // expected-warning {{implicit loop count downcast from '__int128' to 'unsigned long long' in '_Cilk_for'}}
+  _Cilk_for (int i = 0; i < (__int128)10; ++i); // expected-warning {{implicit loop count downcast from '__int128' to 'unsigned long long' in '_Cilk_for'}}
+  _Cilk_for (int i = 0; i < 10; i += (__int128)1); // expected-warning {{implicit loop count downcast from '__int128' to 'unsigned long long' in '_Cilk_for'}}
+}

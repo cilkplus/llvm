@@ -4057,11 +4057,12 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
   QualType LoopCountExprType = LoopCount.get()->getType();
   QualType LoopCountType = Context.UnsignedLongLongTy;
   // Loop count should be either u32 or u64 in Cilk Plus.
-  if (Context.getTypeSize(LoopCountExprType) > 64) {
-    // TODO: Emit warning about truncation to u64.
-  } else if (Context.getTypeSize(LoopCountExprType) <= 32) {
+  if (Context.getTypeSize(LoopCountExprType) > 64)
+    Diag(CilkForLoc, diag::warn_cilk_for_loop_count_downcast)
+      << LoopCountExprType << LoopCountType;
+  else if (Context.getTypeSize(LoopCountExprType) <= 32)
     LoopCountType = Context.UnsignedIntTy;
-  }
+
   // Implicitly casting LoopCount to u32/u64.
   return ImpCastExprToType(LoopCount.get(), LoopCountType, CK_IntegralCast);
 }

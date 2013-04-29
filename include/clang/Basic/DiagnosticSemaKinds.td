@@ -6413,6 +6413,9 @@ def err_cilk_for_cannot_return: Error<
   "cannot return from within a '_Cilk_for' loop">;
 def err_cilk_for_cannot_break: Error<
   "cannot break from a '_Cilk_for' loop">;
+def warn_cilk_for_loop_count_downcast: Warning<
+  "implicit loop count downcast from %0 to %1 in '_Cilk_for'">,
+  InGroup<Conversion>, DefaultWarn;
 
 } // end of sema category
 
