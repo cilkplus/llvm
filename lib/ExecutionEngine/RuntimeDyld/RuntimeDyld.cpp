@@ -96,7 +96,8 @@ ObjectImage *RuntimeDyldImpl::loadObject(ObjectBuffer *InputBuffer) {
     bool isCommon = flags & SymbolRef::SF_Common;
     if (isCommon) {
       // Add the common symbols to a list.  We'll allocate them all below.
-      uint64_t Align = getCommonSymbolAlignment(*i);
+      uint32_t Align;
+      Check(i->getAlignment(Align));
       uint64_t Size = 0;
       Check(i->getSize(Size));
       CommonSize += Size + Align;
@@ -154,18 +155,8 @@ ObjectImage *RuntimeDyldImpl::loadObject(ObjectBuffer *InputBuffer) {
         isFirstRelocation = false;
       }
 
-      ObjRelocationInfo RI;
-      RI.SectionID = SectionID;
-      Check(i->getAdditionalInfo(RI.AdditionalInfo));
-      Check(i->getOffset(RI.Offset));
-      Check(i->getSymbol(RI.Symbol));
-      Check(i->getType(RI.Type));
-
-      DEBUG(dbgs() << "\t\tAddend: " << RI.AdditionalInfo
-                   << " Offset: " << format("%p", (uintptr_t)RI.Offset)
-                   << " Type: " << (uint32_t)(RI.Type & 0xffffffffL)
-                   << "\n");
-      processRelocationRef(RI, *obj, LocalSections, LocalSymbols, Stubs);
+      processRelocationRef(SectionID, *i, *obj, LocalSections, LocalSymbols,
+			   Stubs);
     }
   }
 
@@ -401,26 +392,14 @@ void RuntimeDyldImpl::reassignSectionAddress(unsigned SectionID,
   Sections[SectionID].LoadAddress = Addr;
 }
 
-void RuntimeDyldImpl::resolveRelocationEntry(const RelocationEntry &RE,
-                                             uint64_t Value) {
-  // Ignore relocations for sections that were not loaded
-  if (Sections[RE.SectionID].Address != 0) {
-    DEBUG(dbgs() << "\tSectionID: " << RE.SectionID
-          << " + " << RE.Offset << " ("
-          << format("%p", Sections[RE.SectionID].Address + RE.Offset) << ")"
-          << " RelType: " << RE.RelType
-          << " Addend: " << RE.Addend
-          << "\n");
-
-    resolveRelocation(Sections[RE.SectionID], RE.Offset,
-                      Value, RE.RelType, RE.Addend);
-  }
-}
-
 void RuntimeDyldImpl::resolveRelocationList(const RelocationList &Relocs,
                                             uint64_t Value) {
   for (unsigned i = 0, e = Relocs.size(); i != e; ++i) {
-    resolveRelocationEntry(Relocs[i], Value);
+    const RelocationEntry &RE = Relocs[i];
+    // Ignore relocations for sections that were not loaded
+    if (Sections[RE.SectionID].Address == 0)
+      continue;
+    resolveRelocation(RE, Value);
   }
 }
 

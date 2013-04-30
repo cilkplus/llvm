@@ -133,6 +133,10 @@ const DataLayout &AsmPrinter::getDataLayout() const {
   return *TM.getDataLayout();
 }
 
+StringRef AsmPrinter::getTargetTriple() const {
+  return TM.getTargetTriple();
+}
+
 /// getCurrentSection() - Return the current section we are emitting to.
 const MCSection *AsmPrinter::getCurrentSection() const {
   return OutStreamer.getCurrentSection().first;
@@ -813,7 +817,7 @@ void AsmPrinter::EmitDwarfRegOp(const MachineLocation &MLoc) const {
   // caller might be in the middle of an dwarf expression. We should
   // probably assert that Reg >= 0 once debug info generation is more mature.
 
-  if (int Offset =  MLoc.getOffset()) {
+  if (MLoc.isIndirect()) {
     if (Reg < 32) {
       OutStreamer.AddComment(
         dwarf::OperationEncodingString(dwarf::DW_OP_breg0 + Reg));
@@ -824,7 +828,7 @@ void AsmPrinter::EmitDwarfRegOp(const MachineLocation &MLoc) const {
       OutStreamer.AddComment(Twine(Reg));
       EmitULEB128(Reg);
     }
-    EmitSLEB128(Offset);
+    EmitSLEB128(MLoc.getOffset());
   } else {
     if (Reg < 32) {
       OutStreamer.AddComment(
@@ -1250,6 +1254,11 @@ bool AsmPrinter::EmitSpecialLLVMGlobal(const GlobalVariable *GV) {
     return true;
   }
 
+  if (GV->getName() == "llvm.tls_init_funcs") {
+    EmitTLSInitFuncs(cast<ConstantArray>(GV->getInitializer()));
+    return true;
+  }
+
   return false;
 }
 
@@ -1314,6 +1323,16 @@ void AsmPrinter::EmitXXStructorList(const Constant *List, bool isCtor) {
       EmitAlignment(Align);
     EmitXXStructor(Structors[i].second);
   }
+}
+
+/// EmitTLSInitFuncs - Emit the TLS initialization functions.
+void AsmPrinter::EmitTLSInitFuncs(const ConstantArray *InitList) {
+  const DataLayout *TD = TM.getDataLayout();
+  OutStreamer.SwitchSection(getObjFileLowering().getTLSThreadInitSection());
+  EmitAlignment(Log2_32(TD->getPointerPrefAlignment()));
+  for (unsigned I = 0, E = InitList->getNumOperands(); I != E; ++I)
+    EmitGlobalConstant(
+      dyn_cast<Constant>(InitList->getOperand(I)->stripPointerCasts()));
 }
 
 //===--------------------------------------------------------------------===//

@@ -27,9 +27,11 @@
 #if HAVE_SYS_STAT_H
 #include <sys/stat.h>
 #endif
-#if HAVE_DLFCN_H && __GNUG__
-#include <dlfcn.h>
+#if HAVE_CXXABI_H
 #include <cxxabi.h>
+#endif
+#if HAVE_DLFCN_H
+#include <dlfcn.h>
 #endif
 #if HAVE_MACH_MACH_H
 #include <mach/mach.h>
@@ -290,9 +292,13 @@ void llvm::sys::PrintStackTrace(FILE *FD) {
             (int)(sizeof(void*) * 2) + 2, (unsigned long)StackTrace[i]);
 
     if (dlinfo.dli_sname != NULL) {
-      int res;
       fputc(' ', FD);
+#  if HAVE_CXXABI_H
+      int res;
       char* d = abi::__cxa_demangle(dlinfo.dli_sname, NULL, NULL, &res);
+#  else
+      char* d = NULL;
+#  endif
       if (d == NULL) fputs(dlinfo.dli_sname, FD);
       else           fputs(d, FD);
       free(d);

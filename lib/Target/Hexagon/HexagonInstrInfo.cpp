@@ -325,8 +325,6 @@ bool HexagonInstrInfo::analyzeCompare(const MachineInstr *MI,
     case Hexagon::CMPGTUrr:
     case Hexagon::CMPGTri:
     case Hexagon::CMPGTrr:
-    case Hexagon::CMPLTUrr:
-    case Hexagon::CMPLTrr:
       SrcReg = MI->getOperand(1).getReg();
       Mask = ~0;
       break;
@@ -366,8 +364,6 @@ bool HexagonInstrInfo::analyzeCompare(const MachineInstr *MI,
     case Hexagon::CMPhEQrr_xor_V4:
     case Hexagon::CMPhGTUrr_V4:
     case Hexagon::CMPhGTrr_shl_V4:
-    case Hexagon::CMPLTUrr:
-    case Hexagon::CMPLTrr:
       SrcReg2 = MI->getOperand(2).getReg();
       return true;
 
@@ -746,11 +742,6 @@ bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
     case Hexagon::STrib_abs_cdnPt_nv_V4:
     case Hexagon::STrib_abs_cNotPt_nv_V4:
     case Hexagon::STrib_abs_cdnNotPt_nv_V4:
-    case Hexagon::STrib_imm_abs_nv_V4:
-    case Hexagon::STrib_imm_abs_cPt_nv_V4:
-    case Hexagon::STrib_imm_abs_cdnPt_nv_V4:
-    case Hexagon::STrib_imm_abs_cNotPt_nv_V4:
-    case Hexagon::STrib_imm_abs_cdnNotPt_nv_V4:
 
     // Store Halfword
     case Hexagon::STrih_nv_V4:
@@ -784,11 +775,6 @@ bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
     case Hexagon::STrih_abs_cdnPt_nv_V4:
     case Hexagon::STrih_abs_cNotPt_nv_V4:
     case Hexagon::STrih_abs_cdnNotPt_nv_V4:
-    case Hexagon::STrih_imm_abs_nv_V4:
-    case Hexagon::STrih_imm_abs_cPt_nv_V4:
-    case Hexagon::STrih_imm_abs_cdnPt_nv_V4:
-    case Hexagon::STrih_imm_abs_cNotPt_nv_V4:
-    case Hexagon::STrih_imm_abs_cdnNotPt_nv_V4:
 
     // Store Word
     case Hexagon::STriw_nv_V4:
@@ -822,11 +808,6 @@ bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
     case Hexagon::STriw_abs_cdnPt_nv_V4:
     case Hexagon::STriw_abs_cNotPt_nv_V4:
     case Hexagon::STriw_abs_cdnNotPt_nv_V4:
-    case Hexagon::STriw_imm_abs_nv_V4:
-    case Hexagon::STriw_imm_abs_cPt_nv_V4:
-    case Hexagon::STriw_imm_abs_cdnPt_nv_V4:
-    case Hexagon::STriw_imm_abs_cNotPt_nv_V4:
-    case Hexagon::STriw_imm_abs_cdnNotPt_nv_V4:
       return true;
   }
 }
@@ -2129,14 +2110,10 @@ bool HexagonInstrInfo::isNewValueJumpCandidate(const MachineInstr *MI) const {
     default: return false;
     case Hexagon::CMPEQrr:
     case Hexagon::CMPEQri:
-    case Hexagon::CMPLTrr:
     case Hexagon::CMPGTrr:
     case Hexagon::CMPGTri:
-    case Hexagon::CMPLTUrr:
     case Hexagon::CMPGTUrr:
     case Hexagon::CMPGTUri:
-    case Hexagon::CMPGEri:
-    case Hexagon::CMPGEUri:
       return true;
   }
 }

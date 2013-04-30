@@ -21,16 +21,24 @@ using namespace llvm::object;
 
 namespace llvm {
 
+void RuntimeDyldMachO::resolveRelocation(const RelocationEntry &RE,
+                                         uint64_t Value) {
+  const SectionEntry &Section = Sections[RE.SectionID];
+  return resolveRelocation(Section, RE.Offset, Value, RE.RelType, RE.Addend,
+                           RE.IsPCRel, RE.Size);
+}
+
 void RuntimeDyldMachO::resolveRelocation(const SectionEntry &Section,
                                          uint64_t Offset,
                                          uint64_t Value,
                                          uint32_t Type,
-                                         int64_t Addend) {
+                                         int64_t Addend,
+                                         bool isPCRel,
+                                         unsigned LogSize) {
   uint8_t *LocalAddress = Section.Address + Offset;
   uint64_t FinalAddress = Section.LoadAddress + Offset;
-  bool isPCRel = (Type >> 24) & 1;
-  unsigned MachoType = (Type >> 28) & 0xf;
-  unsigned Size = 1 << ((Type >> 25) & 3);
+  unsigned MachoType = Type;
+  unsigned Size = 1 << LogSize;
 
   DEBUG(dbgs() << "resolveRelocation LocalAddress: " 
         << format("%p", LocalAddress)
@@ -205,60 +213,58 @@ bool RuntimeDyldMachO::resolveARMRelocation(uint8_t *LocalAddress,
   return false;
 }
 
-void RuntimeDyldMachO::processRelocationRef(const ObjRelocationInfo &Rel,
+void RuntimeDyldMachO::processRelocationRef(unsigned SectionID,
+                                            RelocationRef RelI,
                                             ObjectImage &Obj,
                                             ObjSectionToIDMap &ObjSectionToID,
                                             const SymbolTableMap &Symbols,
                                             StubMap &Stubs) {
+  const ObjectFile *OF = Obj.getObjectFile();
+  const MachOObjectFile *MachO = static_cast<const MachOObjectFile*>(OF);
+  macho::RelocationEntry RE = MachO->getRelocation(RelI.getRawDataRefImpl());
 
-  uint32_t RelType = (uint32_t) (Rel.Type & 0xffffffffL);
+  uint32_t RelType = MachO->getAnyRelocationType(RE);
   RelocationValueRef Value;
-  SectionEntry &Section = Sections[Rel.SectionID];
+  SectionEntry &Section = Sections[SectionID];
 
-  bool isExtern = (RelType >> 27) & 1;
+  bool isExtern = MachO->getPlainRelocationExternal(RE);
+  bool IsPCRel = MachO->getAnyRelocationPCRel(RE);
+  unsigned Size = MachO->getAnyRelocationLength(RE);
+  uint64_t Offset;
+  RelI.getOffset(Offset);
+  uint8_t *LocalAddress = Section.Address + Offset;
+  unsigned NumBytes = 1 << Size;
+  uint64_t Addend = 0;
+  memcpy(&Addend, LocalAddress, NumBytes);
+
   if (isExtern) {
     // Obtain the symbol name which is referenced in the relocation
+    SymbolRef Symbol;
+    RelI.getSymbol(Symbol);
     StringRef TargetName;
-    const SymbolRef &Symbol = Rel.Symbol;
     Symbol.getName(TargetName);
     // First search for the symbol in the local symbol table
     SymbolTableMap::const_iterator lsi = Symbols.find(TargetName.data());
     if (lsi != Symbols.end()) {
       Value.SectionID = lsi->second.first;
-      Value.Addend = lsi->second.second;
+      Value.Addend = lsi->second.second + Addend;
     } else {
       // Search for the symbol in the global symbol table
       SymbolTableMap::const_iterator gsi = GlobalSymbolTable.find(TargetName.data());
       if (gsi != GlobalSymbolTable.end()) {
         Value.SectionID = gsi->second.first;
-        Value.Addend = gsi->second.second;
-      } else
+        Value.Addend = gsi->second.second + Addend;
+      } else {
         Value.SymbolName = TargetName.data();
+        Value.Addend = Addend;
+      }
     }
   } else {
-    error_code err;
-    uint8_t sectionIndex = static_cast<uint8_t>(RelType & 0xFF);
-    section_iterator si = Obj.begin_sections(),
-                     se = Obj.end_sections();
-    for (uint8_t i = 1; i < sectionIndex; i++) {
-      error_code err;
-      si.increment(err);
-      if (si == se)
-        break;
-    }
-    assert(si != se && "No section containing relocation!");
-    Value.SectionID = findOrEmitSection(Obj, *si, true, ObjSectionToID);
-    Value.Addend = 0;
-    // FIXME: The size and type of the relocation determines if we can
-    // encode an Addend in the target location itself, and if so, how many
-    // bytes we should read in order to get it. We don't yet support doing
-    // that, and just assuming it's sizeof(intptr_t) is blatantly wrong.
-    //Value.Addend = *(const intptr_t *)Target;
-    if (Value.Addend) {
-      // The MachO addend is an offset from the current section.  We need it
-      // to be an offset from the destination section
-      Value.Addend += Section.ObjAddress - Sections[Value.SectionID].ObjAddress;
-    }
+    SectionRef Sec = MachO->getRelocationSection(RE);
+    Value.SectionID = findOrEmitSection(Obj, Sec, true, ObjSectionToID);
+    uint64_t Addr;
+    Sec.getAddress(Addr);
+    Value.Addend = Addend - Addr;
   }
 
   if (Arch == Triple::arm && (RelType & 0xf) == macho::RIT_ARM_Branch24Bit) {
@@ -267,27 +273,28 @@ void RuntimeDyldMachO::processRelocationRef(const ObjRelocationInfo &Rel,
     //  Look up for existing stub.
     StubMap::const_iterator i = Stubs.find(Value);
     if (i != Stubs.end())
-      resolveRelocation(Section, Rel.Offset,
+      resolveRelocation(Section, Offset,
                         (uint64_t)Section.Address + i->second,
-                        RelType, 0);
+                        RelType, 0, IsPCRel, Size);
     else {
       // Create a new stub function.
       Stubs[Value] = Section.StubOffset;
       uint8_t *StubTargetAddr = createStubFunction(Section.Address +
                                                    Section.StubOffset);
-      RelocationEntry RE(Rel.SectionID, StubTargetAddr - Section.Address,
+      RelocationEntry RE(SectionID, StubTargetAddr - Section.Address,
                          macho::RIT_Vanilla, Value.Addend);
       if (Value.SymbolName)
         addRelocationForSymbol(RE, Value.SymbolName);
       else
         addRelocationForSection(RE, Value.SectionID);
-      resolveRelocation(Section, Rel.Offset,
+      resolveRelocation(Section, Offset,
                         (uint64_t)Section.Address + Section.StubOffset,
-                        RelType, 0);
+                        RelType, 0, IsPCRel, Size);
       Section.StubOffset += getMaxStubSize();
     }
   } else {
-    RelocationEntry RE(Rel.SectionID, Rel.Offset, RelType, Value.Addend);
+    RelocationEntry RE(SectionID, Offset, RelType, Value.Addend,
+                       IsPCRel, Size);
     if (Value.SymbolName)
       addRelocationForSymbol(RE, Value.SymbolName);
     else

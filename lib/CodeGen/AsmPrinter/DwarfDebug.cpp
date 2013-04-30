@@ -176,7 +176,7 @@ DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
 
   // Turn on accelerator tables and older gdb compatibility
   // for Darwin.
-  bool IsDarwin = Triple(M->getTargetTriple()).isOSDarwin();
+  bool IsDarwin = Triple(A->getTargetTriple()).isOSDarwin();
   if (DarwinGDBCompat == Default) {
     if (IsDarwin)
       IsDarwinGDBCompat = true;
@@ -821,7 +821,7 @@ void DwarfDebug::beginModule() {
     // If we're splitting the dwarf out now that we've got the entire
     // CU then construct a skeleton CU based upon it.
     if (useSplitDwarf()) {
-    // This should be a unique identifier when we want to build .dwp files.
+      // This should be a unique identifier when we want to build .dwp files.
       CU->addUInt(CU->getCUDie(), dwarf::DW_AT_GNU_dwo_id,
                   dwarf::DW_FORM_data8, 0);
       // Now construct the skeleton CU associated.
@@ -1131,7 +1131,13 @@ static DotDebugLocEntry getDebugLocEntry(AsmPrinter *Asm,
   }
   if (MI->getOperand(0).isReg() && MI->getOperand(1).isImm()) {
     MachineLocation MLoc;
-    MLoc.set(MI->getOperand(0).getReg(), MI->getOperand(1).getImm());
+    // TODO: Currently an offset of 0 in a DBG_VALUE means
+    // we need to generate a direct register value.
+    // There is no way to specify an indirect value with offset 0.
+    if (MI->getOperand(1).getImm() == 0)
+      MLoc.set(MI->getOperand(0).getReg());
+    else
+      MLoc.set(MI->getOperand(0).getReg(), MI->getOperand(1).getImm());
     return DotDebugLocEntry(FLabel, SLabel, MLoc, Var);
   }
   if (MI->getOperand(0).isImm())

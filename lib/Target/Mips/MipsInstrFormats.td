@@ -240,7 +240,7 @@ class ADDI_FM<bits<6> op> : StdArch {
   let Inst{15-0}  = imm16;
 }
 
-class SRA_FM<bits<6> funct, bit rotate> {
+class SRA_FM<bits<6> funct, bit rotate> : StdArch {
   bits<5> rd;
   bits<5> rt;
   bits<5> shamt;
@@ -256,7 +256,7 @@ class SRA_FM<bits<6> funct, bit rotate> {
   let Inst{5-0}   = funct;
 }
 
-class SRLV_FM<bits<6> funct, bit rotate> {
+class SRLV_FM<bits<6> funct, bit rotate> : StdArch {
   bits<5> rd;
   bits<5> rt;
   bits<5> rs;
@@ -549,7 +549,7 @@ class MFC1_FM<bits<5> funct> {
   let Inst{10-0}  = 0;
 }
 
-class LW_FM<bits<6> op> {
+class LW_FM<bits<6> op> : StdArch {
   bits<5> rt;
   bits<21> addr;
 

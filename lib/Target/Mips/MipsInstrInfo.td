@@ -414,13 +414,13 @@ class shift_rotate_imm<string opstr, Operand ImmOpnd,
                        SDPatternOperator PF = null_frag> :
   InstSE<(outs RC:$rd), (ins RC:$rt, ImmOpnd:$shamt),
          !strconcat(opstr, "\t$rd, $rt, $shamt"),
-         [(set RC:$rd, (OpNode RC:$rt, PF:$shamt))], IIAlu, FrmR>;
+         [(set RC:$rd, (OpNode RC:$rt, PF:$shamt))], IIAlu, FrmR, opstr>;
 
 class shift_rotate_reg<string opstr, RegisterOperand RC,
                        SDPatternOperator OpNode = null_frag>:
   InstSE<(outs RC:$rd), (ins CPURegsOpnd:$rs, RC:$rt),
          !strconcat(opstr, "\t$rd, $rt, $rs"),
-         [(set RC:$rd, (OpNode RC:$rt, CPURegsOpnd:$rs))], IIAlu, FrmR>;
+         [(set RC:$rd, (OpNode RC:$rt, CPURegsOpnd:$rs))], IIAlu, FrmR, opstr>;
 
 // Load Upper Imediate
 class LoadUpper<string opstr, RegisterClass RC, Operand Imm>:
@@ -440,18 +440,20 @@ class FMem<bits<6> op, dag outs, dag ins, string asmstr, list<dag> pattern,
 
 // Memory Load/Store
 class Load<string opstr, SDPatternOperator OpNode, RegisterClass RC,
-           Operand MemOpnd, ComplexPattern Addr> :
+           Operand MemOpnd, ComplexPattern Addr, string ofsuffix> :
   InstSE<(outs RC:$rt), (ins MemOpnd:$addr), !strconcat(opstr, "\t$rt, $addr"),
-         [(set RC:$rt, (OpNode Addr:$addr))], NoItinerary, FrmI> {
+         [(set RC:$rt, (OpNode Addr:$addr))], NoItinerary, FrmI,
+         !strconcat(opstr, ofsuffix)> {
   let DecoderMethod = "DecodeMem";
   let canFoldAsLoad = 1;
   let mayLoad = 1;
 }
 
 class Store<string opstr, SDPatternOperator OpNode, RegisterClass RC,
-            Operand MemOpnd, ComplexPattern Addr> :
+            Operand MemOpnd, ComplexPattern Addr, string ofsuffix> :
   InstSE<(outs), (ins RC:$rt, MemOpnd:$addr), !strconcat(opstr, "\t$rt, $addr"),
-         [(OpNode RC:$rt, Addr:$addr)], NoItinerary, FrmI> {
+         [(OpNode RC:$rt, Addr:$addr)], NoItinerary, FrmI,
+         !strconcat(opstr, ofsuffix)> {
   let DecoderMethod = "DecodeMem";
   let mayStore = 1;
 }
@@ -459,8 +461,9 @@ class Store<string opstr, SDPatternOperator OpNode, RegisterClass RC,
 multiclass LoadM<string opstr, RegisterClass RC,
                  SDPatternOperator OpNode = null_frag,
                  ComplexPattern Addr = addr> {
-  def NAME : Load<opstr, OpNode, RC, mem, Addr>, Requires<[NotN64, HasStdEnc]>;
-  def _P8  : Load<opstr, OpNode, RC, mem64, Addr>,
+  def NAME : Load<opstr, OpNode, RC, mem, Addr, "">,
+             Requires<[NotN64, HasStdEnc]>;
+  def _P8  : Load<opstr, OpNode, RC, mem64, Addr, "_p8">,
              Requires<[IsN64, HasStdEnc]> {
     let DecoderNamespace = "Mips64";
     let isCodeGenOnly = 1;
@@ -470,8 +473,9 @@ multiclass LoadM<string opstr, RegisterClass RC,
 multiclass StoreM<string opstr, RegisterClass RC,
                   SDPatternOperator OpNode = null_frag,
                   ComplexPattern Addr = addr> {
-  def NAME : Store<opstr, OpNode, RC, mem, Addr>, Requires<[NotN64, HasStdEnc]>;
-  def _P8  : Store<opstr, OpNode, RC, mem64, Addr>,
+  def NAME : Store<opstr, OpNode, RC, mem, Addr, "">,
+             Requires<[NotN64, HasStdEnc]>;
+  def _P8  : Store<opstr, OpNode, RC, mem64, Addr, "_p8">,
              Requires<[IsN64, HasStdEnc]> {
     let DecoderNamespace = "Mips64";
     let isCodeGenOnly = 1;
@@ -884,33 +888,35 @@ def XOR   : MMRel, ArithLogicR<"xor", CPURegsOpnd, 1, IIAlu, xor>,
 def NOR   : MMRel, LogicNOR<"nor", CPURegsOpnd>, ADD_FM<0, 0x27>;
 
 /// Shift Instructions
-def SLL  : shift_rotate_imm<"sll", shamt, CPURegsOpnd, shl, immZExt5>,
+def SLL  : MMRel, shift_rotate_imm<"sll", shamt, CPURegsOpnd, shl, immZExt5>,
            SRA_FM<0, 0>;
-def SRL  : shift_rotate_imm<"srl", shamt, CPURegsOpnd, srl, immZExt5>,
+def SRL  : MMRel, shift_rotate_imm<"srl", shamt, CPURegsOpnd, srl, immZExt5>,
            SRA_FM<2, 0>;
-def SRA  : shift_rotate_imm<"sra", shamt, CPURegsOpnd, sra, immZExt5>,
+def SRA  : MMRel, shift_rotate_imm<"sra", shamt, CPURegsOpnd, sra, immZExt5>,
            SRA_FM<3, 0>;
-def SLLV : shift_rotate_reg<"sllv", CPURegsOpnd, shl>, SRLV_FM<4, 0>;
-def SRLV : shift_rotate_reg<"srlv", CPURegsOpnd, srl>, SRLV_FM<6, 0>;
-def SRAV : shift_rotate_reg<"srav", CPURegsOpnd, sra>, SRLV_FM<7, 0>;
+def SLLV : MMRel, shift_rotate_reg<"sllv", CPURegsOpnd, shl>, SRLV_FM<4, 0>;
+def SRLV : MMRel, shift_rotate_reg<"srlv", CPURegsOpnd, srl>, SRLV_FM<6, 0>;
+def SRAV : MMRel, shift_rotate_reg<"srav", CPURegsOpnd, sra>, SRLV_FM<7, 0>;
 
 // Rotate Instructions
 let Predicates = [HasMips32r2, HasStdEnc] in {
-  def ROTR  : shift_rotate_imm<"rotr", shamt, CPURegsOpnd, rotr, immZExt5>,
+  def ROTR  : MMRel, shift_rotate_imm<"rotr", shamt, CPURegsOpnd, rotr,
+                                      immZExt5>,
               SRA_FM<2, 1>;
-  def ROTRV : shift_rotate_reg<"rotrv", CPURegsOpnd, rotr>, SRLV_FM<6, 1>;
+  def ROTRV : MMRel, shift_rotate_reg<"rotrv", CPURegsOpnd, rotr>,
+              SRLV_FM<6, 1>;
 }
 
 /// Load and Store Instructions
 ///  aligned
-defm LB  : LoadM<"lb", CPURegs, sextloadi8>, LW_FM<0x20>;
-defm LBu : LoadM<"lbu", CPURegs, zextloadi8, addrDefault>, LW_FM<0x24>;
-defm LH  : LoadM<"lh", CPURegs, sextloadi16, addrDefault>, LW_FM<0x21>;
-defm LHu : LoadM<"lhu", CPURegs, zextloadi16>, LW_FM<0x25>;
-defm LW  : LoadM<"lw", CPURegs, load, addrDefault>, LW_FM<0x23>;
-defm SB  : StoreM<"sb", CPURegs, truncstorei8>, LW_FM<0x28>;
-defm SH  : StoreM<"sh", CPURegs, truncstorei16>, LW_FM<0x29>;
-defm SW  : StoreM<"sw", CPURegs, store>, LW_FM<0x2b>;
+defm LB  : LoadM<"lb", CPURegs, sextloadi8>, MMRel, LW_FM<0x20>;
+defm LBu : LoadM<"lbu", CPURegs, zextloadi8, addrDefault>, MMRel, LW_FM<0x24>;
+defm LH  : LoadM<"lh", CPURegs, sextloadi16, addrDefault>, MMRel, LW_FM<0x21>;
+defm LHu : LoadM<"lhu", CPURegs, zextloadi16>, MMRel, LW_FM<0x25>;
+defm LW  : LoadM<"lw", CPURegs, load, addrDefault>, MMRel, LW_FM<0x23>;
+defm SB  : StoreM<"sb", CPURegs, truncstorei8>, MMRel, LW_FM<0x28>;
+defm SH  : StoreM<"sh", CPURegs, truncstorei16>, MMRel, LW_FM<0x29>;
+defm SW  : StoreM<"sw", CPURegs, store>, MMRel, LW_FM<0x2b>;
 
 /// load/store left/right
 defm LWL : LoadLeftRightM<"lwl", MipsLWL, CPURegs>, LW_FM<0x22>;

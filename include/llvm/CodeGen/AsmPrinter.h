@@ -135,6 +135,9 @@ namespace llvm {
     /// getDataLayout - Return information about data layout.
     const DataLayout &getDataLayout() const;
 
+    /// getTargetTriple - Return the target triple string.
+    StringRef getTargetTriple() const;
+
     /// getCurrentSection() - Return the current section we are emitting to.
     const MCSection *getCurrentSection() const;
 
@@ -483,6 +486,7 @@ namespace llvm {
                             unsigned uid) const;
     void EmitLLVMUsedList(const ConstantArray *InitList);
     void EmitXXStructorList(const Constant *List, bool isCtor);
+    void EmitTLSInitFuncs(const ConstantArray *InitList);
     GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy *C);
   };
 }

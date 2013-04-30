@@ -36,4 +36,32 @@ let isCodeGenOnly = 1 in {
                  MULT_FM_MM<0x22c>;
   def MULTu_MM : MMRel, Mult<"multu", IIImul, CPURegsOpnd, [HI, LO]>,
                  MULT_FM_MM<0x26c>;
+
+  /// Shift Instructions
+  def SLL_MM   : MMRel, shift_rotate_imm<"sll", shamt, CPURegsOpnd>,
+                 SRA_FM_MM<0, 0>;
+  def SRL_MM   : MMRel, shift_rotate_imm<"srl", shamt, CPURegsOpnd>,
+                 SRA_FM_MM<0x40, 0>;
+  def SRA_MM   : MMRel, shift_rotate_imm<"sra", shamt, CPURegsOpnd>,
+                 SRA_FM_MM<0x80, 0>;
+  def SLLV_MM  : MMRel, shift_rotate_reg<"sllv", CPURegsOpnd>,
+                 SRLV_FM_MM<0x10, 0>;
+  def SRLV_MM  : MMRel, shift_rotate_reg<"srlv", CPURegsOpnd>,
+                 SRLV_FM_MM<0x50, 0>;
+  def SRAV_MM  : MMRel, shift_rotate_reg<"srav", CPURegsOpnd>,
+                 SRLV_FM_MM<0x90, 0>;
+  def ROTR_MM  : MMRel, shift_rotate_imm<"rotr", shamt, CPURegsOpnd>,
+                 SRA_FM_MM<0xc0, 0>;
+  def ROTRV_MM : MMRel, shift_rotate_reg<"rotrv", CPURegsOpnd>,
+                 SRLV_FM_MM<0xd0, 0>;
+
+  /// Load and Store Instructions - aligned
+  defm LB_MM  : LoadM<"lb", CPURegs, sextloadi8>, MMRel, LW_FM_MM<0x7>;
+  defm LBu_MM : LoadM<"lbu", CPURegs, zextloadi8>, MMRel, LW_FM_MM<0x5>;
+  defm LH_MM  : LoadM<"lh", CPURegs, sextloadi16>, MMRel, LW_FM_MM<0xf>;
+  defm LHu_MM : LoadM<"lhu", CPURegs, zextloadi16>, MMRel, LW_FM_MM<0xd>;
+  defm LW_MM  : LoadM<"lw", CPURegs>, MMRel, LW_FM_MM<0x3f>;
+  defm SB_MM  : StoreM<"sb", CPURegs, truncstorei8>, MMRel, LW_FM_MM<0x6>;
+  defm SH_MM  : StoreM<"sh", CPURegs, truncstorei16>, MMRel, LW_FM_MM<0xe>;
+  defm SW_MM  : StoreM<"sw", CPURegs>, MMRel, LW_FM_MM<0x3e>;
 }

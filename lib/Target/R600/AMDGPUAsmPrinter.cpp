@@ -22,6 +22,7 @@
 #include "SIDefines.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
+#include "R600MachineFunctionInfo.h"
 #include "R600RegisterInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionELF.h"
@@ -58,7 +59,7 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   const MCSectionELF *ConfigSection = getObjFileLowering().getContext()
                                               .getELFSection(".AMDGPU.config",
-                                              ELF::SHT_NULL, 0,
+                                              ELF::SHT_PROGBITS, 0,
                                               SectionKind::getReadOnly());
   OutStreamer.SwitchSection(ConfigSection);
   if (STM.device()->getGeneration() > AMDGPUDeviceInfo::HD6XXX) {
@@ -73,8 +74,10 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
 void AMDGPUAsmPrinter::EmitProgramInfoR600(MachineFunction &MF) {
   unsigned MaxGPR = 0;
+  bool killPixel = false;
   const R600RegisterInfo * RI =
                 static_cast<const R600RegisterInfo*>(TM.getRegisterInfo());
+  R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
 
   for (MachineFunction::iterator BB = MF.begin(), BB_E = MF.end();
                                                   BB != BB_E; ++BB) {
@@ -82,6 +85,8 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(MachineFunction &MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
                                                     I != E; ++I) {
       MachineInstr &MI = *I;
+      if (MI.getOpcode() == AMDGPU::KILLGT)
+        killPixel = true;
       unsigned numOperands = MI.getNumOperands();
       for (unsigned op_idx = 0; op_idx < numOperands; op_idx++) {
         MachineOperand & MO = MI.getOperand(op_idx);
@@ -97,6 +102,8 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(MachineFunction &MF) {
     }
   }
   OutStreamer.EmitIntValue(MaxGPR + 1, 4);
+  OutStreamer.EmitIntValue(MFI->StackSize, 4);
+  OutStreamer.EmitIntValue(killPixel, 4);
 }
 
 void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {

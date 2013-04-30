@@ -13,11 +13,12 @@
 
 include "R600Intrinsics.td"
 
-class InstR600 <bits<11> inst, dag outs, dag ins, string asm, list<dag> pattern,
+class InstR600 <dag outs, dag ins, string asm, list<dag> pattern,
                 InstrItinClass itin>
     : AMDGPUInst <outs, ins, asm, pattern> {
 
   field bits<64> Inst;
+  bit TransOnly = 0;
   bit Trig = 0;
   bit Op3 = 0;
   bit isVector = 0;
@@ -25,9 +26,9 @@ class InstR600 <bits<11> inst, dag outs, dag ins, string asm, list<dag> pattern,
   bit Op1 = 0;
   bit Op2 = 0;
   bit HasNativeOperands = 0;
+  bit VTXInst = 0;
+  bit TEXInst = 0;
 
-  bits<11> op_code = inst;
-  //let Inst = inst;
   let Namespace = "AMDGPU";
   let OutOperandList = outs;
   let InOperandList = ins;
@@ -35,6 +36,7 @@ class InstR600 <bits<11> inst, dag outs, dag ins, string asm, list<dag> pattern,
   let Pattern = pattern;
   let Itinerary = itin;
 
+  let TSFlags{0} = TransOnly;
   let TSFlags{4} = Trig;
   let TSFlags{5} = Op3;
 
@@ -45,11 +47,12 @@ class InstR600 <bits<11> inst, dag outs, dag ins, string asm, list<dag> pattern,
   let TSFlags{9} = HasNativeOperands;
   let TSFlags{10} = Op1;
   let TSFlags{11} = Op2;
+  let TSFlags{12} = VTXInst;
+  let TSFlags{13} = TEXInst;
 }
 
 class InstR600ISA <dag outs, dag ins, string asm, list<dag> pattern> :
-    AMDGPUInst <outs, ins, asm, pattern> {
-  field bits<64> Inst;
+    InstR600 <outs, ins, asm, pattern, NullALU> {
 
   let Namespace = "AMDGPU";
 }
@@ -72,6 +75,9 @@ class InstFlag<string PM = "printOperand", int Default = 0>
 
 // src_sel for ALU src operands, see also ALU_CONST, ALU_PARAM registers
 def SEL : OperandWithDefaultOps <i32, (ops (i32 -1))> {
+  let PrintMethod = "printSel";
+}
+def BANK_SWIZZLE : OperandWithDefaultOps <i32, (ops (i32 0))> {
   let PrintMethod = "printSel";
 }
 
@@ -137,7 +143,7 @@ class R600ALU_Word1 {
   field bits<32> Word1;
 
   bits<11> dst;
-  bits<3>  bank_swizzle = 0;
+  bits<3>  bank_swizzle;
   bits<1>  dst_rel;
   bits<1>  clamp;
 
@@ -346,11 +352,11 @@ let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 // and R600InstrInfo::getOperandIdx().
 class R600_1OP <bits<11> inst, string opName, list<dag> pattern,
                 InstrItinClass itin = AnyALU> :
-    InstR600 <0,
-              (outs R600_Reg32:$dst),
+    InstR600 <(outs R600_Reg32:$dst),
               (ins WRITE:$write, OMOD:$omod, REL:$dst_rel, CLAMP:$clamp,
                    R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, ABS:$src0_abs, SEL:$src0_sel,
-                   LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal),
+                   LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal,
+                   BANK_SWIZZLE:$bank_swizzle),
               !strconcat("  ", opName,
                    "$clamp $dst$write$dst_rel$omod, "
                    "$src0_neg$src0_abs$src0$src0_abs$src0_rel, "
@@ -385,13 +391,13 @@ class R600_1OP_Helper <bits<11> inst, string opName, SDPatternOperator node,
 // R600InstrInfo::buildDefaultInstruction(), and R600InstrInfo::getOperandIdx().
 class R600_2OP <bits<11> inst, string opName, list<dag> pattern,
                 InstrItinClass itin = AnyALU> :
-  InstR600 <inst,
-          (outs R600_Reg32:$dst),
+  InstR600 <(outs R600_Reg32:$dst),
           (ins UEM:$update_exec_mask, UP:$update_pred, WRITE:$write,
                OMOD:$omod, REL:$dst_rel, CLAMP:$clamp,
                R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, ABS:$src0_abs, SEL:$src0_sel,
                R600_Reg32:$src1, NEG:$src1_neg, REL:$src1_rel, ABS:$src1_abs, SEL:$src1_sel,
-               LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal),
+               LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal,
+               BANK_SWIZZLE:$bank_swizzle),
           !strconcat("  ", opName,
                 "$clamp $update_exec_mask$update_pred$dst$write$dst_rel$omod, "
                 "$src0_neg$src0_abs$src0$src0_abs$src0_rel, "
@@ -423,13 +429,13 @@ class R600_2OP_Helper <bits<11> inst, string opName, SDPatternOperator node,
 // R600InstrInfo::getOperandIdx().
 class R600_3OP <bits<5> inst, string opName, list<dag> pattern,
                 InstrItinClass itin = AnyALU> :
-  InstR600 <0,
-          (outs R600_Reg32:$dst),
+  InstR600 <(outs R600_Reg32:$dst),
           (ins REL:$dst_rel, CLAMP:$clamp,
                R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, SEL:$src0_sel,
                R600_Reg32:$src1, NEG:$src1_neg, REL:$src1_rel, SEL:$src1_sel,
                R600_Reg32:$src2, NEG:$src2_neg, REL:$src2_rel, SEL:$src2_sel,
-               LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal),
+               LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal,
+               BANK_SWIZZLE:$bank_swizzle),
           !strconcat("  ", opName, "$clamp $dst$dst_rel, "
                              "$src0_neg$src0$src0_rel, "
                              "$src1_neg$src1$src1_rel, "
@@ -450,8 +456,7 @@ class R600_3OP <bits<5> inst, string opName, list<dag> pattern,
 
 class R600_REDUCTION <bits<11> inst, dag ins, string asm, list<dag> pattern,
                       InstrItinClass itin = VecALU> :
-  InstR600 <inst,
-          (outs R600_Reg32:$dst),
+  InstR600 <(outs R600_Reg32:$dst),
           ins,
           asm,
           pattern,
@@ -459,8 +464,7 @@ class R600_REDUCTION <bits<11> inst, dag ins, string asm, list<dag> pattern,
 
 class R600_TEX <bits<11> inst, string opName, list<dag> pattern,
                 InstrItinClass itin = AnyALU> :
-  InstR600 <inst,
-          (outs R600_Reg128:$DST_GPR),
+  InstR600 <(outs R600_Reg128:$DST_GPR),
           (ins R600_Reg128:$SRC_GPR, i32imm:$RESOURCE_ID, i32imm:$SAMPLER_ID, i32imm:$textureTarget),
           !strconcat(opName, "$DST_GPR, $SRC_GPR, $RESOURCE_ID, $SAMPLER_ID, $textureTarget"),
           pattern,
@@ -481,11 +485,14 @@ class R600_TEX <bits<11> inst, string opName, list<dag> pattern,
     let FETCH_WHOLE_QUAD = 0;
     let ALT_CONST = 0;
     let SAMPLER_INDEX_MODE = 0;
+    let RESOURCE_INDEX_MODE = 0;
 
     let COORD_TYPE_X = 0;
     let COORD_TYPE_Y = 0;
     let COORD_TYPE_Z = 0;
     let COORD_TYPE_W = 0;
+
+    let TEXInst = 1;
   }
 
 } // End mayLoad = 1, mayStore = 0, hasSideEffects = 0
@@ -897,6 +904,7 @@ class CF_WORD1_EG {
   bits<2> COND;
   bits<6> COUNT;
   bits<1> VALID_PIXEL_MODE;
+  bits<1> END_OF_PROGRAM;
   bits<8> CF_INST;
   bits<1> BARRIER;
 
@@ -905,6 +913,7 @@ class CF_WORD1_EG {
   let Word1{9-8} = COND;
   let Word1{15-10} = COUNT;
   let Word1{20} = VALID_PIXEL_MODE;
+  let Word1{21} = END_OF_PROGRAM;
   let Word1{29-22} = CF_INST;
   let Word1{31} = BARRIER;
 }
@@ -919,6 +928,7 @@ ins, AsmPrint, [] >, CF_WORD0_EG, CF_WORD1_EG {
   let CF_CONST = 0;
   let VALID_PIXEL_MODE = 0;
   let COND = 0;
+  let END_OF_PROGRAM = 0;
 
   let Inst{31-0} = Word0;
   let Inst{63-32} = Word1;
@@ -927,11 +937,32 @@ ins, AsmPrint, [] >, CF_WORD0_EG, CF_WORD1_EG {
 def CF_ALU : ALU_CLAUSE<8, "ALU">;
 def CF_ALU_PUSH_BEFORE : ALU_CLAUSE<9, "ALU_PUSH_BEFORE">;
 
-def STACK_SIZE : AMDGPUInst <(outs),
-(ins i32imm:$num), "nstack $num", [] > {
+def FETCH_CLAUSE : AMDGPUInst <(outs),
+(ins i32imm:$addr), "Fetch clause starting at $addr:", [] > {
   field bits<8> Inst;
   bits<8> num;
   let Inst = num;
+}
+
+def ALU_CLAUSE : AMDGPUInst <(outs),
+(ins i32imm:$addr), "ALU clause starting at $addr:", [] > {
+  field bits<8> Inst;
+  bits<8> num;
+  let Inst = num;
+}
+
+def LITERALS : AMDGPUInst <(outs),
+(ins LITERAL:$literal1, LITERAL:$literal2), "$literal1, $literal2", [] > {
+  field bits<64> Inst;
+  bits<32> literal1;
+  bits<32> literal2;
+
+  let Inst{31-0} = literal1;
+  let Inst{63-32} = literal2;
+}
+
+def PAD : AMDGPUInst <(outs), (ins), "PAD", [] > {
+  field bits<64> Inst;
 }
 
 let Predicates = [isR600toCayman] in {
@@ -1274,7 +1305,6 @@ let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 multiclass CUBE_Common <bits<11> inst> {
 
   def _pseudo : InstR600 <
-    inst,
     (outs R600_Reg128:$dst),
     (ins R600_Reg128:$src),
     "CUBE $dst $src",
@@ -1290,23 +1320,38 @@ multiclass CUBE_Common <bits<11> inst> {
 
 class EXP_IEEE_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "EXP_IEEE", fexp2
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class FLT_TO_INT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "FLT_TO_INT", fp_to_sint
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class INT_TO_FLT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "INT_TO_FLT", sint_to_fp
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class FLT_TO_UINT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "FLT_TO_UINT", fp_to_uint
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class UINT_TO_FLT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "UINT_TO_FLT", uint_to_fp
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class LOG_CLAMPED_Common <bits<11> inst> : R600_1OP <
   inst, "LOG_CLAMPED", []
@@ -1314,50 +1359,84 @@ class LOG_CLAMPED_Common <bits<11> inst> : R600_1OP <
 
 class LOG_IEEE_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "LOG_IEEE", flog2
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class LSHL_Common <bits<11> inst> : R600_2OP_Helper <inst, "LSHL", shl>;
 class LSHR_Common <bits<11> inst> : R600_2OP_Helper <inst, "LSHR", srl>;
 class ASHR_Common <bits<11> inst> : R600_2OP_Helper <inst, "ASHR", sra>;
 class MULHI_INT_Common <bits<11> inst> : R600_2OP_Helper <
   inst, "MULHI_INT", mulhs
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 class MULHI_UINT_Common <bits<11> inst> : R600_2OP_Helper <
   inst, "MULHI", mulhu
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 class MULLO_INT_Common <bits<11> inst> : R600_2OP_Helper <
   inst, "MULLO_INT", mul
->;
-class MULLO_UINT_Common <bits<11> inst> : R600_2OP <inst, "MULLO_UINT", []>;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
+class MULLO_UINT_Common <bits<11> inst> : R600_2OP <inst, "MULLO_UINT", []> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class RECIP_CLAMPED_Common <bits<11> inst> : R600_1OP <
   inst, "RECIP_CLAMPED", []
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class RECIP_IEEE_Common <bits<11> inst> : R600_1OP <
   inst, "RECIP_IEEE", [(set R600_Reg32:$dst, (fdiv FP_ONE, R600_Reg32:$src0))]
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class RECIP_UINT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "RECIP_UINT", AMDGPUurecip
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class RECIPSQRT_CLAMPED_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "RECIPSQRT_CLAMPED", int_AMDGPU_rsq
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class RECIPSQRT_IEEE_Common <bits<11> inst> : R600_1OP <
   inst, "RECIPSQRT_IEEE", []
->;
+> {
+  let TransOnly = 1;
+  let Itinerary = TransALU;
+}
 
 class SIN_Common <bits<11> inst> : R600_1OP <
   inst, "SIN", []>{
   let Trig = 1;
+  let TransOnly = 1;
+  let Itinerary = TransALU;
 }
 
 class COS_Common <bits<11> inst> : R600_1OP <
   inst, "COS", []> {
   let Trig = 1;
+  let TransOnly = 1;
+  let Itinerary = TransALU;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1485,6 +1564,12 @@ let Predicates = [isR600] in {
   def POP_R600 : CF_CLAUSE_R600<14, (ins i32imm:$ADDR, i32imm:$POP_COUNT),
   "POP @$ADDR POP:$POP_COUNT"> {
     let COUNT = 0;
+  }
+  def CF_END_R600 : CF_CLAUSE_R600<0, (ins), "CF_END"> {
+    let COUNT = 0;
+    let POP_COUNT = 0;
+    let ADDR = 0;
+    let END_OF_PROGRAM = 1;
   }
 
 }
@@ -1690,7 +1775,12 @@ let hasSideEffects = 1 in {
   "POP @$ADDR POP:$POP_COUNT"> {
     let COUNT = 0;
   }
-
+  def CF_END_EG :  CF_CLAUSE_EG<0, (ins), "CF_END"> {
+    let COUNT = 0;
+    let POP_COUNT = 0;
+    let ADDR = 0;
+    let END_OF_PROGRAM = 1;
+  }
 
 //===----------------------------------------------------------------------===//
 // Memory read/write instructions
@@ -1782,6 +1872,8 @@ class VTX_READ_eg <string name, bits<8> buffer_id, dag outs, list<dag> pattern>
   // VTX_WORD3 (Padding)
   //
   // Inst{127-96} = 0;
+
+  let VTXInst = 1;
 }
 
 class VTX_READ_8_eg <bits<8> buffer_id, list<dag> pattern>
@@ -1935,6 +2027,11 @@ def : Pat <
                             (MOV_IMM_I32 CONST.FP_UINT_MAX_PLUS_1)))
 >;
 
+  def CF_END_CM : CF_CLAUSE_EG<32, (ins), "CF_END"> {
+    let ADDR = 0;
+    let POP_COUNT = 0;
+    let COUNT = 0;
+  }
 
 def : Pat<(fsqrt R600_Reg32:$src),
   (MUL R600_Reg32:$src, (RECIPSQRT_CLAMPED_cm R600_Reg32:$src))>;
@@ -1959,21 +2056,21 @@ def PREDICATED_BREAK : ILFormat<(outs), (ins GPRI32:$src),
 let isPseudo = 1 in {
 
 def PRED_X : InstR600 <
-  0, (outs R600_Predicate_Bit:$dst),
+  (outs R600_Predicate_Bit:$dst),
   (ins R600_Reg32:$src0, i32imm:$src1, i32imm:$flags),
   "", [], NullALU> {
   let FlagOperandIdx = 3;
 }
 
 let isTerminator = 1, isBranch = 1 in {
-def JUMP_COND : InstR600 <0x10,
+def JUMP_COND : InstR600 <
           (outs),
           (ins brtarget:$target, R600_Predicate_Bit:$p),
           "JUMP $target ($p)",
           [], AnyALU
   >;
 
-def JUMP : InstR600 <0x10,
+def JUMP : InstR600 <
           (outs),
           (ins brtarget:$target),
           "JUMP $target",
@@ -2000,20 +2097,22 @@ def MASK_WRITE : AMDGPUShaderInst <
 } // End mayLoad = 0, mayStore = 0, hasSideEffects = 1
 
 
-def TXD: AMDGPUShaderInst <
+def TXD: InstR600 <
   (outs R600_Reg128:$dst),
   (ins R600_Reg128:$src0, R600_Reg128:$src1, R600_Reg128:$src2, i32imm:$resourceId, i32imm:$samplerId, i32imm:$textureTarget),
   "TXD $dst, $src0, $src1, $src2, $resourceId, $samplerId, $textureTarget",
-  [(set R600_Reg128:$dst, (int_AMDGPU_txd R600_Reg128:$src0, R600_Reg128:$src1, R600_Reg128:$src2, imm:$resourceId, imm:$samplerId, imm:$textureTarget))]
->;
+  [(set R600_Reg128:$dst, (int_AMDGPU_txd R600_Reg128:$src0, R600_Reg128:$src1, R600_Reg128:$src2, imm:$resourceId, imm:$samplerId, imm:$textureTarget))], NullALU> {
+  let TEXInst = 1;
+}
 
-def TXD_SHADOW: AMDGPUShaderInst <
+def TXD_SHADOW: InstR600 <
   (outs R600_Reg128:$dst),
   (ins R600_Reg128:$src0, R600_Reg128:$src1, R600_Reg128:$src2, i32imm:$resourceId, i32imm:$samplerId, i32imm:$textureTarget),
   "TXD_SHADOW $dst, $src0, $src1, $src2, $resourceId, $samplerId, $textureTarget",
-  [(set R600_Reg128:$dst, (int_AMDGPU_txd R600_Reg128:$src0, R600_Reg128:$src1, R600_Reg128:$src2, imm:$resourceId, imm:$samplerId, TEX_SHADOW:$textureTarget))]
->;
-
+  [(set R600_Reg128:$dst, (int_AMDGPU_txd R600_Reg128:$src0, R600_Reg128:$src1, R600_Reg128:$src2, imm:$resourceId, imm:$samplerId, TEX_SHADOW:$textureTarget))], NullALU
+> {
+  let TEXInst = 1;
+}
 } // End isPseudo = 1
 } // End usesCustomInserter = 1
 
@@ -2099,6 +2198,7 @@ def TEX_VTX_CONSTBUF :
 // VTX_WORD3 (Padding)
 //
 // Inst{127-96} = 0;
+  let VTXInst = 1;
 }
 
 def TEX_VTX_TEXBUF:
@@ -2152,6 +2252,7 @@ let Inst{63-32} = Word1;
 // VTX_WORD3 (Padding)
 //
 // Inst{127-96} = 0;
+  let VTXInst = 1;
 }
 
 

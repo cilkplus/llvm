@@ -114,9 +114,9 @@ TinyTripCountVectorThreshold("vectorizer-min-trip-count", cl::init(16),
 /// We don't unroll loops with a known constant trip count below this number.
 static const unsigned TinyTripCountUnrollThreshold = 128;
 
-/// When performing a runtime memory check, do not check more than this
-/// number of pointers. Notice that the check is quadratic!
-static const unsigned RuntimeMemoryCheckThreshold = 4;
+/// When performing memory disambiguation checks at runtime do not make more
+/// than this number of comparisons.
+static const unsigned RuntimeMemoryCheckThreshold = 8;
 
 /// We use a metadata with this name  to indicate that a scalar loop was
 /// vectorized and that we don't need to re-vectorize it if we run into it
@@ -419,7 +419,7 @@ public:
     }
 
     /// Insert a pointer and calculate the start and end SCEVs.
-    void insert(ScalarEvolution *SE, Loop *Lp, Value *Ptr);
+    void insert(ScalarEvolution *SE, Loop *Lp, Value *Ptr, bool WritePtr);
 
     /// This flag indicates if we need to add the runtime check.
     bool Need;
@@ -429,6 +429,8 @@ public:
     SmallVector<const SCEV*, 2> Starts;
     /// Holds the pointer value at the end of the loop.
     SmallVector<const SCEV*, 2> Ends;
+    /// Holds the information if this pointer is used for writing to memory.
+    SmallVector<bool, 2> IsWritePtr;
   };
 
   /// A POD for saving information about induction variables.
@@ -707,6 +709,11 @@ struct LoopVectorize : public LoopPass {
     AA = getAnalysisIfAvailable<AliasAnalysis>();
     TLI = getAnalysisIfAvailable<TargetLibraryInfo>();
 
+    if (DL == NULL) {
+      DEBUG(dbgs() << "LV: Not vectorizing because of missing data layout");
+      return false;
+    }
+
     DEBUG(dbgs() << "LV: Checking a loop in \"" <<
           L->getHeader()->getParent()->getName() << "\"\n");
 
@@ -782,7 +789,8 @@ struct LoopVectorize : public LoopPass {
 
 void
 LoopVectorizationLegality::RuntimePointerCheck::insert(ScalarEvolution *SE,
-                                                       Loop *Lp, Value *Ptr) {
+                                                       Loop *Lp, Value *Ptr,
+                                                       bool WritePtr) {
   const SCEV *Sc = SE->getSCEV(Ptr);
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(Sc);
   assert(AR && "Invalid addrec expression");
@@ -791,6 +799,7 @@ LoopVectorizationLegality::RuntimePointerCheck::insert(ScalarEvolution *SE,
   Pointers.push_back(Ptr);
   Starts.push_back(AR->getStart());
   Ends.push_back(ScEnd);
+  IsWritePtr.push_back(WritePtr);
 }
 
 Value *InnerLoopVectorizer::getBroadcastInstrs(Value *V) {
@@ -951,12 +960,18 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr,
   Value *Ptr = LI ? LI->getPointerOperand() : SI->getPointerOperand();
   unsigned Alignment = LI ? LI->getAlignment() : SI->getAlignment();
 
+  unsigned ScalarAllocatedSize = DL->getTypeAllocSize(ScalarDataTy);
+  unsigned VectorElementSize = DL->getTypeStoreSize(DataTy)/VF;
+
+  if (ScalarAllocatedSize != VectorElementSize)
+    return scalarizeInstruction(Instr);
+
   // If the pointer is loop invariant or if it is non consecutive,
   // scalarize the load.
-  int Stride = Legal->isConsecutivePtr(Ptr);
-  bool Reverse = Stride < 0;
+  int ConsecutiveStride = Legal->isConsecutivePtr(Ptr);
+  bool Reverse = ConsecutiveStride < 0;
   bool UniformLoad = LI && Legal->isUniform(Ptr);
-  if (Stride == 0 || UniformLoad)
+  if (!ConsecutiveStride || UniformLoad)
     return scalarizeInstruction(Instr);
 
   Constant *Zero = Builder.getInt32(0);
@@ -1085,10 +1100,10 @@ void InnerLoopVectorizer::scalarizeInstruction(Instruction *Instr) {
   // Create a new entry in the WidenMap and initialize it to Undef or Null.
   VectorParts &VecResults = WidenMap.splat(Instr, UndefVec);
 
-  // For each scalar that we create:
-  for (unsigned Width = 0; Width < VF; ++Width) {
-    // For each vector unroll 'part':
-    for (unsigned Part = 0; Part < UF; ++Part) {
+  // For each vector unroll 'part':
+  for (unsigned Part = 0; Part < UF; ++Part) {
+    // For each scalar that we create:
+    for (unsigned Width = 0; Width < VF; ++Width) {
       Instruction *Cloned = Instr->clone();
       if (!IsVoidRetTy)
         Cloned->setName(Instr->getName() + ".cloned");
@@ -1155,6 +1170,10 @@ InnerLoopVectorizer::addRuntimeCheck(LoopVectorizationLegality *Legal,
 
   for (unsigned i = 0; i < NumPointers; ++i) {
     for (unsigned j = i+1; j < NumPointers; ++j) {
+      // No need to check if two readonly pointers intersect.
+      if (!PtrRtCheck->IsWritePtr[i] && !PtrRtCheck->IsWritePtr[j])
+        continue;
+
       Value *Start0 = ChkBuilder.CreateBitCast(Starts[i], PtrArithTy, "bc");
       Value *Start1 = ChkBuilder.CreateBitCast(Starts[j], PtrArithTy, "bc");
       Value *End0 =   ChkBuilder.CreateBitCast(Ends[i],   PtrArithTy, "bc");
@@ -2556,6 +2575,8 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   PtrRtCheck.Pointers.clear();
   PtrRtCheck.Need = false;
 
+  const bool IsAnnotatedParallel = TheLoop->isAnnotatedParallel();
+
   // For each block.
   for (Loop::block_iterator bb = TheLoop->block_begin(),
        be = TheLoop->block_end(); bb != be; ++bb) {
@@ -2570,7 +2591,7 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
       if (it->mayReadFromMemory()) {
         LoadInst *Ld = dyn_cast<LoadInst>(it);
         if (!Ld) return false;
-        if (!Ld->isSimple() && !TheLoop->isAnnotatedParallel()) {
+        if (!Ld->isSimple() && !IsAnnotatedParallel) {
           DEBUG(dbgs() << "LV: Found a non-simple load.\n");
           return false;
         }
@@ -2582,7 +2603,7 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
       if (it->mayWriteToMemory()) {
         StoreInst *St = dyn_cast<StoreInst>(it);
         if (!St) return false;
-        if (!St->isSimple() && !TheLoop->isAnnotatedParallel()) {
+        if (!St->isSimple() && !IsAnnotatedParallel) {
           DEBUG(dbgs() << "LV: Found a non-simple store.\n");
           return false;
         }
@@ -2629,7 +2650,7 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
       ReadWrites.insert(std::make_pair(Ptr, ST));
   }
 
-  if (TheLoop->isAnnotatedParallel()) {
+  if (IsAnnotatedParallel) {
     DEBUG(dbgs()
           << "LV: A loop annotated parallel, ignore memory dependency "
           << "checks.\n");
@@ -2658,6 +2679,9 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
     return true;
   }
 
+  unsigned NumReadPtrs = 0;
+  unsigned NumWritePtrs = 0;
+
   // Find pointers with computable bounds. We are going to use this information
   // to place a runtime bound check.
   bool CanDoRT = true;
@@ -2665,7 +2689,8 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   for (MI = ReadWrites.begin(), ME = ReadWrites.end(); MI != ME; ++MI) {
     Value *V = (*MI).first;
     if (hasComputableBounds(V)) {
-      PtrRtCheck.insert(SE, TheLoop, V);
+      PtrRtCheck.insert(SE, TheLoop, V, true);
+      NumWritePtrs++;
       DEBUG(dbgs() << "LV: Found a runtime check ptr:" << *V <<"\n");
     } else {
       CanDoRT = false;
@@ -2675,7 +2700,8 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   for (MI = Reads.begin(), ME = Reads.end(); MI != ME; ++MI) {
     Value *V = (*MI).first;
     if (hasComputableBounds(V)) {
-      PtrRtCheck.insert(SE, TheLoop, V);
+      PtrRtCheck.insert(SE, TheLoop, V, false);
+      NumReadPtrs++;
       DEBUG(dbgs() << "LV: Found a runtime check ptr:" << *V <<"\n");
     } else {
       CanDoRT = false;
@@ -2685,7 +2711,9 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
 
   // Check that we did not collect too many pointers or found a
   // unsizeable pointer.
-  if (!CanDoRT || PtrRtCheck.Pointers.size() > RuntimeMemoryCheckThreshold) {
+  unsigned NumComparisons = (NumWritePtrs * (NumReadPtrs + NumWritePtrs - 1));
+  DEBUG(dbgs() << "LV: We need to compare " << NumComparisons << " ptrs.\n");
+  if (!CanDoRT || NumComparisons > RuntimeMemoryCheckThreshold) {
     PtrRtCheck.reset();
     CanDoRT = false;
   }
@@ -3549,9 +3577,11 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
         TTI.getMemoryOpCost(I->getOpcode(), VectorTy, Alignment, AS);
 
     // Scalarized loads/stores.
-    int Stride = Legal->isConsecutivePtr(Ptr);
-    bool Reverse = Stride < 0;
-    if (0 == Stride) {
+    int ConsecutiveStride = Legal->isConsecutivePtr(Ptr);
+    bool Reverse = ConsecutiveStride < 0;
+    unsigned ScalarAllocatedSize = DL->getTypeAllocSize(ValTy);
+    unsigned VectorElementSize = DL->getTypeStoreSize(VectorTy)/VF;
+    if (!ConsecutiveStride || ScalarAllocatedSize != VectorElementSize) {
       unsigned Cost = 0;
       // The cost of extracting from the value vector and pointer vector.
       Type *PtrTy = ToVectorTy(Ptr->getType(), VF);
