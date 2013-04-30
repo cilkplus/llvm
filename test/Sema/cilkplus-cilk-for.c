@@ -375,3 +375,23 @@ L: _Cilk_spawn baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at
   _Cilk_for (int i = 0; i < 10; ++i)
     baz(_Cilk_spawn bar()); // expected-error {{_Cilk_spawn is not at statement level}}
 }
+
+void jump_between_spawning_blocks() {
+  _Cilk_for (int i = 0; i < 10; ++i) {
+  l1: (void)i;
+    _Cilk_for (int j = 0; j < 10; ++j) {
+  l2: (void)j;
+       goto l1; // expected-error {{use of undeclared label 'l1'}}
+       goto l2;
+       goto l3; // expected-error {{use of undeclared label 'l3'}}
+    }
+    goto l1;
+    goto l2; // expected-error {{use of undeclared label 'l2'}}
+    goto l3; // expected-error {{use of undeclared label 'l3'}}
+  }
+l3:
+  _Cilk_spawn jump_between_spawning_blocks();
+  goto l1; // expected-error {{use of undeclared label 'l1'}}
+  goto l2; // expected-error {{use of undeclared label 'l2'}}
+  goto l3;
+}
