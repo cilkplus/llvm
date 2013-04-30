@@ -5,6 +5,8 @@
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK4 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK5 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK6 %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK7 %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK8 %s
 //
 struct Bool {
   ~Bool();
@@ -302,6 +304,53 @@ void test_void_increment() {
   // CHECK6: define void @_ZN17ns_void_increment19test_void_incrementEv
   // CHECK6: call void @__cilkrts_cilk_for_32
   // CHECK6: ret void
+}
+
+} // namespace
+
+namespace cilk_for_exceptions {
+
+void anchor(int) throw();
+
+void throw_odd(int n) {
+  if (n % 2) throw n;
+}
+
+void test1() {
+  anchor(10);
+  _Cilk_for (int i = 0; i < 10; ++i) {
+    throw_odd(i);
+  }
+  anchor(11);
+  // CHECK7: call void @_ZN19cilk_for_exceptions6anchorEi(i32 10)
+  // CHECK7: call void @__cilkrts_cilk_for_32
+  // CHECK7-NOT: __cilk_sync 
+  // CHECK7: call void @_ZN19cilk_for_exceptions6anchorEi(i32 11)
+}
+
+void test2() {
+  anchor(12);
+  _Cilk_for (int i = 0; i < 10; ++i) {
+    _Cilk_spawn throw_odd(i);
+  }
+  anchor(13);
+  // CHECK8: call void @_ZN19cilk_for_exceptions6anchorEi(i32 12)
+  // CHECK8: call void @__cilkrts_cilk_for_32({{.*}} @[[Helper:__cilk_for_helper[0-9]*]]
+  // CHECK8: call void @_ZN19cilk_for_exceptions6anchorEi(i32 13)
+  // CHECK8-NEXT: ret void
+  //
+  // CHECK8: define internal void @[[Helper]](
+  // CHECK8: call void @__cilk_parent_prologue
+  //
+  // CHECK8: call void @__cilk_sync
+  // CHECK8-NEXT: call void @__cilk_parent_epilogue
+  // CHECK8-NEXT: br
+  //
+  // CHECK8-NOT: ret
+  //
+  // CHECK8: call void @__cilk_sync
+  // CHECK8-NEXT: call void @__cilk_parent_epilogue
+  // CHECK8-NEXT: ret void
 }
 
 } // namespace
