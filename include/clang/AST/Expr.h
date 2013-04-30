@@ -2649,7 +2649,7 @@ protected:
          (ty->isInstantiationDependentType() ||
           (op && op->isInstantiationDependent())),
          (ty->containsUnexpandedParameterPack() ||
-          op->containsUnexpandedParameterPack())),
+          (op && op->containsUnexpandedParameterPack()))),
     Op(op) {
     assert(kind != CK_Invalid && "creating cast with invalid cast kind");
     CastExprBits.Kind = kind;

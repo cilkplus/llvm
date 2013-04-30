@@ -257,7 +257,8 @@ static bool checkPreprocessorOptions(const PreprocessorOptions &PPOpts,
                                      const PreprocessorOptions &ExistingPPOpts,
                                      DiagnosticsEngine *Diags,
                                      FileManager &FileMgr,
-                                     std::string &SuggestedPredefines) {
+                                     std::string &SuggestedPredefines,
+                                     const LangOptions &LangOpts) {
   // Check macro definitions.
   MacroDefinitionsMap ASTFileMacros;
   collectMacroDefinitions(PPOpts, ASTFileMacros);
@@ -323,6 +324,15 @@ static bool checkPreprocessorOptions(const PreprocessorOptions &PPOpts,
     return true;
   }
 
+  // Detailed record is important since it is used for the module cache hash.
+  if (LangOpts.Modules &&
+      PPOpts.DetailedRecord != ExistingPPOpts.DetailedRecord) {
+    if (Diags) {
+      Diags->Report(diag::err_pch_pp_detailed_record) << PPOpts.DetailedRecord;
+    }
+    return true;
+  }
+
   // Compute the #include and #include_macros lines we need.
   for (unsigned I = 0, N = ExistingPPOpts.Includes.size(); I != N; ++I) {
     StringRef File = ExistingPPOpts.Includes[I];
@@ -363,7 +373,8 @@ bool PCHValidator::ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
   return checkPreprocessorOptions(PPOpts, ExistingPPOpts,
                                   Complain? &Reader.Diags : 0,
                                   PP.getFileManager(),
-                                  SuggestedPredefines);
+                                  SuggestedPredefines,
+                                  PP.getLangOpts());
 }
 
 void PCHValidator::ReadHeaderFileInfo(const HeaderFileInfo &HFI,
@@ -3427,7 +3438,7 @@ namespace {
                                          bool Complain,
                                          std::string &SuggestedPredefines) {
       return checkPreprocessorOptions(ExistingPPOpts, PPOpts, 0, FileMgr,
-                                      SuggestedPredefines);
+                                      SuggestedPredefines, ExistingLangOpts);
     }
   };
 }
@@ -4004,6 +4015,7 @@ bool ASTReader::ParsePreprocessorOptions(const RecordData &Record,
   }
 
   PPOpts.UsePredefines = Record[Idx++];
+  PPOpts.DetailedRecord = Record[Idx++];
   PPOpts.ImplicitPCHInclude = ReadString(Record, Idx);
   PPOpts.ImplicitPTHInclude = ReadString(Record, Idx);
   PPOpts.ObjCXXARCStandardLibrary =
@@ -4626,8 +4638,12 @@ QualType ASTReader::readTypeRecord(unsigned Index) {
     return Context.getUnaryTransformType(BaseType, UnderlyingType, UKind);
   }
 
-  case TYPE_AUTO:
-    return Context.getAutoType(readType(*Loc.F, Record, Idx));
+  case TYPE_AUTO: {
+    QualType Deduced = readType(*Loc.F, Record, Idx);
+    bool IsDecltypeAuto = Record[Idx++];
+    bool IsDependent = Deduced.isNull() ? Record[Idx++] : false;
+    return Context.getAutoType(Deduced, IsDecltypeAuto, IsDependent);
+  }
 
   case TYPE_RECORD: {
     if (Record.size() != 2) {
@@ -6002,8 +6018,8 @@ void ASTReader::InitializeSema(Sema &S) {
   // Makes sure any declarations that were deserialized "too early"
   // still get added to the identifier's declaration chains.
   for (unsigned I = 0, N = PreloadedDecls.size(); I != N; ++I) {
-    NamedDecl *ND = cast<NamedDecl>(PreloadedDecls[I]->getMostRecentDecl());
-    SemaObj->pushExternalDeclIntoScope(ND, PreloadedDecls[I]->getDeclName());
+    pushExternalDeclIntoScope(PreloadedDecls[I],
+                              PreloadedDecls[I]->getDeclName());
   }
   PreloadedDecls.clear();
 
@@ -6417,8 +6433,7 @@ ASTReader::SetGloballyVisibleDecls(IdentifierInfo *II,
       // Introduce this declaration into the translation-unit scope
       // and add it to the declaration chain for this identifier, so
       // that (unqualified) name lookup will find it.
-      NamedDecl *ND = cast<NamedDecl>(D->getMostRecentDecl());
-      SemaObj->pushExternalDeclIntoScope(ND, II);
+      pushExternalDeclIntoScope(D, II);
     } else {
       // Queue this declaration so that it will be added to the
       // translation unit scope and identifier's declaration chain
@@ -7205,8 +7220,7 @@ void ASTReader::finishPendingActions() {
          TLD != TLDEnd; ++TLD) {
       IdentifierInfo *II = TLD->first;
       for (unsigned I = 0, N = TLD->second.size(); I != N; ++I) {
-        NamedDecl *ND = cast<NamedDecl>(TLD->second[I]->getMostRecentDecl());
-        SemaObj->pushExternalDeclIntoScope(ND, II);
+        pushExternalDeclIntoScope(cast<NamedDecl>(TLD->second[I]), II);
       }
     }
 
@@ -7343,6 +7357,21 @@ void ASTReader::FinishedDeserializing() {
       InterestingDecls.pop_front();
       PassInterestingDeclToConsumer(D);
     }
+  }
+}
+
+void ASTReader::pushExternalDeclIntoScope(NamedDecl *D, DeclarationName Name) {
+  D = cast<NamedDecl>(D->getMostRecentDecl());
+
+  if (SemaObj->IdResolver.tryAddTopLevelDecl(D, Name) && SemaObj->TUScope) {
+    SemaObj->TUScope->AddDecl(D);
+  } else if (SemaObj->TUScope) {
+    // Adding the decl to IdResolver may have failed because it was already in
+    // (even though it was not added in scope). If it is already in, make sure
+    // it gets in the scope as well.
+    if (std::find(SemaObj->IdResolver.begin(Name),
+                  SemaObj->IdResolver.end(), D) != SemaObj->IdResolver.end())
+      SemaObj->TUScope->AddDecl(D);
   }
 }
 

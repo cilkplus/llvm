@@ -786,9 +786,6 @@ void Sema::CheckCXXThisCapture(SourceLocation Loc, bool Explicit) {
     else if (CapturedRegionScopeInfo *RSI
         = dyn_cast<CapturedRegionScopeInfo>(FunctionScopes[idx]))
       ThisExpr = captureThis(Context, RSI->TheRecordDecl, ThisTy, Loc);
-    else if (CilkForScopeInfo *FSI
-        = dyn_cast<CilkForScopeInfo>(FunctionScopes[idx]))
-      ThisExpr = captureThis(Context, FSI->TheRecordDecl, ThisTy, Loc);
 
     bool isNested = NumClosures > 1;
     CSI->addThisCapture(isNested, Loc, ThisTy, ThisExpr);
@@ -994,7 +991,7 @@ Sema::ActOnCXXNew(SourceLocation StartLoc, bool UseGlobal,
                   SourceLocation PlacementLParen, MultiExprArg PlacementArgs,
                   SourceLocation PlacementRParen, SourceRange TypeIdParens,
                   Declarator &D, Expr *Initializer) {
-  bool TypeContainsAuto = D.getDeclSpec().getTypeSpecType() == DeclSpec::TST_auto;
+  bool TypeContainsAuto = D.getDeclSpec().containsPlaceholderType();
 
   Expr *ArraySize = 0;
   // If the specified type is an array, unwrap it and save the expression.
@@ -1121,9 +1118,7 @@ Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
     HaveCompleteInit = true;
 
   // C++11 [decl.spec.auto]p6. Deduce the type which 'auto' stands in for.
-  AutoType *AT = 0;
-  if (TypeMayContainAuto &&
-      (AT = AllocType->getContainedAutoType()) && !AT->isDeduced()) {
+  if (TypeMayContainAuto && AllocType->isUndeducedType()) {
     if (initStyle == CXXNewExpr::NoInit || NumInits == 0)
       return ExprError(Diag(StartLoc, diag::err_auto_new_requires_ctor_arg)
                        << AllocType << TypeRange);
@@ -2282,6 +2277,9 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
 ExprResult Sema::CheckConditionVariable(VarDecl *ConditionVar,
                                         SourceLocation StmtLoc,
                                         bool ConvertToBoolean) {
+  if (ConditionVar->isInvalidDecl())
+    return ExprError();
+
   QualType T = ConditionVar->getType();
 
   // C++ [stmt.select]p2:

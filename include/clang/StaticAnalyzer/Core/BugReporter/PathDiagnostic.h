@@ -21,6 +21,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerUnion.h"
 #include <deque>
+#include <list>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -283,6 +284,13 @@ public:
   const SourceManager& getManager() const { assert(isValid()); return *SM; }
   
   void Profile(llvm::FoldingSetNodeID &ID) const;
+
+  /// \brief Given an exploded node, retrieve the statement that should be used 
+  /// for the diagnostic location.
+  static const Stmt *getStmt(const ExplodedNode *N);
+
+  /// \brief Retrieve the statement corresponding to the sucessor node.
+  static const Stmt *getNextStmt(const ExplodedNode *N);
 };
 
 class PathDiagnosticLocationPair {
@@ -381,7 +389,7 @@ public:
 };
   
   
-class PathPieces : public std::deque<IntrusiveRefCntPtr<PathDiagnosticPiece> > {
+class PathPieces : public std::list<IntrusiveRefCntPtr<PathDiagnosticPiece> > {
   void flattenTo(PathPieces &Primary, PathPieces &Current,
                  bool ShouldFlattenMacros) const;
 public:

@@ -1136,7 +1136,8 @@ public:
   // Lookup a method. First, we search locally. If a method isn't
   // found, we search referenced protocols and class categories.
   ObjCMethodDecl *lookupMethod(Selector Sel, bool isInstance,
-                               bool shallowCategoryLookup= false) const;
+                               bool shallowCategoryLookup= false,
+                               const ObjCCategoryDecl *C= 0) const;
   ObjCMethodDecl *lookupInstanceMethod(Selector Sel,
                             bool shallowCategoryLookup = false) const {
     return lookupMethod(Sel, true/*isInstance*/, shallowCategoryLookup);
@@ -1155,6 +1156,15 @@ public:
     return lookupPrivateMethod(Sel, false);
   }
 
+  /// \brief Lookup a setter or getter in the class hierarchy,
+  /// including in all categories except for category passed
+  /// as argument.
+  ObjCMethodDecl *lookupPropertyAccessor(const Selector Sel,
+                                         const ObjCCategoryDecl *Cat) const {
+    return lookupMethod(Sel, true/*isInstance*/,
+                        false/*shallowCategoryLookup*/, Cat);
+  }
+                          
   SourceLocation getEndOfDefinitionLoc() const { 
     if (!hasDefinition())
       return getLocation();

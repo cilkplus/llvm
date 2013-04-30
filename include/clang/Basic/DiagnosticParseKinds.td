@@ -277,6 +277,11 @@ def warn_auto_storage_class : Warning<
 def ext_auto_storage_class : ExtWarn<
   "'auto' storage class specifier is not permitted in C++11, and will not "
   "be supported in future releases">, InGroup<DiagGroup<"auto-storage-class">>;
+def ext_decltype_auto_type_specifier : ExtWarn<
+  "'decltype(auto)' type specifier is a C++1y extension">, InGroup<CXX1y>;
+def warn_cxx11_compat_decltype_auto_type_specifier : Warning<
+  "'decltype(auto)' type specifier is incompatible with C++ standards before "
+  "C++1y">, InGroup<CXXPre1yCompat>, DefaultIgnore;
 def ext_for_range : ExtWarn<
   "range-based for loop is a C++11 extension">, InGroup<CXX11>;
 def warn_cxx98_compat_for_range : Warning<
@@ -413,6 +418,8 @@ def err_missing_catch_finally : Error<
 def err_objc_concat_string : Error<"unexpected token after Objective-C string">;
 def err_expected_objc_container : Error<
   "'@end' must appear in an Objective-C context">;
+def err_unexpected_protocol_qualifier : Error<
+  "@implementation declaration can not be protocol qualified">;
 def err_objc_unexpected_atend : Error<
   "'@end' appears where closing brace '}' is expected">;
 def error_property_ivar_decl : Error<

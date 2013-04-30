@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <sys/stat.h>
 #include "Tools.h"
 #include "InputInfo.h"
 #include "SanitizerArgs.h"
@@ -1776,14 +1777,27 @@ static bool shouldUseLeafFramePointer(const ArgList &Args,
 /// If the PWD environment variable is set, add a CC1 option to specify the
 /// debug compilation directory.
 static void addDebugCompDirArg(const ArgList &Args, ArgStringList &CmdArgs) {
-  if (const char *pwd = ::getenv("PWD")) {
-    // GCC also verifies that stat(pwd) and stat(".") have the same inode
-    // number. Not doing those because stats are slow, but we could.
-    if (llvm::sys::path::is_absolute(pwd)) {
-      std::string CompDir = pwd;
-      CmdArgs.push_back("-fdebug-compilation-dir");
-      CmdArgs.push_back(Args.MakeArgString(CompDir));
-    }
+  struct stat StatPWDBuf, StatDotBuf;
+
+  const char *pwd = ::getenv("PWD");
+  if (!pwd)
+    return;
+
+  if (llvm::sys::path::is_absolute(pwd) &&
+      stat(pwd, &StatPWDBuf) == 0 &&
+      stat(".", &StatDotBuf) == 0 &&
+      StatPWDBuf.st_ino == StatDotBuf.st_ino &&
+      StatPWDBuf.st_dev == StatDotBuf.st_dev) {
+    CmdArgs.push_back("-fdebug-compilation-dir");
+    CmdArgs.push_back(Args.MakeArgString(pwd));
+    return;
+  }
+
+  // Fall back to using getcwd.
+  SmallString<128> cwd;
+  if (!llvm::sys::fs::current_path(cwd)) {
+    CmdArgs.push_back("-fdebug-compilation-dir");
+    CmdArgs.push_back(Args.MakeArgString(cwd));
   }
 }
 
@@ -1827,6 +1841,13 @@ static void SplitDebugInfo(const ToolChain &TC, Compilation &C,
 
   // Then remove them from the original .o file.
   C.addCommand(new Command(JA, T, Exec, StripArgs));
+}
+
+static bool isOptimizationLevelFast(const ArgList &Args) {
+  if (Arg *A = Args.getLastArg(options::OPT_O_Group))
+    if (A->getOption().matches(options::OPT_Ofast))
+      return true;
+  return false;
 }
 
 void Clang::ConstructJob(Compilation &C, const JobAction &JA,
@@ -2117,7 +2138,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasFlag(options::OPT_fzero_initialized_in_bss,
                     options::OPT_fno_zero_initialized_in_bss))
     CmdArgs.push_back("-mno-zero-initialized-in-bss");
-  if (!Args.hasFlag(options::OPT_fstrict_aliasing,
+
+  bool OFastEnabled = isOptimizationLevelFast(Args);
+  // If -Ofast is the optimization level, then -fstrict-aliasing should be
+  // enabled.  This alias option is being used to simplify the hasFlag logic.
+  OptSpecifier StrictAliasingAliasOption = OFastEnabled ? options::OPT_Ofast :
+    options::OPT_fstrict_aliasing;
+  if (!Args.hasFlag(options::OPT_fstrict_aliasing, StrictAliasingAliasOption,
                     options::OPT_fno_strict_aliasing,
                     getToolChain().IsStrictAliasingDefault()))
     CmdArgs.push_back("-relaxed-aliasing");
@@ -2133,13 +2160,18 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Handle segmented stacks.
   if (Args.hasArg(options::OPT_fsplit_stack))
     CmdArgs.push_back("-split-stacks");
+
+  // If -Ofast is the optimization level, then -ffast-math should be enabled.
+  // This alias option is being used to simplify the getLastArg logic.
+  OptSpecifier FastMathAliasOption = OFastEnabled ? options::OPT_Ofast :
+    options::OPT_ffast_math;
   
   // Handle various floating point optimization flags, mapping them to the
   // appropriate LLVM code generation flags. The pattern for all of these is to
   // default off the codegen optimizations, and if any flag enables them and no
   // flag disables them after the flag enabling them, enable the codegen
   // optimization. This is complicated by several "umbrella" flags.
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_ffinite_math_only,
                                options::OPT_fno_finite_math_only,
@@ -2149,7 +2181,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         A->getOption().getID() != options::OPT_fno_finite_math_only &&
         A->getOption().getID() != options::OPT_fhonor_infinities)
       CmdArgs.push_back("-menable-no-infs");
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_ffinite_math_only,
                                options::OPT_fno_finite_math_only,
@@ -2162,7 +2194,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // -fmath-errno is the default on some platforms, e.g. BSD-derived OSes.
   bool MathErrno = getToolChain().IsMathErrnoDefault();
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_fmath_errno,
                                options::OPT_fno_math_errno))
@@ -2175,7 +2207,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // entire set of LLVM optimizations, so collect them through all the flag
   // madness.
   bool AssociativeMath = false;
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_funsafe_math_optimizations,
                                options::OPT_fno_unsafe_math_optimizations,
@@ -2186,7 +2218,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         A->getOption().getID() != options::OPT_fno_associative_math)
       AssociativeMath = true;
   bool ReciprocalMath = false;
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_funsafe_math_optimizations,
                                options::OPT_fno_unsafe_math_optimizations,
@@ -2197,7 +2229,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         A->getOption().getID() != options::OPT_fno_reciprocal_math)
       ReciprocalMath = true;
   bool SignedZeros = true;
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_funsafe_math_optimizations,
                                options::OPT_fno_unsafe_math_optimizations,
@@ -2208,7 +2240,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         A->getOption().getID() != options::OPT_fsigned_zeros)
       SignedZeros = false;
   bool TrappingMath = true;
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_funsafe_math_optimizations,
                                options::OPT_fno_unsafe_math_optimizations,
@@ -2224,7 +2256,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
 
   // Validate and pass through -fp-contract option. 
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math,
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
                                options::OPT_fno_fast_math,
                                options::OPT_ffp_contract)) {
     if (A->getOption().getID() == options::OPT_ffp_contract) {
@@ -2235,7 +2267,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         D.Diag(diag::err_drv_unsupported_option_argument)
           << A->getOption().getName() << Val;
       }
-    } else if (A->getOption().getID() == options::OPT_ffast_math) {
+    } else if (A->getOption().matches(options::OPT_ffast_math) ||
+               (OFastEnabled && A->getOption().matches(options::OPT_Ofast))) {
       // If fast-math is set then set the fp-contract mode to fast.
       CmdArgs.push_back(Args.MakeArgString("-ffp-contract=fast"));
     }
@@ -2246,9 +2279,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // preprocessor macros. This is distinct from enabling any optimizations as
   // these options induce language changes which must survive serialization
   // and deserialization, etc.
-  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, options::OPT_fno_fast_math))
-    if (A->getOption().matches(options::OPT_ffast_math))
-      CmdArgs.push_back("-ffast-math");
+  if (Arg *A = Args.getLastArg(options::OPT_ffast_math, FastMathAliasOption,
+                               options::OPT_fno_fast_math))
+      if (!A->getOption().matches(options::OPT_fno_fast_math))
+        CmdArgs.push_back("-ffast-math");
   if (Arg *A = Args.getLastArg(options::OPT_ffinite_math_only, options::OPT_fno_fast_math))
     if (A->getOption().matches(options::OPT_ffinite_math_only))
       CmdArgs.push_back("-ffinite-math-only");
@@ -3271,8 +3305,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    false))
     CmdArgs.push_back("-fasm-blocks");
 
+  // If -Ofast is the optimization level, then -fvectorize should be enabled.
+  // This alias option is being used to simplify the hasFlag logic.
+  OptSpecifier VectorizeAliasOption = OFastEnabled ? options::OPT_Ofast :
+    options::OPT_fvectorize;
+
   // -fvectorize is default.
-  if (Args.hasFlag(options::OPT_fvectorize,
+  if (Args.hasFlag(options::OPT_fvectorize, VectorizeAliasOption,
                    options::OPT_fno_vectorize, true)) {
     CmdArgs.push_back("-backend-option");
     CmdArgs.push_back("-vectorize-loops");
@@ -5770,6 +5809,12 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-EB");
     else
       CmdArgs.push_back("-EL");
+
+    Args.AddLastArg(CmdArgs, options::OPT_mips16, options::OPT_mno_mips16);
+    Args.AddLastArg(CmdArgs, options::OPT_mmicromips,
+                    options::OPT_mno_micromips);
+    Args.AddLastArg(CmdArgs, options::OPT_mdsp, options::OPT_mno_dsp);
+    Args.AddLastArg(CmdArgs, options::OPT_mdspr2, options::OPT_mno_dspr2);
 
     Arg *LastPICArg = Args.getLastArg(options::OPT_fPIC, options::OPT_fno_PIC,
                                       options::OPT_fpic, options::OPT_fno_pic,

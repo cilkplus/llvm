@@ -155,6 +155,8 @@ private:
       }
 
       if (CurrentToken->is(tok::r_paren)) {
+        if (CurrentToken->Parent->closesScope())
+          CurrentToken->Parent->MatchingParen->NoMoreTokensOnLevel = true;
         Left->MatchingParen = CurrentToken;
         CurrentToken->MatchingParen = Left;
 
@@ -456,6 +458,10 @@ private:
     case tok::pp_error:
     case tok::pp_warning:
       parseWarningOrError();
+      break;
+    case tok::pp_if:
+    case tok::pp_elif:
+      parseLine();
       break;
     default:
       break;
@@ -1181,6 +1187,7 @@ void TokenAnnotator::printDebugInfo(const AnnotatedLine &Line) {
     llvm::errs() << " M=" << Tok->MustBreakBefore
                  << " C=" << Tok->CanBreakBefore << " T=" << Tok->Type
                  << " S=" << Tok->SpacesRequiredBefore
+                 << " P=" << Tok->SplitPenalty
                  << " Name=" << Tok->FormatTok.Tok.getName() << " FakeLParens=";
     for (unsigned i = 0, e = Tok->FakeLParens.size(); i != e; ++i)
       llvm::errs() << Tok->FakeLParens[i] << "/";

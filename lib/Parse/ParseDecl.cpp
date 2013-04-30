@@ -1809,8 +1809,7 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(Declarator &D,
     }
   }
 
-  bool TypeContainsAuto =
-    D.getDeclSpec().getTypeSpecType() == DeclSpec::TST_auto;
+  bool TypeContainsAuto = D.getDeclSpec().containsPlaceholderType();
 
   // Parse declarator '=' initializer.
   // If a '==' or '+=' is found, suggest a fixit to '='.
@@ -3754,8 +3753,8 @@ void Parser::ParseEnumBody(SourceLocation StartLoc, Decl *EnumDecl) {
   MaybeParseGNUAttributes(attrs);
 
   Actions.ActOnEnumBody(StartLoc, T.getOpenLocation(), T.getCloseLocation(),
-                        EnumDecl, EnumConstantDecls.data(),
-                        EnumConstantDecls.size(), getCurScope(),
+                        EnumDecl, EnumConstantDecls,
+                        getCurScope(),
                         attrs.getList());
 
   EnumScope.Exit();

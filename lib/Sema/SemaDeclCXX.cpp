@@ -845,7 +845,8 @@ static bool CheckConstexprDeclStmt(Sema &SemaRef, const FunctionDecl *Dcl,
             << (VD->getTLSKind() == VarDecl::TLS_Dynamic);
           return false;
         }
-        if (SemaRef.RequireLiteralType(
+        if (!VD->getType()->isDependentType() &&
+            SemaRef.RequireLiteralType(
               VD->getLocation(), VD->getType(),
               diag::err_constexpr_local_var_non_literal_type,
               isa<CXXConstructorDecl>(Dcl)))
@@ -1135,11 +1136,11 @@ bool Sema::CheckConstexprFunctionBody(const FunctionDecl *Dcl, Stmt *Body) {
       // statement. We still do, unless the return type is void, because
       // otherwise if there's no return statement, the function cannot
       // be used in a core constant expression.
+      bool OK = getLangOpts().CPlusPlus1y && Dcl->getResultType()->isVoidType();
       Diag(Dcl->getLocation(),
-           getLangOpts().CPlusPlus1y && Dcl->getResultType()->isVoidType()
-             ? diag::warn_cxx11_compat_constexpr_body_no_return
-             : diag::err_constexpr_body_no_return);
-      return false;
+           OK ? diag::warn_cxx11_compat_constexpr_body_no_return
+              : diag::err_constexpr_body_no_return);
+      return OK;
     }
     if (ReturnStmts.size() > 1) {
       Diag(ReturnStmts.back(),
@@ -10507,7 +10508,8 @@ Decl *Sema::ActOnStartLinkageSpecification(Scope *S, SourceLocation ExternLoc,
   // FIXME: Add all the various semantics of linkage specifications
 
   LinkageSpecDecl *D = LinkageSpecDecl::Create(Context, CurContext,
-                                               ExternLoc, LangLoc, Language);
+                                               ExternLoc, LangLoc, Language,
+                                               LBraceLoc.isValid());
   CurContext->addDecl(D);
   PushDeclContext(S, D);
   return D;
@@ -11131,29 +11133,39 @@ NamedDecl *Sema::ActOnFriendFunctionDecl(Scope *S, Declarator &D,
 
     // Find the appropriate context according to the above.
     DC = CurContext;
-    while (true) {
-      // Skip class contexts.  If someone can cite chapter and verse
-      // for this behavior, that would be nice --- it's what GCC and
-      // EDG do, and it seems like a reasonable intent, but the spec
-      // really only says that checks for unqualified existing
-      // declarations should stop at the nearest enclosing namespace,
-      // not that they should only consider the nearest enclosing
-      // namespace.
-      while (DC->isRecord() || DC->isTransparentContext()) 
-        DC = DC->getParent();
 
-      LookupQualifiedName(Previous, DC);
+    // Skip class contexts.  If someone can cite chapter and verse
+    // for this behavior, that would be nice --- it's what GCC and
+    // EDG do, and it seems like a reasonable intent, but the spec
+    // really only says that checks for unqualified existing
+    // declarations should stop at the nearest enclosing namespace,
+    // not that they should only consider the nearest enclosing
+    // namespace.
+    while (DC->isRecord())
+      DC = DC->getParent();
+
+    DeclContext *LookupDC = DC;
+    while (LookupDC->isTransparentContext())
+      LookupDC = LookupDC->getParent();
+
+    while (true) {
+      LookupQualifiedName(Previous, LookupDC);
 
       // TODO: decide what we think about using declarations.
-      if (isLocal || !Previous.empty())
+      if (isLocal)
         break;
 
-      if (isTemplateId) {
-        if (isa<TranslationUnitDecl>(DC)) break;
-      } else {
-        if (DC->isFileContext()) break;
+      if (!Previous.empty()) {
+        DC = LookupDC;
+        break;
       }
-      DC = DC->getParent();
+
+      if (isTemplateId) {
+        if (isa<TranslationUnitDecl>(LookupDC)) break;
+      } else {
+        if (LookupDC->isFileContext()) break;
+      }
+      LookupDC = LookupDC->getParent();
     }
 
     DCScope = getScopeForDeclContext(S, DC);

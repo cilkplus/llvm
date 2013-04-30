@@ -2192,7 +2192,7 @@ GetAllocationSite(ProgramStateManager& StateMgr, const ExplodedNode *N,
     if (!InitMethodContext)
       if (Optional<CallEnter> CEP = N->getLocation().getAs<CallEnter>()) {
         const Stmt *CE = CEP->getCallExpr();
-        if (const ObjCMessageExpr *ME = dyn_cast<ObjCMessageExpr>(CE)) {
+        if (const ObjCMessageExpr *ME = dyn_cast_or_null<ObjCMessageExpr>(CE)) {
           const Stmt *RecExpr = ME->getInstanceReceiver();
           if (RecExpr) {
             SVal RecV = St->getSVal(RecExpr, NContext);
@@ -2358,8 +2358,17 @@ CFRefLeakReport::CFRefLeakReport(CFRefBug &D, const LangOptions &LOpts,
   else
     AllocStmt = P.castAs<PostStmt>().getStmt();
   assert(AllocStmt && "All allocations must come from explicit calls");
-  Location = PathDiagnosticLocation::createBegin(AllocStmt, SMgr,
-                                                  n->getLocationContext());
+
+  PathDiagnosticLocation AllocLocation =
+    PathDiagnosticLocation::createBegin(AllocStmt, SMgr,
+                                        AllocNode->getLocationContext());
+  Location = AllocLocation;
+
+  // Set uniqieing info, which will be used for unique the bug reports. The
+  // leaks should be uniqued on the allocation site.
+  UniqueingLocation = AllocLocation;
+  UniqueingDecl = AllocNode->getLocationContext()->getDecl();
+
   // Fill in the description of the bug.
   Description.clear();
   llvm::raw_string_ostream os(Description);

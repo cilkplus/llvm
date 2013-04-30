@@ -1948,10 +1948,10 @@ public:
     SourceLocation getLocation() const { return Loc; }
 
     /// \brief Determine whether this capture handles the C++ 'this' pointer.
-    bool capturesThis() const { return Kind == VCK_This; }
+    bool capturesThis() const { return getCaptureKind() == VCK_This; }
 
     /// \brief Determine whether this capture handles a variable.
-    bool capturesVariable() const { return Kind != VCK_This; }
+    bool capturesVariable() const { return getCaptureKind() != VCK_This; }
 
     /// \brief Retrieve the declaration of the variable being captured.
     ///

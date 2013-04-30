@@ -644,7 +644,7 @@ Sema::ActOnCaseStmt(SourceLocation CaseLoc, Expr *LHSVal,
       // Recover from an error by just forgetting about it.
     }
   }
-  
+
   LHSVal = ActOnFinishFullExpr(LHSVal, LHSVal->getExprLoc(), false,
                                getLangOpts().CPlusPlus11).take();
   if (RHSVal)
@@ -2199,7 +2199,15 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
   StmtResult BeginEndDecl = BeginEnd;
   ExprResult NotEqExpr = Cond, IncrExpr = Inc;
 
-  if (!BeginEndDecl.get() && !RangeVarType->isDependentType()) {
+  if (RangeVarType->isDependentType()) {
+    // The range is implicitly used as a placeholder when it is dependent.
+    RangeVar->setUsed();
+
+    // Deduce any 'auto's in the loop variable as 'DependentTy'. We'll fill
+    // them in properly when we instantiate the loop.
+    if (!LoopVar->isInvalidDecl() && Kind != BFRK_Check)
+      LoopVar->setType(SubstAutoType(LoopVar->getType(), Context.DependentTy));
+  } else if (!BeginEndDecl.get()) {
     SourceLocation RangeLoc = RangeVar->getLocation();
 
     const QualType RangeVarNonRefType = RangeVarType.getNonReferenceType();
@@ -2386,9 +2394,6 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
       if (LoopVar->isInvalidDecl())
         NoteForRangeBeginEndFunction(*this, BeginExpr.get(), BEF_begin);
     }
-  } else {
-    // The range is implicitly used as a placeholder when it is dependent.
-    RangeVar->setUsed();
   }
 
   // Don't bother to actually allocate the result if we're just trying to

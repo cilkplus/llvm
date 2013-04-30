@@ -51,6 +51,7 @@ FormatStyle getLLVMStyle() {
   LLVMStyle.ObjCSpaceBeforeProtocolList = true;
   LLVMStyle.PenaltyExcessCharacter = 1000000;
   LLVMStyle.PenaltyReturnTypeOnItsOwnLine = 75;
+  LLVMStyle.AlignEscapedNewlinesLeft = false;
   return LLVMStyle;
 }
 
@@ -67,16 +68,18 @@ FormatStyle getGoogleStyle() {
   GoogleStyle.BinPackParameters = true;
   GoogleStyle.AllowAllParametersOfDeclarationOnNextLine = true;
   GoogleStyle.ConstructorInitializerAllOnOneLineOrOnePerLine = true;
-  GoogleStyle.AllowShortIfStatementsOnASingleLine = false;
+  GoogleStyle.AllowShortIfStatementsOnASingleLine = true;
   GoogleStyle.ObjCSpaceBeforeProtocolList = false;
   GoogleStyle.PenaltyExcessCharacter = 1000000;
   GoogleStyle.PenaltyReturnTypeOnItsOwnLine = 200;
+  GoogleStyle.AlignEscapedNewlinesLeft = true;
   return GoogleStyle;
 }
 
 FormatStyle getChromiumStyle() {
   FormatStyle ChromiumStyle = getGoogleStyle();
   ChromiumStyle.AllowAllParametersOfDeclarationOnNextLine = false;
+  ChromiumStyle.AllowShortIfStatementsOnASingleLine = false;
   ChromiumStyle.BinPackParameters = false;
   ChromiumStyle.Standard = FormatStyle::LS_Cpp03;
   ChromiumStyle.DerivePointerBinding = false;
@@ -566,6 +569,15 @@ private:
       State.Stack.push_back(
           ParenState(NewIndent, State.Stack.back().LastSpace, AvoidBinPacking,
                      State.Stack.back().NoLineBreak));
+
+      if (Current.NoMoreTokensOnLevel && Current.FakeLParens.empty()) {
+        // This parenthesis was the last token possibly making use of Indent and
+        // LastSpace of the next higher ParenLevel. Thus, erase them to acieve
+        // better memoization results.
+        State.Stack[State.Stack.size() - 2].Indent = 0;
+        State.Stack[State.Stack.size() - 2].LastSpace = 0;
+      }
+
       ++State.ParenLevel;
     }
 
@@ -1069,6 +1081,8 @@ public:
         if (TheLine.Last->is(tok::comment))
           Whitespaces.addUntouchableComment(SourceMgr.getSpellingColumnNumber(
               TheLine.Last->FormatTok.Tok.getLocation()) - 1);
+        else
+          Whitespaces.alignComments();
       }
       PreviousLineLastToken = I->Last;
     }
