@@ -421,6 +421,13 @@ llvm::Value *CodeGenFunction::getSelectorFromSlot() {
 }
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
+  // Emit an implicit sync if necessary for a spawning function. This must occur
+  // before __cxa_allocate_exception, since the runtime requires
+  // std::uncaught_exception() to be false.
+  if (CurCGCilkImplicitSyncInfo &&
+      CurCGCilkImplicitSyncInfo->needsImplicitSync(E))
+    CGM.getCilkPlusRuntime().EmitCilkSync(*this);
+
   if (!E->getSubExpr()) {
     EmitNoreturnRuntimeCallOrInvoke(getReThrowFn(CGM),
                                     ArrayRef<llvm::Value*>());
@@ -454,13 +461,8 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
     EmitNounwindRuntimeCall(AllocExceptionFn,
                             llvm::ConstantInt::get(SizeTy, TypeSize),
                             "exception");
-  
-  EmitAnyExprToExn(*this, E->getSubExpr(), ExceptionPtr);
 
-  // Emit an implicit sync if necessary for a spawning function.
-  if (CurCGCilkImplicitSyncInfo &&
-      CurCGCilkImplicitSyncInfo->needsImplicitSync(E))
-    CGM.getCilkPlusRuntime().EmitCilkSync(*this);
+  EmitAnyExprToExn(*this, E->getSubExpr(), ExceptionPtr);
 
   // Now throw the exception.
   llvm::Constant *TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, 
@@ -579,12 +581,23 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 }
 
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
+  // Entering a new scope before we emit the try and catch blocks. An implicit
+  // sync will be emitted on exit, if necessary.
+  //
+  // try {
+  //   try-block;
+  // }  catch-blocks...
+  // } finally {
+  //   _Cilk_sync;
+  // }
+  //
+  RunCleanupsScope Scope(*this);
+  if (CurCGCilkImplicitSyncInfo &&
+      CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
+    CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
+
   EnterCXXTryStmt(S);
   {
-    // Entering a new scope before we emit the try block. An implicit sync
-    // will be emitted on exit, if necessary.
-    RunCleanupsScope Scope(*this);
-
     if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo) {
       // The following implicit sync is not required by the Cilk Plus
       // Language Extension Specificition V1.1. However, this is required
@@ -592,9 +605,6 @@ void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
       //
       // Optimizations should be able to elide those unnecessary syncs.
       CGM.getCilkPlusRuntime().EmitCilkSync(*this);
-
-      if (CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
-        CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
     }
 
     EmitStmt(S.getTryBlock());
@@ -1299,16 +1309,16 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // Catch the exception if this isn't a catch-all.
     const CXXCatchStmt *C = S.getHandler(I-1);
 
-    // Insert a special sync before the catch statement is processed.
-    if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo)
-      CGM.getCilkPlusRuntime().EmitCilkExceptingSync(*this);
-
     // Enter a cleanup scope, including the catch variable and the
     // end-catch.
     RunCleanupsScope CatchScope(*this);
 
     // Initialize the catch variable and set up the cleanups.
     BeginCatch(*this, C);
+
+    // Insert a special sync before the catch statement is processed.
+    if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo)
+      CGM.getCilkPlusRuntime().EmitCilkExceptingSync(*this);
 
     // Perform the body of the catch.
     EmitStmt(C->getHandlerBlock());

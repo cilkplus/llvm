@@ -143,34 +143,44 @@ void test6_anchor() throw ();
 void test6() {
   // CHECK: define void @_Z5test6v()
   //
-  // normal and exception handling implicit sync
-  //
-  // CHECK: call void @__cilkrts_sync
-  // CHECK: call void @__cilkrts_sync
   try {
     global = _Cilk_spawn ThrowingFib(BIG_NUM * BIG_NUM);
+    // normal and exception handling implicit sync
   } catch (int except) {
+    // CHECK: call void @__cilkrts_sync
     return;
+  } catch (float except) {
+    // CHECK: call void @__cilkrts_sync
   }
+  // finally {
+  //   CHECK: call void @__cilkrts_sync
+  // }
 
   test6_anchor();
   // Elide the function implicit sync
   //
   // CHECK: call void @_Z12test6_anchorv()
   // CHECK-NOT:  call void @__cilkrts_sync
+  // CHECK: ret
 }
 
 
-// Should have sync before throw, right after the exception object
+// Should have sync before throw, right before the exception object
 // has been created
 void test7() throw (int) {
+  try {
+    global = _Cilk_spawn Fib(BIG_NUM);
+    throw BIG_NUM;
+  } catch (...) { }
+
   // CHECK: define void @_Z5test7v()
-  global = _Cilk_spawn Fib(BIG_NUM);
+  //
+  // * Implicit sync while entering the try block
+  // CHECK: call void @__cilkrts_sync
   //
   // implicit sync before throwing
+  // CHECK: call void @__cilkrts_sync
   // CHECK: call i8* @__cxa_allocate_exception
   // CHECK: store i32 30
-  // CHECK: call void @__cilkrts_sync
   // CHECK: invoke void @__cxa_throw
-  throw BIG_NUM;
 }

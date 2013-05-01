@@ -112,10 +112,6 @@ out: return;
     //
     // CHECK_SYNC_JUMP: call void @__cilk_sync
     //
-    // * Exit due to exception *
-    //
-    // CHECK_SYNC_JUMP: call void @__cilk_sync
-    //
     // * All normal exits *
     // All normal exits go through a single cleanup block, which uses a switch
     // to determine which path to continue after the cleanup.
@@ -123,6 +119,11 @@ out: return;
     // CHECK_SYNC_JUMP: call void @__cilk_sync
     // CHECK_SYNC_JUMP-NOT: br
     // CHECK_SYNC_JUMP: switch i32 %cleanup.dest
+    //
+    // * Exit due to exception *
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    // CHECK_SYNC_JUMP-NEXT: call void @__cilk_parent_epilogue
   }
 
   void test4() {
@@ -141,10 +142,6 @@ out: return;
     //
     // CHECK_SYNC_JUMP: call void @__cilk_sync
     //
-    // * Exit due to exception *
-    //
-    // CHECK_SYNC_JUMP: call void @__cilk_sync
-    //
     // * All normal exits *
     // All normal exits go through a single cleanup block, which uses a switch
     // to determine which path to continue after the cleanup.
@@ -152,6 +149,11 @@ out: return;
     // CHECK_SYNC_JUMP: call void @__cilk_sync
     // CHECK_SYNC_JUMP-NOT: br
     // CHECK_SYNC_JUMP: switch i32 %cleanup.dest
+    //
+    // * Exit due to exception *
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
+    // CHECK_SYNC_JUMP-NEXT: call void @__cilk_parent_epilogue
   }
 
   void test5() {
@@ -170,10 +172,6 @@ out: return;
     //
     // CHECK_SYNC_JUMP: call void @__cilk_sync
     //
-    // * Exit due to exception *
-    //
-    // CHECK_SYNC_JUMP: call void @__cilk_sync
-    //
     // * All normal exits *
     // All normal exits go through a single cleanup block, which uses a switch
     // to determine which path to continue after the cleanup.
@@ -181,6 +179,10 @@ out: return;
     // CHECK_SYNC_JUMP: call void @__cilk_sync
     // CHECK_SYNC_JUMP-NOT: br
     // CHECK_SYNC_JUMP: switch i32 %cleanup.dest
+    //
+    // * Exit due to exception *
+    //
+    // CHECK_SYNC_JUMP: call void @__cilk_sync
   }
 }
 
@@ -269,9 +271,9 @@ void test5() {
   _Cilk_spawn foo();
   throw 13;
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test5Ev
-  // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
+  // CHECK_IMPLICIT_SYNC: call void @__cilk_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: call i8* @__cxa_allocate_exception
   // CHECK_IMPLICIT_SYNC: store i32 13
-  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_sync
   // CHECK_IMPLICIT_SYNC-NEXT: invoke void @__cxa_throw
 }
 
@@ -284,11 +286,18 @@ void test6() {
     bar();
   }
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test6Ev
-  // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
+  //
+  // try {
+  // CHECK_IMPLICIT_SYNC: call void @__cilk_sync
+  //
+  // throw 17
+  // CHECK_IMPLICIT_SYNC: call void @__cilk_sync
+  // CHECK_IMPLICIT_SYNC-NEXT: call i8* @__cxa_allocate_exception
   // CHECK_IMPLICIT_SYNC: store i32 17
-  // CHECK_IMPLICIT_SYNC-NEXT: call void @__cilk_sync
   // CHECK_IMPLICIT_SYNC-NEXT: invoke void @__cxa_throw
 }
+
+void test7_anchor() throw();
 
 // No implicit sync before throw
 void test7() {
@@ -297,11 +306,14 @@ void test7() {
   } catch (...) {
     bar();
   }
+
+  test7_anchor();
   throw 19;
   // CHECK_IMPLICIT_SYNC: define void @_ZN27implicit_sync_elision_basic5test7Ev
+  // CHECK_IMPLICIT_SYNC: call void @_ZN27implicit_sync_elision_basic12test7_anchorEv
+  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilk_sync
   // CHECK_IMPLICIT_SYNC: call i8* @__cxa_allocate_exception
   // CHECK_IMPLICIT_SYNC: store i32 19
-  // CHECK_IMPLICIT_SYNC-NOT: call void @__cilk_sync
   // CHECK_IMPLICIT_SYNC-NEXT: invoke void @__cxa_throw
 }
 
