@@ -3787,15 +3787,33 @@ static bool ExtractCilkForCondition(Sema &S,
   return false;
 }
 
-static bool IsCilkForControlVarRef(Expr *E, VarDecl *ControlVar) {
-  E = E->IgnoreParenNoopCasts(ControlVar->getASTContext());
+static bool IsCilkForControlVarRef(Expr *E, const VarDecl *ControlVar) {
+  // Only ignore very basic casts and this allows us to distinguish
+  //
+  // struct Int {
+  //  Int();
+  //  operator int&();
+  // };
+  //
+  // _Cilk_for (Int i; i.opertor int&() < 10; ++i);
+  //
+  // and
+  //
+  // _Cilk_for (Int i; i < 10; ++i);
+  //
+  // The first is a member function call and the second is also member function
+  // call but associated with a user defined conversion cast.
+  //
+  E = E->IgnoreParenLValueCasts();
+
   if (CXXConstructExpr *C = dyn_cast<CXXConstructExpr>(E)) {
     if (C->getConstructor()->isConvertingConstructor(false))
       return IsCilkForControlVarRef(C->getArg(0), ControlVar);
-  } else if (MaterializeTemporaryExpr *M = dyn_cast<MaterializeTemporaryExpr>(E)) {
-    return IsCilkForControlVarRef(M->GetTemporaryExpr(), ControlVar);
-  } else if (CastExpr *C = dyn_cast<CastExpr>(E)) {
-    return IsCilkForControlVarRef(C->getSubExpr(), ControlVar);
+  } else if (CXXBindTemporaryExpr *BE = dyn_cast<CXXBindTemporaryExpr>(E)) {
+    return IsCilkForControlVarRef(BE->getSubExpr(), ControlVar);
+  } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E)) {
+    // Apply recursively with the subexpression written in the source.
+    return IsCilkForControlVarRef(ICE->getSubExprAsWritten(), ControlVar);
   } else if (DeclRefExpr *DR = dyn_cast<DeclRefExpr>(E))
     if (DR->getDecl() == ControlVar)
       return true;
@@ -3860,25 +3878,6 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   Limit = RHS;
 }
 
-// Returns true if OpSubExpr references ControlVar, false otherwise.
-// If OpSubExpr does not reference ControlVar, a diagnostic is issued.
-static bool CheckIncrementVar(Sema &S, const Expr *OpSubExpr,
-                              const VarDecl *ControlVar)
-{
-  OpSubExpr = OpSubExpr->IgnoreImpCasts();
-  const DeclRefExpr *VarRef = dyn_cast<DeclRefExpr>(OpSubExpr);
-  if (!VarRef)
-    return false;
-
-  if (VarRef->getDecl() != ControlVar) {
-    S.Diag(VarRef->getExprLoc(), diag::err_cilk_for_increment_not_control_var)
-      << ControlVar;
-    return false;
-  }
-
-  return true;
-}
-
 static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
                                     const VarDecl *ControlVar,
                                     bool &HasConstantIncrement,
@@ -3892,8 +3891,11 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
 
   // Simple increment or decrement -- always OK
   if (UnaryOperator *U = dyn_cast<UnaryOperator>(Increment)) {
-    if (!CheckIncrementVar(S, U->getSubExpr(), ControlVar))
-      return false;
+    if (!IsCilkForControlVarRef(U->getSubExpr(), ControlVar)) {
+      S.Diag(U->getSubExpr()->getExprLoc(),
+             diag::err_cilk_for_increment_not_control_var) << ControlVar;
+       return false;
+    }
 
     if (U->isIncrementDecrementOp()) {
       HasConstantIncrement = true;
@@ -3935,13 +3937,19 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
       Direction = Overload == OO_PlusEqual ? 1 : -1;
     }
 
-    if (!CheckIncrementVar(S, C->getArg(0), ControlVar))
+    if (!IsCilkForControlVarRef(C->getArg(0), ControlVar)) {
+      S.Diag(C->getArg(0)->getExprLoc(),
+             diag::err_cilk_for_increment_not_control_var) << ControlVar;
       return false;
+    }
   }
 
   if (BinaryOperator *B = dyn_cast<CompoundAssignOperator>(Increment)) {
-    if (!CheckIncrementVar(S, B->getLHS(), ControlVar))
+    if (!IsCilkForControlVarRef(B->getLHS(), ControlVar)) {
+      S.Diag(B->getLHS()->getExprLoc(),
+             diag::err_cilk_for_increment_not_control_var) << ControlVar;
       return false;
+    }
 
     // += or -= -- defer checking of the RHS type
     if (B->isAdditiveAssignOp()) {
@@ -4255,7 +4263,7 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
 
     // Build a full expression "inner_loop_var += stride * low"
     {
-      EnterExpressionEvaluationContext Scope(*this, PotentiallyEvaluated);
+      EnterExpressionEvaluationContext EvalScope(*this, PotentiallyEvaluated);
 
       // Both low and stride experssions are of type integral.
       ExprResult LowExpr = BuildDeclRefExpr(Low, Ty, VK_LValue, VarLoc);
@@ -4276,6 +4284,7 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
       AdjustExpr = BuildBinOp(CurScope, VarLoc, BO_AddAssign,
                               InnerVarExpr.get(), StepExpr.get());
       if (!AdjustExpr.isInvalid()) {
+        ExprNeedsCleanups |= StepExpr.get()->hasNonTrivialCall(Context);
         AdjustExpr = MaybeCreateExprWithCleanups(AdjustExpr);
       }
       // FIXME: Should mark the CilkForDecl as invalid?

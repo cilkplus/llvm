@@ -234,3 +234,26 @@ int jump() {
   NoCopyCtor j;
   _Cilk_for (NoCopyCtor i(j); i < 10; ++i); // expected-error {{call to deleted constructor of 'NoCopyCtor'}}
 }
+
+namespace ns_member {
+
+struct B {
+  int val;
+  B(int v = 0);
+  operator int&();
+};
+
+struct Derived : public B {
+  Derived(int v = 0) : B(v) {}
+};
+
+void test() {
+  _Cilk_for (Derived i; i < 10; ++i); // OK
+  _Cilk_for (Derived i; i.operator int&() < 10; ++i); // expected-error {{loop condition does not test control variable 'i' in '_Cilk_for'}} \
+                                                      // expected-note {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+  _Cilk_for (Derived i; i.val < 10; ++i); // expected-error {{loop condition does not test control variable 'i' in '_Cilk_for'}} \
+                                          // expected-note {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+  _Cilk_for (Derived i; i < 10; i.operator int&()++); // expected-error {{loop increment does not modify control variable 'i' in '_Cilk_for'}}
+}
+
+} // namespace
