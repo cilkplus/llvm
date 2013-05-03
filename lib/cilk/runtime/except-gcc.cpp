@@ -2,35 +2,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2009-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
 #include "except-gcc.h"
@@ -41,6 +44,7 @@
 #include "full_frame.h"
 #include "scheduler.h"
 #include "frame_malloc.h"
+#include "pedigrees.h"
 
 #include <stdint.h>
 #include <typeinfo>
@@ -166,8 +170,24 @@ __cilkrts_return_exception(__cilkrts_stack_frame *sf)
     CILK_ASSERT(sf->flags & CILK_FRAME_DETACHED);
     sf->flags &= ~CILK_FRAME_DETACHED;
 
+   /*
+    * If we are in replay mode, and a steal occurred during the recording
+    * phase, stall till a steal actually occurs.
+    */
+    replay_wait_for_steal_if_parent_was_stolen(w);
+
     /* If this is to be an abnormal return, save the active exception. */
     if (!__cilkrts_pop_tail(w)) {
+        /* Write a record to the replay log for an attempt to return to a
+           stolen parent.  This must be done before the exception handler
+           invokes __cilkrts_leave_frame which will bump the pedigree so
+           the replay_wait_for_steal_if_parent_was_stolen() above will match on
+           replay */
+        replay_record_orphaned(w);
+
+        /* Now that the record/replay stuff is done, update the pedigree */
+        update_pedigree_on_leave_frame(w, sf);
+
         /* Inline pop_frame; this may not be needed. */
         w->current_stack_frame = sf->call_parent;
         sf->call_parent = 0;
@@ -198,6 +218,10 @@ __cilkrts_return_exception(__cilkrts_stack_frame *sf)
        the same stack and part of the same full frame.  The caller is
        cleaning up the Cilk frame during unwind and will reraise the
        exception */
+
+    /* Now that the record/replay stuff is done, update the pedigree */
+    update_pedigree_on_leave_frame(w, sf);
+
 #if DEBUG_EXCEPTIONS /* DEBUG ONLY */
     {
         __cxa_eh_globals *state = __cxa_get_globals();
@@ -254,7 +278,8 @@ NORETURN __cilkrts_c_sync_except (__cilkrts_worker *w, __cilkrts_stack_frame *sf
     __cxa_eh_globals *state = __cxa_get_globals();
     _Unwind_Exception *exc = (_Unwind_Exception *)sf->except_data;
 
-    CILK_ASSERT (sf->flags & (CILK_FRAME_UNSYNCHED|CILK_FRAME_EXCEPTING) == (CILK_FRAME_UNSYNCHED|CILK_FRAME_EXCEPTING));
+    CILK_ASSERT((sf->flags & (CILK_FRAME_UNSYNCHED|CILK_FRAME_EXCEPTING)) ==
+                (CILK_FRAME_UNSYNCHED|CILK_FRAME_EXCEPTING));
     sf->flags &= ~CILK_FRAME_EXCEPTING;
 
 #if DEBUG_EXCEPTIONS

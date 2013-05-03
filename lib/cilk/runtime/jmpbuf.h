@@ -2,35 +2,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2009-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
 /**
@@ -51,32 +54,48 @@
 #include <setjmp.h>
 
 #if 0 /* defined CILK_USE_C_SETJMP && defined JB_RSP */
-#define SP(SF) (SF)->ctx[0].__jmpbuf[JB_RSP]
-#define FP(SF) (SF)->ctx[0].__jmpbuf[JB_RBP]
-#define PC(SF) (SF)->ctx[0].__jmpbuf[JB_PC]
+#   define JMPBUF_SP(ctx) (ctx)[0].__jmpbuf[JB_RSP]
+#   define JMPBUF_FP(ctx) (ctx)[0].__jmpbuf[JB_RBP]
+#   define JMPBUF_PC(ctx) (ctx)[0].__jmpbuf[JB_PC]
 #elif 0 /* defined CILK_USE_C_SETJMP && defined JB_SP */
-#define SP(SF) (SF)->ctx[0].__jmpbuf[JB_SP]
-#define FP(SF) (SF)->ctx[0].__jmpbuf[JB_BP]
-#define PC(SF) (SF)->ctx[0].__jmpbuf[JB_PC]
+#   define JMPBUF_SP(ctx) (ctx)[0].__jmpbuf[JB_SP]
+#   define JMPBUF_FP(ctx) (ctx)[0].__jmpbuf[JB_BP]
+#   define JMPBUF_PC(ctx) (ctx)[0].__jmpbuf[JB_PC]
 #elif defined _WIN64
-#define SP(SF) ((_JUMP_BUFFER*)(&(SF)->ctx))->Rsp
-#define FP(SF) ((_JUMP_BUFFER*)(&(SF)->ctx))->Rbp
-#define PC(SF) ((_JUMP_BUFFER*)(&(SF)->ctx))->Rip
+#   define JMPBUF_SP(ctx) ((_JUMP_BUFFER*)(&(ctx)))->Rsp
+#   define JMPBUF_FP(ctx) ((_JUMP_BUFFER*)(&(ctx)))->Rbp
+#   define JMPBUF_PC(ctx) ((_JUMP_BUFFER*)(&(ctx)))->Rip
 #elif defined _WIN32
-/** Fetch stack pointer from a __cilkrts_stack_frame */
-#define SP(SF) SF->ctx.Esp
-/** Fetch frame pointer from a __cilkrts_stack_frame */
-#define FP(SF) SF->ctx.Ebp
-/** Fetch program counter from a __cilkrts_stack_frame */
-#define PC(SF) SF->ctx.Eip
+    /** Fetch stack pointer from a __cilkrts_stack_frame */
+#   define JMPBUF_SP(ctx) (ctx).Esp
+    /** Fetch frame pointer from a __cilkrts_stack_frame */
+#   define JMPBUF_FP(ctx) (ctx).Ebp
+    /** Fetch program counter from a __cilkrts_stack_frame */
+#   define JMPBUF_PC(ctx) (ctx).Eip
 #else /* defined __GNUC__ || defined __ICC */
-/* word 0 is frame address
-   word 1 is resume address
-   word 2 is stack address */
-#define FP(SF) (SF)->ctx[0]
-#define PC(SF) (SF)->ctx[1]
-#define SP(SF) (SF)->ctx[2]
+    /* word 0 is frame address
+     * word 1 is resume address
+     * word 2 is stack address */
+#   define JMPBUF_FP(ctx) (ctx)[0]
+#   define JMPBUF_PC(ctx) (ctx)[1]
+#   define JMPBUF_SP(ctx) (ctx)[2]
 #endif
+
+/**
+ * @brief Get frame pointer from jump buffer in__cilkrts_stack_frame.
+ */
+#define FP(SF) JMPBUF_FP((SF)->ctx)
+
+/**
+ * @brief Get program counter from jump buffer in__cilkrts_stack_frame.
+ */
+#define PC(SF) JMPBUF_PC((SF)->ctx)
+
+/**
+ * @brief Get stack pointer from jump buffer in__cilkrts_stack_frame.
+ */
+#define SP(SF) JMPBUF_SP((SF)->ctx)
+
 
 __CILKRTS_BEGIN_EXTERN_C
 

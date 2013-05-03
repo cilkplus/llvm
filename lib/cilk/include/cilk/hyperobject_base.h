@@ -1,33 +1,36 @@
 /*
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2009-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  */
 
@@ -50,19 +53,6 @@
      * functions. */
 #   pragma comment(lib, "cilkrts")
 # endif
-#endif
-
-/* Macro to cache-align a declaration.  Argument(s) comprise either a
- * variable or a struct declaration. */
-#define __CILKRTS_CACHE_LINE__ 64 /* Good enough for most architectures */
-#if defined(__INTEL_COMPILER) || defined(_WIN32)
-# define __CILKRTS_CACHE_ALIGNED(...) \
-    __declspec(align(__CILKRTS_CACHE_LINE__)) __VA_ARGS__
-#elif defined(__GNUC__)
-# define __CILKRTS_CACHE_ALIGNED(...) \
-    __VA_ARGS__ __attribute__((__aligned__(__CILKRTS_CACHE_LINE__)))
-#else
-# define __CILKRTS_CACHE_ALIGNED(...) __VA_ARGS__
 #endif
 
 /* The __CILKRTS_STRAND_PURE attribute tells the compiler that the value
@@ -113,6 +103,9 @@ typedef struct __cilkrts_hyperobject_base
     __STDNS size_t      __view_size;    /* Size of each view */
 } __cilkrts_hyperobject_base;
 
+
+#ifndef CILK_STUB
+
 /* Library functions. */
 CILK_EXPORT
     void __cilkrts_hyper_create(__cilkrts_hyperobject_base *key);
@@ -129,6 +122,50 @@ CILK_EXPORT
 /* No-op destroy function */
 CILK_EXPORT
     void __cilkrts_hyperobject_noop_destroy(void* ignore, void* ignore2);
+
+
+#else // CILK_STUB
+
+// Programs compiled with CILK_STUB are not linked with the Cilk runtime 
+// library, so they should not have external references to cilkrts functions.
+// Furthermore, they don't need the hyperobject functionality, so the
+// functions can be stubbed.
+
+#define __cilkrts_hyperobject_create __cilkrts_hyperobject_create__stub
+__CILKRTS_INLINE
+    void __cilkrts_hyper_create(__cilkrts_hyperobject_base *key) 
+    {}
+
+#define __cilkrts_hyperobject_destroy __cilkrts_hyperobject_destroy__stub
+__CILKRTS_INLINE
+    void __cilkrts_hyper_destroy(__cilkrts_hyperobject_base *key) 
+    {}
+
+#define __cilkrts_hyperobject_lookup __cilkrts_hyperobject_lookup__stub
+__CILKRTS_INLINE
+    void* __cilkrts_hyper_lookup(__cilkrts_hyperobject_base *key)
+    { return (char*)(key) + key->__view_offset; }
+
+// Pointers to these functions are stored into monoids, so real functions
+// are needed.
+
+#define __cilkrts_hyperobject_alloc __cilkrts_hyperobject_alloc__stub
+__CILKRTS_INLINE
+    void* __cilkrts_hyperobject_alloc(void* ignore, __STDNS size_t bytes)
+    { assert(0); return __STDNS malloc(bytes); }
+
+#define __cilkrts_hyperobject_dealloc __cilkrts_hyperobject_dealloc__stub
+__CILKRTS_INLINE
+    void __cilkrts_hyperobject_dealloc(void* ignore, void* view)
+    { assert(0); __STDNS free(view); }
+
+#define __cilkrts_hyperobject_noop_destroy \
+            __cilkrts_hyperobject_noop_destroy__stub
+__CILKRTS_INLINE
+    void __cilkrts_hyperobject_noop_destroy(void* ignore, void* ignore2)
+    {}
+    
+#endif
 
 __CILKRTS_END_EXTERN_C
 

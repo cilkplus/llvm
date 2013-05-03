@@ -2,9 +2,11 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2010-2011 , Intel Corporation
+ * @copyright
+ * Copyright (C) 2010-2011, Intel Corporation
  * All rights reserved.
  * 
+ * @copyright
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -19,6 +21,7 @@
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  * 
+ * @copyright
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -47,7 +50,7 @@ __CILKRTS_END_EXTERN_C
 #   endif
 #endif  // _WIN32
 
-#if defined __unix__ || defined __APPLE__
+#if defined __unix__ || defined __APPLE__ || defined __VXWORKS__
 #   include <sys/time.h>
 #endif  // defined __unix__ || defined __APPLE__
 
@@ -68,7 +71,7 @@ static inline unsigned long long __cilkview_getticks()
 #ifdef _WIN32
     // Return milliseconds elapsed since the system started
     return GetTickCount();
-#elif defined(__unix__) || defined(__APPLE__)
+#elif defined(__unix__) || defined(__APPLE__) || defined __VXWORKS__
     // Return milliseconds elapsed since the Unix Epoch
     // (1-Jan-1970 00:00:00.000 UTC)
     struct timeval t;
@@ -103,7 +106,7 @@ typedef struct
 {
     cilkview_data_t *start;     // Values at start of interval
     cilkview_data_t *end;       // Values at end of interval
-    char *label;                // Name for this interval
+    const char *label;          // Name for this interval
     unsigned int flags;         // What to do - see flags below
 } cilkview_report_t;
 
@@ -114,10 +117,13 @@ enum
     CV_REPORT_WRITE_TO_RESULTS = 2  // Write parallelism data to results file
 };
 
-void __cilkview_do_report(cilkview_data_t *start,
+#ifndef CILKVIEW_NO_REPORT
+static void __cilkview_do_report(cilkview_data_t *start,
                           cilkview_data_t *end,
-                          char *label,
+                          const char *label,
                           unsigned int flags);
+#endif /* CILKVIEW_NO_REPORT
+
 /*
  * Metacall data
  *
@@ -205,7 +211,7 @@ enum
 
 static void __cilkview_do_report(cilkview_data_t *start,
                                  cilkview_data_t *end,
-                                 char *label,
+                                 const char *label,
                                  unsigned int flags)
 {
     int under_cilkview = 0;
@@ -249,7 +255,7 @@ static void __cilkview_do_report(cilkview_data_t *start,
     // Open the output file and write the trial data to it
     outfile = getenv("CILKVIEW_OUTFILE");
     if (NULL == outfile)
-        outfile = "cilkview.out";
+        outfile = (char *)"cilkview.out";
 
     f = fopen(outfile, "a");
     if (NULL == f)

@@ -2,35 +2,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2010-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2010-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************/
 
@@ -71,10 +74,8 @@ full_frame *__cilkrts_make_full_frame(__cilkrts_worker *w,
         ff->registration = 0;
 #endif
 	ff->frame_size = 0;
-//        ff->exception_sp_offset = 0;
-//        ff->eh_kind = EH_NONE;
-        ff->stack_self = 0;
-        ff->stack_child = 0;
+        ff->fiber_self = 0;
+        ff->fiber_child = 0;
 
         ff->sync_master = 0;
 
@@ -123,6 +124,26 @@ COMMON_PORTABLE void __cilkrts_take_stack(full_frame *ff, void *sp)
     DBGPRINTF("%d-                __cilkrts_take_stack - adjust (-) sync "
               "stack of full frame %p to %p (-sp: %p)\n",
               __cilkrts_get_tls_worker()->self, ff, ff->sync_sp, sp);
+}
+
+COMMON_PORTABLE void __cilkrts_adjust_stack(full_frame *ff, size_t size)
+{
+    /* When resuming the parent after a steal, __cilkrts_take_stack is used to
+     * subtract the new stack pointer from the current stack pointer, storing
+     * the offset in ff->sync_sp.  When resuming after a sync,
+     * __cilkrts_take_stack is used to subtract the new stack pointer from
+     * itself, leaving ff->sync_sp at zero (null).  Although the pointers being
+     * subtracted are not part of the same contiguous chunk of memory, the
+     * flat memory model allows us to subtract them and get a useable offset.
+     *
+     * __cilkrts_adjust_stack() is used to deallocate a Variable Length Array
+     * by adding it's size to ff->sync_sp.
+     */
+    ff->sync_sp = ff->sync_sp + size;
+
+    DBGPRINTF("%d-                __cilkrts_adjust_stack - adjust (+) sync "
+              "stack of full frame %p to %p (+ size: 0x%x)\n",
+              __cilkrts_get_tls_worker()->self, ff, ff->sync_sp, size);
 }
 
 COMMON_PORTABLE

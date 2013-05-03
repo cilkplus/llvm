@@ -1,35 +1,49 @@
 /*
- * Copyright (C) 2010-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2010-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  */
+
+/**
+ * @file common.h
+ *
+ * @brief Defines common macros and structures used by the Intel Cilk Plus
+ * runtime.
+ */
+
+/** Cilk library version = 1.0
+ */
+#define CILK_LIBRARY_VERSION 100
 
 #ifndef INCLUDED_CILK_COMMON
 #define INCLUDED_CILK_COMMON
@@ -40,7 +54,8 @@
 #   include <assert.h>
 #endif
 
-/* Prefix standard library function and type names with __STDNS in order to
+/**
+ * Prefix standard library function and type names with __STDNS in order to
  * get correct lookup in both C and C++.
  */
 #ifdef __cplusplus
@@ -49,8 +64,12 @@
 #   define __STDNS
 #endif
 
-/* CILK_EXPORT - Define export of runtime functions from shared library.
+/**
+ * @def CILK_EXPORT
+ * Define export of runtime functions from shared library.
  * Should be exported only from cilkrts*.dll/cilkrts*.so
+ * @def CILK_EXPORT_DATA
+ * Define export of runtime data from shared library.
  */
 #ifdef _WIN32
 #   ifdef IN_CILK_RUNTIME
@@ -63,6 +82,9 @@
 #elif defined(__CYGWIN__)
 #   define CILK_EXPORT      /* nothing */
 #   define CILK_EXPORT_DATA /* nothing */
+#elif defined(__APPLE__)
+#   define CILK_EXPORT      /* nothing */
+#   define CILK_EXPORT_DATA /* nothing */
 #else /* Unix/gcc */
 #   ifdef IN_CILK_RUNTIME
 #       define CILK_EXPORT      __attribute__((visibility("protected")))
@@ -73,14 +95,29 @@
 #   endif  /* IN_CILK_RUNTIME */
 #endif /* Unix/gcc */
 
+/**
+ * @def __CILKRTS_BEGIN_EXTERN_C
+ * Macro to denote the start of a section in which all names have "C" linkage.
+ * That is, none of the names are to be mangled.
+ *
+ * @def __CILKRTS_END_EXTERN_C
+ * Macro to denote the end of a section in which all names have "C" linkage.
+ * That is, none of the names are to be mangled.
+ */
 #ifdef __cplusplus
-#   define __CILKRTS_BEGIN_EXTERN_C extern "C" {
-#   define __CILKRTS_END_EXTERN_C }
+#   define __CILKRTS_BEGIN_EXTERN_C     extern "C" {
+#   define __CILKRTS_END_EXTERN_C       }
+#   define __CILKRTS_EXTERN_C           extern "C"
 #else
 #   define __CILKRTS_BEGIN_EXTERN_C
 #   define __CILKRTS_END_EXTERN_C
+#   define __CILKRTS_EXTERN_C
 #endif
 
+/**
+ * OS-independent macro to specify a function which is known to not throw
+ * an exception.
+ */ 
 #ifdef __cplusplus
 #   ifdef _WIN32
 #       define __CILKRTS_NOTHROW __declspec(nothrow)
@@ -91,15 +128,31 @@
 #   define __CILKRTS_NOTHROW /* nothing */
 #endif /* __cplusplus */
 
+/** Cache alignment. (Good enough for most architectures.)
+ */
+#define __CILKRTS_CACHE_LINE__ 64
+
+/**
+ * Macro to specify alignment of a data member in a structure.
+ */
 #ifdef _WIN32
 #   define CILK_ALIGNAS(n) __declspec(align(n))
 #else /* Unix/gcc */
-#   define CILK_ALIGNAS(n) __attribute__((aligned(n)))
+#   define CILK_ALIGNAS(n) __attribute__((__aligned__(n)))
 #endif /* Unix/gcc */
 
-/* CILK_API: Called explicitly by the programmer.
- * CILK_ABI: Called by compiler-generated code.
- * CILK_ABI_THROWS: An ABI function that may throw an exception
+/**
+ * Macro to specify cache-line alignment of a data member in a structure.
+ */
+#define __CILKRTS_CACHE_ALIGN CILK_ALIGNAS(__CILKRTS_CACHE_LINE__)
+
+/**
+ * @def CILK_API(RET_TYPE)
+ * A function called explicitly by the programmer.
+ * @def CILK_ABI(RET_TYPE)
+ * A function called by compiler-generated code.
+ * @def CILK_ABI_THROWS(RET_TYPE)
+ * An ABI function that may throw an exception
  *
  * Even when these are the same definitions, they should be separate macros so
  * that they can be easily found in the code.
@@ -115,7 +168,8 @@
 #   define CILK_ABI_THROWS(RET_TYPE) CILK_EXPORT RET_TYPE
 #endif
 
-/* __CILKRTS_ASSERT should be defined for debugging only, otherwise it
+/**
+ * __CILKRTS_ASSERT should be defined for debugging only, otherwise it
  * interferes with vectorization.  Since NDEBUG is not reliable (it must be
  * set by the user), we must use a platform-specific detection of debug mode.
  */
@@ -133,7 +187,9 @@
 #   define __CILKRTS_ASSERT(e) ((void) 0)
 #endif
 
-// Inlining is always available, but not always the same way.
+/**
+ * OS-independent macro to specify a function that should be inlined
+ */
 #ifdef __cpluspus
     // C++
 #   define __CILKRTS_INLINE inline
@@ -144,22 +200,26 @@
     // C89 on Windows
 #   define __CILKRTS_INLINE __inline
 #else
-    // C89 on Linux
-#   define __CILKRTS_INLINE __inline__
+    // C89 on GCC-compatible systems
+#   define __CILKRTS_INLINE extern __inline__
 #endif
 
-// Functions marked as CILK_EXPORT_AND_INLINE have both
-// inline versions defined in the Cilk API, as well as
-// non-inlined versions that are exported (for
-// compatibility with previous versions that did not
-// inline the functions).
+/**
+ * Functions marked as CILK_EXPORT_AND_INLINE have both
+ * inline versions defined in the Cilk API, as well as
+ * non-inlined versions that are exported (for
+ * compatibility with previous versions that did not
+ * inline the functions).
+ */
 #ifdef COMPILING_CILK_API_FUNCTIONS
 #   define CILK_EXPORT_AND_INLINE  CILK_EXPORT
 #else
 #   define CILK_EXPORT_AND_INLINE  __CILKRTS_INLINE
 #endif
 
-// Try to determine if compiler supports rvalue references.
+/**
+ * Try to determine if compiler supports rvalue references.
+ */
 #if defined(__cplusplus) && !defined(__CILKRTS_RVALUE_REFERENCES)
 #   if __cplusplus >= 201103L // C++11
 #       define __CILKRTS_RVALUE_REFERENCES 1
@@ -231,9 +291,18 @@
 // structure as parameter. 
 __CILKRTS_BEGIN_EXTERN_C
     struct __cilkrts_worker;
-    typedef struct __cilkrts_worker __cilkrts_worker;
-    typedef struct __cilkrts_worker *__cilkrts_worker_ptr;
+
+    /// Worker struct, exported for inlined API methods
+    typedef struct __cilkrts_worker __cilkrts_worker;     
+
+    /// Worker pointer, exported for inlined API methods
+    typedef struct __cilkrts_worker *__cilkrts_worker_ptr; 
     CILK_ABI(__cilkrts_worker_ptr) __cilkrts_get_tls_worker(void);
+
+    /// void *, defined to work around complaints from the compiler
+    /// about using __declspec(nothrow) after the "void *" return type
+    typedef void * __cilkrts_void_ptr;
+
 __CILKRTS_END_EXTERN_C
 
                                    

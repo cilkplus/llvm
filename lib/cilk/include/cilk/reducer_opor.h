@@ -1,40 +1,43 @@
-/*
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+/** @file reducer_opor.h
  *
- */
-
-/*
- * reducer_opor.h
+ *  @brief Defines classes for doing parallel bitwise or reductions.
  *
- * Purpose: Reducer hyperobject to compute bitwise OR values
+ *  @copyright
+ *  Copyright (C) 2012, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ *
+ *  @ingroup reducers
+ *
+ *  @see @ref page_reducer_or
  */
 
 #ifndef REDUCER_OPOR_H_INCLUDED
@@ -42,366 +45,455 @@
 
 #include <cilk/reducer.h>
 
+/** @page page_reducer_or Bitwise Or Reducers
+ *
+ *  @tableofcontents
+ *
+ *  Header file reducer_opor.h defines the monoid and view classes for creating Cilk reducers
+ *  to compute the bitwise or of a set of values in parallel.
+ *
+ *  You should be familiar with @ref pagereducers "Cilk reducers", described in file
+ *  reducers.md, and particularly with @ref reducers_using, before trying to use the
+ *  information in this file.
+ *
+ *  @section redopor_usage Usage Example
+ *
+ *      cilk::reducer< cilk::op_or<unsigned> > r;
+ *      cilk_for (int i = 0; i != N; ++i) {
+ *          *r |= a[i];
+ *      }
+ *      unsigned result;
+ *      r.move_out(result);
+ *
+ *  @section redopor_classes Classes Defined
+ *
+ *  *   @ref cilk::op_or\<Type\> (monoid)
+ *  *   @ref cilk::op_or_view\<Type\> (view)
+ *  *   @ref cilk::reducer< cilk::op_or\<Type\> > (reducer) (defined in reducer.h)
+ *  *   @ref cilk::reducer_opor\<T\> (deprecated reducer)
+ *
+ *  @section redopor_monoid The Monoid
+ *
+ *  @subsection redopor_monoid_values Value Set
+ *
+ *  The value set of a bitwise or reducer is the set of values of `Type`, which is
+ *  expected to be a builtin integer type which has a representation as a sequence of bits (or
+ *  something like it, such as `bool` or `std::bitset`).
+ *
+ *  @subsection redopor_monoid_operator Operator
+ *
+ *  The operator of a bitwise or reducer is the bitwise or operator, defined by the “`|`”
+ *  binary operator on `Type`.
+ *
+ *  @subsection redopor_monoid_identity Identity
+ *
+ *  The identity value of the reducer is the value whose representation contains all 0-bits.
+ *  This is expected to be the value of the default constructor `Type()`.
+ *
+ *  @section redopor_operations Operations
+ *
+ *  @subsection redopor_constructors Constructors
+ *
+ *      reducer()   // identity
+ *      reducer(const Type& value)
+ *      reducer(move_in(Type& variable))
+ *
+ *  @subsection redopor_get_set Set and Get
+ *
+ *      r.set_value(const Type& value)
+ *      const Type& = r.get_value() const
+ *      Type& = r.get_value()
+ *      r.move_in(Type& variable)
+ *      r.move_out(Type& variable)
+ *
+ *  @subsection redopor_initial Initial Values
+ *
+ *  If a bitwise or reducer is constructed without an explicit initial value, then its initial
+ *  value will be its identity value, as long as `Type` satisfies the requirements of
+ *  @ref redopor_types.
+ *
+ *  @subsection redopor_view_ops View Operations
+ *
+ *      *r |= a
+ *      *r = *r | a
+ *      *r = *r | a1 | a2 … | an
+ *
+ *  @section redopor_types Type and Operator Requirements
+ *
+ *  `Type` must be `Copy Constructible`, `Default Constructible`, and `Assignable`.
+ *
+ *  The operator “`|=`” must be defined on `Type`, with `x |= a` having the same
+ *  meaning as `x = x | a`.
+ *
+ *  The expression `Type()` must be a valid expression which yields the identity value (the
+ *  value of `Type` whose representation consists of all 0-bits).
+ *
+ *  @section redopor_in_c Bitwise Or Reducers in C
+ *
+ *  The @ref CILK_C_REDUCER_OPOR and @ref CILK_C_REDUCER_OPOR_TYPE macros can be used to do
+ *  bitwise or reductions in C. For example:
+ *
+ *      CILK_C_REDUCER_OPOR(r, uint, 0);
+ *      CILK_C_REGISTER_REDUCER(r);
+ *      cilk_for(int i = 0; i != n; ++i) {
+ *          REDUCER_VIEW(r) |= a[i];
+ *      }
+ *      CILK_C_UNREGISTER_REDUCER(r);
+ *      printf("The bitwise OR of the elements of a is %x\n", REDUCER_VIEW(r));
+ *
+ *  See @ref reducers_c_predefined.
+ */
+
 #ifdef __cplusplus
 
-/* C++ Interface
- *
- * Purpose: Reducer hyperobject to compute bitwise OR values
- *          When bool is passed as 'Type', it computes logical OR
- *          operation.
- *
- * Classes: reducer_opor<Type>
- *
- * Description:
- * ============
- * This component provides a reducer-type hyperobject representation
- * that allows conducting bitwise OR operation to a non-local variable 
- * using the |=, | operators.  A common operation 
- * when traversing a data structure is to bit-wise OR values 
- * into a non-local numeric variable.  When Cilk parallelism is 
- * introduced, however, a data race will occur on the variable holding 
- * the bit-wise OR result.  By replacing the variable with the
- * hyperobject defined in this component, the data race is eliminated.
- *
- * When bool is passed as the 'Type', this reducer conducts logic OR 
- * operation.
- *
- * Usage Example:
- * ==============
- * Assume we wish to traverse an array of objects, performing a bit-wise OR
- * operation on each object and accumulating the result of the operation 
- * into an integer variable.
- *..
- *  unsigned int compute(const X& v);
- *
- *  int test()
- *  {
- *      const std::size_t ARRAY_SIZE = 1000000;
- *      extern X myArray[ARRAY_SIZE];
- *      // ...
- *
- *      unsigned int result = 0;
- *      for (std::size_t i = 0; i < ARRAY_SIZE; ++i)
- *      {
- *          result |= compute(myArray[i]);
- *      }
- *
- *      std::cout << "The result is: " << result << std::endl;
- *
- *      return 0;
- *  }
- *..
- * Changing the 'for' to a 'cilk_for' will cause the loop to run in parallel,
- * but doing so will create a data race on the 'result' variable.
- * The race is solved by changing 'result' to a 'reducer_opor' hyperobject:
- *..
- *  unsigned int compute(const X& v);
- *  
- *   
- *  int test()
- *  {
- *      const std::size_t ARRAY_SIZE = 1000000;
- *      extern X myArray[ARRAY_SIZE];
- *      // ...
- *       
- *      cilk::reducer_opor<unsigned int> result;
- *      cilk_for (std::size_t i = 0; i < ARRAY_SIZE; ++i)
- *      {
- *          *result |= compute(myArray[i]);
- *      }
- *
- *      std::cout << "The result is: " 
- *                << result.get_value() << std::endl;
- *
- *      return 0;
- *  }
- *  
- *
- * Operations provided:
- * ====================
- * Given 'reducer_opor' objects, x and y, the following are
- * valid statements:
- *..
- *  *x |= 5;
- *  *x = *x | 5;
- *..
- * The following are not valid expressions and will result in a run-time error
- * in a debug build:
- *..
- *  x = y;       // Cannot assign one reducer to another
- *  *x = *y | 5; // Mixed reducers
- *  *x = 5 | *x; // operator| is not necessarily commutative
- *..
- *
- * Requirements on the 'Type' parameter
- * ====================================
- * The 'Type' parameter used to instantiate the 'reducer_opor' class must
- * provide a |= operator that meets the requirements for an
- * *associative* *mutating* *operator* as defined in the Cilk++ user manual.
- * The default constructor for 'Type' must yield an OR identity, i.e.,
- * a value (such as unsigned int 0, bool false) that, when performed 
- * OR operation to any other value, yields the other value.
- */
+namespace cilk {
 
-#include <new>
-
-namespace cilk
-{
-
-/**
- * @brief A reducer-type hyperobject representation that supports bitwise OR
- * operations on a non-local variable using the |=, | operators.
+/** The bitwise or reducer view class.
  *
- * A common operation when traversing a data structure is to bit-wise OR 
- * values into a non-local numeric variable.  When Cilk parallelism is 
- * introduced, however, a data race will occur on the variable holding 
- * the bit-wise OR result.  By replacing the variable with the
- * hyperobject defined in this component, the data race is eliminated.
+ *  This is the view class for reducers created with `cilk::reducer< cilk::op_or<Type> >`.
+ *  It holds the accumulator variable for the reduction, and allows only or
+ *  operations to be performed on it.
  *
- * When bool is passed as the 'Type', this reducer conducts logic OR 
- * operation.
+ *  @note   The reducer “dereference” operation (`reducer::operator *()`) yields a reference 
+ *          to the view. Thus, for example, the view class’s `|=` operation would be used in
+ *          an expression like `*r |= a`, where `r` is an opmod reducer variable.
+ *
+ *  @tparam Type    The type of the contained accumulator variable. This will be the value type
+ *                  of a monoid_with_view that is instantiated with this view.
+ *
+ *  @see @ref page_reducer_or
+ *  @see op_or
  */
 template <typename Type>
-class reducer_opor
+class op_or_view : public scalar_view<Type>
 {
-  public:
-    /// Definition of data view, operation, and identity for reducer_opor
-    class Monoid : public monoid_base<Type>
-    {
-      public:
-            /// Combines two views of the data
-            static void reduce(Type* left, Type* right);
+    typedef scalar_view<Type> base;
+    
+public:
+    /** Class to represent the right-hand side of `*reducer = *reducer | value`.
+     *
+     *  The only assignment operator for the op_or_view class takes an rhs_proxy
+     *  as its operand. This results in the syntactic restriction that the only expressions
+     *  that can be assigned to an op_or_view are ones which generate an rhs_proxy — that is,
+     *  expressions of the form `op_or_view | value ... | value`.
+     *
+     *  @warning
+     *  The lhs and rhs views in such an assignment must be the same; otherwise, the
+     *  behavior will be undefined. (I.e., `v1 = v1 | x` is legal; `v1 = v2 | x` is illegal.) 
+     *  This condition will be checked with a runtime assertion when compiled in debug mode.
+     *
+     *  @see op_or_view
+     */
+    class rhs_proxy {
+        friend class op_or_view;
+
+        const op_or_view* m_view;
+        Type              m_value;
+
+        // Constructor is invoked only from op_or_view::operator|().
+        //
+        rhs_proxy(const op_or_view* view, const Type& value) : m_view(view), m_value(value) {}
+
+        rhs_proxy& operator=(const rhs_proxy&); // Disable assignment operator
+        rhs_proxy();                            // Disable default constructor
+
+    public:
+        /** Bitwise or with an additional rhs value. If `v` is an op_or_view and `a1` is a
+         *  value, then the expression `v | a1` invokes the view’s `operator|()` to create an
+         *  rhs_proxy for `(v, a1)`; then `v | a1 | a2` invokes the rhs_proxy’s `operator|()`
+         *  to create a new rhs_proxy for `(v, a1|a2)`. This allows the right-hand side of an
+         *  assignment to be not just `view | value`, but `view | value | value ... | value`.
+         *  The effect is that
+         *
+         *      v = v | a1 | a2 ... | an;
+         *
+         *  is evaluated as
+         *
+         *      v = v | (a1 | a2 ... | an);
+         */
+        rhs_proxy& operator|(const Type& x) { m_value |= x; return *this; }
     };
 
-    /// "PRIVATE" HELPER CLASS
-    class temp_or {
-        friend class reducer_opor;
 
-        Type* valuePtr_;
+    /** Default/identity constructor. This constructor initializes the contained value to
+     *  `Type()`.
+     */
+    op_or_view() : base() {}
 
-        // Default copy constructor, no assignment operator
-        temp_or& operator=(const temp_or&);
+    /** Construct with a specified initial value.
+     */
+    explicit op_or_view(const Type& v) : base(v) {}
+    
+    /** Reduction operation.
+     *
+     *  This function is invoked by the @ref op_or monoid to combine the views of two strands
+     *  when the right strand merges with the left one. It multiplies the value contained in 
+     *  the left-strand view by the value contained in the right-strand view, and leaves the
+     *  value in the right-strand view undefined.
+     *
+     *  @param  right   A pointer to the right-strand view. (`this` points to the left-strand
+     *                  view.)
+     *
+     *  @note   Used only by the @ref op_or monoid to implement the monoid reduce operation.
+     */
+    void reduce(op_or_view* right) { this->m_value |= right->m_value; }
+    
+    /** @name Accumulator variable updates.
+     *
+     *  These functions support the various syntaxes for multiplying the accumulator
+     *  variable contained in the view by some value.
+     */
+    //@{
 
-        explicit temp_or(Type* valuePtr);
+    /** or the accumulator variable with @a x.
+     */
+    op_or_view& operator|=(const Type& x) { this->m_value |= x; return *this; }
 
-      public:
-        temp_or& operator|(const Type& x);
-    };
+    /** Create an object representing `*this | x`.
+     *
+     *  @see rhs_proxy
+     */
+    rhs_proxy operator|(const Type& x) const { return rhs_proxy(this, x); }
+
+    /** Assign the result of a `view | value` expression to the view. Note that this is 
+     *  the only assignment operator for this class.
+     *
+     *  @see rhs_proxy
+     */
+    op_or_view& operator=(const rhs_proxy& rhs) {
+        __CILKRTS_ASSERT(this == rhs.m_view);
+        this->m_value |= rhs.m_value;
+        return *this;
+    }
+    
+    //@}
+};
+
+/** Monoid class for bitwise or reductions. Instantiate the cilk::reducer template
+ *  class with an op_or monoid to create a multiplication reducer class. For example, to compute
+ *  the or of a set of `unsigned long` values:
+ *
+ *      cilk::reducer< cilk::op_or<unsigned long> > r;
+ *
+ *  @see @ref page_reducer_or
+ *  @see op_or_view
+ */
+template <typename Type, bool Align = false>
+struct op_or : public monoid_with_view<op_or_view<Type>, Align> {};
+
+/** Deprecated bitwise or reducer class.
+ *
+ *  reducer_opor\<Type\> is the same as @ref cilk::reducer< @ref op_or\<Type\> >, except that 
+ *  reducer_opor is a proxy for the contained view, so that accumulator variable update 
+ *  operations can be applied directly to the reducer. For example, where a `reducer<op_or>`
+ *  is incremented using `*r |= a`, you can increment a reducer_opor with `r |= a`.
+ *
+ *  @deprecated Users are strongly encouraged to use @ref cilk::reducer\<monoid\> reducers
+ *              rather than the old reducers like reducer_opor. The reducer\<monoid\> reducers
+ *              show the reducer/monoid/view architecture more clearly, are more consistent in
+ *              their implementation, and present a simpler model for new user-implemented
+ *              reducers.
+ *
+ *  @note   Implicit conversions are provided between `reducer_opor\<T\>` and 
+ *          `reducer< op_or\<T\> >`. This allows incremental code conversion: old code that used 
+ *          `reducer_opor` can pass a `reducer_opor` to a converted function that now expects 
+ *          a reference to a `reducer<op_or>`, and vice versa.
+ *
+ *  @tparam Type    The value type of the reducer.
+ *
+ *  @see op_or
+ *  @see reducer
+ *  @see @ref page_reducer_or
+ */
+template <typename Type>
+class reducer_opor : public reducer< op_or<Type, true> >
+{
+    typedef reducer< op_or<Type, true> > base;
+    using base::view;
 
   public:
+    typedef typename base::view_type        view_type;  ///< The view type for the reducer.
+    typedef typename view_type::rhs_proxy   rhs_proxy;  ///< The view’s rhs proxy type.
 
-    /// Construct an 'reducer_opor' object with a value of 'Type()'.
-    reducer_opor();
+    /// Construct with default initial value of `Type()`.
+    reducer_opor() {}
 
-    /// Construct an 'reducer_opor' object with the specified initial value.
-    explicit reducer_opor(const Type& initial_value);
+    /// Construct with a specified initial value.
+    explicit reducer_opor(const Type& initial_value) : base(initial_value) {}
 
-    /// Return a const reference to the current value of this object.
-    ///
-    /// @warning If this method is called before the parallel calculation is
-    /// complete, the value returned by this method will be a partial result.
-    const Type& get_value() const;
+    /// @name Forwarding functions
+    //@{
+    /// Functions that are forwarded to the view.
+    reducer_opor& operator|=(const Type& x)         { view() |= x; return *this; }
+    rhs_proxy     operator|(const Type& x) const    { return view() | x; }
+    reducer_opor& operator=(const rhs_proxy& temp)  { view() = temp; return *this; }
+    //@}
 
-    /// Set the value of this object.
-    ///
-    /// @warning: Setting the value of a reducer such that it violates the 
-    /// associative operation algebra will yield results that are likely to 
-    /// differ from serial execution and may differ from run to run.
-    void set_value(const Type& value);
-
-    /// OR 'x' to the value of this reducer and produce a temporary and object.
-    /// The temporary and can be used for additional bit-wise operations 
-    /// or assigned back to this reducer.
-    temp_or operator|(const Type& x) const;
-
-    /// OR 'x' to the value of this object.
-    reducer_opor& operator|=(const Type& x);
-
-    /// Merge the result of OR operation into this object.  The OR operation
-    /// must involve this reducer, i.e., x = x + 5; not x = y + 5;
-    reducer_opor& operator=(const temp_or& temp);
-
+    /** @name `*reducer == reducer`.
+     */
+    //@{
     reducer_opor&       operator*()       { return *this; }
     reducer_opor const& operator*() const { return *this; }
 
     reducer_opor*       operator->()       { return this; }
     reducer_opor const* operator->() const { return this; }
-
-  private:
-    friend class temp_or;
-
-    // Hyperobject to serve up views
-    reducer<Monoid> imp_;
-
-    // Not copyable
-    reducer_opor(const reducer_opor&);
-    reducer_opor& operator=(const reducer_opor&);
+    //@}
+    
+    /** “Upcast” to corresponding unaligned reducer.
+     *
+     *  @note   Upcast to corresponding _aligned_ reducer is a true upcast, so
+     *          no conversion operator is necessary.
+     */
+    operator reducer< op_or<Type, false> >& ()
+    {
+        return *reinterpret_cast< reducer< op_or<Type, false> >* >(this);
+    }
+    
+    /** “Upcast” to corresponding unaligned reducer.
+     *
+     *  @note   Upcast to corresponding _aligned_ reducer is a true upcast, so
+     *          no conversion operator is necessary.
+     */
+    operator const reducer< op_or<Type, false> >& () const
+    {
+        return *reinterpret_cast< const reducer< op_or<Type, false> >* >(this);
+    }
+    
 };
 
-/////////////////////////////////////////////////////////////////////////////
-// Implementation of inline and template functions
-/////////////////////////////////////////////////////////////////////////////
-
-// ------------------------------------
-// template class reducer_opor::Monoid
-// ------------------------------------
-
-template <typename Type>
-void
-reducer_opor<Type>::Monoid::reduce(Type* left, Type* right)
+/// @cond internal
+/** Metafunction specialization for reducer conversion.
+ *
+ *  This specialization of the @ref legacy_reducer_downcast template class defined in
+ *  reducer.h causes the `reducer< op_or<Type> >` class to have an 
+ *  `operator reducer_opor<Type>& ()` conversion operator that statically downcasts the 
+ *  `reducer<op_or>` to the corresponding `reducer_opor` type. (The reverse conversion,
+ *  from `reducer_opor` to `reducer<op_or>`, is just an upcast, which is provided for free
+ *  by the language.)
+ */
+template <typename Type, bool Align>
+struct legacy_reducer_downcast<reducer<op_or<Type, Align> > >
 {
-    *left |= *right;
-}
-
-// ----------------------------
-// template class reducer_opor
-// ----------------------------
-
-template <typename Type>
-inline
-reducer_opor<Type>::reducer_opor()
-    : imp_(Type())
-{
-}
-
-template <typename Type>
-inline
-reducer_opor<Type>::reducer_opor(const Type& initial_value)
-    : imp_(initial_value)
-{
-}
-
-template <typename Type>
-inline
-const Type& reducer_opor<Type>::get_value() const
-{
-    return imp_.view();
-}
-
-template <typename Type>
-inline
-void reducer_opor<Type>::set_value(const Type& value)
-{
-    imp_.view() = value;
-}
-
-template <typename Type>
-inline
-typename reducer_opor<Type>::temp_or
-reducer_opor<Type>::operator|(const Type& x) const
-{
-    Type* valuePtr = const_cast<Type*>(&imp_.view());
-    *valuePtr = *valuePtr | x;
-    return temp_or(valuePtr);
-}
-
-template <typename Type>
-inline
-reducer_opor<Type>& reducer_opor<Type>::operator|=(const Type& x)
-{
-    imp_.view() |= x;
-    return *this;
-}
-
-template <typename Type>
-inline
-reducer_opor<Type>&
-reducer_opor<Type>::operator=(
-    const typename reducer_opor<Type>::temp_or& temp)
-{
-    // No-op.  Just test that temp was constructed from this.
-    __CILKRTS_ASSERT(&imp_.view() == temp.valuePtr_);
-    return *this;
-}
-
-// --------------------------------------
-// template class reducer_opor::temp_or
-// --------------------------------------
-
-template <typename Type>
-inline
-reducer_opor<Type>::temp_or::temp_or(Type *valuePtr)
-    : valuePtr_(valuePtr)
-{
-}
-
-template <typename Type>
-inline
-typename reducer_opor<Type>::temp_or&
-reducer_opor<Type>::temp_or::operator|(const Type& x)
-{
-    *valuePtr_ = *valuePtr_ | x;
-    return *this;
-}
+    typedef reducer_opor<Type> type;
+};
+/// @endcond
 
 } // namespace cilk
 
 #endif /* __cplusplus */
 
-/* C Interface
+/** @name C language reducer macros
+ *
+ *  These macros are used to declare and work with op_or reducers in C code.
+ *
+ *  @see @ref page_reducers_in_c
  */
-
+ //@{
+ 
 __CILKRTS_BEGIN_EXTERN_C
 
+/** Opor reducer type name.
+ *
+ *  This macro expands into the identifier which is the name of the op_or reducer
+ *  type for a specified numeric type.
+ *
+ *  @param  tn  The @ref reducers_c_type_names "numeric type name" specifying the type of the
+ *              reducer.
+ *
+ *  @see @ref reducers_c_predefined
+ */
 #define CILK_C_REDUCER_OPOR_TYPE(tn)                                         \
     __CILKRTS_MKIDENT(cilk_c_reducer_opor_,tn)
+
+/** Declare an op_or reducer object.
+ *
+ *  This macro expands into a declaration of an op_or reducer object for a specified numeric
+ *  type. For example:
+ *
+ *      CILK_C_REDUCER_OPOR(my_reducer, ulong, 0);
+ *
+ *  @param  obj The variable name to be used for the declared reducer object.
+ *  @param  tn  The @ref reducers_c_type_names "numeric type name" specifying the type of the
+ *              reducer.
+ *  @param  v   The initial value for the reducer. (A value which can be assigned to the 
+ *              numeric type represented by @a tn.)
+ *
+ *  @see @ref reducers_c_predefined
+ */
 #define CILK_C_REDUCER_OPOR(obj,tn,v)                                        \
     CILK_C_REDUCER_OPOR_TYPE(tn) obj =                                       \
-        CILK_C_INIT_REDUCER(_Typeof(obj.value),                              \
+        CILK_C_INIT_REDUCER(_Typeof(obj.value),                               \
                         __CILKRTS_MKIDENT(cilk_c_reducer_opor_reduce_,tn),   \
                         __CILKRTS_MKIDENT(cilk_c_reducer_opor_identity_,tn), \
                         __cilkrts_hyperobject_noop_destroy, v)
 
-/* Declare an instance of the reducer for a specific numeric type */
-#define CILK_C_REDUCER_OPOR_INSTANCE(t,tn)                                \
-    typedef CILK_C_DECLARE_REDUCER(t)                                     \
-        __CILKRTS_MKIDENT(cilk_c_reducer_opor_,tn);                       \
+/// @cond internal
+
+/** Declare the op_or reducer functions for a numeric type.
+ *
+ *  This macro expands into external function declarations for functions which implement
+ *  the reducer functionality for the op_or reducer type for a specified numeric type.
+ *
+ *  @param  t   The value type of the reducer.
+ *  @param  tn  The value “type name” identifier, used to construct the reducer type name,
+ *              function names, etc.
+ */
+#define CILK_C_REDUCER_OPOR_DECLARATION(t,tn)                             \
+    typedef CILK_C_DECLARE_REDUCER(t) CILK_C_REDUCER_OPOR_TYPE(tn);       \
     __CILKRTS_DECLARE_REDUCER_REDUCE(cilk_c_reducer_opor,tn,l,r);         \
-    __CILKRTS_DECLARE_REDUCER_IDENTITY(cilk_c_reducer_opor,tn);  
-
-/* Declare an instance of the reducer type for each numeric type */
-CILK_C_REDUCER_OPOR_INSTANCE(char,char);
-CILK_C_REDUCER_OPOR_INSTANCE(unsigned char,uchar);
-CILK_C_REDUCER_OPOR_INSTANCE(signed char,schar);
-CILK_C_REDUCER_OPOR_INSTANCE(wchar_t,wchar_t);
-CILK_C_REDUCER_OPOR_INSTANCE(short,short);
-CILK_C_REDUCER_OPOR_INSTANCE(unsigned short,ushort);
-CILK_C_REDUCER_OPOR_INSTANCE(int,int);
-CILK_C_REDUCER_OPOR_INSTANCE(unsigned int,uint);
-CILK_C_REDUCER_OPOR_INSTANCE(unsigned int,unsigned); /* alternate name */
-CILK_C_REDUCER_OPOR_INSTANCE(long,long);
-CILK_C_REDUCER_OPOR_INSTANCE(unsigned long,ulong);
-CILK_C_REDUCER_OPOR_INSTANCE(long long,longlong);
-CILK_C_REDUCER_OPOR_INSTANCE(unsigned long long,ulonglong);
-CILK_C_REDUCER_OPOR_INSTANCE(float,float);
-CILK_C_REDUCER_OPOR_INSTANCE(double,double);
-CILK_C_REDUCER_OPOR_INSTANCE(long double,longdouble);
-
-/* Declare function bodies for the reducer for a specific numeric type */
-#define CILK_C_REDUCER_OPOR_IMP(t,tn)                                     \
+    __CILKRTS_DECLARE_REDUCER_IDENTITY(cilk_c_reducer_opor,tn);
+ 
+/** Define the op_or reducer functions for a numeric type.
+ *
+ *  This macro expands into function definitions for functions which implement the
+ *  reducer functionality for the op_or reducer type for a specified numeric type.
+ *
+ *  @param  t   The value type of the reducer.
+ *  @param  tn  The value “type name” identifier, used to construct the reducer type name,
+ *              function names, etc.
+ */
+#define CILK_C_REDUCER_OPOR_DEFINITION(t,tn)                              \
+    typedef CILK_C_DECLARE_REDUCER(t) CILK_C_REDUCER_OPOR_TYPE(tn);       \
     __CILKRTS_DECLARE_REDUCER_REDUCE(cilk_c_reducer_opor,tn,l,r)          \
         { *(t*)l |= *(t*)r; }                                              \
     __CILKRTS_DECLARE_REDUCER_IDENTITY(cilk_c_reducer_opor,tn)            \
-        { *(t*)v = (t)0; }
+        { *(t*)v = 0; }
+ 
+//@{
+/** @def CILK_C_REDUCER_OPOR_INSTANCE 
+ *  @brief Declare or define implementation functions for a reducer type.
+ *
+ *  In the runtime source file c_reducers.c, the macro CILK_C_DEFINE_REDUCERS will be defined, and
+ *  this macro will generate reducer implementation functions. Everywhere else, CILK_C_DEFINE_REDUCERS
+ *  will be undefined, and this macro will expand into external declarations for the functions.
+ */
+#ifdef CILK_C_DEFINE_REDUCERS
+#   define CILK_C_REDUCER_OPOR_INSTANCE(t,tn)  \
+        CILK_C_REDUCER_OPOR_DEFINITION(t,tn)
+#else
+#   define CILK_C_REDUCER_OPOR_INSTANCE(t,tn)  \
+        CILK_C_REDUCER_OPOR_DECLARATION(t,tn)
+#endif
+//@}
 
-/* c_reducers.c contains definitions for all of the monoid functions
-   for the C numeric tyeps.  The contents of reducer_opor.c are as follows:
+/*  Declare or define an instance of the reducer type and its functions for each 
+ *  numeric type.
+ */
+CILK_C_REDUCER_OPOR_INSTANCE(char,                 char)
+CILK_C_REDUCER_OPOR_INSTANCE(unsigned char,        uchar)
+CILK_C_REDUCER_OPOR_INSTANCE(signed char,          schar)
+CILK_C_REDUCER_OPOR_INSTANCE(wchar_t,              wchar_t)
+CILK_C_REDUCER_OPOR_INSTANCE(short,                short)
+CILK_C_REDUCER_OPOR_INSTANCE(unsigned short,       ushort)
+CILK_C_REDUCER_OPOR_INSTANCE(int,                  int)
+CILK_C_REDUCER_OPOR_INSTANCE(unsigned int,         uint)
+CILK_C_REDUCER_OPOR_INSTANCE(unsigned int,         unsigned) /* alternate name */
+CILK_C_REDUCER_OPOR_INSTANCE(long,                 long)
+CILK_C_REDUCER_OPOR_INSTANCE(unsigned long,        ulong)
+CILK_C_REDUCER_OPOR_INSTANCE(long long,            longlong)
+CILK_C_REDUCER_OPOR_INSTANCE(unsigned long long,   ulonglong)
 
-CILK_C_REDUCER_OPOR_IMP(char,char)
-CILK_C_REDUCER_OPOR_IMP(unsigned char,uchar)
-CILK_C_REDUCER_OPOR_IMP(signed char,schar)
-CILK_C_REDUCER_OPOR_IMP(wchar_t,wchar_t)
-CILK_C_REDUCER_OPOR_IMP(short,short)
-CILK_C_REDUCER_OPOR_IMP(unsigned short,ushort)
-CILK_C_REDUCER_OPOR_IMP(int,int)
-CILK_C_REDUCER_OPOR_IMP(unsigned int,uint)
-CILK_C_REDUCER_OPOR_IMP(unsigned int,unsigned) // alternate name
-CILK_C_REDUCER_OPOR_IMP(long,long)
-CILK_C_REDUCER_OPOR_IMP(unsigned long,ulong)
-CILK_C_REDUCER_OPOR_IMP(long long,longlong)
-CILK_C_REDUCER_OPOR_IMP(unsigned long long,ulonglong)
-
-*/
+//@endcond
 
 __CILKRTS_END_EXTERN_C
 

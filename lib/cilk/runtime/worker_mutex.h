@@ -2,35 +2,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2009-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
 /**
@@ -49,7 +52,7 @@
 
 __CILKRTS_BEGIN_EXTERN_C
 
-// Forwarded declarations
+/// Forwarded declaration of worker struct.
 typedef struct __cilkrts_worker __cilkrts_worker;
 
 /**
@@ -66,7 +69,7 @@ typedef struct mutex {
 } mutex;
 
 /**
- * Initialize a Cilk mutex.
+ * @brief Initialize a Cilk mutex.
  *
  * @param m Mutex to be initialized.
  */
@@ -74,7 +77,9 @@ COMMON_PORTABLE
 void __cilkrts_mutex_init(struct mutex *m);
 
 /**
- * Acquire a Cilk mutex.  If statistics are being gathered, the time spent
+ * @brief Acquire a Cilk mutex.
+ *
+ * If statistics are being gathered, the time spent
  * acquiring the mutex will be attributed to the specified worker.
  *
  * @param w Worker that will become the owner of this mutex.
@@ -84,9 +89,10 @@ COMMON_PORTABLE
 void __cilkrts_mutex_lock(__cilkrts_worker *w,
                           struct mutex *m);
 /**
- * Attempt to lock a Cilk mutex and fail if it isn't available.  If statistics
- * are being gathered, the time spent acquiring the mutex will be attributed
- * to the specified worker.
+ * @brief Attempt to lock a Cilk mutex and fail if it isn't available.
+ *
+ * If statistics are being gathered, the time spent acquiring the
+ * mutex will be attributed to the specified worker.
  *
  * @param w Worker that will become the owner of this mutex.
  * @param m Mutex to be acquired.
@@ -99,11 +105,12 @@ int __cilkrts_mutex_trylock(__cilkrts_worker *w,
                             struct mutex *m);
 
 /**
- * Release a Cilk mutex.  If statistics are being gathered, the time spent
+ * @brief Release a Cilk mutex.
+ * 
+ * If statistics are being gathered, the time spent
  * acquiring the mutex will be attributed to the specified worker.
  *
- * Preconditions:
- *   - The mutex must be owned by the worker.
+ * @pre The mutex must be owned by the worker.
  *
  * @param w Worker that owns this mutex.
  * @param m Mutex to be released.
@@ -113,7 +120,8 @@ void __cilkrts_mutex_unlock(__cilkrts_worker *w,
                             struct mutex *m);
 
 /**
- * Deallocated a Cilk mutex.  Currently does nothing.
+ * @brief Deallocate a Cilk mutex.  Currently does nothing.
+ *
  * @param w Unused.
  * @param m Mutex to be deallocated.
  */

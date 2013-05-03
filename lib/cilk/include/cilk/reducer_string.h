@@ -1,115 +1,43 @@
-/*
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+/** @file reducer_string.h
  *
- */
-
-/*
- * reducer_string.h
+ *  @brief Defines classes for doing parallel string creation by appending.
  *
- * Purpose: Reducer hyperobject to accumulate a string.
+ *  @copyright
+ *  Copyright (C) 2012, 2013, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
- * Classes: reducer_basic_string<Elem, Traits, Alloc>
- *          reducer_string - convenience name for a string-of-char reducer
- *          reducer_wstring - convenience name for a string-of-wchar_t reducer
+ *  @ingroup reducers
  *
- * Description:
- * ============
- * This component provides a reducer-type hyperobject representation that
- * allows appending characters to an STL string.  By replacing the variable
- * with the hyperobject defined in this component, the data race is eliminated.
- *
- * reducer_basic_string is actually implemented using a list to avoid memory
- * fragmentation issues as text is appended to the string.  The string
- * components are assembled into a single string before being returned by
- * get_value().
- *
- * Usage Example:
- * ==============
- * Assume we wish to traverse an array of objects, performing an operation on
- * each object and accumulating the result of the operation into an STL string
- * variable.
- *..
- *  char *compute(const X& v);
- *
- *  int test()
- *  {
- *      const std::size_t ARRAY_SIZE = 1000000;
- *      extern X myArray[ARRAY_SIZE];
- *      // ...
- *
- *      std::string result;
- *      for (std::size_t i = 0; i < ARRAY_SIZE; ++i)
- *      {
- *          result += compute(myArray[i]);
- *      }
- *
- *      std::cout << "The result is: " << result.c_str() << std::endl;
- 
- *      return 0;
- *  }
- *..
- * Changing the 'for' to a 'cilk_for' will cause the loop to run in parallel,
- * but doing so will create a data race on the 'result' variable.
- * The race is solved by changing 'result' to a 'reducer_string' hyperobject:
- *..
- *  char *compute(const X& v);
- *
- *  int test()
- *  {
- *      const std::size_t ARRAY_SIZE = 1000000;
- *      extern X myArray[ARRAY_SIZE];
- *      // ...
- *
- *      cilk::reducer_string result;
- *      cilk_for (std::size_t i = 0; i < ARRAY_SIZE; ++i)
- *      {
- *          *result += compute(myArray[i]);
- *      }
- *
- *      std::cout << "The result is: " << result.get_value() << std::endl;
- *
- *      return 0;
- *  }
- *..
- *
- * Operations provided:
- * ====================
- *
- * 'reducer_string' supports operator+= and append.
- *
- * The the current value of the reducer can be retrieved using the 'get_value'
- * method. As with most reducers, the 'get_value' method produces deterministic
- * results only if called before the first spawn after creating a 'hyperobject'
- * or when all strands spawned since creating the 'hyperobject' have been
- * synced.
+ *  @see @ref page_reducer_string
  */
 
 #ifndef REDUCER_STRING_H_INCLUDED
@@ -119,565 +47,612 @@
 #include <string>
 #include <list>
 
-namespace cilk
+/** @page page_reducer_string String Reducers
+ *
+ *  @tableofcontents
+ *
+ *  Header file reducer_string.h defines the monoid and view classes for creating Cilk reducers
+ *  to concatenate a set of strings or characters in parallel.
+ *
+ *  You should be familiar with @ref pagereducers "Cilk reducers", described in file
+ *  reducers.md, and particularly with @ref reducers_using, before trying to use the
+ *  information in this file.
+ *
+ *  @section redstring_usage Usage Example
+ *
+ *      vector<Data> data;
+ *      void expensive_string_computation(const Data& x, string& s);
+ *      cilk::reducer<cilk::op_string> r;
+ *      cilk_for (int i = 0; i != data.size(); ++i) {
+ *          string temp;
+ *          expensive_string_computation(data[i], temp);
+ *          *r += temp;
+ *      }
+ *      string result;
+ *      r.move_out(result);
+ *
+ *  @section redstring_classes Classes Defined
+ *
+ *  *   @ref cilk::op_basic_string<Char, Traits=std::char_traits<Char>,
+ *          Alloc=std::allocator<Char> > (monoid)
+ *  *   @ref cilk::op_string = cilk::op_basic_string<char> (monoid)
+ *  *   @ref cilk::op_wstring = cilk::op_basic_string<wchar_t> (monoid)
+ *  *   @ref cilk::op_basic_string_view<Char, Traits, Alloc> (view)
+ *  *   @ref cilk::reducer< cilk::op_basic_string\<…\> > (reducer) (defined in reducer.h)
+ *  *   @ref cilk::reducer_basic_string<Char, Traits=std::char_traits<Char>,
+ *          Alloc=std::allocator<Char> > (deprecated reducer)
+ *  *   @ref cilk::reducer_string = cilk::reducer_basic_string<char> (deprecated reducer)
+ *  *   @ref cilk::reducer_wstring = cilk::reducer_basic_string<wchar_t> (deprecated reducer)
+ *
+ *  @section redstring_monoid The Monoid
+ *
+ *  @subsection redstring_monoid_values Value Set
+ *
+ *  The value set of a string reducer is the set of values of the class
+ *  `std::basic_string<Char, Traits, Alloc>`, which we refer to as “the reducer’s string type”.
+ *
+ *  @subsection redstring_monoid_operator Operator
+ *
+ *  The operator of a string reducer is the string concatenation operator, defined by the “`+`”
+ *  binary operator on the reducer’s string type.
+ *
+ *  @subsection redstring_monoid_identity Identity
+ *
+ *  The identity value of a string reducer is the empty string, which is the value of the
+ *  expression `std::basic_string<Char, Traits, Alloc>([allocator])`.
+ *
+ *  @section redstring_operations Operations
+ *
+ *  In the operation descriptions below, the type name `String` refers to the reducer’s string
+ *  type, `std::basic_string<Char, Traits, Alloc>`.
+ *
+ *  @subsection redstring_constructors Constructors
+ *
+ *  Any argument list which is valid for a `std::basic_string` constructor is valid for a string
+ *  reducer constructor. The usual move-in constructor is also provided:
+ *
+ *      reducer(move_in(String& variable))
+ *
+ *  @subsection redstring_get_set Set and Get
+ *
+ *      r.set_value(const String& value)
+ *      const String& = r.get_value() const
+ *      String& = r.get_value()
+ *      r.move_in(String& variable)
+ *      r.move_out(String& variable)
+ *
+ *  @subsection redstring_initial Initial Values
+ *
+ *  A string reducer with no constructor arguments, or with only an allocator argument, will
+ *  initially contain the identity value, an empty string.
+ *
+ *  @subsection redstring_view_ops View Operations
+ *
+ *      *r += a
+ *      r->append(a)
+ *      r->append(a, b)
+ *      r->push_back(a)
+ *
+ *  These operations on string reducer views are the same as the corresponding operations on
+ *  strings.
+ *
+ *  @section redstring_performance Performance Considerations
+ *
+ *  String reducers work by creating a string for each view, collecting those strings in a list,
+ *  and then concatenating them into a single result string at the end of the computation. This
+ *  last step takers place in serial code, and necessarily takes time proportional to the length
+ *  of the result string. Thus, a parallel string reducer cannot actually speed up the time
+ *  spent directly creating the string. This trivial example would probably be slower (because
+ *  of reducer overhead) than the corresponding serial code:
+ *
+ *      array<string> a;
+ *      reducer<op_string> r;
+ *      cilk_for (int i = 0; i != a.length(); ++i) *r += a[i];
+ *      string result;
+ *      r.move_out(result);
+ *
+ *  What a string reducer _can_ do is to allow the _remainder_ of the computation to be done
+ *  in parallel, without having to worry about managing the string computation.
+ *
+ *  The strings for new views are created (by the view identity constructor) using the same
+ *  allocator as the string that was created when the reducer was constructed. Note that this
+ *  allocator is determined when the reducer is constructed. The following two examples may have
+ *  very different behavior:
+ *
+ *      string<Char, Traits, Allocator> a_string;
+ *
+ *      reducer< op_string<Char, Traits, Allocator> reducer1(move_in(a_string));
+ *      ... parallel computation ...
+ *      reducer1.move_out(a_string);
+ *
+ *      reducer< op_string<Char, Traits, Allocator> reducer2;
+ *      reducer2.move_in(a_string);
+ *      ... parallel computation ...
+ *      reducer2.move_out(a_string);
+ *
+ *  *   `reducer1` will be constructed with the same allocator as `a_string`, because the string
+ *      was specified in the constructor. The `move_in` and`move_out` can therefore be done with
+ *      a `swap` in constant time.
+ *  *   `reducer2` will be constructed with a _default_ allocator of type `Allocator`, which
+ *      may not be the same as the allocator of `a_string`. Therefore, the `move_in` and
+ *      `move_out` may have to be done with a copy in _O(N)_ time.
+ *
+ *  (All instances of an allocator type with no internal state (like `std::allocator`) are “the
+ *  same”. You only need to worry about the “same allocator” issue when you create string
+ *  reducers with custom allocator types.)
+ *
+ *  @section redstring_types Type and Operator Requirements
+ *
+ *  `std::basic_string<Char, Traits, Alloc>` must be a valid type.
+*/
+
+namespace cilk {
+
+/** The string append reducer view class.
+ *
+ *  This is the view class for reducers created with
+ *  `cilk::reducer< cilk::op_basic_string<Type, Traits, Allocator> >`. It holds the accumulator
+ *  variable for the reduction, and allows only append operations to be performed on it.
+ *
+ *  @note   The reducer “dereference” operation (`reducer::operator *()`) yields a reference
+ *          to the view. Thus, for example, the view class’s `append` operation would be
+ *          used in an expression like `r->append(a)`, where `r` is a string append reducer
+ *          variable.
+ *
+ *  @tparam Char        The string element type (not the string type).
+ *  @tparam Traits      The character traits type.
+ *  @tparam Alloc       The string allocator type.
+ *
+ *  @see @ref page_reducer_string
+ *  @see op_basic_string
+ */
+template<typename Char, typename Traits, typename Alloc>
+class op_basic_string_view
 {
+    typedef std::basic_string<Char, Traits, Alloc>  string_type;
+    typedef std::list<string_type>                  list_type;
+    typedef typename string_type::size_type         size_type;
+
+    // The view's value is represented by a list of strings and a single string. The value is
+    // the concatenation of the strings in the list with the single string at the end. All
+    // string operations apply to the single string; reduce operations cause lists of partial
+    // strings from multiple strands to be combined.
+    //
+    mutable string_type                             m_string;
+    mutable list_type                               m_list;
+
+    // Before returning the value of the reducer, concatenate all the strings in the list with
+    // the single string.
+    //
+    void flatten() const
+    {
+        if (m_list.empty()) return;
+
+        typename list_type::iterator i;
+
+        size_type len = m_string.size();
+        for (i = m_list.begin(); i != m_list.end(); ++i)
+            len += i->size();
+
+        string_type result(get_allocator());
+        result.reserve(len);
+
+        for (i = m_list.begin(); i != m_list.end(); ++i)
+            result += *i;
+        m_list.clear();
+
+        result += m_string;
+        result.swap(m_string);
+    }
+
+public:
+
+    /** @name Monoid support.
+     */
+    //@{
+
+    typedef string_type value_type;             ///< Required by @ref monoid_with_view
+
+    Alloc get_allocator() const                 ///< Required by @ref op_string
+    {
+        return m_string.get_allocator();
+    }
+
+    /** Reduce operation. Required by @ref monoid_with_view.
+     */
+    void reduce(op_basic_string_view* other)
+    {
+        if (!other->m_string.empty() || !other->m_list.empty()) {
+            // (list, string) + (other_list, other_string) =>
+            //      (list + {string} + other_list, other_string)
+            if (!m_string.empty()) {
+                // simulate m_list.push_back(std::move(m_string))
+                m_list.push_back(string_type(get_allocator()));
+                m_list.back().swap(m_string);
+            }
+            m_list.splice(m_list.end(), other->m_list);
+            m_string.swap(other->m_string);
+        }
+    }
+
+    //@}
+
+    /** @name Pass constructor arguments through to the string constructor.
+     */
+    //@{
+
+    op_basic_string_view() : m_string() {}
+
+    template <typename T1>
+    op_basic_string_view(const T1& x1) : m_string(x1) {}
+
+    template <typename T1, typename T2>
+    op_basic_string_view(const T1& x1, const T2& x2) : m_string(x1, x2) {}
+
+    template <typename T1, typename T2, typename T3>
+    op_basic_string_view(const T1& x1, const T2& x2, const T3& x3) : m_string(x1, x2, x3) {}
+
+    template <typename T1, typename T2, typename T3, typename T4>
+    op_basic_string_view(const T1& x1, const T2& x2, const T3& x3, const T4& x4) :
+        m_string(x1, x2, x3, x4) {}
+
+    //@}
+
+    /** Move-in constructor.
+     */
+    explicit op_basic_string_view(move_in_wrapper<value_type> w)
+        : m_string(w.value().get_allocator())
+    {
+        m_string.swap(w.value());
+    }
+
+    /** @name @ref reducer support.
+     */
+    //@{
+
+    void view_move_in(string_type& s)
+    {
+        m_list.clear();
+        if (m_string.get_allocator() == s.get_allocator())
+            // Equal allocators. Do a (fast) swap.
+            m_string.swap(s);
+        else
+            // Unequal allocators. Do a (slow) copy.
+            m_string = s;
+        s.clear();
+    }
+
+    void view_move_out(string_type& s)
+    {
+        flatten();
+        if (m_string.get_allocator() == s.get_allocator())
+            // Equal allocators.  Do a (fast) swap.
+            m_string.swap(s);
+        else
+            // Unequal allocators.  Do a (slow) copy.
+            s = m_string;
+        m_string.clear();
+    }
+
+    void view_set_value(const string_type& s) { m_list.clear(); m_string = s; }
+
+    string_type const& view_get_value()     const { flatten(); return m_string; }
+    string_type      & view_get_reference()       { flatten(); return m_string; }
+    string_type const& view_get_reference() const { flatten(); return m_string; }
+
+    //@}
+
+    /** @name View modifier operations.
+     *
+     *  @details These simply wrap the corresponding operations on the underlying string.
+     */
+    //@{
+
+    template <typename T>
+    op_basic_string_view& operator +=(const T& x) { m_string += x; return *this; }
+
+    template <typename T1>
+    op_basic_string_view& append(const T1& x1) { m_string.append(x1); return *this; }
+
+    template <typename T1, typename T2>
+    op_basic_string_view& append(const T1& x1, const T2& x2)
+        { m_string.append(x1, x2); return *this; }
+
+    template <typename T1, typename T2, typename T3>
+    op_basic_string_view& append(const T1& x1, const T2& x2, const T3& x3)
+        { m_string.append(x1, x2, x3); return *this; }
+
+    void push_back(const Char x) { m_string.push_back(x); }
+
+    //@}
+};
+
+
+/** String append monoid class. Instantiate the cilk::reducer template class with an
+ *  op_basic_string monoid to create a string append reducer class. For example, to
+ *  concatenate a collection of standard strings:
+ *
+ *      cilk::reducer< cilk::op_basic_string<char> > r;
+ *
+ *  @tparam Char        The string element type (not the string type).
+ *  @tparam Traits      The character traits type.
+ *  @tparam Alloc       The string allocator type.
+ *
+ *  @see op_basic_string_view
+ *  @see reducer_basic_string
+ *  @see op_string
+ *  @see op_wstring
+ */
+template<typename Char,
+         typename Traits = std::char_traits<Char>,
+         typename Alloc = std::allocator<Char>,
+         bool     Align = false>
+class op_basic_string : public monoid_with_view< op_basic_string_view<Char, Traits, Alloc>, Align >
+{
+    typedef monoid_with_view< op_basic_string_view<Char, Traits, Alloc>, Align >
+            base;
+    Alloc m_allocator;
+
+public:
+
+    typedef typename base::view_type view_type;
+
+    /** Constructor.
+     *
+     *  There is no default constructor for string monoids, because the allocator must always
+     *  be specified.
+     *
+     *  @param  allocator   The list allocator to be used when identity-constructing new views.
+     */
+    op_basic_string(const Alloc& allocator = Alloc()) : m_allocator(allocator) {}
+
+    /** Create an identity view.
+     *
+     *  String view identity constructors take the string allocator as an argument.
+     *
+     *  @param v    The address of the uninitialized memory in which the view will be
+     *  constructed.
+     */
+    void identity(view_type *v) const { ::new((void*) v) view_type(m_allocator); }
+
+    /** @name construct functions
+     *
+     *  A string append reduction monoid must have a copy of the allocator of the leftmost
+     *  view’s string, so that it can use it in the `identity` operation. This, in turn,
+     *  requires that string reduction monoids have a specialized `construct()` function.
+     *
+     *  All string reducer monoid `construct()` functions first construct the leftmost view,
+     *  using the arguments that were passed in from the reducer constructor. They then
+     *  call the view’s `get_allocator()` function to get the string allocator from the string
+     *  in the leftmost view, and pass that to the monoid constructor.
+     */
+    //@{
+
+    static void construct(op_basic_string* monoid, view_type* view)
+        { provisional( new ((void*)view) view_type() ).confirm_if(
+            new ((void*)monoid) op_basic_string(view->get_allocator()) ); }
+
+    template <typename T1>
+    static void construct(op_basic_string* monoid, view_type* view, const T1& x1)
+        { provisional( new ((void*)view) view_type(x1) ).confirm_if(
+            new ((void*)monoid) op_basic_string(view->get_allocator()) ); }
+
+    template <typename T1, typename T2>
+    static void construct(op_basic_string* monoid, view_type* view, const T1& x1, const T2& x2)
+        { provisional( new ((void*)view) view_type(x1, x2) ).confirm_if(
+            new ((void*)monoid) op_basic_string(view->get_allocator()) ); }
+
+    template <typename T1, typename T2, typename T3>
+    static void construct(op_basic_string* monoid, view_type* view, const T1& x1, const T2& x2,
+                            const T3& x3)
+        { provisional( new ((void*)view) view_type(x1, x2, x3) ).confirm_if(
+            new ((void*)monoid) op_basic_string(view->get_allocator()) ); }
+
+    template <typename T1, typename T2, typename T3, typename T4>
+    static void construct(op_basic_string* monoid, view_type* view, const T1& x1, const T2& x2,
+                            const T3& x3, const T4& x4)
+        { provisional( new ((void*)view) view_type(x1, x2, x3, x4) ).confirm_if(
+            new ((void*)monoid) op_basic_string(view->get_allocator()) ); }
+
+    //@}
+};
+
 
 /**
- * @brief Reducer hyperobject representation of a string.
- *
- * Typedefs for 8-bit character strings (reducer_string) and 16-bit character
- * strings (reducer_wstring) are provided at the end of the file.
+ *  Convenience typedef for 8-bit strings
  */
-template<class _Elem,
-         class _Traits = std::char_traits<_Elem>,
-         class _Alloc = std::allocator<_Elem> >
-class reducer_basic_string
-{
-public:
-    /// Type of the basic_string reducer_basic_string is based on
-    typedef std::basic_string<_Elem, _Traits, _Alloc> string_type;
+typedef op_basic_string<char> op_string;
+    
+/**
+ *  Convenience typedef for 16-bit strings
+ */
+typedef op_basic_string<wchar_t> op_wstring;
 
-    /// Type of sizes
+
+/** Deprecated string append reducer class.
+ *
+ *  reducer_basic_string<Char, Traits, Alloc> is the same as
+ *  @ref cilk::reducer< @ref op_basic_string<Char, Traits, Alloc> >, except that
+ *  reducer_basic_string is a proxy for the contained view, so that accumulator variable update
+ *  operations can be applied directly to the reducer. For example, a character is appended to a
+ *  `reducer<op_basic_string>` with `r->append(c)`, but a character is appended to a
+ *  `reducer_basic_string` with `r.append(c)`.
+ *
+ *  @deprecated Users are strongly encouraged to use @ref cilk::reducer\<monoid\> reducers
+ *              rather than the old reducers like reducer_basic_string. The reducer\<monoid\>
+ *              reducers show the reducer/monoid/view architecture more clearly, are more
+ *              consistent in their implementation, and present a simpler model for new
+ *              user-implemented reducers.
+ *
+ *  @note   Implicit conversions are provided between `reducer_basic_string<Char, Traits,
+ *          Alloc>` and
+ *          `reducer< op_list_append<Type, Allocator> >`. This allows incremental code
+ *          conversion: old code that used  `reducer_list_append` can pass a
+ *          `reducer_list_append` to a converted function that now expects a reference to a
+ *          `reducer<op_list_append>`, and vice versa.
+ *
+ *  @tparam Type        The value type of the list.
+ *  @tparam Allocator   The allocator type of the list.
+ *
+ *  @see op_list_append
+ *  @see reducer
+ *  @see @ref page_reducer_list
+ */
+template<typename Char,
+         typename Traits = std::char_traits<Char>,
+         typename Alloc = std::allocator<Char> >
+class reducer_basic_string : public reducer< op_basic_string<Char, Traits, Alloc, true> >
+{
+    typedef reducer< op_basic_string<Char, Traits, Alloc, true> > base;
+    using base::view;
+public:
+
+    /** The reducer’s string type.
+     */
+    typedef typename base::value_type string_type;
+
+    /** The reducer’s primitive component type.
+     */
+    typedef Char basic_value_type;
+
+    /** The string size type.
+     */
     typedef typename string_type::size_type size_type;
 
-    /// Character type for reducer_basic_string
-    typedef _Elem basic_value_type;
+    /** The monoid type.
+     */
+    typedef typename base::monoid_type Monoid;
 
-    /// Internal representation of the per-strand view of the data for reducer_basic_string
-    struct View
-    {
-        friend class reducer_basic_string<_Elem, _Traits, _Alloc>;
+    /** The view type.
+     */
+    typedef typename base::view_type View;
 
-        /// Type of the basic_string the View is based on
-        typedef std::basic_string<_Elem, _Traits, _Alloc> string_type;
 
-        /// Type of sizes
-        typedef typename string_type::size_type size_type;
+    /** @name Forward constructor calls to the base class.
+     *
+     *  All basic_string constructor forms are supported.
+     */
+    //@{
+    reducer_basic_string() {}
 
-        std::basic_string<_Elem, _Traits, _Alloc> &get_value();
+    template <typename T1>
+    reducer_basic_string(const T1& x1) : base(x1) {}
 
-        /// Add a character to the View
-        void add_char(_Elem ch) { m_value += ch; }
+    template <typename T1, typename T2>
+    reducer_basic_string(const T1& x1, const T2& x2) : base(x1, x2) {}
 
-    private:
-        string_type             m_value;   // Holds current string
-        std::list<string_type>  m_list;    // List used to accumulate string fragments
-    };
+    template <typename T1, typename T2, typename T3>
+    reducer_basic_string(const T1& x1, const T2& x2, const T3& x3) : base(x1, x2, x3) {}
 
-public:
-    /// Definition of data view, operation, and identity for reducer_basic_string
-    struct Monoid: monoid_base< View >
-    {
-        static void reduce (View *left, View *right);
-    };
+    template <typename T1, typename T2, typename T3, typename T4>
+    reducer_basic_string(const T1& x1, const T2& x2, const T3& x3, const T4& x4) :
+        base(x1, x2, x3, x4) {}
+    //@}
 
-private:
-    // Hyperobject to serve up views
-    reducer<Monoid> imp_;
+    /** Allow mutable access to the string within the current view.
+     *
+     *  @warning    If this method is called before the parallel calculation is complete,
+     *              the string returned by this method will be a partial result.
+     *
+     *  @returns    A mutable reference to the string within the current view.
+     */
+    string_type &get_reference() { return view().view_get_reference(); }
 
-public:
+    /** Allow read-only access to the string within the current view.
+     *
+     *  @warning    If this method is called before the parallel calculation is complete,
+     *              the string returned by this method will be a partial result.
+     *
+     *  @returns    A const reference to the string within the current view.
+     */
+    string_type const &get_reference() const { return view().view_get_reference(); }
 
-    // Default constructor - Construct an empty reducer_basic_string
-    reducer_basic_string();
-
-    // Construct a reducer_basic_string with an initial value
-    reducer_basic_string(const _Elem *ptr);
-    reducer_basic_string(const _Elem *ptr, const _Alloc &al);
-    reducer_basic_string(const _Elem *ptr, size_type count);
-    reducer_basic_string(const _Elem *ptr, size_type count, const _Alloc &al);
-    reducer_basic_string(const string_type &right, size_type offset, size_type count);
-    reducer_basic_string(const string_type &right, size_type offset, size_type count, const _Alloc &al);
-    reducer_basic_string(size_type count, _Elem ch);
-    reducer_basic_string(size_type count, _Elem ch, const _Alloc &al);
-
-    // Return an immutable reference to the current string
-    const string_type &get_value() const;
-
-    // Return a reference to the current string
-    string_type&       get_reference();
-    string_type const& get_reference() const;
-
-    // Set the string to a specified value
-    void set_value(const string_type &value);
-
-    // Append to the string
-    void append(const _Elem *ptr);
-    void append(const _Elem *ptr, size_type count);
-    void append(const string_type &str, size_type offset, size_type count);
-    void append(const string_type &str);
-    void append(size_type count, _Elem ch);
+    /** @name Append to the string.
+     *
+     *  These operations are simply forwarded to the view.
+     */
+    //@{
+    void append(const Char *ptr)
+        { view().append(ptr); }
+    void append(const Char *ptr, size_type count)
+        { view().append(ptr, count); }
+    void append(const string_type &str, size_type offset, size_type count)
+        { view().append(str, offset, count); }
+    void append(const string_type &str)
+        { view().append(str); }
+    void append(size_type count, Char ch)
+        { view().append(count, ch); }
 
     // Append to the string
-    reducer_basic_string<_Elem, _Traits, _Alloc> &operator+=(_Elem ch);
-    reducer_basic_string<_Elem, _Traits, _Alloc> &operator+=(const _Elem *ptr);
-    reducer_basic_string<_Elem, _Traits, _Alloc> &operator+=(const string_type &right);
+    reducer_basic_string<Char, Traits, Alloc> &operator+=(Char ch)
+        { view() += ch; return *this; }
+    reducer_basic_string<Char, Traits, Alloc> &operator+=(const Char *ptr)
+        { view() += ptr; return *this; }
+    reducer_basic_string<Char, Traits, Alloc> &operator+=(const string_type &right)
+        { view() += right; return *this; }
+    //@}
 
+    /** @name `*reducer == reducer`.
+     */
+    //@{
     reducer_basic_string&       operator*()       { return *this; }
     reducer_basic_string const& operator*() const { return *this; }
 
     reducer_basic_string*       operator->()       { return this; }
     reducer_basic_string const* operator->() const { return this; }
+    //@}
 
-};  // class reducer_basic_string
-
-/////////////////////////////////////////////////////////////////////////////
-// Implementation of inline and template functions
-/////////////////////////////////////////////////////////////////////////////
-
-// -----------------------------------------
-// template class reducer_basic_string::View
-// -----------------------------------------
-
-/**
- * Assemble the string from the collected fragments
- *
- * @returns std::basic_string reference to the assembled string
- */
-template<class _Elem, class _Traits, class _Alloc>
-std::basic_string<_Elem, _Traits, _Alloc> &
-reducer_basic_string<_Elem, _Traits, _Alloc>::View::get_value()
-{
-    // If the list is empty, just return our string
-    if (m_list.empty())
-        return m_value;
-
-    // First calculate the total length of all of the string fragments
-    size_type len = m_value.size();
-    typename std::list<string_type>::iterator i;
-    for (i = m_list.begin(); i != m_list.end(); ++i)
-        len += i->size();
-
-    // Hold onto the string, since it needs to go at the end
-    string_type tmp;
-    tmp.swap(m_value);
-
-    // Expand the string that to hold all of the string fragments.
-    // Allocating it up-front prevents heap fragmentation.
-    m_value.reserve(len);
-
-    // Concatenate all of the fragments into the string, then clear out the
-    // list
-    for (i = m_list.begin(); i != m_list.end(); ++i)
-        m_value += *i;
-    m_list.clear();
-
-    // Finally, add the string value we saved
-    m_value += tmp;
-    return m_value;
-}
-
-// -------------------------------------------
-// template class reducer_basic_string::Monoid
-// -------------------------------------------
-
-/**
- * Appends string from "right" reducer_basic_string onto the end of
- * the "left". When done, the "right" reducer_basic_string is empty.
- */
-template<class _Elem, class _Traits, class _Alloc>
-void
-reducer_basic_string<_Elem, _Traits, _Alloc>::Monoid::reduce(View *left,
-                                                             View *right)
-{
-    // Check if there's anything to do
-    if (right->m_list.empty() && right->m_value.empty())
-        return;
-
-    // If the only thing is the right string, just take it
-    if (left->m_list.empty() && right->m_list.empty() & left->m_value.empty())
+    /** “Upcast” to corresponding unaligned reducer.
+     *
+     *  @note   Upcast to corresponding _aligned_ reducer is a true upcast, so
+     *          no conversion operator is necessary.
+     */
+    operator reducer< op_basic_string<Char, Traits, Alloc, false> >& ()
     {
-        left->m_value.swap(right->m_value);
-        return;
+        return *reinterpret_cast< reducer< op_basic_string<Char, Traits, Alloc, false> >* >(this);
     }
 
-    // Debugging aid - should be removed before ship!
-#ifdef DEBUG_STRING_REDUCER
-    std::cout << "Complex merge" << std::endl;
-    dump ("Left");
-    right->dump("Right");
-#endif
-
-    // OK, merge everything together.  If there's anything in our string, it's
-    // got to be added to the list first
-    if (! left->m_value.empty())
+    /** “Upcast” to corresponding unaligned reducer.
+     *
+     *  @note   Upcast to corresponding _aligned_ reducer is a true upcast, so
+     *          no conversion operator is necessary.
+     */
+    operator const reducer< op_basic_string<Char, Traits, Alloc, false> >& () const
     {
-        left->m_list.push_back(left->m_value);
-        left->m_value.clear();
+        return *reinterpret_cast< const reducer< op_basic_string<Char, Traits, Alloc, false> >* >(this);
     }
+};
 
-    // Now splice the two lists together, then take the right string
-    left->m_list.splice(left->m_list.end(), right->m_list);
-    left->m_value.swap(right->m_value);
-
-    // Debugging aid - should be removed before ship!
-#ifdef DEBUG_STRING_REDUCER
-    dump ("Result");
-#endif
-}
-
-// -----------------------------------
-// template class reducer_basic_string
-// -----------------------------------
 
 /**
- * Default constructor - doesn't do much
+ *  Convenience typedef for 8-bit strings
  */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string():
-    imp_()
-{
-}
+typedef reducer_basic_string<char> reducer_string;
 
 /**
- * Construct a reducer_basic_string initializing it from a null-terminated
- * string using the default allocator.
+ *  Convenience typedef for 16-bit strings
+ */
+typedef reducer_basic_string<wchar_t> reducer_wstring;
+
+/// @cond internal
+
+/** Metafunction specialization for reducer conversion.
  *
- * @param ptr Null-terminated string to initialize from
+ *  This specialization of the @ref legacy_reducer_downcast template class defined in
+ *  reducer.h causes the `reducer< op_basic_string<Type, Allocator> >` class to have an
+ *  `operator reducer_basic_string<Type, Allocator>& ()` conversion operator that statically
+ *  downcasts the `reducer<op_basic_string>` to the corresponding `reducer_basic_string` type.
+ *  (The reverse conversion, from `reducer_basic_string` to `reducer<op_basic_string>`, is just
+ *  an upcast, which is provided for free by the language.)
  */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(const _Elem *ptr) :
-    imp_()
+template<typename Char, typename Traits, typename Alloc, bool Align>
+struct legacy_reducer_downcast<reducer<op_basic_string<Char, Traits, Alloc, Align> > >
 {
-    string_type str(ptr);
+    typedef reducer_basic_string<Char, Traits, Alloc> type;
+};
 
-    View &v = imp_.view();
-    v.m_value = str;
-}
+/// @endcond
 
-/**
- * Construct a reducer_basic_string initializing it from a null-terminated
- * string specifying an allocator.
- *
- * @param ptr Null-terminated string to initialize from
- * @param al Allocator to be used
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(const _Elem *ptr,
-                                                                   const _Alloc &al) :
-    imp_()
-{
-    string_type str(ptr, al);
-
-    View &v = imp_.view();
-    v.m_value = str;
-}
-
-/**
- * Construct a reducer_basic_string initializing it from a null-terminated
- * string, copying N characters, using the default allocator.
- *
- * @param ptr Null-terminated string to initialize from
- * @param count Number of characters to copy
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(const _Elem *ptr,
-                                                                   size_type count) :
-    imp_()
-{
-    string_type str(ptr, count);
-
-    View &v = imp_.view();
-    v.m_value = str;
-}
-
-/**
- * Construct a reducer_basic_string initializing it from a null-terminated
- * string, copying N characters, specifying an allocator.
- *
- * @param ptr Null-terminated string to initialize from
- * @param count Number of characters to copy
- * @param al Allocator to be used
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(const _Elem *ptr,
-                                                                   size_type count,
-                                                                   const _Alloc &al) :
-    imp_()
-{
-    string_type str(ptr, count, al);
-
-    View &v = imp_.view();
-    v.m_value = str;
-}
-
-/**
- * Construct a reducer_basic_string initializing it from a string_type
- * string starting from an offset, copying N characters, using the default
- * allocator.
- *
- * @param right string_type string to initialize from
- * @param offset Character withing right to start copying from
- * @param count Number of characters to copy
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(const string_type &right,
-                                                                   size_type offset,
-                                                                   size_type count) :
-    imp_()
-{
-    string_type str(right, offset, count);
-
-    View &v = imp_.view();
-    v.m_value = str;
-}
-
-/**
- * Construct a reducer_basic_string initializing it from a string_type
- * string starting from an offset, copying N characters, uspecifying an
- * allocator.
- *
- * @param right string_type string to initialize from
- * @param offset Character withing right to start copying from
- * @param count Number of characters to copy
- * @param al Allocator to be used
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(const string_type &right,
-                                                                   size_type offset,
-                                                                   size_type count,
-                                                                   const _Alloc &al) :
-    imp_()
-{
-    string_type str(right, offset, count, al);
-
-    View &v = imp_.view();
-    v.m_value = str;
-}
-
-/**
- * Construct a reducer_basic_string initializing it with a character repeated
- * some number of times, using the default allocator.
- *
- * @param count Number of times to repeat the character
- * @param ch Character to initialize reducer_basic_string with
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(size_type count,
-                                                                   _Elem ch) :
-    imp_()
-{
-    string_type str(count, ch);
-
-    View &v = imp_.view();
-    v.m_value = str;
-}
-
-/**
- * Construct a reducer_basic_string initializing it with a character repeated
- * some number of times, specifying an allocator.
- *
- * @param count Number of times to repeat the character
- * @param ch Character to initialize reducer_basic_string with
- * @param al Allocator to be used
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc>::reducer_basic_string(size_type count,
-                                                                   _Elem ch,
-                                                                   const _Alloc &al) :
-    imp_()
-{
-    string_type str(count, ch, al);
-
-    View &v = imp_.view();
-    v.m_value = str;
-}
-
-/**
- * Assemble the string from the collected fragments and return a mutable
- * reference to it
- *
- * @returns std::basic_string reference
- */
-template<class _Elem, class _Traits, class _Alloc>
-std::basic_string<_Elem, _Traits, _Alloc> &
-reducer_basic_string<_Elem, _Traits, _Alloc>::get_reference()
-{
-    View &v = imp_.view();
-
-    return v.get_value();
-}
-
-/**
- * Assemble the string from the collected fragments and return an immutable
- * reference to it
- *
- * @returns std::basic_string reference
- */
-template<class _Elem, class _Traits, class _Alloc>
-const std::basic_string<_Elem, _Traits, _Alloc> &
-reducer_basic_string<_Elem, _Traits, _Alloc>::get_reference() const
-{
-    // Cast away the const-ness and call mutable get_reference to do the work
-    reducer_basic_string *pThis = const_cast<reducer_basic_string *>(this);
-    return pThis->get_reference();
-}
-
-/**
- * Assemble the string from the collected fragments and return an immutable
- * reference to it
- *
- * @returns string_type reference
- */
-template<class _Elem, class _Traits, class _Alloc>
-inline
-const std::basic_string<_Elem, _Traits, _Alloc> &
-reducer_basic_string<_Elem, _Traits, _Alloc>::get_value() const
-{
-    // Delegate to get_reference()
-    return this->get_reference();
-}
-
-/**
- * Set the string to a specified value
- *
- * @param value string_type to set the reducer_basic_string to
- */
-template<class _Elem, class _Traits, class _Alloc>
-void reducer_basic_string<_Elem, _Traits, _Alloc>::set_value(const string_type &value)
-{
-    View &v = imp_.view();
-
-    v.m_list.clear();
-    v.m_value.assign(value);
-}
-
-/**
- * Add a null-terminated string to the string
- *
- * @param ptr Null-terminated string to be appended
- */
-template<class _Elem, class _Traits, class _Alloc>
-void reducer_basic_string<_Elem, _Traits, _Alloc>::append(const _Elem *ptr)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(ptr);
-}
-
-/**
- * Add a string_type string to the string
- *
- * @param str string_type to be appended
- */
-template<class _Elem, class _Traits, class _Alloc>
-void reducer_basic_string<_Elem, _Traits, _Alloc>::append(const string_type &str)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(str);
-}
-
-/**
- * Add a null-terminated string to the string, specifying the maximum number
- * of characters to copy
- *
- * @param ptr Null-terminated string to be appended
- * @param count Maximum number of characters to copy
- */
-template<class _Elem, class _Traits, class _Alloc>
-void reducer_basic_string<_Elem, _Traits, _Alloc>::append(const _Elem *ptr,
-                                                          size_type count)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(ptr, count);
-}
-
-/**
- * Add a string_type string to the string, specifying the starting offset and
- * maximum number of characters to copy
- *
- * @param str Null-terminated string to be appended
- * @param offset Offset in the string_type to start copy at
- * @param count Maximum number of characters to copy
- */
-template<class _Elem, class _Traits, class _Alloc>
-void reducer_basic_string<_Elem, _Traits, _Alloc>::append(const string_type &str,
-                                                          size_type offset,
-                                                          size_type count)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(str, offset, count);
-}
-
-/**
- * Add one or more repeated characters to the string
- *
- * @param count Number of times to repeat the character
- * @param ch Character to be added one or more times to the string
- */
-// append - add one or more repeated characters to the list
-template<class _Elem, class _Traits, class _Alloc>
-void reducer_basic_string<_Elem, _Traits, _Alloc>::append(size_type count,
-                                                          _Elem ch)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(count, ch);
-}
-
-/**
- * append a single character to the string
- *
- * @param ch Character to be appended
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc> &
-reducer_basic_string<_Elem, _Traits, _Alloc>::operator+=(_Elem ch)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(1, ch);
-    return *this;
-}
-
-/**
- * append a null-terminated string to the string
- *
- * @param ptr Null-terminated string to be appended
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc> &
-reducer_basic_string<_Elem, _Traits, _Alloc>::operator+=(const _Elem *ptr)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(ptr);
-    return *this;
-}
-
-/**
- * append a string-type to the string
- *
- * @param right string-type to be appended
- */
-template<class _Elem, class _Traits, class _Alloc>
-reducer_basic_string<_Elem, _Traits, _Alloc> &
-reducer_basic_string<_Elem, _Traits, _Alloc>::operator+=(const string_type &right)
-{
-    View &v = imp_.view();
-
-    v.m_value.append(right);
-    return *this;
-}
-
-/**
- * Convenience typedefs for 8-bit strings
- */
-typedef reducer_basic_string<char,
-                             std::char_traits<char>,
-                             std::allocator<char> >
-    reducer_string;
-
-/**
- * Convenience typedefs for 16-bit strings
- */
-typedef reducer_basic_string<wchar_t,
-                             std::char_traits<wchar_t>,
-                             std::allocator<wchar_t> >
-    reducer_wstring;
-
-}   // namespace cilk
+} // namespace cilk
 
 #endif //  REDUCER_STRING_H_INCLUDED

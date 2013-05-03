@@ -2,35 +2,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2009-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
 #include "stats.h"
@@ -47,7 +50,8 @@
 static const char *names[] = {
     /*[INTERVAL_IN_SCHEDULER]*/                 "in scheduler",
     /*[INTERVAL_WORKING]*/                      "  of which: working",
-    /*[INTERVAL_STEALING]*/                     "  of which: stealing",
+    /*[INTERVAL_IN_RUNTIME]*/                   "  of which: in runtime",
+    /*[INTERVAL_STEALING]*/                     "     of which: stealing",
     /*[INTERVAL_STEAL_SUCCESS]*/                "steal success: detach",
     /*[INTERVAL_STEAL_FAIL_EMPTYQ]*/            "steal fail: empty queue",
     /*[INTERVAL_STEAL_FAIL_LOCK]*/              "steal fail: victim locked",
@@ -71,15 +75,18 @@ static const char *names[] = {
     /*[INTERVAL_MUTEX_LOCK_SPINNING]*/          "  spinning",
     /*[INTERVAL_MUTEX_LOCK_YIELDING]*/          "  yielding",
     /*[INTERVAL_MUTEX_TRYLOCK]*/                "mutex trylock",
-    /*[INTERVAL_ALLOC_STACK]*/                  "alloc stack",
-    /*[INTERVAL_FREE_STACK]*/                   "free stack",    
+    /*[INTERVAL_FIBER_ALLOCATE]*/               "fiber_allocate",
+    /*[INTERVAL_FIBER_DEALLOCATE]*/             "fiber_deallocate", 
+    /*[INTERVAL_FIBER_ALLOCATE_FROM_THREAD]*/   "fiber_allocate_from_thread",
+    /*[INTERVAL_FIBER_DEALLOCATE_FROM_THREAD]*/ "fiber_deallocate (thread)", 
+    /*[INTERVAL_SUSPEND_RESUME_OTHER]*/         "fiber suspend self + resume",
+    /*[INTERVAL_DEALLOCATE_RESUME_OTHER]*/      "fiber deallocate self + resume", 
 };
 #endif
 
 void __cilkrts_init_stats(statistics *s)
 {
     int i;
-
     for (i = 0; i < INTERVAL_N; ++i) {
         s->start[i] = INVALID_START;
         s->accum[i] = 0;
@@ -94,7 +101,7 @@ void __cilkrts_accum_stats(statistics *to, statistics *from)
 {
     int i;
 
-    for (i = 0; i < INTERVAL_N; ++i) { 
+    for (i = 0; i < INTERVAL_N; ++i) {
         to->accum[i] += from->accum[i];
         to->count[i] += from->count[i];
         from->accum[i] = 0;
@@ -109,7 +116,7 @@ void __cilkrts_accum_stats(statistics *to, statistics *from)
 void __cilkrts_note_interval(__cilkrts_worker *w, enum interval i)
 {
     if (w) {
-        statistics *s = &w->l->stats;
+        statistics *s = w->l->stats;
         CILK_ASSERT(s->start[i] == INVALID_START);
         s->count[i]++;
     }
@@ -118,7 +125,7 @@ void __cilkrts_note_interval(__cilkrts_worker *w, enum interval i)
 void __cilkrts_start_interval(__cilkrts_worker *w, enum interval i)
 {
     if (w) {
-        statistics *s = &w->l->stats;
+        statistics *s = w->l->stats;
         CILK_ASSERT(s->start[i] == INVALID_START);
         s->start[i] = __cilkrts_getticks();
         s->count[i]++;
@@ -128,7 +135,7 @@ void __cilkrts_start_interval(__cilkrts_worker *w, enum interval i)
 void __cilkrts_stop_interval(__cilkrts_worker *w, enum interval i)
 {
     if (w) {
-        statistics *s = &w->l->stats;
+        statistics *s = w->l->stats;
         CILK_ASSERT(s->start[i] != INVALID_START);
         s->accum[i] += __cilkrts_getticks() - s->start[i];
         s->start[i] = INVALID_START;

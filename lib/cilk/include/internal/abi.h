@@ -1,35 +1,38 @@
 /*
  *  abi.h
  *
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2009-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
 
@@ -45,6 +48,7 @@
 
 
 #include <cilk/common.h>
+#include <stddef.h>  // Needed to define size_t
 
 /**
  * Jump buffers are OS and architecture dependent
@@ -92,14 +96,16 @@ typedef struct
 #endif  /* defined(_MSC_VER) */
 
 /* struct tags */
-typedef struct __cilkrts_worker      __cilkrts_worker;
-typedef struct __cilkrts_worker*     __cilkrts_worker_ptr;
-typedef struct __cilkrts_stack_frame __cilkrts_stack_frame;
+typedef struct __cilkrts_worker      __cilkrts_worker;      ///< struct tag for worker 
+typedef struct __cilkrts_worker*     __cilkrts_worker_ptr;  ///< struct tag for worker ptr
+typedef struct __cilkrts_stack_frame __cilkrts_stack_frame; ///< struct tag for stack frame
 
 // Forwarded declarations
-typedef struct global_state_t        global_state_t;
-typedef struct local_state           local_state;
-typedef struct cilkred_map           cilkred_map;
+typedef struct global_state_t        global_state_t;  ///< Forwarded declaration for global state
+typedef struct local_state           local_state;     ///< Forwarded declaration for local state
+typedef struct cilkred_map           cilkred_map;     ///< Forward declaration for reducer map
+
+/// Forwarded declaration for system-dependent worker state
 typedef struct __cilkrts_worker_sysdep_state
                                      __cilkrts_worker_sysdep_state;
 
@@ -566,6 +572,52 @@ CILK_ABI_THROWS(void) __cilkrts_cilk_for_64(__cilk_abi_f64_t body,
                                             cilk64_t count,
                                             int grain);
 
-__CILKRTS_END_EXTERN_C
+/**
+ * @brief Allocate memory for variable length arrays. If the frame is
+ * sync'd, the memory will be allocated on the stack, otherwise it will
+ * be allocated from the heap.
+ *
+ * @param sf The __cilkrts_stack_frame for the function allocating the
+ * memory.
+ * @param size The number of bytes requested.
+ * @param distance_from_sp_to_alloca_area ?.
+ * @param align Alignment required.  Always >= minimum stack alignment,
+ * >= ptr_size, and always a power of 2.
+ * @param needs_tag Non-zero if the pointer being returned needs to be
+ * tagged
+ *
+ * @return The address of the memory block allocated.
+ */
 
+CILK_ABI(__cilkrts_void_ptr)
+__cilkrts_stack_alloc(__cilkrts_stack_frame *sf,
+                      size_t size,
+                      size_t distance_from_sp_to_alloca_area,
+                      uint32_t align,
+                      uint32_t needs_tag);
+
+/**
+ * @brief Free memory allocated by _cilkrts_stack_alloc() for variable length
+ * arrays.
+ *
+ * @param sf The __cilkrts_stack_frame for the function allocating the
+ * memory.
+ * @param p Pointer to the memory block to be freed.
+ * @param size The number of bytes requested.
+ * @param distance_from_sp_to_alloca_area ?.
+ * @param align Alignment required.  Always >= minimum stack alignment,
+ * >= ptr_size, and always a power of 2.
+ * @param know_from_stack Non-zero if the pointer is known to have been
+ * allocated on the stack and has no tag.
+ */
+CILK_ABI(void)
+__cilkrts_stack_free(__cilkrts_stack_frame *sf,
+                     void *p,
+                     size_t size,
+                     size_t distance_from_sp_to_alloca_area,
+                     uint32_t align,
+                     uint32_t known_from_stack);
+
+
+__CILKRTS_END_EXTERN_C
 #endif /* include guard */

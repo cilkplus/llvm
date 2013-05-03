@@ -2,35 +2,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2009-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2009-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  *  Patents Pending, Intel Corporation.
  **************************************************************************/
@@ -93,11 +96,13 @@ struct EnableCilkscreen
     ~EnableCilkscreen () { __cilkscreen_disable_checking(); }
 };
 
-/** Element for a hyperobject */
+/**
+ * @brief Element for a hyperobject
+ */
 struct elem {
-    void                       *key; // Shared key for this hyperobject
-    __cilkrts_hyperobject_base *hb;  // Base of the hyperobject.
-    void                       *val; // Strand-private view of this hyperobject
+    void                       *key; ///< Shared key for this hyperobject
+    __cilkrts_hyperobject_base *hb;  ///< Base of the hyperobject.
+    void                       *val; ///< Strand-private view of this hyperobject
     /// Destructor for an instance of this hyperobject
     void destroy();
 };
@@ -139,36 +144,40 @@ struct cilkred_map {
     /** Set true for leftmost reducer map */
     bool is_leftmost;
 
-    /* Return element mapped to 'key' or null if not found. */
+    /** @brief Return element mapped to 'key' or null if not found. */
     elem *lookup(void *key);
 
-    /* Insert key/value element into hash map without rehashing. Does not
-     * check for duplicate key. */
+    /**
+     * @brief Insert key/value element into hash map without rehashing.
+     * Does not check for duplicate key.
+     */
     elem *insert_no_rehash(__cilkrts_worker           *w,
 			   void                       *key,
 			   __cilkrts_hyperobject_base *hb,
                            void                       *value);
 
-    /* Insert key/value element into hash map, rehashing if necessary. Does not
-     * check for duplicate key. */
+    /**
+     * @brief Insert key/value element into hash map, rehashing if necessary.
+     * Does not check for duplicate key.
+     */
     inline elem *rehash_and_insert(__cilkrts_worker           *w,
 				   void                       *key,
 				   __cilkrts_hyperobject_base *hb,
                                    void                       *value);
 
-    /** Grow bucket by one element, reallocating bucket if necessary */
+    /** @brief Grow bucket by one element, reallocating bucket if necessary */
     static elem *grow(__cilkrts_worker *w, bucket **bp);
 
-    /** Rehash a worker's reducer map */
+    /** @brief Rehash a worker's reducer map */
     void rehash(__cilkrts_worker *);
 
     /**
-     * Returns true if a rehash is needed due to the number of elements that
+     * @brief Returns true if a rehash is needed due to the number of elements that
      * have been inserted.
      */
     inline bool need_rehash_p() const;
 
-    /** Allocate and initialize the buckets */
+    /** @brief Allocate and initialize the buckets */
     void make_buckets(__cilkrts_worker *w, size_t nbuckets);
 
     /**
@@ -183,17 +192,17 @@ struct cilkred_map {
     };
 
     /**
-     * Merge another reducer map into this one, destroying the other map in
+     * @brief Merge another reducer map into this one, destroying the other map in
      * the process.
      */
     __cilkrts_worker* merge(__cilkrts_worker *current_wkr,
 			    cilkred_map      *other_map,
 			    enum merge_kind   kind);
 
-    /** check consistency of a reducer map */
+    /** @brief check consistency of a reducer map */
     void check(bool allow_null_val);
 
-    /** Test whether the cilkred_map is empty */
+    /** @brief Test whether the cilkred_map is empty */
     bool is_empty() { return nelem == 0; }
 };
 

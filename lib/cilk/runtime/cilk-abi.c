@@ -2,37 +2,47 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2010-2012 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2010-2012, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************/
+
+/**
+ * @file cilk-abi.c
+ *
+ * @brief cilk-abi.c implements all of the entrypoints to the Intel Cilk
+ * Plus runtime.
+ */
 
 /*
  * Define this macro so that compiliation of this file generates the
@@ -42,7 +52,6 @@
 #include "cilk/cilk_api.h"
 #include "cilk/cilk_undocumented.h"
 #include "cilktools/cilkscreen.h"
-#include "internal/inspector-abi.h"
 
 #include "global_state.h"
 #include "os.h"
@@ -55,6 +64,7 @@
 #include "sysdep.h"
 #include "except.h"
 #include "cilk_malloc.h"
+#include "record-replay.h"
 
 #include <errno.h>
 #include <string.h>
@@ -79,7 +89,14 @@ void * _ReturnAddress(void);
 
 #define TBB_INTEROP_DATA_DELAYED_UNTIL_BIND (void *)-1
 
-// ABI version
+/**
+ * __cilkrts_bind_thread is a versioned entrypoint.  The runtime should be
+ * exporting copies of __cilkrts_bind_version for the current and all previous
+ * versions of the ABI.
+ *
+ * This macro should always be set to generate a version to match the current
+ * version; __CILKRTS_ABI_VERSION.
+ */
 #define BIND_THREAD_RTN __cilkrts_bind_thread_1
 
 static inline
@@ -132,7 +149,21 @@ CILK_ABI_VOID __cilkrts_enter_frame_fast_1(__cilkrts_stack_frame *sf)
     sf->reserved = 0;
 }
 
-/* Return true if undo-detach failed. */
+/**
+ * A component of the THE protocol.  __cilkrts_undo_detach checks whether
+ * this frame's parent has been stolen.  If it hasn't, the frame can return
+ * normally.  If the parent has been stolen, of if we suspect it might be,
+ * then __cilkrts_leave_frame() needs to call into the runtime.
+ *
+ * @note __cilkrts_undo_detach() is comparing the exception pointer against
+ * the tail pointer.  The exception pointer is modified when another worker
+ * is considering whether it can steal a frame.  The head pointer is updated
+ * to match when the worker lock is taken out and the thief is sure that
+ * it can complete the steal.  If the steal cannot be completed, the thief
+ * will restore the exception pointer.
+ *
+ * @return true if undo-detach failed.
+ */
 static int __cilkrts_undo_detach(__cilkrts_stack_frame *sf)
 {
     __cilkrts_worker *w = sf->worker;
@@ -203,7 +234,9 @@ CILK_ABI_VOID __cilkrts_leave_frame(__cilkrts_stack_frame *sf)
 
 #ifndef _WIN32
         if (__builtin_expect(sf->flags & CILK_FRAME_EXCEPTING, 0)) {
-	    update_pedigree_on_leave_frame(w, sf);
+// Pedigree will be updated in __cilkrts_leave_frame.  We need the
+// pedigree before the update for record/replay
+//	    update_pedigree_on_leave_frame(w, sf);
             __cilkrts_return_exception(sf);
             /* If return_exception returns the caller is attached.
                leave_frame is called from a cleanup (destructor)
@@ -212,13 +245,19 @@ CILK_ABI_VOID __cilkrts_leave_frame(__cilkrts_stack_frame *sf)
 	    return;
         }
 #endif
+
+        // During replay, check whether w was the last worker to continue
+        replay_wait_for_steal_if_parent_was_stolen(w);
+
+        // Attempt to undo the detach
         if (__builtin_expect(__cilkrts_undo_detach(sf), 0)) {
-	    // The update of pedigree for leaving the frame occurs
-	    // inside this call if it does not return.
+	        // The update of pedigree for leaving the frame occurs
+	        // inside this call if it does not return.
             __cilkrts_c_THE_exception_check(w, sf);
         }
 
-	update_pedigree_on_leave_frame(w, sf);
+        update_pedigree_on_leave_frame(w, sf);
+
         /* This path is taken when undo-detach wins the race with stealing.
            Otherwise this strand terminates and the caller will be resumed
            via setjmp at sync. */
@@ -252,11 +291,6 @@ CILK_ABI_VOID __cilkrts_sync(__cilkrts_stack_frame *sf)
     if (__builtin_expect(sf->flags & CILK_FRAME_EXCEPTING, 0)) {
         __cilkrts_c_sync_except(w, sf);
     }
-#endif
-
-    /* Save return address so we can report it to Piersol. */
-#ifdef _WIN32
-    w->l->sync_return_address =  _ReturnAddress();
 #endif
 
     __cilkrts_c_sync(w, sf);
@@ -357,15 +391,19 @@ CILK_ABI_WORKER_PTR BIND_THREAD_RTN(void)
     __cilkrts_cilkscreen_establish_worker(w);
     {
         full_frame *ff = __cilkrts_make_full_frame(w, 0);
-        ff->stack_self = sysdep_make_user_stack(w);
-        tbb_interop_use_saved_stack_op_info(w, ff->stack_self);
-        w->l->user_thread_imported = 0;
+
+        ff->fiber_self = cilk_fiber_allocate_from_thread();
+        CILK_ASSERT(ff->fiber_self);
+
+        cilk_fiber_set_owner(ff->fiber_self, w);
+        cilk_fiber_tbb_interop_use_saved_stack_op_info(ff->fiber_self);
+	
         CILK_ASSERT(ff->join_counter == 0);
         ff->join_counter = 1;
         w->l->frame_ff = ff;
         w->reducer_map = __cilkrts_make_reducer_map(w);
         __cilkrts_set_leftmost_reducer_map(w->reducer_map, 1);
-    	load_pedigree_leaf_into_user_worker(w);
+        load_pedigree_leaf_into_user_worker(w);
     }
 
     // Make sure that the head and tail are reset, and saved_protected_tail
@@ -378,10 +416,32 @@ CILK_ABI_WORKER_PTR BIND_THREAD_RTN(void)
     CILK_ASSERT(w->tail == w->l->ltq);
     CILK_ASSERT(w->protected_tail  == w->ltq_limit);
 
-    if (0 != __cilkrts_sysdep_bind_thread(w))
-        // User thread couldn't be bound (probably because of a lack of
-        // resources).  Continue, but don't allow stealing from this user
-        // thread.
+    // There may have been an old pending exception which was freed when the
+    // exception was caught outside of Cilk
+    w->l->pending_exception = NULL;
+
+    w->reserved = NULL;
+
+    // If we've already created a scheduling fiber for this worker, we'll just
+    // reuse it.  If w->self < 0, it means that this is an ad-hoc user worker
+    // not known to the global state.  Thus, we need to create a scheduling
+    // stack only if we don't already have one and w->self >= 0.
+    if (NULL == w->l->scheduling_fiber && w->self >= 0)
+    {
+        START_INTERVAL(w, INTERVAL_FIBER_ALLOCATE) {
+            // Create a scheduling fiber for this worker.
+            w->l->scheduling_fiber =
+                cilk_fiber_allocate_from_heap(CILK_SCHEDULING_STACK_SIZE);
+            cilk_fiber_reset_state(w->l->scheduling_fiber,
+                                   scheduler_fiber_proc_for_user_worker);
+            cilk_fiber_set_owner(w->l->scheduling_fiber, w);
+        } STOP_INTERVAL(w, INTERVAL_FIBER_ALLOCATE);
+    }
+    
+    // If the scheduling fiber is NULL, we've either exceeded our quota for
+    // fibers or workers or we're out of memory, so we should lose parallelism
+    // by disallowing stealing.
+    if (NULL == w->l->scheduling_fiber)
         __cilkrts_disallow_stealing(w, NULL);
 
     start_cilkscreen = (0 == w->g->Q);
@@ -428,7 +488,7 @@ CILK_ABI_WORKER_PTR BIND_THREAD_RTN(void)
  * For Windows, the aliased symbol is exported in cilk-exports.def.
  */
 #ifdef _DARWIN_C_SOURCE
-/*
+/**
  * Mac OS X: Unfortunately, Darwin doesn't allow aliasing, so we just make a
  * call and hope the optimizer does the right thing.
  */
@@ -436,13 +496,22 @@ CILK_ABI_WORKER_PTR __cilkrts_bind_thread (void) {
     return BIND_THREAD_RTN();
 }
 #else
-/*
+
+/**
+ * Macro to convert a parameter to a string.  Used on Linux or BSD.
+ */
+#define STRINGIFY(x) #x
+
+/**
+ * Macro to generate an __attribute__ for an aliased name
+ */
+#define ALIASED_NAME(x) __attribute__ ((alias (STRINGIFY(x))))
+
+/**
  * Linux or BSD: Use the alias attribute to make the labels for the versioned
  * functions point to the same place in the code as the original.  Using
  * the two macros is annoying but required.
  */
-#define STRINGIFY(x) #x
-#define ALIASED_NAME(x) __attribute__ ((alias (STRINGIFY(x))))
 
 CILK_ABI_WORKER_PTR __cilkrts_bind_thread(void)
     ALIASED_NAME(BIND_THREAD_RTN);
@@ -471,60 +540,6 @@ CILK_API_VOID __cilkrts_dump_stats(void)
     global_os_mutex_unlock();
 }
 
-/*
- * __cilkrts_get_stack_region_id
- *
- * Interface called by Inspector (Piersol)
- *
- * Returns a __cilkrts_region_id for the stack currently executing on a thread.
- * Returns NULL on failure.
- */
-
-CILK_INSPECTOR_ABI(__cilkrts_region_id)
-__cilkrts_get_stack_region_id(__cilkrts_thread_id thread_id)
-{
-    global_state_t *g = cilkg_get_global_state();
-    int i;
-
-    if (NULL == g)
-        return NULL;
-
-    for (i = 0; i < g->total_workers; i++)
-    {
-        if (WORKER_FREE != g->workers[i]->l->type)
-        {
-            if (__cilkrts_sysdep_is_worker_thread_id(g, i, thread_id))
-                return (__cilkrts_region_id)g->workers[i]->l->frame_ff->stack_self;
-        }
-    }
-
-    return NULL;
-}
-
-/*
- * __cilkrts_get_stack_region_properties
- *
- * Interface called by Inspector (Piersol)
- *
- * Fills in the properties for a region_id.
- *
- * Returns false on invalid region_id or improperly sized
- * __cilkrts_region_properties
- */
-
-CILK_INSPECTOR_ABI(int)
-__cilkrts_get_stack_region_properties(__cilkrts_region_id region_id,
-                                      __cilkrts_region_properties *properties)
-{
-    if (NULL == properties)
-        return 0;
-
-    if (properties->size != sizeof(__cilkrts_region_properties))
-        return 0;
-
-    return  __cilkrts_sysdep_get_stack_region_properties((__cilkrts_stack *)region_id, properties);
-}
-
 #ifndef _WIN32
 CILK_ABI_THROWS_VOID __cilkrts_rethrow(__cilkrts_stack_frame *sf)
 {
@@ -542,16 +557,15 @@ static __cilk_tbb_retcode __cilkrts_unwatch_stack(void *data)
 {
     __cilk_tbb_stack_op_thunk o;
 
-    // If the __cilkrts_stack wasn't available fetch it now
+    // If the cilk_fiber wasn't available fetch it now
     if (TBB_INTEROP_DATA_DELAYED_UNTIL_BIND == data)
     {
-        __cilkrts_stack *sd;
         full_frame *ff;
         __cilkrts_worker *w = __cilkrts_get_tls_worker();
         if (NULL == w)
         {
             // Free any saved stack op information
-            tbb_interop_free_stack_op_info();
+            cilk_fiber_tbb_interop_free_stack_op_info();
 
             return 0;       /* Success! */
         }
@@ -559,30 +573,28 @@ static __cilk_tbb_retcode __cilkrts_unwatch_stack(void *data)
         __cilkrts_worker_lock(w);
         ff = w->l->frame_ff;
         __cilkrts_frame_lock(w,ff);
-        data = ff->stack_self;
+        data = ff->fiber_self;
         __cilkrts_frame_unlock(w,ff);
         __cilkrts_worker_unlock(w);
     }
 
 #if CILK_LIB_DEBUG /* Debug code */
     /* Get current stack */
-    __cilkrts_stack *sd;
     full_frame *ff;
     __cilkrts_worker *w = __cilkrts_get_tls_worker();
     __cilkrts_worker_lock(w);
     ff = w->l->frame_ff;
     __cilkrts_frame_lock(w,ff);
-    sd = ff->stack_self;
-    CILK_ASSERT (data==sd);
+    CILK_ASSERT (data == ff->fiber_self);
     __cilkrts_frame_unlock(w,ff);
     __cilkrts_worker_unlock(w);
 #endif
 
     /* Clear the callback information */
     o.data = NULL;
-    o.routine = NULL; 
-    __cilkrts_set_stack_op( (struct __cilkrts_stack*)data, o );
-
+    o.routine = NULL;
+    cilk_fiber_set_stack_op((cilk_fiber*)data, o);
+    
     // Note. Do *NOT* free any saved stack information here.   If they want to
     // free the saved stack op information, they'll do it when the thread is
     // unbound
@@ -604,7 +616,7 @@ CILK_API_TBB_RETCODE
 __cilkrts_watch_stack(__cilk_tbb_unwatch_thunk *u,
                       __cilk_tbb_stack_op_thunk o)
 {
-    __cilkrts_stack *sd;
+    cilk_fiber* current_fiber;
     __cilkrts_worker *w;
 
 #ifdef _MSC_VER
@@ -619,8 +631,8 @@ __cilkrts_watch_stack(__cilk_tbb_unwatch_thunk *u,
     {
         // Save data for later.  We'll deal with it when/if this thread binds
         // to the runtime
-        tbb_interop_save_stack_op_info(o);
-
+        cilk_fiber_tbb_interop_save_stack_op_info(o);
+        
         u->routine = __cilkrts_unwatch_stack;
         u->data = TBB_INTEROP_DATA_DELAYED_UNTIL_BIND;
 
@@ -629,7 +641,7 @@ __cilkrts_watch_stack(__cilk_tbb_unwatch_thunk *u,
 
     /* Get current stack */
     __cilkrts_worker_lock(w);
-    sd = w->l->frame_ff->stack_self;
+    current_fiber = w->l->frame_ff->fiber_self;
     __cilkrts_worker_unlock(w);
 
 /*    CILK_ASSERT( !sd->stack_op_data ); */
@@ -637,9 +649,9 @@ __cilkrts_watch_stack(__cilk_tbb_unwatch_thunk *u,
 
     /* Give TBB our callback */
     u->routine = __cilkrts_unwatch_stack;
-    u->data = sd;
+    u->data = current_fiber;
     /* Save the callback information */
-    __cilkrts_set_stack_op( sd, o );
+    cilk_fiber_set_stack_op(current_fiber, o);
 
     return 0;   /* Success! */
 }

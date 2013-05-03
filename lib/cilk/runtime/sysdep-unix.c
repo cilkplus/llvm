@@ -3,35 +3,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2010-2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2010-2011, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************
  */
@@ -55,6 +58,15 @@
 #include "metacall_impl.h"
 
 
+// On x86 processors (but not MIC processors), the compiler generated code to
+// save the FP state (rounding mode and the like) before calling setjmp.  We
+// will need to restore that state when we resume.
+#ifndef __MIC__
+# if defined(__i386__) || defined(__x86_64)
+#   define RESTORE_X86_FP_STATE
+# endif // defined(__i386__) || defined(__x86_64)
+#endif  // __MIC__
+
 // contains notification macros for VTune.
 #include "cilk-ittnotify.h"
 
@@ -68,28 +80,36 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <alloca.h>
 
 #ifdef __APPLE__
 //#   include <scheduler.h>  // Angle brackets include Apple's scheduler.h, not ours.
 #endif
+
 #ifdef __linux__
 #   include <sys/resource.h>
 #   include <sys/sysinfo.h>
 #endif
+
 #ifdef __FreeBSD__
 #   include <sys/resource.h>
 // BSD does not define MAP_ANONYMOUS, but *does* define MAP_ANON. Aren't standards great!
 #   define MAP_ANONYMOUS MAP_ANON
 #endif
 
-
-static void internal_enforce_global_visibility();
+#ifdef  __VXWORKS__
+#   include <vxWorks.h>   
+#   include <vxCpuLib.h>  
+#endif
 
 struct global_sysdep_state
 {
-    pthread_t *threads;
-    size_t pthread_t_size; /* for cilk_db */
-};
+    pthread_t *threads;    ///< Array of pthreads for system workers
+    size_t pthread_t_size; ///< for cilk_db
+}; 
+
+static void internal_enforce_global_visibility();
+
 
 COMMON_SYSDEP
 void __cilkrts_init_worker_sysdep(struct __cilkrts_worker *w)
@@ -143,15 +163,15 @@ static void internal_run_scheduler_with_exceptions(__cilkrts_worker *w)
     __cilkrts_run_scheduler_with_exceptions(w);
 }
 
+
+
 /*
- * __cilkrts_worker_stub
+ * scheduler_thread_proc_for_system_worker
  *
  * Thread start function called when we start a new worker.
  *
- * This function is exported so Piersol's stack trace displays
- * reasonable information
  */
-NON_COMMON void* __cilkrts_worker_stub(void *arg)
+NON_COMMON void* scheduler_thread_proc_for_system_worker(void *arg)
 {
     /*int status;*/
     __cilkrts_worker *w = (__cilkrts_worker *)arg;
@@ -169,12 +189,71 @@ NON_COMMON void* __cilkrts_worker_stub(void *arg)
     CILK_ASSERT(w->l->type == WORKER_SYSTEM);
     /*status = pthread_mutex_unlock(&__cilkrts_global_mutex);
     CILK_ASSERT(status == 0);*/
-
+    
     __cilkrts_set_tls_worker(w);
+
+    // Create a cilk fiber for this worker on this thread.
+    START_INTERVAL(w, INTERVAL_FIBER_ALLOCATE_FROM_THREAD) {
+        w->l->scheduling_fiber = cilk_fiber_allocate_from_thread();
+        cilk_fiber_set_owner(w->l->scheduling_fiber, w);
+    } STOP_INTERVAL(w, INTERVAL_FIBER_ALLOCATE_FROM_THREAD);
+    
     internal_run_scheduler_with_exceptions(w);
 
+    START_INTERVAL(w, INTERVAL_FIBER_DEALLOCATE_FROM_THREAD) {
+        // Deallocate the scheduling fiber.  This operation reverses the
+        // effect cilk_fiber_allocate_from_thread() and must be done in this
+        // thread before it exits.
+        int ref_count = cilk_fiber_deallocate_from_thread(w->l->scheduling_fiber);
+        // Scheduling fibers should never have extra references to them.
+        // We only get extra references into fibers because of Windows
+        // exceptions.
+        CILK_ASSERT(0 == ref_count);
+        w->l->scheduling_fiber = NULL;
+    } STOP_INTERVAL(w, INTERVAL_FIBER_DEALLOCATE_FROM_THREAD);
+    
     return 0;
 }
+
+
+/*
+ * __cilkrts_user_worker_scheduling_stub
+ *
+ * Routine for the scheduling fiber created for an imported user
+ * worker thread.  This method is analogous to
+ * scheduler_thread_proc_for_system_worker.
+ *
+ */
+void __cilkrts_user_worker_scheduling_stub(cilk_fiber* fiber, void* null_arg)
+{
+    __cilkrts_worker *w = __cilkrts_get_tls_worker();
+
+    // Sanity check.
+    CILK_ASSERT(WORKER_USER == w->l->type);
+
+    // Enter the scheduling loop on the user worker.
+    // This function will never return.
+    __cilkrts_run_scheduler_with_exceptions(w);
+
+    // A WORKER_USER, at some point, will resume on the original stack and leave
+    // Cilk.  Under no circumstances do we ever exit off of the bottom of this
+    // stack.
+    CILK_ASSERT(0);
+}
+
+/**
+ * We are exporting a function with this name to Inspector?
+ * What a confusing name...
+ *
+ * This function is exported so Piersol's stack trace displays
+ * reasonable information.
+ */ 
+void* __cilkrts_worker_stub(void* arg)
+{
+    return scheduler_thread_proc_for_system_worker(arg);
+}
+
+
 
 // /* Return the lesser of the argument and the operating system
 //    limit on the number of workers (threads) that may or ought
@@ -206,12 +285,13 @@ static void write_version_file (global_state_t *, int);
  */
 static void create_threads(global_state_t *g, int base, int top)
 {
-    int i;
-
-    for (i = base; i < top; i++) {
-        int status;
-
-        status = pthread_create(&g->sysdep->threads[i], NULL, __cilkrts_worker_stub, g->workers[i]);
+    // TBD(11/30/12): We want to insert code providing the option of
+    // pinning system workers to cores.
+    for (int i = base; i < top; i++) {
+        int status = pthread_create(&g->sysdep->threads[i],
+                                    NULL,
+                                    scheduler_thread_proc_for_system_worker,
+                                    g->workers[i]);
         if (status != 0)
             __cilkrts_bug("Cilk runtime error: thread creation (%d) failed: %d\n", i, status);
     }
@@ -231,7 +311,7 @@ static void * create_threads_and_work (void * arg)
     threads_created = 1;
 
     // Ideally this turns into a tail call that wipes out this stack frame.
-    return __cilkrts_worker_stub (arg);
+    return scheduler_thread_proc_for_system_worker(arg);
 }
 #endif
 void __cilkrts_start_workers(global_state_t *g, int n)
@@ -311,257 +391,47 @@ void __cilkrts_stop_workers(global_state_t *g)
     return;
 }
 
+#ifdef RESTORE_X86_FP_STATE
+
 /*
  * Restore the floating point state that is stored in a stack frame at each
  * spawn.  This should be called each time a frame is resumed.
+ *
+ * Only valid for IA32 and Intel64 processors.
  */
-static inline void restore_fp_state (__cilkrts_stack_frame *sf) {
+static inline void restore_x86_fp_state (__cilkrts_stack_frame *sf) {
     __asm__ ( "ldmxcsr %0\n\t"
               "fnclex\n\t"
               "fldcw %1"
               :
               : "m" (sf->mxcsr), "m" (sf->fpcsr));
 }
+#endif // RESTORE_X86_FP_STATE
 
-/* Resume user code after a spawn or sync, possibly on a different stack.
-
-   Note: Traditional BSD longjmp would fail with a "longjmp botch"
-   error rather than change the stack pointer in the wrong direction.
-   Linux appears to let the program take the chance.
-
-   This function is called to resume after a sync or steal.  In both cases
-   ff->sync_sp starts out containing the original stack pointer of the loot.
-   In the case of a steal, the stack pointer stored in sf points to the
-   thief's new stack.  In the case of a sync, the stack pointer stored in sf
-   points into original stack (i.e., it is either the same as ff->sync_sp or a
-   small offset from it caused by pushes and pops between the spawn and the
-   sync).  */
-NORETURN __cilkrts_resume(__cilkrts_worker *w, full_frame *ff,
-                          __cilkrts_stack_frame *sf)
-{
-    // Assert: w is the only worker that knows about ff right now, no
-    // lock is needed on ff.
-
-    const int flags = sf->flags;
-    void *sp;
-
-    w->current_stack_frame = sf;
-    sf->worker = w;
-    CILK_ASSERT(flags & CILK_FRAME_SUSPENDED);
-    CILK_ASSERT(!sf->call_parent);
-    CILK_ASSERT(w->head == w->tail);
-
-    if (ff->simulated_stolen)
-        /* We can't prevent __cilkrts_make_unrunnable_sysdep from discarding
-         * the stack pointer because there is no way to tell it that we are
-         * doing a simulated steal.  Thus, we must recover the stack pointer
-         * here. */
-        SP(sf) = ff->sync_sp;
-
-    sp = SP(sf);
-
-    /* Debugging: make sure stack is accessible. */
-    ((volatile char *)sp)[-1];
-
-    __cilkrts_take_stack(ff, sp);
-
-    /* The leftmost frame has no allocated stack */
-    if (ff->simulated_stolen)
-        CILK_ASSERT(flags & CILK_FRAME_UNSYNCHED && ff->sync_sp == NULL);
-    else if (flags & CILK_FRAME_UNSYNCHED)
-        /* XXX By coincidence sync_sp could be null. */
-        CILK_ASSERT(ff->stack_self != NULL && ff->sync_sp != NULL);
-    else
-        /* XXX This frame could be resumed unsynched on the leftmost stack */
-        CILK_ASSERT((ff->sync_master == 0 || ff->sync_master == w) &&
-                    ff->sync_sp == 0);
-    /*if (w->l->type == WORKER_USER)
-        CILK_ASSERT(ff->stack_self == NULL);*/
-
-    // Notify the Intel tools that we're stealing code
-    ITT_SYNC_ACQUIRED(sf->worker);
-#ifdef ENABLE_NOTIFY_ZC_INTRINSIC
-    __notify_zc_intrinsic("cilk_continue", sf);
-#endif // defined ENABLE_NOTIFY_ZC_INTRINSIC
-
-    if (ff->stack_self) {
-        // Notify TBB that we are resuming.
-        __cilkrts_invoke_stack_op(w, CILK_TBB_STACK_ADOPT, ff->stack_self);
-    }
-
-    sf->flags &= ~CILK_FRAME_SUSPENDED;
-
-#ifndef __MIC__
-    if (CILK_FRAME_VERSION_VALUE(sf->flags) >= 1) {
-        // Restore the floating point state that was set in this frame at the
-        // last spawn.
-        //
-        // This feature is only available in ABI 1 or later frames.
-        restore_fp_state(sf);
-    }
-#endif
-
-    CILK_LONGJMP(sf->ctx);
-    /*NOTREACHED*/
-    /* Intel's C compiler respects the preceding lint pragma */
-}
-
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <errno.h>
-
-struct __cilkrts_stack
-{
-    /* If /size/ and /top/ are zero this is the system stack for thread /owner/.
-       If /top/ and /size/ are both nonzero this is an allocated stack and
-       /owner/ is undefined. */
-    char *top;
-    size_t size;
-    pthread_t owner;
-
-    /* Cilk/TBB interop callback routine/data. */
-    __cilk_tbb_pfn_stack_op stack_op_routine;
-    void *stack_op_data;
-};
-
-void __cilkrts_set_stack_op(__cilkrts_stack *sd,
-                            __cilk_tbb_stack_op_thunk o)
-{
-    sd->stack_op_routine = o.routine;
-    sd->stack_op_data = o.data;
-}
-
-void __cilkrts_invoke_stack_op(__cilkrts_worker *w,
-                               enum __cilk_tbb_stack_op op,
-                               __cilkrts_stack *sd)
-{
-    // If we don't have a stack we can't do much, can we?
-    if (NULL == sd)
-        return;
-
-    if (0 == sd->stack_op_routine)
-    {
-        return;
-    }
-
-    (*sd->stack_op_routine)(op,sd->stack_op_data);
-    if (op == CILK_TBB_STACK_RELEASE)
-    {
-        sd->stack_op_routine = 0;
-        sd->stack_op_data = 0;
-    }
-}
 
 /*
- * tbb_interop_save_stack_op_info
+ * @brief Returns the stack address for resuming execution of sf.
  *
- * Save TBB interop information for an unbound thread.  It will get picked
- * up when the thread is bound to the runtime.
- */
-void tbb_interop_save_stack_op_info(__cilk_tbb_stack_op_thunk o)
-{
-    __cilk_tbb_stack_op_thunk *saved_thunk =
-        __cilkrts_get_tls_tbb_interop();
-
-    // If there is not already space allocated, allocate some.
-    if (NULL == saved_thunk) {
-        saved_thunk = (__cilk_tbb_stack_op_thunk*)
-            __cilkrts_malloc(sizeof(__cilk_tbb_stack_op_thunk));
-        __cilkrts_set_tls_tbb_interop(saved_thunk);
-    }
-
-    *saved_thunk = o;
-}
-
-/*
- * tbb_interop_save_info_from_stack
+ * This method takes in the top of the stack to use, and then returns
+ * a properly aligned address for resuming execution of sf.
  *
- * Save TBB interop information from the __cilkrts_stack.  It will get picked
- * up when the thread is bound to the runtime next time.
- */
-void tbb_interop_save_info_from_stack(__cilkrts_stack *sd)
-{
-    __cilk_tbb_stack_op_thunk *saved_thunk;
-
-    // If there is no TBB interop data, just return
-    if (NULL == sd || NULL == sd->stack_op_routine) return;
-
-    saved_thunk = __cilkrts_get_tls_tbb_interop();
-
-    // If there is not already space allocated, allocate some.
-    if (NULL == saved_thunk) {
-        saved_thunk = (__cilk_tbb_stack_op_thunk*)
-            __cilkrts_malloc(sizeof(__cilk_tbb_stack_op_thunk));
-        __cilkrts_set_tls_tbb_interop(saved_thunk);
-    }
-
-    saved_thunk->routine = sd->stack_op_routine;
-    saved_thunk->data = sd->stack_op_data;
-}
-
-/*
- * tbb_interop_use_saved_stack_op_info
+ *  @param sf           -   The stack frame we want to resume executing.
+ *  @param stack_base   -   The top of the stack we want to execute sf on.
  *
- * If there's TBB interop information that was saved before the thread was
- * bound, apply it now
  */
-void tbb_interop_use_saved_stack_op_info(__cilkrts_worker *w,
-                                         __cilkrts_stack *sd)
+static char* get_sp_for_executing_sf(char* stack_base,
+                                     full_frame *ff,
+                                     __cilkrts_stack_frame *sf)
 {
-    struct __cilk_tbb_stack_op_thunk *saved_thunk =
-        __cilkrts_get_tls_tbb_interop();
-
-    // If we haven't allocated a TBB interop index, we don't have any saved info
-    if (NULL == saved_thunk) return;
-
-    // Associate the saved info with the __cilkrts_stack
-    __cilkrts_set_stack_op(sd, *saved_thunk);
-
-    // Free the saved data.  We'll save it again if needed when the code
-    // returns from the initial function
-    tbb_interop_free_stack_op_info();
-}
-
-/*
- * tbb_interop_free_stack_op_info
- *
- * Free saved TBB interop memory.  Should only be called when the thread is
- * not bound.
- */
-void tbb_interop_free_stack_op_info(void)
-{
-    struct __cilk_tbb_stack_op_thunk *saved_thunk =
-        __cilkrts_get_tls_tbb_interop();
-
-    // If we haven't allocated a TBB interop index, we don't have any saved info
-    if (NULL == saved_thunk) return;
-
-    // Free the memory and wipe out the TLS value
-    __cilkrts_free(saved_thunk);
-    __cilkrts_set_tls_tbb_interop(NULL);
-}
-
-void __cilkrts_bind_stack(full_frame *ff, char *new_sp,
-                          __cilkrts_stack *parent_stack,
-                          __cilkrts_worker *owner)
-{
-    __cilkrts_stack_frame *sf = ff->call_stack;
-    __cilkrts_stack *sd = ff->stack_self;
-    CILK_ASSERT(sizeof SP(sf) <= sizeof (size_t));
-
-    SP(sf) = new_sp;
-
-    // Need to do something with parent_stack and owner?
-    return;
-}
-
-char *__cilkrts_stack_to_pointer(__cilkrts_stack *s, __cilkrts_stack_frame *sf)
-{
-    if (!s)
-        return NULL;
-
+// The original calculation that had been done to correct the stack
+// pointer when resuming execution.
+//
+// But this code was never getting called in the eng branch anyway...
+// 
+// TBD(11/30/12): This logic needs to be revisited to make sure that
+// we are doing the proper calculation in reserving space for outgoing
+// arguments on all platforms and architectures.
+#if 0    
     /* Preserve outgoing argument space and stack alignment on steal.
        Outgoing argument space is bounded by the difference between
        stack and frame pointers.  Some user code is known to rely on
@@ -572,190 +442,138 @@ char *__cilkrts_stack_to_pointer(__cilkrts_stack *s, __cilkrts_stack_frame *sf)
         char *fp = FP(sf), *sp = SP(sf);
         int fp_align = (int)(size_t)fp & SMASK;
         ptrdiff_t space = fp - sp;
-        char *top_aligned = (char *)((((size_t)s->top - SMASK) & ~(size_t)SMASK) | fp_align);
+
+        fprintf(stderr, "Here: fp = %p, sp = %p\n", fp, sp);
+        char *top_aligned = (char *)((((size_t)stack_base - SMASK) & ~(size_t)SMASK) | fp_align);
         /* Don't allocate an unreasonable amount of stack space. */
+
+        fprintf(stderr, "Here: stack_base = %p, top_aligned=%p, space=%ld\n",
+                stack_base, top_aligned, space);
         if (space < 32)
             space = 32 + (space & SMASK);
         else if (space > 40 * 1024)
             space = 40 * 1024 + (space & SMASK);
+
         return top_aligned - space;
     }
-    return s->top - 256;
-}
+#endif    
 
-#define PAGE 4096
+#define PERFORM_FRAME_SIZE_CALCULATION 0
+    
+    char* new_stack_base = stack_base - 256;
 
-/*
- * Return a pointer to the top of a "tiny" stack that is 64 KB (plus a buffer
- * page on each end).
- *
- * No reasonable program should need more than 64 KB, so if we hit a buffer,
- * we're doing it wrong.
- */
-void *sysdep_make_tiny_stack (__cilkrts_worker *w)
-{
-    char *p;
-    __cilkrts_stack *s;
-
-#ifndef MAP_ANONYMOUS
-#define MAP_ANONYMOUS MAP_ANON
-#endif
-
-    p = mmap(0, PAGE * 18, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS,
-             -1, 0);
-    if (MAP_FAILED == p) {
-        // For whatever reason (probably ran out of memory), mmap() failed.
-        // There is no stack to return, so the program loses parallelism.
-        if (0 == __cilkrts_xchg(&w->g->failure_to_allocate_stack, 1)) {
-            cilkos_warning("Failed to allocate memory for a new stack.\n"
-                           "Continuing with some loss of parallelism.\n");
+#if PERFORM_FRAME_SIZE_CALCULATION
+    // If there is a frame size saved, then use that as the
+    // correction instead of 256.
+    if (ff->frame_size > 0) {
+        if (ff->frame_size < 40*1024) {
+            new_stack_base = stack_base - ff->frame_size;
         }
-        return NULL;
-    }
-    mprotect(p + (17 * PAGE), PAGE, PROT_NONE);
-    mprotect(p, PAGE, PROT_NONE);
-
-    return (void*)(p + (17 * PAGE));
-}
-
-/*
- * Free a "tiny" stack (created with sysdep_make_tiny_stack()).
- */
-void sysdep_destroy_tiny_stack (void *p)
-{
-    char *s = (char*)p;
-    s = s - (17 * PAGE);
-    munmap((void*)s, 18 * PAGE);
-}
-
-__cilkrts_stack *__cilkrts_make_stack(__cilkrts_worker *w)
-{
-    __cilkrts_stack *s;
-    char *p;
-    size_t stack_size;
-
-#if defined CILK_PROFILE && defined HAVE_SYNC_INTRINSICS
-#define PROFILING_STACKS 1
-#else
-#define PROFILING_STACKS 0
-#endif
-
-    if (PROFILING_STACKS || w->g->max_stacks > 0) {
-        if (w->g->max_stacks > 0 && w->g->stacks > w->g->max_stacks) {
-            /* No you can't have a stack.  Not yours. */
-            return NULL;
-        } else {
-            /* We think we are allowed to allocate a stack.  Perform an atomic
-               increment on the counter and verify that there really are enough
-               stacks remaining for us. */
-            long hwm = __sync_add_and_fetch(&w->g->stacks, 1);
-            if (w->g->max_stacks > 0 && hwm > w->g->max_stacks) {
-                /* Whoops!  Another worker got to it before we did.
-                   C'est la vie. */
-                return NULL;
-            }
-
-#ifdef CILK_PROFILE
-            /* Keeping track of the largest stack count observed by this worker
-               is part of profiling.  The copies will be merged at the end of
-               execution. */
-            if (PROFILING_STACKS && hwm > w->l->stats.stack_hwm) {
-                w->l->stats.stack_hwm = hwm;
-            }
-#endif
+        else {
+            // If for some reason, our frame size calculation is giving us
+            // a number which is bigger than about 10 pages, then
+            // there is likely something wrong here?  Don't allocate
+            // an unreasonable amount of space.
+            new_stack_base = stack_base - 40*1024;
         }
     }
-
-    stack_size = w->g->stack_size;
-    CILK_ASSERT(stack_size > 0);
-
-    p = mmap(0, stack_size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS,
-             -1, 0);
-    if (MAP_FAILED == p) {
-        // For whatever reason (probably ran out of memory), mmap() failed.
-        // There is no stack to return, so the program loses parallelism.
-        if (0 == __cilkrts_xchg(&w->g->failure_to_allocate_stack, 1)) {
-            cilkos_warning("Failed to allocate memory for a new stack.\n"
-                          "Continuing with some loss of parallelism.\n");
-        }
-        return NULL;
-    }
-    mprotect(p + stack_size - PAGE, PAGE, PROT_NONE);
-    mprotect(p, PAGE, PROT_NONE);
-
-    s = __cilkrts_malloc(sizeof (struct __cilkrts_stack));
-    CILK_ASSERT(s);
-    s->top = p + stack_size - PAGE;
-    s->size = stack_size - (PAGE + PAGE);
-    memset(&s->owner, 0, sizeof s->owner);
-
-    s->stack_op_routine = NULL;
-    s->stack_op_data = NULL;
-
-    return s;
+#endif
+    
+    // Whatever correction we choose, align the final stack top.
+    // This alignment seems to be necessary in particular on 32-bit
+    // Linux, and possibly Mac. (Is 32-byte alignment is sufficient?)
+    /* 256-byte alignment. Why not? */
+    const uintptr_t align_mask = ~(256 -1);
+    new_stack_base = (char*)((size_t)new_stack_base & align_mask);
+    return new_stack_base;
 }
 
-void __cilkrts_free_stack(global_state_t *g,
-			  __cilkrts_stack *sd)
+char* sysdep_reset_jump_buffers_for_resume(cilk_fiber* fiber,
+                                           full_frame *ff,
+                                           __cilkrts_stack_frame *sf)
 {
-    char *s;
-    size_t size;
-
-    CILK_ASSERT(g->max_stacks <= 0);
-
-#if defined CILK_PROFILE && defined HAVE_SYNC_INTRINSICS
-    __sync_sub_and_fetch(&g->stacks, 1);
+#if FIBER_DEBUG >= 4
+    fprintf(stderr, "ThreadId=%p (fiber_proc_to_resume), Fiber %p.  sf = %p. ff=%p, ff->sync_sp=%p\n",
+            cilkos_get_current_thread_id(),
+            fiber,
+            sf,
+            ff, ff->sync_sp);
 #endif
 
-    s = sd->top;
-    size = sd->size;
+    CILK_ASSERT(fiber);
+    void* sp = (void*)get_sp_for_executing_sf(cilk_fiber_get_stack_base(fiber), ff, sf);
+    SP(sf) = sp;
 
-    CILK_ASSERT(s && size);
+    /* Debugging: make sure stack is accessible. */
+    ((volatile char *)sp)[-1];
 
-#if __GNUC__
-    {
-        char *fp = __builtin_frame_address(0);
-        CILK_ASSERT(fp < s - 10000 || fp > s);
+    // Adjust the saved_sp to account for the SP we're about to run.  This will
+    // allow us to track fluctations in the stack
+#if FIBER_DEBUG >= 4    
+    fprintf(stderr, "ThreadId=%p, about to take stack ff=%p, sp=%p, sync_sp=%p\n",
+            cilkos_get_current_thread_id(),
+            ff,
+            sp,
+            ff->sync_sp);
+#endif
+    __cilkrts_take_stack(ff, sp);
+    return sp;
+}
+
+
+NORETURN sysdep_longjmp_to_sf(char* new_sp,
+                              __cilkrts_stack_frame *sf,
+                              full_frame *ff_for_exceptions /* UNUSED on Unix */)
+{
+#if FIBER_DEBUG >= 3
+    fprintf(stderr,
+            "ThreadId=%p. resume user code, sf=%p, new_sp = %p, original SP(sf) = %p, FP(sf) = %p\n",
+            cilkos_get_current_thread_id(), sf, new_sp, SP(sf), FP(sf));
+#endif
+
+    // Set the stack pointer.
+    SP(sf) = new_sp;
+
+#ifdef RESTORE_X86_FP_STATE
+    if (CILK_FRAME_VERSION_VALUE(sf->flags) >= 1) {
+        // Restore the floating point state that was set in this frame at the
+        // last spawn.
+        //
+        // This feature is only available in ABI 1 or later frames, and only
+        // needed on IA64 or Intel64 processors.
+        restore_x86_fp_state(sf);
     }
 #endif
-    /* DEBUG: */
-    ((volatile char *)s)[-1];
 
-    s += PAGE;
-    size += PAGE + PAGE;
-
-    if (munmap(s - size, size) < 0)
-        __cilkrts_bug("Cilk: stack release failed error %d", errno);
-
-    sd->top = 0;
-    sd->size = 0;
-    __cilkrts_free(sd);
-
-    return;
+    CILK_LONGJMP(sf->ctx);
 }
 
-void __cilkrts_sysdep_reset_stack(__cilkrts_stack *sd)
-{
-    CILK_ASSERT(sd->stack_op_routine == NULL);
-    CILK_ASSERT(sd->stack_op_data == NULL);
-    return;
-}
+
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <errno.h>
+
 
 void __cilkrts_make_unrunnable_sysdep(__cilkrts_worker *w,
                                       full_frame *ff,
                                       __cilkrts_stack_frame *sf,
-                                      int state_valid,
+                                      int is_loot,
                                       const char *why)
 {
     (void)w; /* unused */
     sf->except_data = 0;
 
-    if (state_valid && ff->frame_size == 0)
+    if (is_loot)
+    {
+        if (ff->frame_size == 0)
         ff->frame_size = __cilkrts_get_frame_size(sf);
 
+        // Null loot's sp for debugging purposes (so we'll know it's not valid)
     SP(sf) = 0;
+    }
 }
-
 
 /*
  * __cilkrts_sysdep_is_worker_thread_id
@@ -768,7 +586,7 @@ int __cilkrts_sysdep_is_worker_thread_id(global_state_t *g,
                                          int i,
                                          void *thread_id)
 {
-#ifdef __linux__
+#if defined( __linux__) || defined(__VXWORKS__)
     pthread_t tid = *(pthread_t *)thread_id;
     if (i < 0 || i > g->total_workers)
         return 0;
@@ -779,42 +597,7 @@ int __cilkrts_sysdep_is_worker_thread_id(global_state_t *g,
 #endif
 }
 
-int __cilkrts_sysdep_bind_thread(__cilkrts_worker *w)
-{
-    if (w->self < 0) {
-        // w->self < 0 means that this is an ad-hoc user worker not known to
-        // the global state.  Nobody will ever try to steal from it, so it
-        // does not need a scheduler_stack.
-        return 0; // success
-    }
 
-    // Allocate a scheduler_stack for this user worker if one does not
-    // already exist.
-    if (NULL == w->l->scheduler_stack) {
-
-        // The scheduler stack does not need to be as large as a normal
-        // programm stack.  Returns null on failure (probably indicating that
-        // we're out of memory).
-        w->l->scheduler_stack = sysdep_make_tiny_stack(w);
-
-        // Return success (zero) if we successfully allocated a scheduler
-        // stack and failure (non-zero) if stack allocation returned NULL.
-        return (NULL == w->l->scheduler_stack ? -1 : 0);
-    }
-
-    return 0; // success
-}
-
-void __cilkrts_sysdep_unbind_thread(__cilkrts_worker *w)
-{
-    // Needs to be implemented
-}
-
-int __cilkrts_sysdep_get_stack_region_properties(__cilkrts_stack *sd,
-                                                 struct  __cilkrts_region_properties *props)
-{
-    return 0;
-}
 
 
 /*************************************************************
@@ -825,6 +608,10 @@ int __cilkrts_sysdep_get_stack_region_properties(__cilkrts_stack *sd,
 #include "internal/cilk_version.h"
 #include <stdio.h>
 #include <sys/utsname.h>
+
+#ifdef __VXWORKS__
+#include <version.h>
+# endif
 
 /* (Non-static) dummy function is used by get_runtime_path() to find the path
  * to the .so containing the Cilk runtime.
@@ -889,7 +676,14 @@ static void write_version_file (global_state_t *g, int n)
             VERSION_MINOR,
             VERSION_REV,
             VERSION_BUILD);
+#ifdef __VXWORKS__    
+    char * vxWorksVer = VXWORKS_VERSION; 
+    fprintf(fp, "Cross compiled for %s\n",vxWorksVer);
+    // user and host not avalible if VxWorks cross compiled on windows build host 
+#else   
     fprintf(fp, "Built by "BUILD_USER" on host "BUILD_HOST"\n");
+#endif
+    
     fprintf(fp, "Compilation date: "__DATE__" "__TIME__"\n");
 
 #ifdef __INTEL_COMPILER
@@ -933,7 +727,11 @@ static void write_version_file (global_state_t *g, int n)
 
     fprintf(fp, "\nThread information\n");
     fprintf(fp, "==================\n");
+#ifdef __VXWORKS__      
+    fprintf(fp, "System cores: %d\n", (int)__builtin_popcount(vxCpuEnabledGet()));
+#else    
     fprintf(fp, "System cores: %d\n", (int)sysconf(_SC_NPROCESSORS_ONLN));
+#endif    
     fprintf(fp, "Cilk workers requested: %d\n", n);
 #if (PARALLEL_THREAD_CREATE)
         fprintf(fp, "Thread creator: Private (parallel)\n");
@@ -976,6 +774,7 @@ void __cilkrts_establish_c_stack(void)
     */
 }
 
+
 /*
  * internal_enforce_global_visibility
  *
@@ -1013,15 +812,6 @@ void worker_user_scheduler()
     // This must be a user worker
     CILK_ASSERT(WORKER_USER == w->l->type);
 
-    // Run the continuation function passed to longjmp_into_runtime
-    run_scheduling_stack_fcn(w);
-    w->reducer_map = 0;
-
-    cilkbug_assert_no_uncaught_exception();
-
-    STOP_INTERVAL(w, INTERVAL_IN_SCHEDULER);
-    STOP_INTERVAL(w, INTERVAL_WORKING);
-
     // Enter the scheduling loop on the user worker.  This function will
     // never return
     __cilkrts_run_scheduler_with_exceptions(w);
@@ -1031,59 +821,6 @@ void worker_user_scheduler()
     // of this stack.
     CILK_ASSERT(0);
 }
-
-/*
- * __cilkrts_sysdep_import_user_thread
- *
- * Imports a user thread the first time it returns to a stolen parent
- */
-
-void __cilkrts_sysdep_import_user_thread(__cilkrts_worker *w)
-{
-    void *ctx[5]; // Jump buffer for __builtin_setjmp/longjmp.
-
-    CILK_ASSERT(w->l->scheduler_stack);
-
-    // It may be that this stack has been used before (i.e., the worker was
-    // bound to a thread), and in principle, we could just jump back into
-    // the runtime, but we'd have to keep around extra data to do that, and
-    // there is no harm in starting over, here.
-
-    // Move the stack pointer onto the scheduler stack.  The subsequent
-    // call will move execution onto that stack.  We never return from
-    // that call, and every time we longjmp_into_runtime() after this,
-    // the w->l->env jump buffer will be populated.
-    if (0 == __builtin_setjmp(ctx)) {
-        ctx[2] = w->l->scheduler_stack; // replace the stack pointer.
-        __builtin_longjmp(ctx, 1);
-    } else {
-        // We can't just pass the worker through as a parameter to
-        // worker_user_scheduler because the generated code might try to
-        // retrieve w using stack-relative addressing instead of bp-relative
-        // addressing and would get a bogus value.
-        worker_user_scheduler(); // noinline, does not return.
-    }
-
-    CILK_ASSERT(0); // Should never reach this point.
-}
-
-/*
- * Make a fake user stack descriptor to correspond to the user's stack.
- */
-__cilkrts_stack *sysdep_make_user_stack (__cilkrts_worker *w)
-{
-    return calloc(1, sizeof(struct __cilkrts_stack));
-}
-
-/*
- * Destroy the fake user stack descriptor that corresponds to the user's stack.
- */
-void sysdep_destroy_user_stack (__cilkrts_stack *sd)
-{
-    free(sd);
-}
-
-
 
 /*
   Local Variables: **

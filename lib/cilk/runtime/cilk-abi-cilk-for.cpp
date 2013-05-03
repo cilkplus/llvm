@@ -2,35 +2,38 @@
  *
  *************************************************************************
  *
- * Copyright (C) 2011 , Intel Corporation
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
- * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ *  @copyright
+ *  Copyright (C) 2011, 2013, Intel Corporation
+ *  All rights reserved.
+ *  
+ *  @copyright
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *  
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *    * Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
+ *  
+ *  @copyright
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ *  AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+ *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************/
 
@@ -121,6 +124,9 @@ void call_cilk_for_loop_body(count_t low, count_t high,
                              __cilkrts_worker *w,
                              __cilkrts_pedigree *loop_root_pedigree)
 {
+    // Cilkscreen should not report this call in a stack trace
+    __notify_zc_intrinsic((char *)"cilkscreen_hide_call", 0);
+
     // The worker is only valid until the first spawn.  Fetch the
     // __cilkrts_stack_frame out of the worker, since it will be stable across
     // steals.  The sf pointer actually points to the *parent's*
@@ -189,10 +195,22 @@ void call_cilk_for_loop_body(count_t low, count_t high,
 inline __cilkrts_worker* 
 capture_spawn_arg_stack_frame(__cilkrts_stack_frame* &sf, __cilkrts_worker* w)
 {
+    // Get current stack frame
+    sf = w->current_stack_frame;
+#ifdef __INTEL_COMPILER
+#   if __INTEL_COMPILER <= 1300 && __INTEL_COMPILER_BUILD_DATE < 20130101
+    // In older compilers 'w->current_stack_frame' points to the
+    // spawn-helper's stack frame.  In newer compiler's however, it points
+    // directly to the pointer's stack frame.  (This change was made to avoid
+    // having the spawn helper in the frame list when evaluating function
+    // arguments, thus avoiding corruption when those arguments themselves
+    // contain cilk_spawns.)
+    
     // w->current_stack_frame is the spawn helper's stack frame.
     // w->current_stack_frame->call_parent is the caller's stack frame.
-    // return w->current_stack_frame->call_parent;
-    sf = w->current_stack_frame->call_parent;
+    sf = sf->call_parent;
+#   endif
+#endif
     return w;
 }
 
@@ -219,6 +237,10 @@ void cilk_for_recursive(count_t low, count_t high,
                         __cilkrts_pedigree *loop_root_pedigree)
 {
 tail_recurse:
+    // Cilkscreen should not report this call in a stack trace
+    // This needs to be done everytime the worker resumes
+    __notify_zc_intrinsic((char *)"cilkscreen_hide_call", 0);
+
     count_t count = high - low;
     // Invariant: count > 0, grain >= 1
     if (count > grain)
@@ -263,6 +285,9 @@ static void noop() { }
 template <typename count_t, typename F>
 static void cilk_for_root(F body, void *data, count_t count, int grain)
 {
+    // Cilkscreen should not report this call in a stack trace
+    __notify_zc_intrinsic((char *)"cilkscreen_hide_call", 0);
+
     // Pedigree computation:
     //
     //    If the last pedigree node on entry to the _Cilk_for has value X,

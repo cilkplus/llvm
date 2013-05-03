@@ -14,13 +14,16 @@ set(cilk_header_files
     cilk/common.h
     cilk/holder.h
     cilk/hyperobject_base.h
+    cilk/metaprogramming.h
     cilk/reducer.h
     cilk/reducer_file.h
     cilk/reducer_list.h
     cilk/reducer_max.h
     cilk/reducer_min.h
+    cilk/reducer_min_max.h
     cilk/reducer_opadd.h
     cilk/reducer_opand.h
+    cilk/reducer_opmul.h
     cilk/reducer_opor.h
     cilk/reducer_opxor.h
     cilk/reducer_ostream.h
@@ -47,6 +50,8 @@ install(DIRECTORY ""
 # Sources files for the libraries
 set(cilk_runtime_sources
     runtime/cilk-abi.c
+    runtime/cilk-abi-vla.c
+    runtime/cilk-abi-vla-internal.c
     runtime/cilk_api.c
     runtime/cilk_malloc.c
     runtime/c_reducers.c
@@ -59,16 +64,19 @@ set(cilk_runtime_sources
     runtime/os-unix.c
     runtime/scheduler.c
     runtime/signal_node.c
-    runtime/stacks.c
+    runtime/spin_mutex.c
     runtime/stats.c
     runtime/symbol_test.c
     runtime/sysdep-unix.c
     runtime/worker_mutex.c
     runtime/bug.cpp
     runtime/cilk-abi-cilk-for.cpp
+    runtime/cilk_fiber.cpp
+    runtime/cilk_fiber-unix.cpp
     runtime/except-gcc.cpp
     runtime/global_state.cpp
     runtime/reducer_impl.cpp
+    runtime/record-replay.cpp
     runtime/pedigrees.c
    )
 
@@ -110,7 +118,7 @@ set(CMAKE_C_COMPILER "${CMAKE_BINARY_DIR}/bin/clang")
 set(CMAKE_CXX_COMPILER "${CMAKE_BINARY_DIR}/bin/clang++")
 
 # Select C/C++ flags
-set(BASE_C_FLAGS "-Wall -std=c99")
+set(BASE_C_FLAGS "-fcilkplus -std=c99 -Wall -Wno-c11-extensions -Wno-typedef-redefinition")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${BASE_C_FLAGS}")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${BASE_C_FLAGS}")
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} ${BASE_C_FLAGS}")
