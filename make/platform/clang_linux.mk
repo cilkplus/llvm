@@ -104,7 +104,6 @@ CFLAGS.ubsan_cxx-i386 := $(CFLAGS) -m32 $(SANITIZER_CFLAGS)
 CFLAGS.ubsan_cxx-x86_64 := $(CFLAGS) -m64 $(SANITIZER_CFLAGS)
 CFLAGS.cilk-x86_64 := -O3 -m64 -fcilkplus -fPIC \
                       -I$(ProjSrcRoot)/lib/cilk/include \
-                      -D_Cilk_spawn= -D_Cilk_sync= -D_Cilk_for=for \
                       -D__CILKRTS_ABI_VERSION=1 -DIN_CILK_RUNTIME=1 \
                       -DBUILD_HOST=\"Linux\" -DBUILD_USER=\"anonymous\"
 

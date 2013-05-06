@@ -166,7 +166,6 @@ CFLAGS.profile_ios.armv7s := $(CFLAGS) $(IOS_DEPLOYMENT_ARGS)
 
 CFLAGS.cilk_osx := -O3 -m64 -fcilkplus \
                    -I$(ProjSrcRoot)/lib/cilk/include \
-                   -D_Cilk_spawn= -D_Cilk_sync= -D_Cilk_for=for \
                    -D__CILKRTS_ABI_VERSION=1 -DIN_CILK_RUNTIME=1 \
                    -D_DARWIN_C_SOURCE \
                    -DBUILD_HOST=\"Darwin\" -DBUILD_USER=\"anonymous\"
