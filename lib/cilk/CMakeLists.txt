@@ -80,53 +80,71 @@ set(cilk_runtime_sources
     runtime/pedigrees.c
    )
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/runtime)
+ set(COMMON_FLAGS
+     -fPIC
+     -fcilkplus
+     -Wall
+     -Wno-typedef-redefinition
+     -Wno-c11-extensions
+     -I${CMAKE_CURRENT_SOURCE_DIR}/include
+     -I${CMAKE_CURRENT_SOURCE_DIR}/runtime
 
-# Generate definitions
-set(CILK_COMMON_DEFINITIONS
-    # The runtime ABI version is 1 by default
-    __CILKRTS_ABI_VERSION=1
-    IN_CILK_RUNTIME=1
-    # No user variable in CMAKE
-    BUILD_USER="anonymous"
-    BUILD_HOST="${CMAKE_HOST_SYSTEM_NAME}"
-   )
+     # Defintions
+     -DIN_CILK_RUNTIME=1
+     # The runtime ABI version is 1 by default
+     -D__CILKRTS_ABI_VERSION=1
+     -DBUILD_USER=
+     -DBUILD_HOST=
+     )
 
 if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
-  set(CILK_COMMON_DEFINITIONS ${CILK_COMMON_DEFINITIONS} "_DARWIN_C_SOURCE")
+  list(APPEND COMMON_FLAGS -D_DARWIN_C_SOURCE)
 endif()
 
-# If we are building clang with ccache, we need to remove ARG1 to build
-# compiler-rt with clang.
-if(${CMAKE_C_COMPILER} MATCHES "ccache")
-  set(CMAKE_C_COMPILER_ARG1 "")
-  set(CMAKE_CXX_COMPILER_ARG1 "")
+string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
+
+# Set CILKRTS_DEBUG=1 to debug the runtime itself.
+set(CILKRTS_DEBUG 0 CACHE BOOL "Enable debugging the cilk runtime")
+
+# Ignore the CMAKE_BUILD_TYPE setting, because you usually don't want to debug
+# the runtime. In debug mode, the runtime will print a lot of information,
+# leading to huge log files when running tests. See CILKRTS_DEBUG for overriding
+# this behaviour.
+if(${BUILD_TYPE} MATCHES "DEBUG")
+  if(NOT CILKRTS_DEBUG)
+    message(STATUS "Warning: ignoring CMAKE_BUILD_TYPE=Debug; set CILKRTS_DEBUG=1 to enable debugging the runtime")
+  endif()
 endif()
 
-# Set clang/clang++ as the compiler
-set(CMAKE_C_COMPILER "${CMAKE_BINARY_DIR}/bin/clang")
-set(CMAKE_CXX_COMPILER "${CMAKE_BINARY_DIR}/bin/clang++")
+if(CILKRTS_DEBUG)
+  list(APPEND COMMON_FLAGS -D_DEBUG)
+else()
+  list(APPEND COMMON_FLAGS -DNDEBUG)
+endif()
 
-# Select C/C++ flags
-set(BASE_C_FLAGS "-fcilkplus -std=c99 -Wall -Wno-c11-extensions -Wno-typedef-redefinition")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${BASE_C_FLAGS}")
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${BASE_C_FLAGS}")
-set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} ${BASE_C_FLAGS}")
-set(CMAKE_C_FLAGS_MINSIZEREL "${CMAKE_C_FLAGS_MINSIZEREL} ${BASE_C_FLAGS}")
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} ${BASE_C_FLAGS}")
+set(CFLAGS ${CMAKE_C_FLAGS_${BUILD_TYPE}} "-std=c99")
+set(CXXFLAGS ${CMAKE_CXX_FLAGS_${BUILD_TYPE}})
 
-set(BASE_CXX_FLAGS "-fcilkplus -Wall")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${BASE_CXX_FLAGS}")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${BASE_CXX_FLAGS}")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${BASE_CXX_FLAGS}")
-set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} ${BASE_CXX_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${BASE_CXX_FLAGS}")
+# Build objects using the newly built clang.
+set(out_objs)
+foreach( f ${cilk_runtime_sources} )
+  if (f MATCHES ".cpp")
+    string(REPLACE ".cpp" ".o" dst ${f})
+    set(FLAGS ${CXXFLAGS} ${COMMON_FLAGS})
+  else()
+    string(REPLACE ".c" ".o" dst ${f})
+    set(FLAGS ${CFLAGS} ${COMMON_FLAGS})
+  endif()
+
+  clang_compile("${CMAKE_CURRENT_BINARY_DIR}/${dst}" ${f}
+    CFLAGS ${FLAGS})
+  list(APPEND out_objs ${dst})
+endforeach( f )
 
 # Generate libraries
 macro(add_cilk_runtime name)
-  parse_arguments(LIB "ARCH;SOURCES;CFLAGS;DEFS;LINKFLAGS" "" ${ARGN})
-  add_library(${name} SHARED ${LIB_SOURCES})
+  parse_arguments(LIB "ARCH;OBJS;SOURCES;CFLAGS;DEFS;LINKFLAGS" "" ${ARGN})
+  add_library(${name} SHARED ${LIB_OBJS})
   set_target_compile_flags(${name} ${LIB_CFLAGS})
   set_target_link_flags(${name} ${LIB_LINKFLAGS})
   set_property(TARGET ${name} APPEND PROPERTY
@@ -140,10 +158,8 @@ endmacro()
 
 add_cilk_runtime(cilkrts
   ARCH "x86_64"
-  SOURCES ${cilk_runtime_sources})
+  OBJS ${out_objs})
 
 add_dependencies(cilkrts clang)
 target_link_libraries(cilkrts dl pthread)
-set_target_properties(cilkrts PROPERTIES
-               COMPILE_DEFINITIONS "${CILK_COMMON_DEFINITIONS}"
-               SOVERSION "5")
+set_target_properties(cilkrts PROPERTIES SOVERSION "5")
