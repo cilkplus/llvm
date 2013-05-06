@@ -604,12 +604,12 @@ void ObjCMethodDecl::setMethodParams(ASTContext &C,
   assert((!SelLocs.empty() || isImplicit()) &&
          "No selector locs for non-implicit method");
   if (isImplicit())
-    return setParamsAndSelLocs(C, Params, ArrayRef<SourceLocation>());
+    return setParamsAndSelLocs(C, Params, llvm::None);
 
   SelLocsKind = hasStandardSelectorLocs(getSelector(), SelLocs, Params,
                                         DeclEndLoc);
   if (SelLocsKind != SelLoc_NonStandard)
-    return setParamsAndSelLocs(C, Params, ArrayRef<SourceLocation>());
+    return setParamsAndSelLocs(C, Params, llvm::None);
 
   setParamsAndSelLocs(C, Params, SelLocs);
 }
@@ -1648,12 +1648,13 @@ ObjCImplementationDecl::Create(ASTContext &C, DeclContext *DC,
                                ObjCInterfaceDecl *SuperDecl,
                                SourceLocation nameLoc,
                                SourceLocation atStartLoc,
+                               SourceLocation superLoc,
                                SourceLocation IvarLBraceLoc,
                                SourceLocation IvarRBraceLoc) {
   if (ClassInterface && ClassInterface->hasDefinition())
     ClassInterface = ClassInterface->getDefinition();
   return new (C) ObjCImplementationDecl(DC, ClassInterface, SuperDecl,
-                                        nameLoc, atStartLoc,
+                                        nameLoc, atStartLoc, superLoc,
                                         IvarLBraceLoc, IvarRBraceLoc);
 }
 

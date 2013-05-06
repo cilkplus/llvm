@@ -528,8 +528,9 @@ public:
                           RecordDecl *RD, ImplicitParamDecl *Context,
                           CapturedRegionKind K)
     : CapturingScopeInfo(Diag, ImpCap_CapturedRegion),
-      TheCapturedDecl(CD), TheRecordDecl(RD), TheScope(S), ContextParam(Context),
-      CapRegionKind(K), ExprNeedsCleanups(false) {
+      TheCapturedDecl(CD), TheRecordDecl(RD), TheScope(S),
+      ContextParam(Context), CapRegionKind(K), ExprNeedsCleanups(false)
+  {
     Kind = SK_CapturedRegion;
   }
 

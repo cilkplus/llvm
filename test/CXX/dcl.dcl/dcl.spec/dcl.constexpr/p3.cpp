@@ -143,10 +143,6 @@ constexpr int ForStmt() {
   for (int n = 0; n < 10; ++n)
 #ifndef CXX1Y
   // expected-error@-2 {{statement not allowed in constexpr function}}
-#else
-  // FIXME: Once we support evaluating a for-statement, this diagnostic should disappear.
-  // expected-error@-6 {{never produces a constant expression}}
-  // expected-note@-6 {{subexpression}}
 #endif
     return 0;
 }
@@ -274,11 +270,13 @@ namespace std_example {
     int a; // expected-error {{must be initialized}}
     return a;
   }
-  // FIXME: Once we support variable mutation, this can produce a
-  // constant expression.
-  constexpr int prev(int x) { // expected-error {{never produces a constant expression}}
-    return --x; // expected-note {{subexpression}}
+  constexpr int prev(int x) {
+    return --x;
   }
+#ifndef CXX1Y
+  // expected-error@-4 {{never produces a constant expression}}
+  // expected-note@-4 {{subexpression}}
+#endif
   constexpr int g(int x, int n) {
     int r = 1;
     while (--n > 0) r *= x;
@@ -287,9 +285,5 @@ namespace std_example {
 #ifndef CXX1Y
     // expected-error@-5 {{C++1y}}
     // expected-error@-5 {{statement not allowed}}
-#else
-    // FIXME: This should be allowed.
-    // expected-error@-10 {{never produces a constant}}
-    // expected-note@-9 {{subexpression}}
 #endif
 }

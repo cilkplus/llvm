@@ -190,7 +190,6 @@ void CodeGenModule::Release() {
       AddGlobalCtor(ObjCInitFunction);
   EmitCtorList(GlobalCtors, "llvm.global_ctors");
   EmitCtorList(GlobalDtors, "llvm.global_dtors");
-  EmitTLSList(TLSInitFuncs);
   EmitGlobalAnnotations();
   EmitStaticExternCAliases();
   EmitLLVMUsed();
@@ -488,12 +487,6 @@ void CodeGenModule::AddGlobalDtor(llvm::Function * Dtor, int Priority) {
   GlobalDtors.push_back(std::make_pair(Dtor, Priority));
 }
 
-/// AddTLSInitFunc - Add a function to the list that will initialize TLS
-/// variables before main() runs.
-void CodeGenModule::AddTLSInitFunc(llvm::Function *Init) {
-  TLSInitFuncs.push_back(Init);
-}
-
 void CodeGenModule::EmitCtorList(const CtorList &Fns, const char *GlobalName) {
   // Ctor function type is void()*.
   llvm::FunctionType* CtorFTy = llvm::FunctionType::get(VoidTy, false);
@@ -520,25 +513,6 @@ void CodeGenModule::EmitCtorList(const CtorList &Fns, const char *GlobalName) {
                              llvm::ConstantArray::get(AT, Ctors),
                              GlobalName);
   }
-}
-
-void CodeGenModule::EmitTLSList(ArrayRef<llvm::Constant*> Fns) {
-  if (Fns.empty()) return;
-
-  // TLS init function types are void()*.
-  llvm::FunctionType* TLSFTy = llvm::FunctionType::get(VoidTy, false);
-  llvm::Type *TLSPFTy = llvm::PointerType::getUnqual(TLSFTy);
-
-  SmallVector<llvm::Constant*, 8> Inits;
-  for (ArrayRef<llvm::Constant*>::iterator I = Fns.begin(),
-         E = Fns.end(); I != E; ++I)
-    Inits.push_back(llvm::ConstantExpr::getBitCast(*I, TLSPFTy));
-
-  llvm::ArrayType *AT = llvm::ArrayType::get(TLSPFTy, Inits.size());
-  new llvm::GlobalVariable(TheModule, AT, false,
-                           llvm::GlobalValue::AppendingLinkage,
-                           llvm::ConstantArray::get(AT, Inits),
-                           "llvm.tls_init_funcs");
 }
 
 llvm::GlobalValue::LinkageTypes
@@ -1657,7 +1631,7 @@ CodeGenModule::MaybeEmitGlobalStdInitializerListInitializer(const VarDecl *D,
                                           D->getLocStart(), D->getLocation(),
                                           name, arrayType, sourceInfo,
                                           SC_Static);
-  backingArray->setTLSKind(D->getTLSKind());
+  backingArray->setTSCSpec(D->getTSCSpec());
 
   // Now clone the InitListExpr to initialize the array instead.
   // Incredible hack: we want to use the existing InitListExpr here, so we need
@@ -1765,8 +1739,8 @@ void CodeGenModule::MaybeHandleStaticInExternC(const SomeDecl *D,
 
   // Must be in an extern "C" context. Entities declared directly within
   // a record are not extern "C" even if the record is in such a context.
-  const DeclContext *DC = D->getFirstDeclaration()->getDeclContext();
-  if (DC->isRecord() || !DC->isExternCContext())
+  const SomeDecl *First = D->getFirstDeclaration();
+  if (First->getDeclContext()->isRecord() || !First->isInExternCContext())
     return;
 
   // OK, this is an internal linkage entity inside an extern "C" linkage
@@ -1950,7 +1924,13 @@ CodeGenModule::GetLLVMLinkageVarDefinition(const VarDecl *D,
            !D->getAttr<WeakImportAttr>()) {
     // Thread local vars aren't considered common linkage.
     return llvm::GlobalVariable::CommonLinkage;
-  }
+  } else if (D->getTLSKind() == VarDecl::TLS_Dynamic &&
+             getTarget().getTriple().isMacOSX())
+    // On Darwin, the backing variable for a C++11 thread_local variable always
+    // has internal linkage; all accesses should just be calls to the
+    // Itanium-specified entry point, which has the normal linkage of the
+    // variable.
+    return llvm::GlobalValue::InternalLinkage;
   return llvm::GlobalVariable::ExternalLinkage;
 }
 

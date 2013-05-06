@@ -226,19 +226,14 @@ public:
     SCS_private_extern,
     SCS_mutable
   };
-  /// \brief Thread storage-class-specifier. These can be combined with
-  /// SCS_extern and SCS_static.
-  enum TSCS {
-    TSCS_unspecified,
-    /// GNU __thread.
-    TSCS___thread,
-    /// C++11 thread_local. Implies 'static' at block scope, but not at
-    /// class scope.
-    TSCS_thread_local,
-    /// C11 _Thread_local. Must be combined with either 'static' or 'extern'
-    /// if used at block scope.
-    TSCS__Thread_local
-  };
+
+  // Import thread storage class specifier enumeration and constants.
+  // These can be combined with SCS_extern and SCS_static.
+  typedef ThreadStorageClassSpecifier TSCS;
+  static const TSCS TSCS_unspecified = clang::TSCS_unspecified;
+  static const TSCS TSCS___thread = clang::TSCS___thread;
+  static const TSCS TSCS_thread_local = clang::TSCS_thread_local;
+  static const TSCS TSCS__Thread_local = clang::TSCS__Thread_local;
 
   // Import type specifier width enumeration and constants.
   typedef TypeSpecifierWidth TSW;
@@ -1503,8 +1498,9 @@ public:
     CXXNewContext,       // C++ new-expression.
     CXXCatchContext,     // C++ catch exception-declaration
     ObjCCatchContext,    // Objective-C catch exception-declaration
-    BlockLiteralContext,  // Block literal declarator.
+    BlockLiteralContext, // Block literal declarator.
     LambdaExprContext,   // Lambda-expression declarator.
+    ConversionIdContext, // C++ conversion-type-id.
     TrailingReturnContext, // C++11 trailing-type-specifier.
     TemplateTypeArgContext, // Template type argument.
     AliasDeclContext,    // C++11 alias-declaration.
@@ -1680,6 +1676,7 @@ public:
     case ObjCCatchContext:
     case BlockLiteralContext:
     case LambdaExprContext:
+    case ConversionIdContext:
     case TemplateTypeArgContext:
     case TrailingReturnContext:
       return true;
@@ -1712,6 +1709,7 @@ public:
     case ObjCResultContext:
     case BlockLiteralContext:
     case LambdaExprContext:
+    case ConversionIdContext:
     case TemplateTypeArgContext:
     case TrailingReturnContext:
       return false;
@@ -1761,6 +1759,7 @@ public:
     case AliasTemplateContext:
     case BlockLiteralContext:
     case LambdaExprContext:
+    case ConversionIdContext:
     case TemplateTypeArgContext:
     case TrailingReturnContext:
       return false;
@@ -1943,6 +1942,7 @@ public:
     case ObjCCatchContext:
     case BlockLiteralContext:
     case LambdaExprContext:
+    case ConversionIdContext:
     case TemplateTypeArgContext:
     case TrailingReturnContext:
       return false;

@@ -4647,7 +4647,7 @@ inline QualType QualType::getUnqualifiedType() const {
 
   return QualType(getSplitUnqualifiedTypeImpl(*this).Ty, 0);
 }
-
+  
 inline SplitQualType QualType::getSplitUnqualifiedType() const {
   if (!getTypePtr()->getCanonicalTypeInternal().hasLocalQualifiers())
     return split();
@@ -4679,7 +4679,7 @@ inline void QualType::removeLocalCVRQualifiers(unsigned Mask) {
 inline unsigned QualType::getAddressSpace() const {
   return getQualifiers().getAddressSpace();
 }
-
+  
 /// getObjCGCAttr - Return the gc attribute of this type.
 inline Qualifiers::GC QualType::getObjCGCAttr() const {
   return getQualifiers().getObjCGCAttr();

@@ -78,9 +78,7 @@ CodeGenTypes::arrangeFreeFunctionType(CanQual<FunctionNoProtoType> FTNP) {
   // When translating an unprototyped function type, always use a
   // variadic type.
   return arrangeLLVMFunctionInfo(FTNP->getResultType().getUnqualifiedType(),
-                                 ArrayRef<CanQualType>(),
-                                 FTNP->getExtInfo(),
-                                 RequiredArgs(0));
+                                 None, FTNP->getExtInfo(), RequiredArgs(0));
 }
 
 /// Arrange the LLVM function layout for a value of the given function
@@ -258,10 +256,8 @@ CodeGenTypes::arrangeFunctionDeclaration(const FunctionDecl *FD) {
   // non-variadic type.
   if (isa<FunctionNoProtoType>(FTy)) {
     CanQual<FunctionNoProtoType> noProto = FTy.getAs<FunctionNoProtoType>();
-    return arrangeLLVMFunctionInfo(noProto->getResultType(),
-                                   ArrayRef<CanQualType>(),
-                                   noProto->getExtInfo(),
-                                   RequiredArgs::All);
+    return arrangeLLVMFunctionInfo(noProto->getResultType(), None,
+                                   noProto->getExtInfo(), RequiredArgs::All);
   }
 
   assert(isa<FunctionProtoType>(FTy));
@@ -421,7 +417,7 @@ CodeGenTypes::arrangeFunctionDeclaration(QualType resultType,
 }
 
 const CGFunctionInfo &CodeGenTypes::arrangeNullaryFunction() {
-  return arrangeLLVMFunctionInfo(getContext().VoidTy, ArrayRef<CanQualType>(),
+  return arrangeLLVMFunctionInfo(getContext().VoidTy, None,
                                  FunctionType::ExtInfo(), RequiredArgs::All);
 }
 
@@ -1197,7 +1193,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
   // initialize the return value.  TODO: it might be nice to have
   // a more general mechanism for this that didn't require synthesized
   // return statements.
-  if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CurFuncDecl)) {
+  if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CurCodeDecl)) {
     if (FD->hasImplicitReturnZero()) {
       QualType RetTy = FD->getResultType().getUnqualifiedType();
       llvm::Type* LLVMTy = CGM.getTypes().ConvertType(RetTy);
@@ -1626,7 +1622,8 @@ static bool checkThisPointer(llvm::Value *ThisArg, llvm::Value *This) {
   return false;
 }
 
-void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI) {
+void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
+                                         bool EmitRetDbgLoc) {
   // Functions with no result always return void.
   if (ReturnValue == 0) {
     Builder.CreateRetVoid();
@@ -1671,8 +1668,10 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI) {
       // If there is a dominating store to ReturnValue, we can elide
       // the load, zap the store, and usually zap the alloca.
       if (llvm::StoreInst *SI = findDominatingStoreToReturnValue(*this)) {
+        // Reuse the debug location from the store unless we're told not to.
+        if (EmitRetDbgLoc)
+          RetDbgLoc = SI->getDebugLoc();
         // Get the stored value and nuke the now-dead store.
-        RetDbgLoc = SI->getDebugLoc();
         RV = SI->getValueOperand();
         SI->eraseFromParent();
 

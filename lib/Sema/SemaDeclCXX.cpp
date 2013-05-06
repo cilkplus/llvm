@@ -265,7 +265,7 @@ Sema::SetParamDefaultArgument(ParmVarDecl *Param, Expr *Arg,
                                                                     Param);
   InitializationKind Kind = InitializationKind::CreateCopy(Param->getLocation(),
                                                            EqualLoc);
-  InitializationSequence InitSeq(*this, Entity, Kind, &Arg, 1);
+  InitializationSequence InitSeq(*this, Entity, Kind, Arg);
   ExprResult Result = InitSeq.Perform(*this, Entity, Kind, Arg);
   if (Result.isInvalid())
     return true;
@@ -2157,14 +2157,12 @@ Sema::ActOnCXXInClassMemberInitializer(Decl *D, SourceLocation InitLoc,
       Diag(FD->getLocation(), diag::warn_dangling_std_initializer_list)
         << /*at end of ctor*/1 << InitExpr->getSourceRange();
     }
-    Expr **Inits = &InitExpr;
-    unsigned NumInits = 1;
     InitializedEntity Entity = InitializedEntity::InitializeMember(FD);
     InitializationKind Kind = FD->getInClassInitStyle() == ICIS_ListInit
         ? InitializationKind::CreateDirectList(InitExpr->getLocStart())
         : InitializationKind::CreateCopy(InitExpr->getLocStart(), InitLoc);
-    InitializationSequence Seq(*this, Entity, Kind, Inits, NumInits);
-    Init = Seq.Perform(*this, Entity, Kind, MultiExprArg(Inits, NumInits));
+    InitializationSequence Seq(*this, Entity, Kind, InitExpr);
+    Init = Seq.Perform(*this, Entity, Kind, InitExpr);
     if (Init.isInvalid()) {
       FD->setInvalidDecl();
       return;
@@ -2527,23 +2525,19 @@ Sema::BuildMemberInitializer(ValueDecl *Member, Expr *Init,
   //   foo(foo)
   // where foo is not also a parameter to the constructor.
   // TODO: implement -Wuninitialized and fold this into that framework.
-  Expr **Args;
-  unsigned NumArgs;
+  MultiExprArg Args;
   if (ParenListExpr *ParenList = dyn_cast<ParenListExpr>(Init)) {
-    Args = ParenList->getExprs();
-    NumArgs = ParenList->getNumExprs();
+    Args = MultiExprArg(ParenList->getExprs(), ParenList->getNumExprs());
   } else if (InitListExpr *InitList = dyn_cast<InitListExpr>(Init)) {
-    Args = InitList->getInits();
-    NumArgs = InitList->getNumInits();
+    Args = MultiExprArg(InitList->getInits(), InitList->getNumInits());
   } else {
     // Template instantiation doesn't reconstruct ParenListExprs for us.
-    Args = &Init;
-    NumArgs = 1;
+    Args = Init;
   }
 
   if (getDiagnostics().getDiagnosticLevel(diag::warn_field_is_uninit, IdLoc)
         != DiagnosticsEngine::Ignored)
-    for (unsigned i = 0; i < NumArgs; ++i)
+    for (unsigned i = 0, e = Args.size(); i != e; ++i)
       // FIXME: Warn about the case when other fields are used before being
       // initialized. For example, let this field be the i'th field. When
       // initializing the i'th field, throw a warning if any of the >= i'th
@@ -2564,8 +2558,7 @@ Sema::BuildMemberInitializer(ValueDecl *Member, Expr *Init,
     bool InitList = false;
     if (isa<InitListExpr>(Init)) {
       InitList = true;
-      Args = &Init;
-      NumArgs = 1;
+      Args = Init;
 
       if (isStdInitializerList(Member->getType(), 0)) {
         Diag(IdLoc, diag::warn_dangling_std_initializer_list)
@@ -2582,10 +2575,8 @@ Sema::BuildMemberInitializer(ValueDecl *Member, Expr *Init,
                : InitializationKind::CreateDirect(IdLoc, InitRange.getBegin(),
                                                   InitRange.getEnd());
 
-    InitializationSequence InitSeq(*this, MemberEntity, Kind, Args, NumArgs);
-    ExprResult MemberInit = InitSeq.Perform(*this, MemberEntity, Kind,
-                                            MultiExprArg(Args, NumArgs),
-                                            0);
+    InitializationSequence InitSeq(*this, MemberEntity, Kind, Args);
+    ExprResult MemberInit = InitSeq.Perform(*this, MemberEntity, Kind, Args, 0);
     if (MemberInit.isInvalid())
       return true;
 
@@ -2621,12 +2612,10 @@ Sema::BuildDelegatingInitializer(TypeSourceInfo *TInfo, Expr *Init,
   Diag(NameLoc, diag::warn_cxx98_compat_delegating_ctor);
 
   bool InitList = true;
-  Expr **Args = &Init;
-  unsigned NumArgs = 1;
+  MultiExprArg Args = Init;
   if (ParenListExpr *ParenList = dyn_cast<ParenListExpr>(Init)) {
     InitList = false;
-    Args = ParenList->getExprs();
-    NumArgs = ParenList->getNumExprs();
+    Args = MultiExprArg(ParenList->getExprs(), ParenList->getNumExprs());
   }
 
   SourceRange InitRange = Init->getSourceRange();
@@ -2637,10 +2626,9 @@ Sema::BuildDelegatingInitializer(TypeSourceInfo *TInfo, Expr *Init,
     InitList ? InitializationKind::CreateDirectList(NameLoc)
              : InitializationKind::CreateDirect(NameLoc, InitRange.getBegin(),
                                                 InitRange.getEnd());
-  InitializationSequence InitSeq(*this, DelegationEntity, Kind, Args, NumArgs);
+  InitializationSequence InitSeq(*this, DelegationEntity, Kind, Args);
   ExprResult DelegationInit = InitSeq.Perform(*this, DelegationEntity, Kind,
-                                              MultiExprArg(Args, NumArgs),
-                                              0);
+                                              Args, 0);
   if (DelegationInit.isInvalid())
     return true;
 
@@ -2760,12 +2748,10 @@ Sema::BuildBaseInitializer(QualType BaseType, TypeSourceInfo *BaseTInfo,
 
   // Initialize the base.
   bool InitList = true;
-  Expr **Args = &Init;
-  unsigned NumArgs = 1;
+  MultiExprArg Args = Init;
   if (ParenListExpr *ParenList = dyn_cast<ParenListExpr>(Init)) {
     InitList = false;
-    Args = ParenList->getExprs();
-    NumArgs = ParenList->getNumExprs();
+    Args = MultiExprArg(ParenList->getExprs(), ParenList->getNumExprs());
   }
 
   InitializedEntity BaseEntity =
@@ -2774,9 +2760,8 @@ Sema::BuildBaseInitializer(QualType BaseType, TypeSourceInfo *BaseTInfo,
     InitList ? InitializationKind::CreateDirectList(BaseLoc)
              : InitializationKind::CreateDirect(BaseLoc, InitRange.getBegin(),
                                                 InitRange.getEnd());
-  InitializationSequence InitSeq(*this, BaseEntity, Kind, Args, NumArgs);
-  ExprResult BaseInit = InitSeq.Perform(*this, BaseEntity, Kind,
-                                        MultiExprArg(Args, NumArgs), 0);
+  InitializationSequence InitSeq(*this, BaseEntity, Kind, Args);
+  ExprResult BaseInit = InitSeq.Perform(*this, BaseEntity, Kind, Args, 0);
   if (BaseInit.isInvalid())
     return true;
 
@@ -2862,8 +2847,7 @@ BuildImplicitBaseInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
 
       InitializationKind InitKind = InitializationKind::CreateDirect(
           Constructor->getLocation(), SourceLocation(), SourceLocation());
-      InitializationSequence InitSeq(SemaRef, InitEntity, InitKind,
-                                     Args.data(), Args.size());
+      InitializationSequence InitSeq(SemaRef, InitEntity, InitKind, Args);
       BaseInit = InitSeq.Perform(SemaRef, InitEntity, InitKind, Args);
       break;
     }
@@ -2872,8 +2856,8 @@ BuildImplicitBaseInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
   case IIK_Default: {
     InitializationKind InitKind
       = InitializationKind::CreateDefault(Constructor->getLocation());
-    InitializationSequence InitSeq(SemaRef, InitEntity, InitKind, 0, 0);
-    BaseInit = InitSeq.Perform(SemaRef, InitEntity, InitKind, MultiExprArg());
+    InitializationSequence InitSeq(SemaRef, InitEntity, InitKind, None);
+    BaseInit = InitSeq.Perform(SemaRef, InitEntity, InitKind, None);
     break;
   }
 
@@ -2910,10 +2894,8 @@ BuildImplicitBaseInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
     InitializationKind InitKind
       = InitializationKind::CreateDirect(Constructor->getLocation(),
                                          SourceLocation(), SourceLocation());
-    InitializationSequence InitSeq(SemaRef, InitEntity, InitKind, 
-                                   &CopyCtorArg, 1);
-    BaseInit = InitSeq.Perform(SemaRef, InitEntity, InitKind,
-                               MultiExprArg(&CopyCtorArg, 1));
+    InitializationSequence InitSeq(SemaRef, InitEntity, InitKind, CopyCtorArg);
+    BaseInit = InitSeq.Perform(SemaRef, InitEntity, InitKind, CopyCtorArg);
     break;
   }
   }
@@ -3064,8 +3046,7 @@ BuildImplicitMemberInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
       InitializationKind::CreateDirect(Loc, SourceLocation(), SourceLocation());
     
     Expr *CtorArgE = CtorArg.takeAs<Expr>();
-    InitializationSequence InitSeq(SemaRef, Entities.back(), InitKind,
-                                   &CtorArgE, 1);
+    InitializationSequence InitSeq(SemaRef, Entities.back(), InitKind, CtorArgE);
     
     ExprResult MemberInit
       = InitSeq.Perform(SemaRef, Entities.back(), InitKind, 
@@ -3103,10 +3084,10 @@ BuildImplicitMemberInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
                 : InitializedEntity::InitializeMember(Field);
     InitializationKind InitKind = 
       InitializationKind::CreateDefault(Loc);
-    
-    InitializationSequence InitSeq(SemaRef, InitEntity, InitKind, 0, 0);
-    ExprResult MemberInit = 
-      InitSeq.Perform(SemaRef, InitEntity, InitKind, MultiExprArg());
+
+    InitializationSequence InitSeq(SemaRef, InitEntity, InitKind, None);
+    ExprResult MemberInit =
+      InitSeq.Perform(SemaRef, InitEntity, InitKind, None);
 
     MemberInit = SemaRef.MaybeCreateExprWithCleanups(MemberInit);
     if (MemberInit.isInvalid())
@@ -4595,7 +4576,7 @@ void Sema::CheckExplicitlyDefaultedMemberExceptionSpec(
   FunctionProtoType::ExtProtoInfo EPI;
   computeImplicitExceptionSpec(*this, MD->getLocation(), MD).getEPI(EPI);
   const FunctionProtoType *ImplicitType = cast<FunctionProtoType>(
-    Context.getFunctionType(Context.VoidTy, ArrayRef<QualType>(), EPI));
+    Context.getFunctionType(Context.VoidTy, None, EPI));
 
   // Ensure that it matches.
   CheckEquivalentExceptionSpec(
@@ -6030,7 +6011,7 @@ QualType Sema::CheckDestructorDeclarator(Declarator &D, QualType R,
   EPI.Variadic = false;
   EPI.TypeQuals = 0;
   EPI.RefQualifier = RQ_None;
-  return Context.getFunctionType(Context.VoidTy, ArrayRef<QualType>(), EPI);
+  return Context.getFunctionType(Context.VoidTy, None, EPI);
 }
 
 /// CheckConversionDeclarator - Called by ActOnDeclarator to check the
@@ -6111,8 +6092,7 @@ void Sema::CheckConversionDeclarator(Declarator &D, QualType &R,
   // of the errors above fired) and with the conversion type as the
   // return type.
   if (D.isInvalidType())
-    R = Context.getFunctionType(ConvType, ArrayRef<QualType>(),
-                                Proto->getExtProtoInfo());
+    R = Context.getFunctionType(ConvType, None, Proto->getExtProtoInfo());
 
   // C++0x explicit conversion operators.
   if (D.getDeclSpec().isExplicitSpecified())
@@ -7811,9 +7791,7 @@ CXXConstructorDecl *Sema::DeclareImplicitDefaultConstructor(
   FunctionProtoType::ExtProtoInfo EPI;
   EPI.ExceptionSpecType = EST_Unevaluated;
   EPI.ExceptionSpecDecl = DefaultCon;
-  DefaultCon->setType(Context.getFunctionType(Context.VoidTy,
-                                              ArrayRef<QualType>(),
-                                              EPI));
+  DefaultCon->setType(Context.getFunctionType(Context.VoidTy, None, EPI));
 
   // We don't need to use SpecialMemberIsTrivial here; triviality for default
   // constructors is easy to compute.
@@ -8277,9 +8255,7 @@ CXXDestructorDecl *Sema::DeclareImplicitDestructor(CXXRecordDecl *ClassDecl) {
   FunctionProtoType::ExtProtoInfo EPI;
   EPI.ExceptionSpecType = EST_Unevaluated;
   EPI.ExceptionSpecDecl = Destructor;
-  Destructor->setType(Context.getFunctionType(Context.VoidTy,
-                                              ArrayRef<QualType>(),
-                                              EPI));
+  Destructor->setType(Context.getFunctionType(Context.VoidTy, None, EPI));
 
   AddOverriddenMethods(ClassDecl, Destructor);
 
@@ -8383,9 +8359,7 @@ void Sema::AdjustDestructorExceptionSpec(CXXRecordDecl *ClassDecl,
   FunctionProtoType::ExtProtoInfo EPI = DtorType->getExtProtoInfo();
   EPI.ExceptionSpecType = EST_Unevaluated;
   EPI.ExceptionSpecDecl = Destructor;
-  Destructor->setType(Context.getFunctionType(Context.VoidTy,
-                                              ArrayRef<QualType>(),
-                                              EPI));
+  Destructor->setType(Context.getFunctionType(Context.VoidTy, None, EPI));
 
   // FIXME: If the destructor has a body that could throw, and the newly created
   // spec doesn't allow exceptions, we should emit a warning, because this
@@ -10642,9 +10616,8 @@ VarDecl *Sema::BuildExceptionDeclaration(Scope *S,
 
       Expr *opaqueValue =
         new (Context) OpaqueValueExpr(Loc, initType, VK_LValue, OK_Ordinary);
-      InitializationSequence sequence(*this, entity, initKind, &opaqueValue, 1);
-      ExprResult result = sequence.Perform(*this, entity, initKind,
-                                           MultiExprArg(&opaqueValue, 1));
+      InitializationSequence sequence(*this, entity, initKind, opaqueValue);
+      ExprResult result = sequence.Perform(*this, entity, initKind, opaqueValue);
       if (result.isInvalid())
         Invalid = true;
       else {
@@ -11718,8 +11691,7 @@ void Sema::MarkVTableUsed(SourceLocation Loc, CXXRecordDecl *Class,
   // Ignore any vtable uses in unevaluated operands or for classes that do
   // not have a vtable.
   if (!Class->isDynamicClass() || Class->isDependentContext() ||
-      CurContext->isDependentContext() ||
-      ExprEvalContexts.back().Context == Unevaluated)
+      CurContext->isDependentContext() || isUnevaluatedContext())
     return;
 
   // Try to insert this class into the map.
@@ -11907,10 +11879,10 @@ void Sema::SetIvarInitializers(ObjCImplementationDecl *ObjCImplementation) {
       InitializedEntity InitEntity = InitializedEntity::InitializeMember(Field);
       InitializationKind InitKind = 
         InitializationKind::CreateDefault(ObjCImplementation->getLocation());
-      
-      InitializationSequence InitSeq(*this, InitEntity, InitKind, 0, 0);
-      ExprResult MemberInit = 
-        InitSeq.Perform(*this, InitEntity, InitKind, MultiExprArg());
+
+      InitializationSequence InitSeq(*this, InitEntity, InitKind, None);
+      ExprResult MemberInit =
+        InitSeq.Perform(*this, InitEntity, InitKind, None);
       MemberInit = MaybeCreateExprWithCleanups(MemberInit);
       // Note, MemberInit could actually come back empty if no initialization 
       // is required (e.g., because it would call a trivial default constructor)

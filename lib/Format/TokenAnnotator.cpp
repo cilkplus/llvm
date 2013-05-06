@@ -245,24 +245,25 @@ private:
   }
 
   bool parseBrace() {
-    // Lines are fine to end with '{'.
-    if (CurrentToken == NULL)
-      return true;
-    ScopedContextCreator ContextCreator(*this, tok::l_brace, 1);
-    AnnotatedToken *Left = CurrentToken->Parent;
-    while (CurrentToken != NULL) {
-      if (CurrentToken->is(tok::r_brace)) {
-        Left->MatchingParen = CurrentToken;
-        CurrentToken->MatchingParen = Left;
-        next();
-        return true;
+    if (CurrentToken != NULL) {
+      ScopedContextCreator ContextCreator(*this, tok::l_brace, 1);
+      AnnotatedToken *Left = CurrentToken->Parent;
+      while (CurrentToken != NULL) {
+        if (CurrentToken->is(tok::r_brace)) {
+          Left->MatchingParen = CurrentToken;
+          CurrentToken->MatchingParen = Left;
+          next();
+          return true;
+        }
+        if (CurrentToken->isOneOf(tok::r_paren, tok::r_square))
+          return false;
+        updateParameterCount(Left, CurrentToken);
+        if (!consumeToken())
+          return false;
       }
-      if (CurrentToken->isOneOf(tok::r_paren, tok::r_square))
-        return false;
-      updateParameterCount(Left, CurrentToken);
-      if (!consumeToken())
-        return false;
     }
+    // No closing "}" found, this probably starts a definition.
+    Line.StartsDefinition = true;
     return true;
   }
 
@@ -596,6 +597,9 @@ private:
       Contexts.back().IsExpression = true;
     } else if (Current.is(tok::kw_new)) {
       Contexts.back().CanBeExpression = false;
+    } else if (Current.is(tok::semi)) {
+      // This should be the condition or increment in a for-loop.
+      Contexts.back().IsExpression = true;
     }
 
     if (Current.Type == TT_Unknown) {
@@ -1045,12 +1049,14 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
     return Line.Type == LT_ObjCDecl ||
            Left.isOneOf(tok::kw_if, tok::kw_for, tok::kw_while, tok::kw_switch,
                         tok::kw_return, tok::kw_catch, tok::kw_new,
-                        tok::kw_delete);
+                        tok::kw_delete, tok::semi);
   }
   if (Left.is(tok::at) &&
       Right.FormatTok.Tok.getObjCKeywordID() != tok::objc_not_keyword)
     return false;
   if (Left.is(tok::l_brace) && Right.is(tok::r_brace))
+    return false;
+  if (Right.is(tok::ellipsis))
     return false;
   return true;
 }
@@ -1132,11 +1138,9 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
   if (Right.Type == TT_ConditionalExpr || Right.is(tok::question))
     return true;
   if (Right.Type == TT_RangeBasedForLoopColon ||
-      Right.Type == TT_InheritanceColon ||
       Right.Type == TT_OverloadedOperatorLParen)
     return false;
-  if (Left.Type == TT_RangeBasedForLoopColon ||
-      Left.Type == TT_InheritanceColon)
+  if (Left.Type == TT_RangeBasedForLoopColon)
     return true;
   if (Right.Type == TT_RangeBasedForLoopColon)
     return false;

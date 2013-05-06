@@ -80,6 +80,24 @@ void test_capture_var() {
   Obj.set(0.0f); // OK
 }
 
+template <typename S, typename T>
+S template_capture_var(S x, T y) {
+  #pragma clang _debug captured
+  {
+    x++;
+    y++;  // expected-error{{read-only variable is not assignable}}
+  }
+
+  return x;
+}
+
+// Check if can recover from a template error.
+void test_capture_var_error() {
+  template_capture_var<int, int>(0, 1); // OK
+  template_capture_var<int, const int>(0, 1); // expected-note{{in instantiation of function template specialization 'template_capture_var<int, const int>' requested here}}
+  template_capture_var<int, int>(0, 1); // OK
+}
+
 template <typename T>
 void template_capture_in_lambda() {
   T x, y;

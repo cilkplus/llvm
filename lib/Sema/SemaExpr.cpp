@@ -55,6 +55,12 @@ bool Sema::CanUseDecl(NamedDecl *D) {
   if (FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
     if (FD->isDeleted())
       return false;
+
+    // If the function has a deduced return type, and we can't deduce it,
+    // then we can't use it either.
+    if (getLangOpts().CPlusPlus1y && FD->getResultType()->isUndeducedType() &&
+        DeduceReturnType(FD, SourceLocation(), /*Diagnose*/false))
+      return false;
   }
 
   // See if this function is unavailable.
@@ -278,6 +284,12 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, SourceLocation Loc,
       NoteDeletedFunction(FD);
       return true;
     }
+
+    // If the function has a deduced return type, and we can't deduce it,
+    // then we can't use it either.
+    if (getLangOpts().CPlusPlus1y && FD->getResultType()->isUndeducedType() &&
+        DeduceReturnType(FD, Loc))
+      return true;
   }
   DiagnoseAvailabilityOfDecl(*this, D, Loc, UnknownObjCClass);
 
@@ -806,7 +818,7 @@ ExprResult Sema::DefaultVariadicArgumentPromotion(Expr *E, VariadicCallType CT,
       return ExprError();
 
     ExprResult Call = ActOnCallExpr(TUScope, TrapFn.get(),
-                                    E->getLocStart(), MultiExprArg(),
+                                    E->getLocStart(), None,
                                     E->getLocEnd());
     if (Call.isInvalid())
       return ExprError();
@@ -2766,8 +2778,7 @@ ExprResult Sema::ActOnCharacterConstant(const Token &Tok, Scope *UDLScope) {
   // C++11 [lex.ext]p6: The literal L is treated as a call of the form
   //   operator "" X (ch)
   return BuildCookedLiteralOperatorCall(*this, UDLScope, UDSuffix, UDSuffixLoc,
-                                        llvm::makeArrayRef(&Lit, 1),
-                                        Tok.getLocation());
+                                        Lit, Tok.getLocation());
 }
 
 ExprResult Sema::ActOnIntegerConstant(SourceLocation Loc, uint64_t Val) {
@@ -2864,7 +2875,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
     // Perform literal operator lookup to determine if we're building a raw
     // literal or a cooked one.
     LookupResult R(*this, OpName, UDSuffixLoc, LookupOrdinaryName);
-    switch (LookupLiteralOperator(UDLScope, R, llvm::makeArrayRef(&CookedTy, 1),
+    switch (LookupLiteralOperator(UDLScope, R, CookedTy,
                                   /*AllowRawAndTemplate*/true)) {
     case LOLR_Error:
       return ExprError();
@@ -2880,8 +2891,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
         Lit = IntegerLiteral::Create(Context, ResultVal, CookedTy,
                                      Tok.getLocation());
       }
-      return BuildLiteralOperatorCall(R, OpNameInfo,
-                                      llvm::makeArrayRef(&Lit, 1),
+      return BuildLiteralOperatorCall(R, OpNameInfo, Lit,
                                       Tok.getLocation());
     }
 
@@ -2897,8 +2907,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
       Expr *Lit = StringLiteral::Create(
           Context, StringRef(TokSpelling.data(), Length), StringLiteral::Ascii,
           /*Pascal*/false, StrTy, &TokLoc, 1);
-      return BuildLiteralOperatorCall(R, OpNameInfo,
-                                      llvm::makeArrayRef(&Lit, 1), TokLoc);
+      return BuildLiteralOperatorCall(R, OpNameInfo, Lit, TokLoc);
     }
 
     case LOLR_Template:
@@ -2916,8 +2925,8 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
         TemplateArgumentLocInfo ArgInfo;
         ExplicitArgs.addArgument(TemplateArgumentLoc(Arg, ArgInfo));
       }
-      return BuildLiteralOperatorCall(R, OpNameInfo, ArrayRef<Expr*>(),
-                                      Tok.getLocation(), &ExplicitArgs);
+      return BuildLiteralOperatorCall(R, OpNameInfo, None, Tok.getLocation(),
+                                      &ExplicitArgs);
     }
 
     llvm_unreachable("unexpected literal operator lookup result");
@@ -3156,13 +3165,7 @@ static void warnOnSizeofOnArrayDecay(Sema &S, SourceLocation Loc, QualType T,
 bool Sema::CheckUnaryExprOrTypeTraitOperand(Expr *E,
                                             UnaryExprOrTypeTrait ExprKind) {
   QualType ExprTy = E->getType();
-
-  // C++ [expr.sizeof]p2: "When applied to a reference or a reference type,
-  //   the result is the size of the referenced type."
-  // C++ [expr.alignof]p3: "When alignof is applied to a reference type, the
-  //   result shall be the alignment of the referenced type."
-  if (const ReferenceType *Ref = ExprTy->getAs<ReferenceType>())
-    ExprTy = Ref->getPointeeType();
+  assert(!ExprTy->isReferenceType());
 
   if (ExprKind == UETT_VecStep)
     return CheckVecStepTraitOperandType(*this, ExprTy, E->getExprLoc(),
@@ -3178,10 +3181,9 @@ bool Sema::CheckUnaryExprOrTypeTraitOperand(Expr *E,
                               ExprKind, E->getSourceRange()))
     return true;
 
-  // Completeing the expression's type may have changed it.
+  // Completing the expression's type may have changed it.
   ExprTy = E->getType();
-  if (const ReferenceType *Ref = ExprTy->getAs<ReferenceType>())
-    ExprTy = Ref->getPointeeType();
+  assert(!ExprTy->isReferenceType());
 
   if (CheckObjCTraitOperandConstraints(*this, ExprTy, E->getExprLoc(),
                                        E->getSourceRange(), ExprKind))
@@ -3266,25 +3268,67 @@ bool Sema::CheckUnaryExprOrTypeTraitOperand(QualType ExprType,
 static bool CheckAlignOfExpr(Sema &S, Expr *E) {
   E = E->IgnoreParens();
 
-  // alignof decl is always ok.
-  if (isa<DeclRefExpr>(E))
-    return false;
-
   // Cannot know anything else if the expression is dependent.
   if (E->isTypeDependent())
     return false;
 
-  if (E->getBitField()) {
+  if (E->getObjectKind() == OK_BitField) {
     S.Diag(E->getExprLoc(), diag::err_sizeof_alignof_bitfield)
        << 1 << E->getSourceRange();
     return true;
   }
 
-  // Alignment of a field access is always okay, so long as it isn't a
-  // bit-field.
-  if (MemberExpr *ME = dyn_cast<MemberExpr>(E))
-    if (isa<FieldDecl>(ME->getMemberDecl()))
+  ValueDecl *D = 0;
+  if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E)) {
+    D = DRE->getDecl();
+  } else if (MemberExpr *ME = dyn_cast<MemberExpr>(E)) {
+    D = ME->getMemberDecl();
+  }
+
+  // If it's a field, require the containing struct to have a
+  // complete definition so that we can compute the layout.
+  //
+  // This requires a very particular set of circumstances.  For a
+  // field to be contained within an incomplete type, we must in the
+  // process of parsing that type.  To have an expression refer to a
+  // field, it must be an id-expression or a member-expression, but
+  // the latter are always ill-formed when the base type is
+  // incomplete, including only being partially complete.  An
+  // id-expression can never refer to a field in C because fields
+  // are not in the ordinary namespace.  In C++, an id-expression
+  // can implicitly be a member access, but only if there's an
+  // implicit 'this' value, and all such contexts are subject to
+  // delayed parsing --- except for trailing return types in C++11.
+  // And if an id-expression referring to a field occurs in a
+  // context that lacks a 'this' value, it's ill-formed --- except,
+  // agian, in C++11, where such references are allowed in an
+  // unevaluated context.  So C++11 introduces some new complexity.
+  //
+  // For the record, since __alignof__ on expressions is a GCC
+  // extension, GCC seems to permit this but always gives the
+  // nonsensical answer 0.
+  //
+  // We don't really need the layout here --- we could instead just
+  // directly check for all the appropriate alignment-lowing
+  // attributes --- but that would require duplicating a lot of
+  // logic that just isn't worth duplicating for such a marginal
+  // use-case.
+  if (FieldDecl *FD = dyn_cast_or_null<FieldDecl>(D)) {
+    // Fast path this check, since we at least know the record has a
+    // definition if we can find a member of it.
+    if (!FD->getParent()->isCompleteDefinition()) {
+      S.Diag(E->getExprLoc(), diag::err_alignof_member_of_incomplete_type)
+        << E->getSourceRange();
+      return true;
+    }
+
+    // Otherwise, if it's a field, and the field doesn't have
+    // reference type, then it must have a complete type (or be a
+    // flexible array member, which we explicitly want to
+    // white-list anyway), which makes the following checks trivial.
+    if (!FD->getType()->isReferenceType())
       return false;
+  }
 
   return S.CheckUnaryExprOrTypeTraitOperand(E, UETT_AlignOf);
 }
@@ -3671,14 +3715,11 @@ ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
                                                  Param);
 
     // Instantiate the expression.
-    MultiLevelTemplateArgumentList ArgList
+    MultiLevelTemplateArgumentList MutiLevelArgList
       = getTemplateInstantiationArgs(FD, 0, /*RelativeToPrimary=*/true);
 
-    std::pair<const TemplateArgument *, unsigned> Innermost
-      = ArgList.getInnermost();
     InstantiatingTemplate Inst(*this, CallLoc, Param,
-                               ArrayRef<TemplateArgument>(Innermost.first,
-                                                          Innermost.second));
+                               MutiLevelArgList.getInnermost());
     if (Inst)
       return ExprError();
 
@@ -3690,7 +3731,7 @@ ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
       //   default argument expression appears.
       ContextRAII SavedContext(*this, FD);
       LocalInstantiationScope Local(*this);
-      Result = SubstExpr(UninstExpr, ArgList);
+      Result = SubstExpr(UninstExpr, MutiLevelArgList);
     }
     if (Result.isInvalid())
       return ExprError();
@@ -3703,7 +3744,7 @@ ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
              /*FIXME:EqualLoc*/UninstExpr->getLocStart());
     Expr *ResultE = Result.takeAs<Expr>();
 
-    InitializationSequence InitSeq(*this, Entity, Kind, &ResultE, 1);
+    InitializationSequence InitSeq(*this, Entity, Kind, ResultE);
     Result = InitSeq.Perform(*this, Entity, Kind, ResultE);
     if (Result.isInvalid())
       return ExprError();
@@ -4112,7 +4153,7 @@ Sema::ActOnCallExpr(Scope *S, Expr *Fn, SourceLocation LParenLoc,
                                                 ArgExprs.back()->getLocEnd()));
       }
 
-      return Owned(new (Context) CallExpr(Context, Fn, MultiExprArg(),
+      return Owned(new (Context) CallExpr(Context, Fn, None,
                                           Context.VoidTy, VK_RValue,
                                           RParenLoc));
     }
@@ -4473,7 +4514,7 @@ Sema::BuildCompoundLiteralExpr(SourceLocation LParenLoc, TypeSourceInfo *TInfo,
     = InitializationKind::CreateCStyleCast(LParenLoc, 
                                            SourceRange(LParenLoc, RParenLoc),
                                            /*InitList=*/true);
-  InitializationSequence InitSeq(*this, Entity, Kind, &LiteralExpr, 1);
+  InitializationSequence InitSeq(*this, Entity, Kind, LiteralExpr);
   ExprResult Result = InitSeq.Perform(*this, Entity, Kind, LiteralExpr,
                                       &literalType);
   if (Result.isInvalid())
@@ -8306,6 +8347,9 @@ static QualType CheckAddressOfOperand(Sema &S, ExprResult &OrigOp,
       << op->getType() << op->getSourceRange();
     if (sfinae)
       return QualType();
+    // Materialize the temporary as an lvalue so that we can take its address.
+    OrigOp = op = new (S.Context)
+        MaterializeTemporaryExpr(op->getType(), OrigOp.take(), true);
   } else if (isa<ObjCSelectorExpr>(op)) {
     return S.Context.getPointerType(op->getType());
   } else if (lval == Expr::LV_MemberFunction) {
@@ -8608,7 +8652,7 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
         InitializationKind::CreateDirectList(RHSExpr->getLocStart());
     InitializedEntity Entity =
         InitializedEntity::InitializeTemporary(LHSExpr->getType());
-    InitializationSequence InitSeq(*this, Entity, Kind, &RHSExpr, 1);
+    InitializationSequence InitSeq(*this, Entity, Kind, RHSExpr);
     ExprResult Init = InitSeq.Perform(*this, Entity, Kind, RHSExpr);
     if (Init.isInvalid())
       return Init;
@@ -9734,7 +9778,7 @@ void Sema::ActOnBlockArguments(SourceLocation CaretLoc, Declarator &ParamInfo,
     FunctionProtoType::ExtProtoInfo EPI;
     EPI.HasTrailingReturn = false;
     EPI.TypeQuals |= DeclSpec::TQ_const;
-    T = Context.getFunctionType(Context.DependentTy, ArrayRef<QualType>(), EPI);
+    T = Context.getFunctionType(Context.DependentTy, None, EPI);
     Sig = Context.getTrivialTypeSourceInfo(T);
   }
   
@@ -9913,7 +9957,7 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
     if (isa<FunctionNoProtoType>(FTy)) {
       FunctionProtoType::ExtProtoInfo EPI;
       EPI.ExtInfo = Ext;
-      BlockTy = Context.getFunctionType(RetTy, ArrayRef<QualType>(), EPI);
+      BlockTy = Context.getFunctionType(RetTy, None, EPI);
 
     // Otherwise, if we don't need to change anything about the function type,
     // preserve its sugar structure.
@@ -9938,7 +9982,7 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
   } else {
     FunctionProtoType::ExtProtoInfo EPI;
     EPI.ExtInfo = FunctionType::ExtInfo().withNoReturn(NoReturn);
-    BlockTy = Context.getFunctionType(RetTy, ArrayRef<QualType>(), EPI);
+    BlockTy = Context.getFunctionType(RetTy, None, EPI);
   }
 
   DiagnoseUnusedParameters(BSI->TheDecl->param_begin(),
@@ -10573,11 +10617,11 @@ namespace {
 }
 
 ExprResult Sema::TransformToPotentiallyEvaluated(Expr *E) {
-  assert(ExprEvalContexts.back().Context == Unevaluated &&
+  assert(isUnevaluatedContext() &&
          "Should only transform unevaluated expressions");
   ExprEvalContexts.back().Context =
       ExprEvalContexts[ExprEvalContexts.size()-2].Context;
-  if (ExprEvalContexts.back().Context == Unevaluated)
+  if (isUnevaluatedContext())
     return E;
   return TransformToPE(*this).TransformExpr(E);
 }
@@ -10609,7 +10653,7 @@ void Sema::PopExpressionEvaluationContext() {
   ExpressionEvaluationContextRecord& Rec = ExprEvalContexts.back();
 
   if (!Rec.Lambdas.empty()) {
-    if (Rec.Context == Unevaluated) {
+    if (Rec.isUnevaluated()) {
       // C++11 [expr.prim.lambda]p2:
       //   A lambda-expression shall not appear in an unevaluated operand
       //   (Clause 5).
@@ -10635,7 +10679,7 @@ void Sema::PopExpressionEvaluationContext() {
   // temporaries that we may have created as part of the evaluation of
   // the expression in that context: they aren't relevant because they
   // will never be constructed.
-  if (Rec.Context == Unevaluated || Rec.Context == ConstantEvaluated) {
+  if (Rec.isUnevaluated() || Rec.Context == ConstantEvaluated) {
     ExprCleanupObjects.erase(ExprCleanupObjects.begin() + Rec.NumCleanupObjects,
                              ExprCleanupObjects.end());
     ExprNeedsCleanups = Rec.ParentNeedsCleanups;
@@ -10674,6 +10718,7 @@ static bool IsPotentiallyEvaluatedContext(Sema &SemaRef) {
 
   switch (SemaRef.ExprEvalContexts.back().Context) {
     case Sema::Unevaluated:
+    case Sema::UnevaluatedAbstract:
       // We are in an expression that is not potentially evaluated; do nothing.
       // (Depending on how you read the standard, we actually do need to do
       // something here for null pointer constants, but the standard's
@@ -11039,10 +11084,10 @@ static ExprResult captureInCapturedRegion(Sema &S, CapturedRegionScopeInfo *RSI,
     = InitializedEntity::InitializeLambdaCapture(Var, Field, Loc);
 
   InitializationKind InitKind = InitializationKind::CreateDirect(Loc, Loc, Loc);
-  InitializationSequence Init(S, Entity, InitKind, &Ref, 1);
+  InitializationSequence Init(S, Entity, InitKind, Ref);
 
   ExprResult Result(true);
-  if (!Init.Diagnose(S, Entity, InitKind, &Ref, 1))
+  if (!Init.Diagnose(S, Entity, InitKind, Ref))
     Result = Init.Perform(S, Entity, InitKind, Ref);
 
   // If this initialization requires any cleanups (e.g., due to a
@@ -11164,9 +11209,9 @@ static ExprResult captureInLambda(Sema &S, LambdaScopeInfo *LSI,
 
   InitializationKind InitKind
     = InitializationKind::CreateDirect(Loc, Loc, Loc);
-  InitializationSequence Init(S, Entities.back(), InitKind, &Ref, 1);
+  InitializationSequence Init(S, Entities.back(), InitKind, Ref);
   ExprResult Result(true);
-  if (!Init.Diagnose(S, Entities.back(), InitKind, &Ref, 1))
+  if (!Init.Diagnose(S, Entities.back(), InitKind, Ref))
     Result = Init.Perform(S, Entities.back(), InitKind, Ref);
 
   // If this initialization requires any cleanups (e.g., due to a
@@ -11889,6 +11934,7 @@ bool Sema::DiagRuntimeBehavior(SourceLocation Loc, const Stmt *Statement,
                                const PartialDiagnostic &PD) {
   switch (ExprEvalContexts.back().Context) {
   case Unevaluated:
+  case UnevaluatedAbstract:
     // The argument will never be evaluated, so don't complain.
     break;
 

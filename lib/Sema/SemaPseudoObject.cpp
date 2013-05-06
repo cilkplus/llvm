@@ -663,12 +663,11 @@ ExprResult ObjCPropertyOpBuilder::buildGet() {
     assert(InstanceReceiver || RefExpr->isSuperReceiver());
     msg = S.BuildInstanceMessageImplicit(InstanceReceiver, receiverType,
                                          GenericLoc, Getter->getSelector(),
-                                         Getter, MultiExprArg());
+                                         Getter, None);
   } else {
     msg = S.BuildClassMessageImplicit(receiverType, RefExpr->isSuperReceiver(),
-                                      GenericLoc,
-                                      Getter->getSelector(), Getter,
-                                      MultiExprArg());
+                                      GenericLoc, Getter->getSelector(),
+                                      Getter, None);
   }
   return msg;
 }
@@ -1118,8 +1117,7 @@ bool ObjCSubscriptOpBuilder::findAtIndexGetter() {
                                                 /*TInfo=*/0,
                                                 SC_None,
                                                 0);
-    AtIndexGetter->setMethodParams(S.Context, Argument, 
-                                   ArrayRef<SourceLocation>());
+    AtIndexGetter->setMethodParams(S.Context, Argument, None);
   }
 
   if (!AtIndexGetter) {
@@ -1243,7 +1241,7 @@ bool ObjCSubscriptOpBuilder::findAtIndexSetter() {
                                                 SC_None,
                                                 0);
     Params.push_back(key);
-    AtIndexSetter->setMethodParams(S.Context, Params, ArrayRef<SourceLocation>());
+    AtIndexSetter->setMethodParams(S.Context, Params, None);
   }
   
   if (!AtIndexSetter) {

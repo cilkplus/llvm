@@ -1388,8 +1388,9 @@ void ASTDumper::VisitGotoStmt(const GotoStmt *Node) {
 
 void ASTDumper::VisitCapturedStmt(const CapturedStmt *Node) {
   VisitStmt(Node);
-  for (CapturedStmt::capture_iterator I = Node->capture_begin(),
-                                      E = Node->capture_end(); I != E; ++I) {
+  for (CapturedStmt::const_capture_iterator I = Node->capture_begin(),
+                                            E = Node->capture_end();
+                                            I != E; ++I) {
     IndentScope Indent(*this);
     OS << "Capture ";
     switch (I->getCaptureKind()) {

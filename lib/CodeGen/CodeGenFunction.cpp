@@ -48,6 +48,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     DebugInfo(0), DisableDebugInfo(false), CalleeWithThisReturn(0),
     DidCallStackSave(false),
     IndirectBranch(0), SwitchInsn(0), CaseRangeBlock(0), UnreachableBlock(0),
+    NumReturnExprs(0), NumSimpleReturnExprs(0),
     CXXABIThisDecl(0), CXXABIThisValue(0), CXXThisValue(0),
     CXXDefaultInitExprThis(0),
     CXXStructorImplicitParamDecl(0), CXXStructorImplicitParamValue(0),
@@ -193,8 +194,19 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   assert(BreakContinueStack.empty() &&
          "mismatched push/pop in break/continue stack!");
 
-  if (CGDebugInfo *DI = getDebugInfo())
-    DI->EmitLocation(Builder, EndLoc);
+  bool OnlySimpleReturnStmts = NumSimpleReturnExprs > 0
+    && NumSimpleReturnExprs == NumReturnExprs;
+  // If the function contains only a simple return statement, the
+  // cleanup code may become the first breakpoint in the function. To
+  // be safe, set the debug location for it to the location of the
+  // return statement.  Otherwise point it to end of the function's
+  // lexical scope.
+  if (CGDebugInfo *DI = getDebugInfo()) {
+    if (OnlySimpleReturnStmts)
+       DI->EmitLocation(Builder, LastStopPoint);
+    else
+      DI->EmitLocation(Builder, EndLoc);
+  }
 
   // Pop a Cilk spawn helper's catch scope.
   if (getLangOpts().Exceptions && getLangOpts().CilkPlus) {
@@ -221,8 +233,18 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   // parameters.  Do this in whatever block we're currently in; it's
   // important to do this before we enter the return block or return
   // edges will be *really* confused.
-  if (EHStack.stable_begin() != PrologueCleanupDepth)
-    PopCleanupBlocks(PrologueCleanupDepth);
+  bool EmitRetDbgLoc = true;
+  if (EHStack.stable_begin() != PrologueCleanupDepth) {
+    PopCleanupBlocks(PrologueCleanupDepth, EndLoc);
+
+    // Make sure the line table doesn't jump back into the body for
+    // the ret after it's been at EndLoc.
+    EmitRetDbgLoc = false;
+
+    if (CGDebugInfo *DI = getDebugInfo())
+      if (OnlySimpleReturnStmts)
+        DI->EmitLocation(Builder, EndLoc);
+  }
 
   // Emit function epilog (to return).
   EmitReturnBlock();
@@ -235,7 +257,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
     DI->EmitFunctionEnd(Builder);
   }
 
-  EmitFunctionEpilog(*CurFnInfo);
+  EmitFunctionEpilog(*CurFnInfo, EmitRetDbgLoc);
   EmitEndEHSpec(CurCodeDecl);
 
   assert(EHStack.empty() &&
@@ -478,7 +500,8 @@ void CodeGenFunction::EmitOpenCLKernelMetadata(const FunctionDecl *FD,
   OpenCLKernelMetadata->addOperand(kernelMDNode);
 }
 
-void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
+void CodeGenFunction::StartFunction(GlobalDecl GD,
+                                    QualType RetTy,
                                     llvm::Function *Fn,
                                     const CGFunctionInfo &FnInfo,
                                     const FunctionArgList &Args,
@@ -486,7 +509,8 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   const Decl *D = GD.getDecl();
 
   DidCallStackSave = false;
-  CurCodeDecl = CurFuncDecl = D;
+  CurCodeDecl = D;
+  CurFuncDecl = (D ? D->getNonClosureContext() : 0);
   FnRetTy = RetTy;
   CurFn = Fn;
   CurFnInfo = &FnInfo;
@@ -602,12 +626,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
                                         LambdaThisCaptureField);
       if (LambdaThisCaptureField) {
         // If this lambda captures this, load it.
-        QualType LambdaTagType =
-            getContext().getTagDeclType(LambdaThisCaptureField->getParent());
-        LValue LambdaLV = MakeNaturalAlignAddrLValue(CXXABIThisValue,
-                                                     LambdaTagType);
-        LValue ThisLValue = EmitLValueForField(LambdaLV,
-                                               LambdaThisCaptureField);
+        LValue ThisLValue = EmitLValueForLambdaField(LambdaThisCaptureField);
         CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
       }
     } else {

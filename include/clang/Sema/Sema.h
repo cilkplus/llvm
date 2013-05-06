@@ -601,6 +601,10 @@ public:
   /// have been declared.
   bool GlobalNewDeleteDeclared;
 
+  /// A flag to indicate that we're in a context that permits abstract
+  /// references to fields.  This is really a 
+  bool AllowAbstractFieldReference;
+
   /// \brief Describes how the expressions currently being parsed are
   /// evaluated at run-time, if at all.
   enum ExpressionEvaluationContext {
@@ -610,6 +614,11 @@ public:
     /// no code will be generated to evaluate the value of the expression at
     /// run time.
     Unevaluated,
+
+    /// \brief The current expression occurs within an unevaluated
+    /// operand that unconditionally permits abstract references to
+    /// fields, such as a SIZE operator in MS-style inline assembly.
+    UnevaluatedAbstract,
 
     /// \brief The current context is "potentially evaluated" in C++11 terms,
     /// but the expression is evaluated at compile-time (like the values of
@@ -689,6 +698,10 @@ public:
       if (!LambdaMangle)
         LambdaMangle = new LambdaMangleContext;
       return *LambdaMangle;
+    }
+
+    bool isUnevaluated() const {
+      return Context == Unevaluated || Context == UnevaluatedAbstract;
     }
   };
 
@@ -1266,7 +1279,7 @@ public:
 
   bool isSimpleTypeSpecifier(tok::TokenKind Kind) const;
 
-  ParsedType getTypeName(IdentifierInfo &II, SourceLocation NameLoc,
+  ParsedType getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
                          Scope *S, CXXScopeSpec *SS = 0,
                          bool isClassName = false,
                          bool HasTrailingDot = false,
@@ -2072,18 +2085,16 @@ public:
                              Expr *Object, ArrayRef<Expr *> Args,
                              OverloadCandidateSet& CandidateSet);
   void AddMemberOperatorCandidates(OverloadedOperatorKind Op,
-                                   SourceLocation OpLoc,
-                                   Expr **Args, unsigned NumArgs,
+                                   SourceLocation OpLoc, ArrayRef<Expr *> Args,
                                    OverloadCandidateSet& CandidateSet,
                                    SourceRange OpRange = SourceRange());
   void AddBuiltinCandidate(QualType ResultTy, QualType *ParamTys,
-                           Expr **Args, unsigned NumArgs,
+                           ArrayRef<Expr *> Args, 
                            OverloadCandidateSet& CandidateSet,
                            bool IsAssignmentOperator = false,
                            unsigned NumContextualBoolArguments = 0);
   void AddBuiltinOperatorCandidates(OverloadedOperatorKind Op,
-                                    SourceLocation OpLoc,
-                                    Expr **Args, unsigned NumArgs,
+                                    SourceLocation OpLoc, ArrayRef<Expr *> Args,
                                     OverloadCandidateSet& CandidateSet);
   void AddArgumentDependentLookupCandidates(DeclarationName Name,
                                             bool Operator, SourceLocation Loc,
@@ -2801,11 +2812,12 @@ public:
   StmtResult ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope);
 
   void ActOnCapturedRegionStart(SourceLocation Loc, Scope *CurScope,
-                                CapturedRegionKind Kind);
+                                CapturedRegionKind Kind, unsigned NumParams);
   StmtResult ActOnCapturedRegionEnd(Stmt *S);
-  void ActOnCapturedRegionError(bool IsInstantiation = false);
+  void ActOnCapturedRegionError();
   RecordDecl *CreateCapturedStmtRecordDecl(CapturedDecl *&CD,
-                                           SourceLocation Loc);
+                                           SourceLocation Loc,
+                                           unsigned NumParams);
 
   void DiagnoseCilkSpawn(Stmt *S, bool &HasError);
 
@@ -2849,12 +2861,21 @@ public:
                              Expr *AsmString, MultiExprArg Clobbers,
                              SourceLocation RParenLoc);
 
-  NamedDecl *LookupInlineAsmIdentifier(StringRef &LineBuf, SourceLocation Loc,
-                                       InlineAsmIdentifierInfo &Info);
+  ExprResult LookupInlineAsmIdentifier(CXXScopeSpec &SS,
+                                       SourceLocation TemplateKWLoc,
+                                       UnqualifiedId &Id,
+                                       InlineAsmIdentifierInfo &Info,
+                                       bool IsUnevaluatedContext);
   bool LookupInlineAsmField(StringRef Base, StringRef Member,
                             unsigned &Offset, SourceLocation AsmLoc);
   StmtResult ActOnMSAsmStmt(SourceLocation AsmLoc, SourceLocation LBraceLoc,
-                            ArrayRef<Token> AsmToks, SourceLocation EndLoc);
+                            ArrayRef<Token> AsmToks,
+                            StringRef AsmString,
+                            unsigned NumOutputs, unsigned NumInputs,
+                            ArrayRef<StringRef> Constraints,
+                            ArrayRef<StringRef> Clobbers,
+                            ArrayRef<Expr*> Exprs,
+                            SourceLocation EndLoc);
 
   VarDecl *BuildObjCExceptionDecl(TypeSourceInfo *TInfo, QualType ExceptionType,
                                   SourceLocation StartLoc,
@@ -3091,7 +3112,7 @@ public:
   bool DiagnoseEmptyLookup(Scope *S, CXXScopeSpec &SS, LookupResult &R,
                            CorrectionCandidateCallback &CCC,
                            TemplateArgumentListInfo *ExplicitTemplateArgs = 0,
-                           ArrayRef<Expr *> Args = ArrayRef<Expr *>());
+                           ArrayRef<Expr *> Args = None);
 
   ExprResult LookupInObjCMethod(LookupResult &LookUp, Scope *S,
                                 IdentifierInfo *II,
@@ -4535,8 +4556,7 @@ public:
                                 CXXCtorInitializer *Initializer);
 
   bool SetCtorInitializers(CXXConstructorDecl *Constructor, bool AnyErrors,
-                           ArrayRef<CXXCtorInitializer *> Initializers =
-                               ArrayRef<CXXCtorInitializer *>());
+                           ArrayRef<CXXCtorInitializer *> Initializers = None);
 
   void SetIvarInitializers(ObjCImplementationDecl *ObjCImplementation);
 
@@ -5691,9 +5711,17 @@ public:
   };
 
   DeduceAutoResult DeduceAutoType(TypeSourceInfo *AutoType, Expr *&Initializer,
-                                  TypeSourceInfo *&Result);
+                                  QualType &Result);
+  DeduceAutoResult DeduceAutoType(TypeLoc AutoTypeLoc, Expr *&Initializer,
+                                  QualType &Result);
   QualType SubstAutoType(QualType TypeWithAuto, QualType Replacement);
   void DiagnoseAutoDeductionFailure(VarDecl *VDecl, Expr *Init);
+  bool DeduceReturnType(FunctionDecl *FD, SourceLocation Loc,
+                        bool Diagnose = true);
+
+  bool DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
+                                        SourceLocation ReturnLoc,
+                                        Expr *&RetExpr, AutoType *AT);
 
   FunctionTemplateDecl *getMoreSpecializedTemplate(FunctionTemplateDecl *FT1,
                                                    FunctionTemplateDecl *FT2,
@@ -6046,7 +6074,7 @@ public:
   bool isUnevaluatedContext() const {
     assert(!ExprEvalContexts.empty() &&
            "Must be in an expression evaluation context");
-    return ExprEvalContexts.back().Context == Sema::Unevaluated;
+    return ExprEvalContexts.back().isUnevaluated();
   }
 
   /// \brief RAII class used to determine whether SFINAE has
@@ -7404,7 +7432,7 @@ private:
   bool CheckFunctionCall(FunctionDecl *FDecl, CallExpr *TheCall,
                          const FunctionProtoType *Proto);
   bool CheckObjCMethodCall(ObjCMethodDecl *Method, SourceLocation loc,
-                           Expr **Args, unsigned NumArgs);
+                           ArrayRef<const Expr *> Args);
   bool CheckBlockCall(NamedDecl *NDecl, CallExpr *TheCall,
                       const FunctionProtoType *Proto);
   void CheckConstructorCall(FunctionDecl *FDecl,

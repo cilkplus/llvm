@@ -1428,7 +1428,7 @@ def err_auto_not_allowed : Error<
   "|in non-static union member|in non-static class member|in interface member"
   "|in exception declaration|in template parameter|in block literal"
   "|in template argument|in typedef|in type alias|in function return type"
-  "|here}0">;
+  "|in conversion function type|here}0">;
 def err_auto_var_requires_init : Error<
   "declaration of variable %0 with type %1 requires an initializer">;
 def err_auto_new_requires_ctor_arg : Error<
@@ -1454,7 +1454,8 @@ def err_auto_var_deduction_failure_from_init_list : Error<
 def err_auto_new_deduction_failure : Error<
   "new expression for type %0 has incompatible constructor argument of type %1">;
 def err_auto_different_deductions : Error<
-  "'auto' deduced as %0 in declaration of %1 and deduced as %2 in declaration of %3">;
+  "'%select{auto|decltype(auto)}0' deduced as %1 in declaration of %2 and "
+  "deduced as %3 in declaration of %4">;
 def err_implied_std_initializer_list_not_found : Error<
   "cannot deduce type of initializer list because std::initializer_list was "
   "not found; include <initializer_list>">;
@@ -1475,6 +1476,23 @@ def err_decltype_auto_compound_type : Error<
   "cannot form %select{pointer to|reference to|array of}0 'decltype(auto)'">;
 def err_decltype_auto_initializer_list : Error<
   "cannot deduce 'decltype(auto)' from initializer list">;
+
+// C++1y deduced return types
+def err_auto_fn_deduction_failure : Error<
+  "cannot deduce return type %0 from returned value of type %1">;
+def err_auto_fn_different_deductions : Error<
+  "'%select{auto|decltype(auto)}0' in return type deduced as %1 here but "
+  "deduced as %2 in earlier return statement">;
+def err_auto_fn_used_before_defined : Error<
+  "function %0 with deduced return type cannot be used before it is defined">;
+def err_auto_fn_no_return_but_not_auto : Error<
+  "cannot deduce return type %0 for function with no return statements">;
+def err_auto_fn_return_void_but_not_auto : Error<
+  "cannot deduce return type %0 from omitted return expression">;
+def err_auto_fn_return_init_list : Error<
+  "cannot deduce return type from initializer list">;
+def err_auto_fn_virtual : Error<
+  "function with deduced return type cannot be virtual">;
 
 // C++11 override control
 def override_keyword_only_allowed_on_virtual_member_functions : Error<
@@ -4036,6 +4054,8 @@ def err_sizeof_alignof_incomplete_type : Error<
   "incomplete type %1">;
 def err_sizeof_alignof_bitfield : Error<
   "invalid application of '%select{sizeof|alignof}0' to bit-field">;
+def err_alignof_member_of_incomplete_type : Error<
+  "invalid application of 'alignof' to a field of a class still being defined">;
 def err_vecstep_non_scalar_vector_type : Error<
   "'vec_step' requires built-in scalar or vector type, %0 invalid">;
 def err_offsetof_incomplete_type : Error<
@@ -5408,16 +5428,13 @@ let CategoryName = "Inline Assembly Issue" in {
   def err_asm_tying_incompatible_types : Error<
     "unsupported inline asm: input with type "
     "%diff{$ matching output with type $|}0,1">;
+  def err_asm_incomplete_type : Error<"asm operand has incomplete type %0">;
   def err_asm_unknown_register_name : Error<"unknown register name '%0' in asm">;
-  def err_asm_empty : Error<"__asm used with no assembly instructions">;
   def err_asm_invalid_input_size : Error<
     "invalid input size for constraint '%0'">;
   def err_invalid_asm_cast_lvalue : Error<
     "invalid use of a cast in a inline asm context requiring an l-value: "
     "remove the cast or build with -fheinous-gnu-extensions">;
-  def err_inline_ms_asm_parsing : Error<"%0">;
-  def err_msasm_unsupported_arch : Error<
-    "Unsupported architecture '%0' for MS-style inline assembly">;
 
   def warn_asm_label_on_auto_decl : Warning<
     "ignored asm label '%0' on automatic variable">;
