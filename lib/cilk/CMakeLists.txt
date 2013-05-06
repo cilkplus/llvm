@@ -129,17 +129,18 @@ string(REPLACE " " ";" CXXFLAGS ${CMAKE_CXX_FLAGS_${BUILD_TYPE}})
 # Build objects using the newly built clang.
 set(out_objs)
 foreach( f ${cilk_runtime_sources} )
+  get_filename_component(basename ${f} NAME)
+  set(output_obj "${basename}.o")
+
   if (f MATCHES ".cpp")
-    string(REPLACE ".cpp" ".o" dst ${f})
     set(FLAGS ${CXXFLAGS} ${COMMON_FLAGS})
   else()
-    string(REPLACE ".c" ".o" dst ${f})
     set(FLAGS ${CFLAGS} ${COMMON_FLAGS})
   endif()
 
-  clang_compile("${CMAKE_CURRENT_BINARY_DIR}/${dst}" ${f}
+  clang_compile(${output_obj} ${f}
     CFLAGS ${FLAGS})
-  list(APPEND out_objs ${dst})
+  list(APPEND out_objs ${output_obj})
 endforeach( f )
 
 # Generate libraries
@@ -152,6 +153,7 @@ macro(add_cilk_runtime name)
     COMPILE_DEFINITIONS ${LIB_DEFS})
   set_target_properties(${name} PROPERTIES
     OSX_ARCHITECTURES "${LIB_ARCH}"
+    LINKER_LANGUAGE CXX
     LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib)
   install(TARGETS ${name}
     LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX})
