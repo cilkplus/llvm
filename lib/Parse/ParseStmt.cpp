@@ -326,7 +326,7 @@ Retry:
 
     return ParseCilkForStmt();
   case tok::annot_pragma_cilk_grainsize_begin:
-    return ParsePragmaCilkGrainSize();
+    return ParsePragmaCilkGrainsize();
 
   case tok::annot_pragma_openmp:
     SourceLocation DeclStart = Tok.getLocation();
@@ -349,7 +349,7 @@ Retry:
   return Res;
 }
 
-StmtResult Parser::ParsePragmaCilkGrainSize() {
+StmtResult Parser::ParsePragmaCilkGrainsize() {
   assert(getLangOpts().CilkPlus && "Cilk Plus extension not enabled");
   ConsumeToken(); // Eat 'annot_pragma_cilk_grainsize_begin'.
 
@@ -366,17 +366,21 @@ StmtResult Parser::ParsePragmaCilkGrainSize() {
     ConsumeToken(); // Eat 'annot_pragma_cilk_grainsize_end'.
 
   // Parse the following statement.
-  StmtResult Result(ParseStatement());
-  if (Result.isInvalid())
+  StmtResult FollowingStmt(ParseStatement());
+  if (FollowingStmt.isInvalid())
     return StmtError();
 
-  if (!isa<CilkForStmt>(Result.get())) {
-    Diag(Result.get()->getLocStart(), diag::err_cilk_for_following_grainsize);
-    return Result;
+  // NOTE: The following statement is not necessarily a _Cilk_for statement.
+  // It can also be another pragma that appertains to the _Cilk_for. However,
+  // since grainsize is the only pragma supported by _Cilk_for, we require the
+  // following statement to be a _Cilk_for.
+  if (!isa<CilkForStmt>(FollowingStmt.get())) {
+    Diag(FollowingStmt.get()->getLocStart(),
+         diag::err_cilk_for_following_grainsize);
+    return StmtError();
   }
 
-  // FIXME: Build AST for the grainsize and its following Cilk for statement.
-  return Result;
+  return Actions.ActOnCilkForGrainsizePragma(E.get(), FollowingStmt.get());
 }
 
 /// \brief Parse an expression statement.

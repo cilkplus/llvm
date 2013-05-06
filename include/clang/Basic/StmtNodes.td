@@ -178,4 +178,5 @@ def AsTypeExpr : DStmt<Expr>;
 // Cilk Plus Extensions.
 def CilkSyncStmt : Stmt;
 def CilkSpawnStmt : Stmt;
+def CilkForGrainsizeStmt : Stmt;
 def CilkForStmt : Stmt;

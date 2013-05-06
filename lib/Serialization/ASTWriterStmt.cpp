@@ -1618,6 +1618,11 @@ void ASTStmtWriter::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
   Code = serialization::STMT_CILKSPAWN;
 }
 
+void ASTStmtWriter::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
+  Code = serialization::STMT_CILK_FOR_GRAINSIZE;
+  llvm_unreachable("not implemented yet");
+}
+
 void ASTStmtWriter::VisitCilkForStmt(CilkForStmt *S) {
   Code = serialization::STMT_CILK_FOR;
   llvm_unreachable("not implemented yet");

@@ -6434,6 +6434,11 @@ def warn_cilk_for_loop_count_downcast: Warning<
   "implicit loop count downcast from %0 to %1 in '_Cilk_for'">,
   InGroup<Conversion>, DefaultWarn;
 
+def err_cilk_for_grainsize_negative: Error<
+  "the behavior of Cilk for is unspecified for a negative grainsize">;
+def note_cilk_for_grainsize_conversion : Note<
+  "grainsize must evaluate to a type convertible to %0">;
+
 } // end of sema category
 
 let CategoryName = "Related Result Type Issue" in {

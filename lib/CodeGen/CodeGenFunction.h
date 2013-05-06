@@ -2372,7 +2372,8 @@ public:
                                            const RecordDecl *RD);
 
   void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
-  void EmitCilkForStmt(const CilkForStmt &S);
+  void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
+  void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);
   void EmitCilkForHelperBody(const Stmt *S);
 
   //===--------------------------------------------------------------------===//

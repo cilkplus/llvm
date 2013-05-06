@@ -147,7 +147,7 @@ class Parser : public CodeCompletionHandler {
   OwningPtr<PragmaHandler> RedefineExtnameHandler;
   OwningPtr<PragmaHandler> FPContractHandler;
   OwningPtr<PragmaHandler> OpenCLExtensionHandler;
-  OwningPtr<PragmaHandler> CilkGrainSizeHandler;
+  OwningPtr<PragmaHandler> CilkGrainsizeHandler;
   OwningPtr<CommentHandler> CommentSemaHandler;
   OwningPtr<PragmaHandler> OpenMPHandler;
 
@@ -1504,7 +1504,7 @@ private:
   ///
   /// #pragma cilk grainsize = ...
   /// _Cilk_for (...)
-  StmtResult ParsePragmaCilkGrainSize();
+  StmtResult ParsePragmaCilkGrainsize();
 
   /// \brief Describes the behavior that should be taken for an __if_exists
   /// block.

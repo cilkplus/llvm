@@ -178,6 +178,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::CilkSpawnStmtClass:
     EmitCilkSpawnStmt(cast<CilkSpawnStmt>(*S));
     break;
+  case Stmt::CilkForGrainsizeStmtClass:
+    EmitCilkForGrainsizeStmt(cast<CilkForGrainsizeStmt>(*S));
+    break;
   case Stmt::CilkForStmtClass:
     EmitCilkForStmt(cast<CilkForStmt>(*S));
     break;
@@ -1906,7 +1909,15 @@ CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
 }
 
 void
-CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
+CodeGenFunction::EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S) {
+  const Expr *E = S.getGrainsize();
+  assert(!E->getType()->isReferenceType() && "invalid type");
+  llvm::Value *Grainsize = EmitAnyExpr(E).getScalarVal();
+  EmitCilkForStmt(*cast<CilkForStmt>(S.getCilkFor()), Grainsize);
+}
+
+void
+CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize) {
   // if (cond) {
   //   count = loop_count;
   //   grainsize = gs;
@@ -1944,8 +1955,6 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
     const Expr *LoopCountExpr = S.getLoopCount();
     llvm::Value *LoopCount = EmitAnyExpr(LoopCountExpr).getScalarVal();
 
-    // TODO: calculate grainsize
-
     // Initialize the captured struct.
     QualType Ty;
     llvm::Value *ReceiverTmp = 0;
@@ -1975,9 +1984,11 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S) {
     // Call __cilkrts_cilk_for_*(helper, captures, count, grainsize);
     SmallVector<llvm::Value *, 4> Args(4);
     Args[0] = Builder.CreateBitCast(Helper, FTy->getParamType(0));
-    Args[1] = Builder.CreatePointerCast(CapStruct.getAddress(), FTy->getParamType(1));
+    Args[1] =
+        Builder.CreatePointerCast(CapStruct.getAddress(), FTy->getParamType(1));
     Args[2] = LoopCount;
-    Args[3] = llvm::Constant::getNullValue(FTy->getParamType(3)); // TODO: grainsize
+    Args[3] = Grainsize ? Grainsize
+                        : llvm::Constant::getNullValue(FTy->getParamType(3));
 
     EmitCallOrInvoke(CilkForABI, Args);
 

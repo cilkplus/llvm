@@ -752,7 +752,7 @@ PragmaOpenCLExtensionHandler::HandlePragma(Preprocessor &PP,
 ///
 /// #pragma 'cilk' 'grainsize' '=' expr new-line
 ///
-void PragmaCilkGrainSizeHandler::HandlePragma(Preprocessor &PP,
+void PragmaCilkGrainsizeHandler::HandlePragma(Preprocessor &PP,
                                               PragmaIntroducerKind Introducer,
                                               Token &FirstToken) {
   Token Tok;

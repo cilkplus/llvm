@@ -2179,6 +2179,47 @@ public:
   }
 };
 
+/// \brief This represents a Cilk for grainsize statement.
+/// \code
+/// #pragma cilk grainsize = expr
+/// _Cilk_for(...) { ... }
+/// \endcode
+class CilkForGrainsizeStmt : public Stmt {
+private:
+  enum { GRAINSIZE, CILK_FOR, LAST };
+  Stmt *SubExprs[LAST];
+
+public:
+  /// \brief Construct a Cilk for grainsize statement.
+  CilkForGrainsizeStmt(Expr *Grainsize, Stmt *CilkFor);
+
+  /// \brief Construct an empty Cilk for grainsize statement.
+  explicit CilkForGrainsizeStmt(EmptyShell Empty);
+
+  SourceLocation getLocStart() const LLVM_READONLY {
+    return SubExprs[GRAINSIZE]->getLocStart();
+  }
+  SourceLocation getLocEnd() const LLVM_READONLY {
+    return SubExprs[CILK_FOR]->getLocEnd();
+  }
+
+  Expr *getGrainsize() { return reinterpret_cast<Expr*>(SubExprs[GRAINSIZE]); }
+  const Expr *getGrainsize() const {
+    return const_cast<CilkForGrainsizeStmt*>(this)->getGrainsize();
+  }
+
+  Stmt *getCilkFor() { return SubExprs[CILK_FOR]; }
+  const Stmt *getCilkFor() const { return SubExprs[CILK_FOR]; }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CilkForGrainsizeStmtClass;
+  }
+
+  child_range children() {
+    return child_range(SubExprs, SubExprs + LAST);
+  }
+};
+
 /// \brief This represents a Cilk for statement.
 /// \code
 /// _Cilk_for (int i = 0; i < n; ++i) {

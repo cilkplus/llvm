@@ -2161,6 +2161,7 @@ DEF_TRAVERSE_STMT(CUDAKernelCallExpr, { })
 
 DEF_TRAVERSE_STMT(CilkSyncStmt, { })
 DEF_TRAVERSE_STMT(CilkSpawnStmt, { })
+DEF_TRAVERSE_STMT(CilkForGrainsizeStmt, { })
 DEF_TRAVERSE_STMT(CilkForStmt, { })
 
 // These operators (all of them) do not need any action except

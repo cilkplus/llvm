@@ -9484,6 +9484,25 @@ TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
 
 template<typename Derived>
 StmtResult
+TreeTransform<Derived>::TransformCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
+  Expr *Grainsize = S->getGrainsize();
+  ExprResult Result = getDerived().TransformExpr(Grainsize);
+  if (Result.isInvalid())
+    return StmtError();
+
+  StmtResult SubS = getDerived().TransformStmt(S->getCilkFor());
+  if (SubS.isInvalid())
+    return StmtError();
+
+  if (!getDerived().AlwaysRebuild() &&
+    Result.get() == Grainsize && SubS.get() == S->getCilkFor())
+    return Owned(S);
+
+  return getSema().ActOnCilkForGrainsizePragma(Result.take(), SubS.take());
+}
+
+template<typename Derived>
+StmtResult
 TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
   // Transform loop initialization.
   StmtResult Init = getDerived().TransformStmt(S->getInit());

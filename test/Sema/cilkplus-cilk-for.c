@@ -401,3 +401,41 @@ void test_wide_integers() {
   _Cilk_for (int i = 0; i < (__int128)10; ++i); // expected-warning {{implicit loop count downcast from '__int128' to 'unsigned long long' in '_Cilk_for'}}
   _Cilk_for (int i = 0; i < 10; i += (__int128)1); // expected-warning {{implicit loop count downcast from '__int128' to 'unsigned long long' in '_Cilk_for'}}
 }
+
+int grainsize();
+struct Foo {};
+struct Foo get_foo();
+
+void cilk_for_grainsize() {
+  #pragma cilk grainsize = 65
+  _Cilk_for (int i = 0; i < 100; ++i); // OK
+
+  #pragma cilk grainsize = 'a'
+  _Cilk_for (int i = 0; i < 100; ++i); // OK
+
+  #pragma cilk grainsize = 65.3f // expected-warning-re {{implicit conversion from 'float' to 'int' changes value from 65.[0-9]+ to 65}}
+  _Cilk_for (int i = 0; i < 100; ++i);
+
+  int n = 20;
+  #pragma cilk grainsize = n
+  _Cilk_for(int i = 0; i < 10; ++i); // OK
+
+  #pragma cilk grainsize = n/2
+  _Cilk_for(int i = 0; i < 10; ++i); // OK
+
+  #pragma cilk grainsize = ++n // OK
+  _Cilk_for(int i = 0; i < 10; ++i);
+
+  #pragma cilk grainsize = grainsize() // OK
+  _Cilk_for(int i = 0; i < 10; ++i);
+
+  #pragma cilk grainsize = "65" // expected-warning {{incompatible pointer to integer conversion initializing 'int' with an expression of type 'char [3]'}}
+  _Cilk_for(int i = 0; i < 100; ++i);
+
+  #pragma cilk grainsize = -1 // expected-error {{the behavior of Cilk for is unspecified for a negative grainsize}}
+  _Cilk_for(int i = 0; i < 100; ++i);
+
+  #pragma cilk grainsize = get_foo() // expected-error {{initializing 'int' with an expression of incompatible type 'struct Foo'}} \
+                                     // expected-note {{grainsize must evaluate to a type convertible to 'int'}}
+  _Cilk_for(int i = 0; i < 10; ++i);
+}

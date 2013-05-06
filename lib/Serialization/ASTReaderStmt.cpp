@@ -1660,6 +1660,10 @@ void ASTStmtReader::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
   llvm_unreachable("not implemented yet");
 }
 
+void ASTStmtReader::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
 void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
   llvm_unreachable("not implemented yet");
 }
@@ -2360,6 +2364,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case STMT_CILKSPAWN:
       S = new (Context) CilkSpawnStmt(Empty);
+      break;
+
+    case STMT_CILK_FOR_GRAINSIZE:
+      llvm_unreachable("not implemented yet");
       break;
 
     case STMT_CILK_FOR:

@@ -732,6 +732,10 @@ void StmtProfiler::VisitCilkSpawnStmt(const CilkSpawnStmt *S) {
   VisitStmt(S);
 }
 
+void StmtProfiler::VisitCilkForGrainsizeStmt(const CilkForGrainsizeStmt *S) {
+  VisitStmt(S);
+}
+
 void StmtProfiler::VisitCilkForStmt(const CilkForStmt *S) {
   VisitStmt(S);
 }

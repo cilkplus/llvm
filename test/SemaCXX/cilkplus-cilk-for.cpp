@@ -257,3 +257,27 @@ void test() {
 }
 
 } // namespace
+
+struct MyInt {
+  operator int();
+};
+
+constexpr int grainsize(int x) {
+  return 2 * x;
+}
+
+void test_grainsize() {
+  MyInt gs;
+  // MyInt is convertible to int and should work as grainsize.
+  #pragma cilk grainsize = gs // OK
+  _Cilk_for(int i = 0; i < 100; ++i);
+
+  #pragma cilk grainsize = grainsize(0) // OK
+  _Cilk_for(int i = 0; i < 100; ++i);
+
+  #pragma cilk grainsize = grainsize(-1) // expected-error {{the behavior of Cilk for is unspecified for a negative grainsize}}
+  _Cilk_for(int i = 0; i < 100; ++i);
+
+  #pragma cilk grainsize = alignof(int) // OK
+  _Cilk_for(int i = 0; i < 100; ++i);
+}

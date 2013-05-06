@@ -53,7 +53,8 @@ void f2() {
   _Cilk_for (int i = 0; i < 10; i++);
 
   #pragma grainsize = 4 /* expected-warning {{unknown pragma ignored}} */
-  _Cilk_for (int i = 0; i < 10; i++);
+  _Cilk_for (int i = 0; i < 10; i++)
+  ;
 
   #pragma cilk grainsize = 4; /* expected-warning {{extra tokens at end of '#pragma cilk' - ignored}} */
   _Cilk_for (int i = 0; i < 10; i++);

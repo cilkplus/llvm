@@ -172,3 +172,35 @@ namespace NS2 {
     foo<NS1::Int>();
   }
 }
+
+template <typename T>
+void grainsize_test1(T gs) {
+  #pragma cilk grainsize = gs
+  _Cilk_for(int i = 0; i < 100; ++i);
+}
+
+template <int gs>
+void grainsize_test2() {
+  #pragma cilk grainsize = gs
+  _Cilk_for(int i = 0; i < 100; ++i);
+}
+
+template <typename T>
+void grainsize_test3(T) {
+  #pragma cilk grainsize = sizeof(sizeof(T))
+  _Cilk_for(int i = 0; i < 100; ++i);
+}
+
+void test_grainsize() {
+  C c;
+  grainsize_test1(c); // expected-error@178 {{no viable conversion from 'C' to 'int'}} \
+                      // expected-note@178 {{grainsize must evaluate to a type convertible to 'int'}} \
+                      // expected-note {{in instantiation of function template specialization 'grainsize_test1<C>' requested here}}
+
+  grainsize_test2<100>(); // OK
+
+  grainsize_test2<-100>(); // expected-error@184 {{the behavior of Cilk for is unspecified for a negative grainsize}} \
+                           // expected-note {{in instantiation of function template specialization 'grainsize_test2<-100>' requested here}}
+
+  grainsize_test3(c); // OK
+}

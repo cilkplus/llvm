@@ -2832,6 +2832,8 @@ public:
   StmtResult ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
   StmtResult ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
 
+  StmtResult ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor);
+
   StmtResult ActOnCilkForStmt(SourceLocation CilkForLoc,
                               SourceLocation LParenLoc,
                               Stmt *First, FullExprArg Second,

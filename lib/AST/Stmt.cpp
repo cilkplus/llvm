@@ -1141,6 +1141,18 @@ bool CapturedStmt::capturesVariable(const VarDecl *Var) const {
   return false;
 }
 
+CilkForGrainsizeStmt::CilkForGrainsizeStmt(Expr *Grainsize, Stmt *CilkFor)
+  : Stmt(CilkForGrainsizeStmtClass) {
+  SubExprs[GRAINSIZE] = Grainsize;
+  SubExprs[CILK_FOR] = CilkFor;
+}
+
+CilkForGrainsizeStmt::CilkForGrainsizeStmt(EmptyShell Empty)
+  : Stmt(CilkForGrainsizeStmtClass) {
+  SubExprs[GRAINSIZE] = 0;
+  SubExprs[CILK_FOR] = 0;
+}
+
 /// \brief Construct an empty Cilk for statement.
 CilkForStmt::CilkForStmt(EmptyShell Empty)
   : Stmt(CilkForStmtClass, Empty), LoopControlVar(0), InnerLoopControlVar(0),
