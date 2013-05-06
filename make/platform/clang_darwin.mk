@@ -455,5 +455,6 @@ KERNEL_USE.cc_kext_ios5 := 1
 Headers.cilk_osx := $(CilkHeaders)
 
 VISIBILITY_HIDDEN := 1
+VISIBILITY_HIDDEN.cilk_osx := 0
 
 SHARED_LIBRARY_SUFFIX := dylib
