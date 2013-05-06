@@ -52,7 +52,8 @@ ExecutionEngine *MCJIT::createJIT(Module *M,
 
 MCJIT::MCJIT(Module *m, TargetMachine *tm, RTDyldMemoryManager *MM,
              bool AllocateGVsWithCode)
-  : ExecutionEngine(m), TM(tm), Ctx(0), MemMgr(MM), Dyld(MM),
+  : ExecutionEngine(m), TM(tm), Ctx(0),
+    MemMgr(MM ? MM : new SectionMemoryManager()), Dyld(MemMgr),
     IsLoaded(false), M(m), ObjCache(0)  {
 
   setDataLayout(TM->getDataLayout());
@@ -167,15 +168,14 @@ void MCJIT::finalizeObject() {
     // If the call to Dyld.resolveRelocations() is removed from loadObject()
     // we'll need to do that here.
     loadObject(M);
-
-    // Set page permissions.
-    MemMgr->applyPermissions();
-
-    return;
+  } else {
+    // Resolve any relocations.
+    Dyld.resolveRelocations();
   }
 
-  // Resolve any relocations.
-  Dyld.resolveRelocations();
+  StringRef EHData = Dyld.getEHFrameSection();
+  if (!EHData.empty())
+    MemMgr->registerEHFrames(EHData);
 
   // Set page permissions.
   MemMgr->applyPermissions();

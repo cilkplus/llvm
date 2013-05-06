@@ -15,13 +15,15 @@
 #include "llvm-c/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cstring>
 
 using namespace llvm;
 
 // Wrapping the C bindings types.
-DEFINE_SIMPLE_CONVERSION_FUNCTIONS(GenericValue,       LLVMGenericValueRef  )
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(GenericValue, LLVMGenericValueRef)
 
 inline DataLayout *unwrap(LLVMTargetDataRef P) {
   return reinterpret_cast<DataLayout*>(P);
@@ -152,18 +154,29 @@ LLVMBool LLVMCreateJITCompilerForModule(LLVMExecutionEngineRef *OutJIT,
   return 1;
 }
 
-LLVMBool LLVMCreateMCJITCompilerForModule(LLVMExecutionEngineRef *OutJIT,
-                                          LLVMModuleRef M,
-                                          LLVMMCJITCompilerOptions *PassedOptions,
-                                          size_t SizeOfPassedOptions,
-                                          char **OutError) {
+void LLVMInitializeMCJITCompilerOptions(LLVMMCJITCompilerOptions *PassedOptions,
+                                        size_t SizeOfPassedOptions) {
+  LLVMMCJITCompilerOptions options;
+  options.OptLevel = 0;
+  options.CodeModel = LLVMCodeModelJITDefault;
+  options.NoFramePointerElim = false;
+  options.EnableFastISel = false;
+  
+  memcpy(PassedOptions, &options,
+         std::min(sizeof(options), SizeOfPassedOptions));
+}
+
+LLVMBool LLVMCreateMCJITCompilerForModule(
+    LLVMExecutionEngineRef *OutJIT, LLVMModuleRef M,
+    LLVMMCJITCompilerOptions *PassedOptions, size_t SizeOfPassedOptions,
+    char **OutError) {
   LLVMMCJITCompilerOptions options;
   // If the user passed a larger sized options struct, then they were compiled
   // against a newer LLVM. Tell them that something is wrong.
   if (SizeOfPassedOptions > sizeof(options)) {
     *OutError = strdup(
-      "Refusing to use options struct that is larger than my own; assuming LLVM "
-      "library mismatch.");
+      "Refusing to use options struct that is larger than my own; assuming "
+      "LLVM library mismatch.");
     return 1;
   }
   
@@ -171,11 +184,12 @@ LLVMBool LLVMCreateMCJITCompilerForModule(LLVMExecutionEngineRef *OutJIT,
   // any fields they didn't see are cleared. We must defend against fields being
   // set to the bitwise equivalent of zero, and assume that this means "do the
   // default" as if that option hadn't been available.
-  memset(&options, 0, sizeof(options));
+  LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
   memcpy(&options, PassedOptions, SizeOfPassedOptions);
   
   TargetOptions targetOptions;
   targetOptions.NoFramePointerElim = options.NoFramePointerElim;
+  targetOptions.EnableFastISel = options.EnableFastISel;
 
   std::string Error;
   EngineBuilder builder(unwrap(M));
@@ -183,6 +197,7 @@ LLVMBool LLVMCreateMCJITCompilerForModule(LLVMExecutionEngineRef *OutJIT,
          .setErrorStr(&Error)
          .setUseMCJIT(true)
          .setOptLevel((CodeGenOpt::Level)options.OptLevel)
+         .setCodeModel(unwrap(options.CodeModel))
          .setTargetOptions(targetOptions);
   if (ExecutionEngine *JIT = builder.create()) {
     *OutJIT = wrap(JIT);
@@ -298,7 +313,8 @@ LLVMBool LLVMFindFunction(LLVMExecutionEngineRef EE, const char *Name,
   return 1;
 }
 
-void *LLVMRecompileAndRelinkFunction(LLVMExecutionEngineRef EE, LLVMValueRef Fn) {
+void *LLVMRecompileAndRelinkFunction(LLVMExecutionEngineRef EE,
+                                     LLVMValueRef Fn) {
   return unwrap(EE)->recompileAndRelinkFunction(unwrap<Function>(Fn));
 }
 

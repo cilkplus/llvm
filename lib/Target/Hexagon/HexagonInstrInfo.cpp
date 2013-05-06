@@ -23,7 +23,9 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/raw_ostream.h"
 #define GET_INSTRINFO_CTOR
 #define GET_INSTRMAP_INFO
 #include "HexagonGenInstrInfo.inc"
@@ -118,16 +120,16 @@ HexagonInstrInfo::InsertBranch(MachineBasicBlock &MBB,MachineBasicBlock *TBB,
                              DebugLoc DL) const{
 
     int BOpc   = Hexagon::JMP;
-    int BccOpc = Hexagon::JMP_c;
+    int BccOpc = Hexagon::JMP_t;
 
     assert(TBB && "InsertBranch must not be told to insert a fallthrough");
 
     int regPos = 0;
     // Check if ReverseBranchCondition has asked to reverse this branch
     // If we want to reverse the branch an odd number of times, we want
-    // JMP_cNot.
+    // JMP_f.
     if (!Cond.empty() && Cond[0].isImm() && Cond[0].getImm() == 0) {
-      BccOpc = Hexagon::JMP_cNot;
+      BccOpc = Hexagon::JMP_f;
       regPos = 1;
     }
 
@@ -174,8 +176,8 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   FBB = NULL;
 
   // If the block has no terminators, it just falls into the block after it.
-  MachineBasicBlock::iterator I = MBB.end();
-  if (I == MBB.begin())
+  MachineBasicBlock::instr_iterator I = MBB.instr_end();
+  if (I == MBB.instr_begin())
     return false;
 
   // A basic block may looks like this:
@@ -194,13 +196,24 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
     --I;
     if (I->isEHLabel())
       return true;
-  } while (I != MBB.begin());
+  } while (I != MBB.instr_begin());
 
-  I = MBB.end();
+  I = MBB.instr_end();
   --I;
 
   while (I->isDebugValue()) {
-    if (I == MBB.begin())
+    if (I == MBB.instr_begin())
+      return false;
+    --I;
+  }
+
+  // Delete the JMP if it's equivalent to a fall-through.
+  if (AllowModify && I->getOpcode() == Hexagon::JMP &&
+      MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
+    DEBUG(dbgs()<< "\nErasing the jump to successor block\n";);
+    I->eraseFromParent();
+    I = MBB.instr_end();
+    if (I == MBB.instr_begin())
       return false;
     --I;
   }
@@ -209,23 +222,42 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
   // Get the last instruction in the block.
   MachineInstr *LastInst = I;
+  MachineInstr *SecondLastInst = NULL;
+  // Find one more terminator if present.
+  do {
+    if (&*I != LastInst && !I->isBundle() && isUnpredicatedTerminator(I)) {
+      if (!SecondLastInst)
+        SecondLastInst = I;
+      else
+        // This is a third branch.
+        return true;
+    }
+    if (I == MBB.instr_begin())
+      break;
+    --I;
+  } while(I);
+
+  int LastOpcode = LastInst->getOpcode();
+
+  bool LastOpcodeHasJMP_c = PredOpcodeHasJMP_c(LastOpcode);
+  bool LastOpcodeHasNot = PredOpcodeHasNot(LastOpcode);
 
   // If there is only one terminator instruction, process it.
-  if (I == MBB.begin() || !isUnpredicatedTerminator(--I)) {
-    if (LastInst->getOpcode() == Hexagon::JMP) {
+  if (LastInst && !SecondLastInst) {
+    if (LastOpcode == Hexagon::JMP) {
       TBB = LastInst->getOperand(0).getMBB();
       return false;
     }
-    if (LastInst->getOpcode() == Hexagon::JMP_c) {
-      // Block ends with fall-through true condbranch.
-      TBB = LastInst->getOperand(1).getMBB();
+    if (LastOpcode == Hexagon::ENDLOOP0) {
+      TBB = LastInst->getOperand(0).getMBB();
       Cond.push_back(LastInst->getOperand(0));
       return false;
     }
-    if (LastInst->getOpcode() == Hexagon::JMP_cNot) {
-      // Block ends with fall-through false condbranch.
+    if (LastOpcodeHasJMP_c) {
       TBB = LastInst->getOperand(1).getMBB();
-      Cond.push_back(MachineOperand::CreateImm(0));
+      if (LastOpcodeHasNot) {
+        Cond.push_back(MachineOperand::CreateImm(0));
+      }
       Cond.push_back(LastInst->getOperand(0));
       return false;
     }
@@ -233,29 +265,14 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
     return true;
   }
 
-  // Get the instruction before it if it's a terminator.
-  MachineInstr *SecondLastInst = I;
+  int SecLastOpcode = SecondLastInst->getOpcode();
 
-  // If there are three terminators, we don't know what sort of block this is.
-  if (SecondLastInst && I != MBB.begin() &&
-      isUnpredicatedTerminator(--I))
-    return true;
-
-  // If the block ends with Hexagon::BRCOND and Hexagon:JMP, handle it.
-  if (((SecondLastInst->getOpcode() == Hexagon::BRCOND) ||
-      (SecondLastInst->getOpcode() == Hexagon::JMP_c)) &&
-      LastInst->getOpcode() == Hexagon::JMP) {
+  bool SecLastOpcodeHasJMP_c = PredOpcodeHasJMP_c(SecLastOpcode);
+  bool SecLastOpcodeHasNot = PredOpcodeHasNot(SecLastOpcode);
+  if (SecLastOpcodeHasJMP_c && (LastOpcode == Hexagon::JMP)) {
     TBB =  SecondLastInst->getOperand(1).getMBB();
-    Cond.push_back(SecondLastInst->getOperand(0));
-    FBB = LastInst->getOperand(0).getMBB();
-    return false;
-  }
-
-  // If the block ends with Hexagon::JMP_cNot and Hexagon:JMP, handle it.
-  if ((SecondLastInst->getOpcode() == Hexagon::JMP_cNot) &&
-      LastInst->getOpcode() == Hexagon::JMP) {
-    TBB =  SecondLastInst->getOperand(1).getMBB();
-    Cond.push_back(MachineOperand::CreateImm(0));
+    if (SecLastOpcodeHasNot)
+      Cond.push_back(MachineOperand::CreateImm(0));
     Cond.push_back(SecondLastInst->getOperand(0));
     FBB = LastInst->getOperand(0).getMBB();
     return false;
@@ -263,12 +280,20 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
   // If the block ends with two Hexagon:JMPs, handle it.  The second one is not
   // executed, so remove it.
-  if (SecondLastInst->getOpcode() == Hexagon::JMP &&
-      LastInst->getOpcode() == Hexagon::JMP) {
+  if (SecLastOpcode == Hexagon::JMP && LastOpcode == Hexagon::JMP) {
     TBB = SecondLastInst->getOperand(0).getMBB();
     I = LastInst;
     if (AllowModify)
       I->eraseFromParent();
+    return false;
+  }
+
+  // If the block ends with an ENDLOOP, and JMP, handle it.
+  if (SecLastOpcode == Hexagon::ENDLOOP0 &&
+      LastOpcode == Hexagon::JMP) {
+    TBB = SecondLastInst->getOperand(0).getMBB();
+    Cond.push_back(SecondLastInst->getOperand(0));
+    FBB = LastInst->getOperand(0).getMBB();
     return false;
   }
 
@@ -279,8 +304,8 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
 unsigned HexagonInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
   int BOpc   = Hexagon::JMP;
-  int BccOpc = Hexagon::JMP_c;
-  int BccOpcNot = Hexagon::JMP_cNot;
+  int BccOpc = Hexagon::JMP_t;
+  int BccOpcNot = Hexagon::JMP_f;
 
   MachineBasicBlock::iterator I = MBB.end();
   if (I == MBB.begin()) return 0;
@@ -984,9 +1009,6 @@ bool HexagonInstrInfo::isPredicable(MachineInstr *MI) const {
   case Hexagon::ZXTB:
   case Hexagon::ZXTH:
     return Subtarget.hasV4TOps();
-
-  case Hexagon::JMPR:
-    return false;
   }
 
   return true;
@@ -1023,10 +1045,10 @@ unsigned HexagonInstrInfo::getInvertedPredicatedOpcode(const int Opc) const {
     case Hexagon::TFRI_cNotPt:
       return Hexagon::TFRI_cPt;
 
-    case Hexagon::JMP_c:
-      return Hexagon::JMP_cNot;
-    case Hexagon::JMP_cNot:
-      return Hexagon::JMP_c;
+    case Hexagon::JMP_t:
+      return Hexagon::JMP_f;
+    case Hexagon::JMP_f:
+      return Hexagon::JMP_t;
 
     case Hexagon::ADD_ri_cPt:
       return Hexagon::ADD_ri_cNotPt;
@@ -1094,10 +1116,10 @@ unsigned HexagonInstrInfo::getInvertedPredicatedOpcode(const int Opc) const {
       return Hexagon::ZXTH_cPt_V4;
 
 
-    case Hexagon::JMPR_cPt:
-      return Hexagon::JMPR_cNotPt;
-    case Hexagon::JMPR_cNotPt:
-      return Hexagon::JMPR_cPt;
+    case Hexagon::JMPR_t:
+      return Hexagon::JMPR_f;
+    case Hexagon::JMPR_f:
+      return Hexagon::JMPR_t;
 
   // V4 indexed+scaled load.
     case Hexagon::LDrid_indexed_shl_cPt_V4:
@@ -1480,8 +1502,8 @@ getMatchingCondBranchOpcode(int Opc, bool invertPredicate) const {
     return !invertPredicate ? Hexagon::TFRI_cPt :
                               Hexagon::TFRI_cNotPt;
   case Hexagon::JMP:
-    return !invertPredicate ? Hexagon::JMP_c :
-                              Hexagon::JMP_cNot;
+    return !invertPredicate ? Hexagon::JMP_t :
+                              Hexagon::JMP_f;
   case Hexagon::JMP_EQrrPt_nv_V4:
     return !invertPredicate ? Hexagon::JMP_EQrrPt_nv_V4 :
                               Hexagon::JMP_EQrrNotPt_nv_V4;
@@ -1511,8 +1533,8 @@ getMatchingCondBranchOpcode(int Opc, bool invertPredicate) const {
                               Hexagon::ZXTH_cNotPt_V4;
 
   case Hexagon::JMPR:
-    return !invertPredicate ? Hexagon::JMPR_cPt :
-                              Hexagon::JMPR_cNotPt;
+    return !invertPredicate ? Hexagon::JMPR_t :
+                              Hexagon::JMPR_f;
 
   // V4 indexed+scaled load.
   case Hexagon::LDrid_indexed_shl_V4:
@@ -1811,10 +1833,14 @@ PredicateInstruction(MachineInstr *MI,
   // It is better to have an assert here to check this. But I don't know how
   // to write this assert because findFirstPredOperandIdx() would return -1
   if (oper < -1) oper = -1;
+
   MI->getOperand(oper+1).ChangeToRegister(PredMO.getReg(), PredMO.isDef(),
-                                          PredMO.isImplicit(), PredMO.isKill(),
+                                          PredMO.isImplicit(), false,
                                           PredMO.isDead(), PredMO.isUndef(),
                                           PredMO.isDebug());
+
+  MachineRegisterInfo &RegInfo = MI->getParent()->getParent()->getRegInfo();
+  RegInfo.clearKillFlags(PredMO.getReg());
 
   if (hasGAOpnd)
   {
@@ -2447,6 +2473,34 @@ bool HexagonInstrInfo::isConstExtended(MachineInstr *MI) const {
   return (ImmValue < MinValue || ImmValue > MaxValue);
 }
 
+// Returns the opcode to use when converting MI, which is a conditional jump,
+// into a conditional instruction which uses the .new value of the predicate.
+// We also use branch probabilities to add a hint to the jump.
+int
+HexagonInstrInfo::getDotNewPredJumpOp(MachineInstr *MI,
+                                  const
+                                  MachineBranchProbabilityInfo *MBPI) const {
+
+  // We assume that block can have at most two successors.
+  bool taken = false;
+  MachineBasicBlock *Src = MI->getParent();
+  MachineOperand *BrTarget = &MI->getOperand(1);
+  MachineBasicBlock *Dst = BrTarget->getMBB();
+
+  const BranchProbability Prediction = MBPI->getEdgeProbability(Src, Dst);
+  if (Prediction >= BranchProbability(1,2))
+    taken = true;
+
+  switch (MI->getOpcode()) {
+  case Hexagon::JMP_t:
+    return taken ? Hexagon::JMP_tnew_t : Hexagon::JMP_tnew_nt;
+  case Hexagon::JMP_f:
+    return taken ? Hexagon::JMP_fnew_t : Hexagon::JMP_fnew_nt;
+
+  default:
+    llvm_unreachable("Unexpected jump instruction.");
+  }
+}
 // Returns true if a particular operand is extendable for an instruction.
 bool HexagonInstrInfo::isOperandExtended(const MachineInstr *MI,
                                          unsigned short OperandNum) const {
@@ -2550,4 +2604,19 @@ short HexagonInstrInfo::getNonExtOpcode (const MachineInstr *MI) const {
     }
   }
   return -1;
+}
+
+bool HexagonInstrInfo::PredOpcodeHasJMP_c(Opcode_t Opcode) const {
+  return (Opcode == Hexagon::JMP_t) ||
+         (Opcode == Hexagon::JMP_f) ||
+         (Opcode == Hexagon::JMP_tnew_t) ||
+         (Opcode == Hexagon::JMP_fnew_t) ||
+         (Opcode == Hexagon::JMP_tnew_nt) ||
+         (Opcode == Hexagon::JMP_fnew_nt);
+}
+
+bool HexagonInstrInfo::PredOpcodeHasNot(Opcode_t Opcode) const {
+  return (Opcode == Hexagon::JMP_f) ||
+         (Opcode == Hexagon::JMP_fnew_t) ||
+         (Opcode == Hexagon::JMP_fnew_nt);
 }

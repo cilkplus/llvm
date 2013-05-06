@@ -4,6 +4,7 @@ if( WIN32 AND NOT CYGWIN )
 endif()
 
 include(CheckIncludeFile)
+include(CheckIncludeFileCXX)
 include(CheckLibraryExists)
 include(CheckSymbolExists)
 include(CheckFunctionExists)
@@ -37,7 +38,7 @@ endfunction()
 check_include_file(argz.h HAVE_ARGZ_H)
 check_include_file(assert.h HAVE_ASSERT_H)
 check_include_file(ctype.h HAVE_CTYPE_H)
-check_include_file(cxxabi.h HAVE_CXXABI_H)
+check_include_file_cxx(cxxabi.h HAVE_CXXABI_H)
 check_include_file(dirent.h HAVE_DIRENT_H)
 check_include_file(dl.h HAVE_DL_H)
 check_include_file(dld.h HAVE_DLD_H)
@@ -339,12 +340,13 @@ if (CMAKE_COMPILER_IS_GNUCXX)
   endif()
 endif()
 
-include(GetHostTriple)
-get_host_triple(LLVM_HOST_TRIPLE)
-
 # By default, we target the host, but this can be overridden at CMake
 # invocation time.
-set(LLVM_HOSTTRIPLE "${LLVM_HOST_TRIPLE}")
+include(GetHostTriple)
+get_host_triple(LLVM_INFERRED_HOST_TRIPLE)
+
+set(LLVM_HOST_TRIPLE "${LLVM_INFERRED_HOST_TRIPLE}" CACHE STRING
+    "Host on which LLVM binaries will run")
 
 # Determine the native architecture.
 string(TOLOWER "${LLVM_TARGET_ARCH}" LLVM_NATIVE_ARCH)
@@ -364,6 +366,8 @@ elseif (LLVM_NATIVE_ARCH MATCHES "sparc")
   set(LLVM_NATIVE_ARCH Sparc)
 elseif (LLVM_NATIVE_ARCH MATCHES "powerpc")
   set(LLVM_NATIVE_ARCH PowerPC)
+elseif (LLVM_NATIVE_ARCH MATCHES "aarch64")
+  set(LLVM_NATIVE_ARCH AArch64)
 elseif (LLVM_NATIVE_ARCH MATCHES "arm")
   set(LLVM_NATIVE_ARCH ARM)
 elseif (LLVM_NATIVE_ARCH MATCHES "mips")

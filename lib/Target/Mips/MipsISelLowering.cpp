@@ -200,6 +200,8 @@ const char *MipsTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case MipsISD::SHLL_DSP:          return "MipsISD::SHLL_DSP";
   case MipsISD::SHRA_DSP:          return "MipsISD::SHRA_DSP";
   case MipsISD::SHRL_DSP:          return "MipsISD::SHRL_DSP";
+  case MipsISD::SETCC_DSP:         return "MipsISD::SETCC_DSP";
+  case MipsISD::SELECT_CC_DSP:     return "MipsISD::SELECT_CC_DSP";
   default:                         return NULL;
   }
 }
@@ -213,7 +215,7 @@ MipsTargetLowering(MipsTargetMachine &TM)
   // Mips does not have i1 type, so use i32 for
   // setcc operations results (slt, sgt, ...).
   setBooleanContents(ZeroOrOneBooleanContent);
-  setBooleanVectorContents(ZeroOrOneBooleanContent); // FIXME: Is this correct?
+  setBooleanVectorContents(ZeroOrNegativeOneBooleanContent);
 
   // Load extented operations for i1 types must be promoted
   setLoadExtAction(ISD::EXTLOAD,  MVT::i1,  Promote);
@@ -711,10 +713,7 @@ void
 MipsTargetLowering::ReplaceNodeResults(SDNode *N,
                                        SmallVectorImpl<SDValue> &Results,
                                        SelectionDAG &DAG) const {
-  SDValue Res = LowerOperation(SDValue(N, 0), DAG);
-
-  for (unsigned I = 0, E = Res->getNumValues(); I != E; ++I)
-    Results.push_back(Res.getValue(I));
+  return LowerOperationWrapper(N, Results, DAG);
 }
 
 SDValue MipsTargetLowering::
@@ -2832,8 +2831,8 @@ getRegForInlineAsmConstraint(const std::string &Constraint, EVT VT) const
       return std::make_pair((unsigned)Mips::T9_64, &Mips::CPU64RegsRegClass);
     case 'l': // register suitable for indirect jump
       if (VT == MVT::i32)
-        return std::make_pair((unsigned)Mips::LO, &Mips::HILORegClass);
-      return std::make_pair((unsigned)Mips::LO64, &Mips::HILO64RegClass);
+        return std::make_pair((unsigned)Mips::LO, &Mips::LORegsRegClass);
+      return std::make_pair((unsigned)Mips::LO64, &Mips::LORegs64RegClass);
     case 'x': // register suitable for indirect jump
       // Fixme: Not triggering the use of both hi and low
       // This will generate an error message

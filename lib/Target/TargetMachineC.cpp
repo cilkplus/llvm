@@ -17,7 +17,6 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Module.h"
 #include "llvm/PassManager.h"
-#include "llvm/Wrap.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -107,29 +106,9 @@ LLVMTargetMachineRef LLVMCreateTargetMachine(LLVMTargetRef T, char* Triple,
       break;
   }
 
-  CodeModel::Model CM;
-  switch (CodeModel) {
-    case LLVMCodeModelJITDefault:
-      CM = CodeModel::JITDefault;
-      break;
-    case LLVMCodeModelSmall:
-      CM = CodeModel::Small;
-      break;
-    case LLVMCodeModelKernel:
-      CM = CodeModel::Kernel;
-      break;
-    case LLVMCodeModelMedium:
-      CM = CodeModel::Medium;
-      break;
-    case LLVMCodeModelLarge:
-      CM = CodeModel::Large;
-      break;
-    default:
-      CM = CodeModel::Default;
-      break;
-  }
-  CodeGenOpt::Level OL;
+  CodeModel::Model CM = unwrap(CodeModel);
 
+  CodeGenOpt::Level OL;
   switch (Level) {
     case LLVMCodeGenLevelNone:
       OL = CodeGenOpt::None;

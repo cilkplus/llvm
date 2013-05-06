@@ -49,6 +49,12 @@ class RuntimeDyldELF : public RuntimeDyldImpl {
                             uint32_t Type,
                             int32_t Addend);
 
+  void resolveAArch64Relocation(const SectionEntry &Section,
+                                uint64_t Offset,
+                                uint64_t Value,
+                                uint32_t Type,
+                                int64_t Addend);
+
   void resolveARMRelocation(const SectionEntry &Section,
                             uint64_t Offset,
                             uint32_t Value,
@@ -67,6 +73,11 @@ class RuntimeDyldELF : public RuntimeDyldImpl {
                               uint32_t Type,
                               int64_t Addend);
 
+  void resolveSystemZRelocation(const SectionEntry &Section,
+                                uint64_t Offset,
+                                uint64_t Value,
+                                uint32_t Type,
+                                int64_t Addend);
 
   uint64_t findPPC64TOC() const;
   void findOPDEntrySection(ObjectImage &Obj,
@@ -85,6 +96,7 @@ public:
                                     StubMap &Stubs);
   virtual bool isCompatibleFormat(const ObjectBuffer *Buffer) const;
   virtual ObjectImage *createObjectImage(ObjectBuffer *InputBuffer);
+  virtual StringRef getEHFrameSection();
   virtual ~RuntimeDyldELF();
 };
 

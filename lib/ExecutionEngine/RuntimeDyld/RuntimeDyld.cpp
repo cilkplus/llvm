@@ -25,9 +25,14 @@ using namespace llvm::object;
 
 // Empty out-of-line virtual destructor as the key function.
 RTDyldMemoryManager::~RTDyldMemoryManager() {}
+void RTDyldMemoryManager::registerEHFrames(StringRef SectionData) {}
 RuntimeDyldImpl::~RuntimeDyldImpl() {}
 
 namespace llvm {
+
+StringRef RuntimeDyldImpl::getEHFrameSection() {
+  return StringRef();
+}
 
 // Resolve the relocations for all symbols we currently know about.
 void RuntimeDyldImpl::resolveRelocations() {
@@ -174,7 +179,7 @@ void RuntimeDyldImpl::emitCommonSymbols(ObjectImage &Obj,
   if (!Addr)
     report_fatal_error("Unable to allocate memory for common symbols!");
   uint64_t Offset = 0;
-  Sections.push_back(SectionEntry(StringRef(), Addr, TotalSize, TotalSize, 0));
+  Sections.push_back(SectionEntry(StringRef(), Addr, TotalSize, 0));
   memset(Addr, 0, TotalSize);
 
   DEBUG(dbgs() << "emitCommonSection SectionID: " << SectionID
@@ -234,6 +239,12 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
   Check(Section.isReadOnlyData(IsReadOnly));
   Check(Section.getSize(DataSize));
   Check(Section.getName(Name));
+  if (StubSize > 0) {
+    unsigned StubAlignment = getStubAlignment();
+    unsigned EndAlignment = (DataSize | Alignment) & -(DataSize | Alignment);
+    if (StubAlignment > EndAlignment)
+      StubBufSize += StubAlignment - EndAlignment;
+  }
 
   unsigned Allocate;
   unsigned SectionID = Sections.size();
@@ -286,8 +297,7 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
                  << "\n");
   }
 
-  Sections.push_back(SectionEntry(Name, Addr, Allocate, DataSize,
-				  (uintptr_t)pData));
+  Sections.push_back(SectionEntry(Name, Addr, DataSize, (uintptr_t)pData));
   return SectionID;
 }
 
@@ -330,7 +340,25 @@ void RuntimeDyldImpl::addRelocationForSymbol(const RelocationEntry &RE,
 }
 
 uint8_t *RuntimeDyldImpl::createStubFunction(uint8_t *Addr) {
-  if (Arch == Triple::arm) {
+  if (Arch == Triple::aarch64) {
+    // This stub has to be able to access the full address space,
+    // since symbol lookup won't necessarily find a handy, in-range,
+    // PLT stub for functions which could be anywhere.
+    uint32_t *StubAddr = (uint32_t*)Addr;
+
+    // Stub can use ip0 (== x16) to calculate address
+    *StubAddr = 0xd2e00010; // movz ip0, #:abs_g3:<addr>
+    StubAddr++;
+    *StubAddr = 0xf2c00010; // movk ip0, #:abs_g2_nc:<addr>
+    StubAddr++;
+    *StubAddr = 0xf2a00010; // movk ip0, #:abs_g1_nc:<addr>
+    StubAddr++;
+    *StubAddr = 0xf2800010; // movk ip0, #:abs_g0_nc:<addr>
+    StubAddr++;
+    *StubAddr = 0xd61f0200; // br ip0
+
+    return Addr;
+  } else if (Arch == Triple::arm) {
     // TODO: There is only ARM far stub now. We should add the Thumb stub,
     // and stubs for branches Thumb - ARM and ARM - Thumb.
     uint32_t *StubAddr = (uint32_t*)Addr;
@@ -370,6 +398,13 @@ uint8_t *RuntimeDyldImpl::createStubFunction(uint8_t *Addr) {
     writeInt32BE(Addr+36, 0xE96C0010); // ld    r11, 16(r2)
     writeInt32BE(Addr+40, 0x4E800420); // bctr
 
+    return Addr;
+  } else if (Arch == Triple::systemz) {
+    writeInt16BE(Addr,    0xC418);     // lgrl %r1,.+8
+    writeInt16BE(Addr+2,  0x0000);
+    writeInt16BE(Addr+4,  0x0004);
+    writeInt16BE(Addr+6,  0x07F1);     // brc 15,%r1
+    // 8-byte address stored at Addr + 8
     return Addr;
   }
   return Addr;
@@ -511,6 +546,10 @@ void RuntimeDyld::mapSectionAddress(const void *LocalAddress,
 
 StringRef RuntimeDyld::getErrorString() {
   return Dyld->getErrorString();
+}
+
+StringRef RuntimeDyld::getEHFrameSection() {
+  return Dyld->getEHFrameSection();
 }
 
 } // end namespace llvm

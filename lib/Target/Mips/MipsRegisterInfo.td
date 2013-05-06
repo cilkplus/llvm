@@ -16,6 +16,11 @@ def sub_fpodd  : SubRegIndex;
 def sub_32     : SubRegIndex;
 def sub_lo     : SubRegIndex;
 def sub_hi     : SubRegIndex;
+def sub_dsp16_19 : SubRegIndex;
+def sub_dsp20    : SubRegIndex;
+def sub_dsp21    : SubRegIndex;
+def sub_dsp22    : SubRegIndex;
+def sub_dsp23    : SubRegIndex;
 }
 
 class Unallocatable {
@@ -264,7 +269,23 @@ let Namespace = "Mips" in {
 
   def AC0_64 : ACC<0, "ac0", [LO64, HI64]>;
 
-  def DSPCtrl : Register<"dspctrl">;
+  // DSP-ASE control register fields.
+  def DSPPos : Register<"">;
+  def DSPSCount : Register<"">;
+  def DSPCarry : Register<"">;
+  def DSPEFI : Register<"">;
+  def DSPOutFlag16_19 : Register<"">;
+  def DSPOutFlag20 : Register<"">;
+  def DSPOutFlag21 : Register<"">;
+  def DSPOutFlag22 : Register<"">;
+  def DSPOutFlag23 : Register<"">;
+  def DSPCCond : Register<"">;
+
+  let SubRegIndices = [sub_dsp16_19, sub_dsp20, sub_dsp21, sub_dsp22,
+                       sub_dsp23] in
+  def DSPOutFlag : RegisterWithSubRegs<"", [DSPOutFlag16_19, DSPOutFlag20,
+                                            DSPOutFlag21, DSPOutFlag22,
+                                            DSPOutFlag23]>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -340,10 +361,12 @@ def FGR64 : RegisterClass<"Mips", [f64], 64, (sequence "D%u_64", 0, 31)>;
 def CCR  : RegisterClass<"Mips", [i32], 32, (add FCR31,FCC0)>, Unallocatable;
 
 // Hi/Lo Registers
-def HILO : RegisterClass<"Mips", [i32], 32, (add HI, LO)>, Unallocatable;
-def HILO64 : RegisterClass<"Mips", [i64], 64, (add HI64, LO64)>, Unallocatable;
+def LORegs : RegisterClass<"Mips", [i32], 32, (add LO)>;
+def HIRegs : RegisterClass<"Mips", [i32], 32, (add HI)>;
 def LORegsDSP : RegisterClass<"Mips", [i32], 32, (add LO, LO1, LO2, LO3)>;
 def HIRegsDSP : RegisterClass<"Mips", [i32], 32, (add HI, HI1, HI2, HI3)>;
+def LORegs64 : RegisterClass<"Mips", [i64], 64, (add LO64)>;
+def HIRegs64 : RegisterClass<"Mips", [i64], 64, (add HI64)>;
 
 // Hardware registers
 def HWRegs : RegisterClass<"Mips", [i32], 32, (add HWR29)>, Unallocatable;
@@ -362,6 +385,9 @@ def ACRegsDSP : RegisterClass<"Mips", [untyped], 64, (sequence "AC%u", 0, 3)> {
   let Size = 64;
 }
 
+def DSPCC : RegisterClass<"Mips", [v4i8, v2i16], 32, (add DSPCCond)>;
+
+// Register Operands.
 def CPURegsAsmOperand : AsmOperandClass {
   let Name = "CPURegsAsm";
   let ParserMethod = "parseCPURegs";

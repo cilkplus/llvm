@@ -342,30 +342,101 @@ class NoEncode<string E> {
 // all their register operands.
 // For this purpose, we define one RegisterOperand for each RegisterClass,
 // using the same name as the class, just in lower case.
-def gprc : RegisterOperand<GPRC>;
-def g8rc : RegisterOperand<G8RC>;
-def gprc_nor0 : RegisterOperand<GPRC_NOR0>;
-def g8rc_nox0 : RegisterOperand<G8RC_NOX0>;
-def f8rc : RegisterOperand<F8RC>;
-def f4rc : RegisterOperand<F4RC>;
-def vrrc : RegisterOperand<VRRC>;
-def crbitrc : RegisterOperand<CRBITRC>;
-def crrc : RegisterOperand<CRRC>;
 
+def PPCRegGPRCAsmOperand : AsmOperandClass {
+  let Name = "RegGPRC"; let PredicateMethod = "isRegNumber";
+}
+def gprc : RegisterOperand<GPRC> {
+  let ParserMatchClass = PPCRegGPRCAsmOperand;
+}
+def PPCRegG8RCAsmOperand : AsmOperandClass {
+  let Name = "RegG8RC"; let PredicateMethod = "isRegNumber";
+}
+def g8rc : RegisterOperand<G8RC> {
+  let ParserMatchClass = PPCRegG8RCAsmOperand;
+}
+def PPCRegGPRCNoR0AsmOperand : AsmOperandClass {
+  let Name = "RegGPRCNoR0"; let PredicateMethod = "isRegNumber";
+}
+def gprc_nor0 : RegisterOperand<GPRC_NOR0> {
+  let ParserMatchClass = PPCRegGPRCNoR0AsmOperand;
+}
+def PPCRegG8RCNoX0AsmOperand : AsmOperandClass {
+  let Name = "RegG8RCNoX0"; let PredicateMethod = "isRegNumber";
+}
+def g8rc_nox0 : RegisterOperand<G8RC_NOX0> {
+  let ParserMatchClass = PPCRegG8RCNoX0AsmOperand;
+}
+def PPCRegF8RCAsmOperand : AsmOperandClass {
+  let Name = "RegF8RC"; let PredicateMethod = "isRegNumber";
+}
+def f8rc : RegisterOperand<F8RC> {
+  let ParserMatchClass = PPCRegF8RCAsmOperand;
+}
+def PPCRegF4RCAsmOperand : AsmOperandClass {
+  let Name = "RegF4RC"; let PredicateMethod = "isRegNumber";
+}
+def f4rc : RegisterOperand<F4RC> {
+  let ParserMatchClass = PPCRegF4RCAsmOperand;
+}
+def PPCRegVRRCAsmOperand : AsmOperandClass {
+  let Name = "RegVRRC"; let PredicateMethod = "isRegNumber";
+}
+def vrrc : RegisterOperand<VRRC> {
+  let ParserMatchClass = PPCRegVRRCAsmOperand;
+}
+def PPCRegCRBITRCAsmOperand : AsmOperandClass {
+  let Name = "RegCRBITRC"; let PredicateMethod = "isRegNumber";
+}
+def crbitrc : RegisterOperand<CRBITRC> {
+  let ParserMatchClass = PPCRegCRBITRCAsmOperand;
+}
+def PPCRegCRRCAsmOperand : AsmOperandClass {
+  let Name = "RegCRRC"; let PredicateMethod = "isCCRegNumber";
+}
+def crrc : RegisterOperand<CRRC> {
+  let ParserMatchClass = PPCRegCRRCAsmOperand;
+}
+
+def PPCS5ImmAsmOperand : AsmOperandClass {
+  let Name = "S5Imm"; let PredicateMethod = "isS5Imm";
+  let RenderMethod = "addImmOperands";
+}
 def s5imm   : Operand<i32> {
   let PrintMethod = "printS5ImmOperand";
+  let ParserMatchClass = PPCS5ImmAsmOperand;
+}
+def PPCU5ImmAsmOperand : AsmOperandClass {
+  let Name = "U5Imm"; let PredicateMethod = "isU5Imm";
+  let RenderMethod = "addImmOperands";
 }
 def u5imm   : Operand<i32> {
   let PrintMethod = "printU5ImmOperand";
+  let ParserMatchClass = PPCU5ImmAsmOperand;
+}
+def PPCU6ImmAsmOperand : AsmOperandClass {
+  let Name = "U6Imm"; let PredicateMethod = "isU6Imm";
+  let RenderMethod = "addImmOperands";
 }
 def u6imm   : Operand<i32> {
   let PrintMethod = "printU6ImmOperand";
+  let ParserMatchClass = PPCU6ImmAsmOperand;
+}
+def PPCS16ImmAsmOperand : AsmOperandClass {
+  let Name = "S16Imm"; let PredicateMethod = "isS16Imm";
+  let RenderMethod = "addImmOperands";
 }
 def s16imm  : Operand<i32> {
   let PrintMethod = "printS16ImmOperand";
+  let ParserMatchClass = PPCS16ImmAsmOperand;
+}
+def PPCU16ImmAsmOperand : AsmOperandClass {
+  let Name = "U16Imm"; let PredicateMethod = "isU16Imm";
+  let RenderMethod = "addImmOperands";
 }
 def u16imm  : Operand<i32> {
   let PrintMethod = "printU16ImmOperand";
+  let ParserMatchClass = PPCU16ImmAsmOperand;
 }
 def directbrtarget : Operand<OtherVT> {
   let PrintMethod = "printBranchOperand";
@@ -384,21 +455,49 @@ def aaddr : Operand<iPTR> {
 def symbolHi: Operand<i32> {
   let PrintMethod = "printSymbolHi";
   let EncoderMethod = "getHA16Encoding";
+  let ParserMatchClass = PPCS16ImmAsmOperand;
 }
 def symbolLo: Operand<i32> {
   let PrintMethod = "printSymbolLo";
   let EncoderMethod = "getLO16Encoding";
+  let ParserMatchClass = PPCS16ImmAsmOperand;
+}
+def PPCCRBitMaskOperand : AsmOperandClass {
+ let Name = "CRBitMask"; let PredicateMethod = "isCRBitMask";
 }
 def crbitm: Operand<i8> {
   let PrintMethod = "printcrbitm";
   let EncoderMethod = "get_crbitm_encoding";
+  let ParserMatchClass = PPCCRBitMaskOperand;
 }
 // Address operands
 // A version of ptr_rc which excludes R0 (or X0 in 64-bit mode).
-def ptr_rc_nor0 : PointerLikeRegClass<1>;
+def PPCRegGxRCNoR0Operand : AsmOperandClass {
+  let Name = "RegGxRCNoR0"; let PredicateMethod = "isRegNumber";
+}
+def ptr_rc_nor0 : Operand<iPTR>, PointerLikeRegClass<1> {
+  let ParserMatchClass = PPCRegGxRCNoR0Operand;
+}
+// A version of ptr_rc usable with the asm parser.
+def PPCRegGxRCOperand : AsmOperandClass {
+  let Name = "RegGxRC"; let PredicateMethod = "isRegNumber";
+}
+def ptr_rc_idx : Operand<iPTR>, PointerLikeRegClass<0> {
+  let ParserMatchClass = PPCRegGxRCOperand;
+}
 
-def dispRI : Operand<iPTR>;
-def dispRIX : Operand<iPTR>;
+def PPCDispRIOperand : AsmOperandClass {
+ let Name = "DispRI"; let PredicateMethod = "isS16Imm";
+}
+def dispRI : Operand<iPTR> {
+  let ParserMatchClass = PPCDispRIOperand;
+}
+def PPCDispRIXOperand : AsmOperandClass {
+ let Name = "DispRIX"; let PredicateMethod = "isS16ImmX4";
+}
+def dispRIX : Operand<iPTR> {
+  let ParserMatchClass = PPCDispRIXOperand;
+}
 
 def memri : Operand<iPTR> {
   let PrintMethod = "printMemRegImm";
@@ -407,7 +506,7 @@ def memri : Operand<iPTR> {
 }
 def memrr : Operand<iPTR> {
   let PrintMethod = "printMemRegReg";
-  let MIOperandInfo = (ops ptr_rc_nor0:$ptrreg, ptr_rc:$offreg);
+  let MIOperandInfo = (ops ptr_rc_nor0:$ptrreg, ptr_rc_idx:$offreg);
 }
 def memrix : Operand<iPTR> {   // memri where the imm is shifted 2 bits.
   let PrintMethod = "printMemRegImmShifted";
@@ -2012,3 +2111,98 @@ def : Pat<(fma f32:$A, (fneg f32:$C), f32:$B),
 
 include "PPCInstrAltivec.td"
 include "PPCInstr64Bit.td"
+
+
+//===----------------------------------------------------------------------===//
+// PowerPC Instructions used for assembler/disassembler only
+//
+
+def ISYNC : XLForm_2_ext<19, 150, 0, 0, 0, (outs), (ins),
+                         "isync", SprISYNC, []>;
+
+def ICBI : XForm_1a<31, 982, (outs), (ins memrr:$src),
+                    "icbi $src", LdStICBI, []>;
+
+//===----------------------------------------------------------------------===//
+// PowerPC Assembler Instruction Aliases
+//
+
+// Pseudo-instructions for alternate assembly syntax (never used by codegen).
+// These are aliases that require C++ handling to convert to the target
+// instruction, while InstAliases can be handled directly by tblgen.
+class PPCAsmPseudo<string asm, dag iops>
+  : Instruction {
+  let Namespace = "PPC";
+  bit PPC64 = 0;  // Default value, override with isPPC64
+
+  let OutOperandList = (outs);
+  let InOperandList = iops;
+  let Pattern = [];
+  let AsmString = asm;
+  let isAsmParserOnly = 1;
+  let isPseudo = 1;
+}
+
+def : InstAlias<"mr $rA, $rB", (OR8 g8rc:$rA, g8rc:$rB, g8rc:$rB)>;
+
+def SLWI : PPCAsmPseudo<"slwi $rA, $rS, $n",
+                        (ins gprc:$rA, gprc:$rS, u5imm:$n)>;
+def SRWI : PPCAsmPseudo<"srwi $rA, $rS, $n",
+                        (ins gprc:$rA, gprc:$rS, u5imm:$n)>;
+def SLDI : PPCAsmPseudo<"sldi $rA, $rS, $n",
+                        (ins g8rc:$rA, g8rc:$rS, u6imm:$n)>;
+def SRDI : PPCAsmPseudo<"srdi $rA, $rS, $n",
+                        (ins g8rc:$rA, g8rc:$rS, u6imm:$n)>;
+
+def : InstAlias<"blt $cc, $dst", (BCC 12, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bgt $cc, $dst", (BCC 44, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"beq $cc, $dst", (BCC 76, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bun $cc, $dst", (BCC 108, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bso $cc, $dst", (BCC 108, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bge $cc, $dst", (BCC 4, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bnl $cc, $dst", (BCC 4, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"ble $cc, $dst", (BCC 36, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bng $cc, $dst", (BCC 36, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bne $cc, $dst", (BCC 68, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bnu $cc, $dst", (BCC 100, crrc:$cc, condbrtarget:$dst)>;
+def : InstAlias<"bns $cc, $dst", (BCC 100, crrc:$cc, condbrtarget:$dst)>;
+
+def : InstAlias<"bltlr $cc", (BCLR 12, crrc:$cc)>;
+def : InstAlias<"bgtlr $cc", (BCLR 44, crrc:$cc)>;
+def : InstAlias<"beqlr $cc", (BCLR 76, crrc:$cc)>;
+def : InstAlias<"bunlr $cc", (BCLR 108, crrc:$cc)>;
+def : InstAlias<"bsolr $cc", (BCLR 108, crrc:$cc)>;
+def : InstAlias<"bgelr $cc", (BCLR 4, crrc:$cc)>;
+def : InstAlias<"bnllr $cc", (BCLR 4, crrc:$cc)>;
+def : InstAlias<"blelr $cc", (BCLR 36, crrc:$cc)>;
+def : InstAlias<"bnglr $cc", (BCLR 36, crrc:$cc)>;
+def : InstAlias<"bnelr $cc", (BCLR 68, crrc:$cc)>;
+def : InstAlias<"bnulr $cc", (BCLR 100, crrc:$cc)>;
+def : InstAlias<"bnslr $cc", (BCLR 100, crrc:$cc)>;
+
+def : InstAlias<"bltctr $cc", (BCCTR 12, crrc:$cc)>;
+def : InstAlias<"bgtctr $cc", (BCCTR 44, crrc:$cc)>;
+def : InstAlias<"beqctr $cc", (BCCTR 76, crrc:$cc)>;
+def : InstAlias<"bunctr $cc", (BCCTR 108, crrc:$cc)>;
+def : InstAlias<"bsoctr $cc", (BCCTR 108, crrc:$cc)>;
+def : InstAlias<"bgectr $cc", (BCCTR 4, crrc:$cc)>;
+def : InstAlias<"bnlctr $cc", (BCCTR 4, crrc:$cc)>;
+def : InstAlias<"blectr $cc", (BCCTR 36, crrc:$cc)>;
+def : InstAlias<"bngctr $cc", (BCCTR 36, crrc:$cc)>;
+def : InstAlias<"bnectr $cc", (BCCTR 68, crrc:$cc)>;
+def : InstAlias<"bnuctr $cc", (BCCTR 100, crrc:$cc)>;
+def : InstAlias<"bnsctr $cc", (BCCTR 100, crrc:$cc)>;
+
+def : InstAlias<"bltctrl $cc", (BCCTRL 12, crrc:$cc)>;
+def : InstAlias<"bgtctrl $cc", (BCCTRL 44, crrc:$cc)>;
+def : InstAlias<"beqctrl $cc", (BCCTRL 76, crrc:$cc)>;
+def : InstAlias<"bunctrl $cc", (BCCTRL 108, crrc:$cc)>;
+def : InstAlias<"bsoctrl $cc", (BCCTRL 108, crrc:$cc)>;
+def : InstAlias<"bgectrl $cc", (BCCTRL 4, crrc:$cc)>;
+def : InstAlias<"bnlctrl $cc", (BCCTRL 4, crrc:$cc)>;
+def : InstAlias<"blectrl $cc", (BCCTRL 36, crrc:$cc)>;
+def : InstAlias<"bngctrl $cc", (BCCTRL 36, crrc:$cc)>;
+def : InstAlias<"bnectrl $cc", (BCCTRL 68, crrc:$cc)>;
+def : InstAlias<"bnuctrl $cc", (BCCTRL 100, crrc:$cc)>;
+def : InstAlias<"bnsctrl $cc", (BCCTRL 100, crrc:$cc)>;
+
