@@ -6742,6 +6742,9 @@ public:
   /// \#pragma {STDC,OPENCL} FP_CONTRACT
   void ActOnPragmaFPContract(tok::OnOffSwitch OOS);
 
+  /// ActOnPragmaSIMD - Called on well formed \#pragma simd
+  StmtResult ActOnPragmaSIMD(SourceLocation PragmaLoc, Stmt *S);
+
   /// AddAlignmentAttributesForRecord - Adds any needed alignment attributes to
   /// a the record decl, to handle '\#pragma pack' and '\#pragma options align'.
   void AddAlignmentAttributesForRecord(RecordDecl *RD);

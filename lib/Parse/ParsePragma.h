@@ -90,7 +90,15 @@ public:
   virtual void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer,
                             Token &FirstToken);
 };
-  
+
+class PragmaSIMDHandler : public PragmaHandler {
+public:
+  explicit PragmaSIMDHandler() : PragmaHandler("simd") {}
+
+  virtual void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer,
+                            Token &FirstToken);
+};
+
 
 class PragmaFPContractHandler : public PragmaHandler {
 public:

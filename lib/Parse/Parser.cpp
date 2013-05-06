@@ -112,6 +112,9 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
     PP.AddPragmaHandler(MSCommentHandler.get());
   }
 
+  SIMDHandler.reset(new PragmaSIMDHandler());
+  PP.AddPragmaHandler(SIMDHandler.get());
+
   CommentSemaHandler.reset(new ActionCommentHandler(actions));
   PP.addCommentHandler(CommentSemaHandler.get());
 
@@ -456,6 +459,9 @@ Parser::~Parser() {
     MSCommentHandler.reset();
   }
 
+  PP.RemovePragmaHandler(SIMDHandler.get());
+  SIMDHandler.reset();
+
   PP.RemovePragmaHandler("STDC", FPContractHandler.get());
   FPContractHandler.reset();
 
@@ -653,6 +659,9 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
     return DeclGroupPtrTy();
   case tok::annot_pragma_openmp:
     ParseOpenMPDeclarativeDirective();
+    return DeclGroupPtrTy();
+  case tok::annot_pragma_simd:
+    HandlePragmaSIMD();
     return DeclGroupPtrTy();
   case tok::semi:
     // Either a C++11 empty-declaration or attribute-declaration.

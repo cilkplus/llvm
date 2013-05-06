@@ -840,6 +840,12 @@ def err_cilk_for_expect_assign: Error<
 def err_cilk_for_following_grainsize: Error<
   "'#pragma cilk' must be followed by a '_Cilk_for' loop">;
 
+def err_simd_invalid_clause: Error<
+  "invalid pragma simd clause">;
+
+def err_simd_expected_reduction_operator: Error<
+  "expected reduction operator">;
+
 // OpenMP support.
 def warn_pragma_omp_ignored : Warning <
   "unexpected '#pragma omp ...' in program">, InGroup<SourceUsesOpenMP>, DefaultIgnore;

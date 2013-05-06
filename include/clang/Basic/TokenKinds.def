@@ -679,6 +679,12 @@ ANNOTATION(pragma_cilk_grainsize_end)
 ANNOTATION(pragma_openmp)
 ANNOTATION(pragma_openmp_end)
 
+// Annotation for #pragma simd
+// The lexer produces these so that they only take effect when the parser
+// handles them.
+ANNOTATION(pragma_simd)
+ANNOTATION(pragma_simd_end)
+
 #undef ANNOTATION
 #undef TESTING_KEYWORD
 #undef OBJC2_AT_KEYWORD

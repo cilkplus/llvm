@@ -148,6 +148,7 @@ class Parser : public CodeCompletionHandler {
   OwningPtr<PragmaHandler> FPContractHandler;
   OwningPtr<PragmaHandler> OpenCLExtensionHandler;
   OwningPtr<PragmaHandler> CilkGrainsizeHandler;
+  OwningPtr<PragmaHandler> SIMDHandler;
   OwningPtr<CommentHandler> CommentSemaHandler;
   OwningPtr<PragmaHandler> OpenMPHandler;
   OwningPtr<PragmaHandler> MSCommentHandler;
@@ -451,6 +452,13 @@ private:
   /// \brief Handle the annotation token produced for
   /// #pragma clang __debug captured
   StmtResult HandlePragmaCaptured();
+
+  /// \brief Handle the annotation token produced for
+  /// #pragma simd
+  void HandlePragmaSIMD();
+  /// \brief Handle the annotation token produced for
+  /// #pragma simd
+  StmtResult HandlePragmaSIMDStatementOrDeclaration();
 
   /// GetLookAheadToken - This peeks ahead N tokens and returns that token
   /// without consuming any tokens.  LookAhead(0) returns 'Tok', LookAhead(1)

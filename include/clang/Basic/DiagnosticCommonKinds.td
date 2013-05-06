@@ -86,6 +86,8 @@ def note_decl_hiding_tag_type : Note<
 def err_attribute_not_type_attr : Error<
   "%0 attribute cannot be applied to types">;
 def err_enum_template : Error<"enumeration cannot be a template">;
+def warn_pragma_simd_expected_loop : Warning<
+  "expected loop statement following '#pragma simd' - ignored">;
 
 }
 

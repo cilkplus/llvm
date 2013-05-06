@@ -1009,3 +1009,7 @@ def UnspecifiedInheritance : MSInheritanceAttr {
 def Unaligned : IgnoredAttr {
   let Spellings = [Keyword<"__unaligned">];
 }
+
+def SIMD : InheritableAttr {
+  let Spellings = [];
+}

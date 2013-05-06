@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ParsePragma.h"
+#include "RAIIObjectsForParser.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Parse/Parser.h"
@@ -180,7 +181,31 @@ void Parser::HandlePragmaOpenCLExtension() {
   }
 }
 
+// #pragma simd
+void PragmaSIMDHandler::HandlePragma(Preprocessor &PP,
+                                     PragmaIntroducerKind Introducer,
+                                     Token &FirstTok) {
+  SmallVector<Token, 16> Pragma;
+  Token Tok;
+  Tok.startToken();
+  Tok.setKind(tok::annot_pragma_simd);
+  Tok.setLocation(FirstTok.getLocation());
 
+  while (Tok.isNot(tok::eod)) {
+    Pragma.push_back(Tok);
+    PP.Lex(Tok);
+  }
+  SourceLocation EodLoc = Tok.getLocation();
+  Tok.startToken();
+  Tok.setKind(tok::annot_pragma_simd_end);
+  Tok.setLocation(EodLoc);
+  Pragma.push_back(Tok);
+
+  Token *Toks = new Token[Pragma.size()];
+  std::copy(Pragma.begin(), Pragma.end(), Toks);
+  PP.EnterTokenStream(Toks, Pragma.size(),
+                      /*DisableMacroExpansion=*/true, /*OwnsTokens=*/true);
+}
 
 // #pragma GCC visibility comes in two variants:
 //   'push' '(' [visibility] ')'

@@ -4609,3 +4609,15 @@ void Sema::ActOnCilkForStmtError() {
   PopCompoundScope();
   PopFunctionScopeInfo();
 }
+
+StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
+                                 Stmt *SubStmt) {
+  if (isa<ForStmt>(SubStmt) ||
+      isa<WhileStmt>(SubStmt) ||
+      isa<DoStmt>(SubStmt)) {
+    const Attr* Attrs[] = { ::new (Context) SIMDAttr(PragmaLoc, Context) };
+    return ActOnAttributedStmt(PragmaLoc, Attrs, SubStmt);
+  }
+  Diag(PragmaLoc, diag::warn_pragma_simd_expected_loop);
+  return SubStmt;
+}
