@@ -4188,7 +4188,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   // Check increment
   llvm::APSInt Stride;
   Expr *StrideExpr = 0;
-  bool HasConstantIncrement;
+  bool HasConstantIncrement = false;
   SourceLocation IncrementRHSLoc;
   if (!IsValidCilkForIncrement(*this, Increment, ControlVar,
                                HasConstantIncrement, Stride, StrideExpr,
