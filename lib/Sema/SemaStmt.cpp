@@ -4167,8 +4167,10 @@ Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor) {
   // extensions.
   llvm::APSInt Result;
   if (GrainsizeExpr->EvaluateAsInt(Result, Context))
-    if (Result.isNegative())
+    if (Result.isNegative()) {
       Diag(LocStart, diag::err_cilk_for_grainsize_negative);
+      return StmtError();
+    }
 
   // Check if the result of the Grainsize expression is convertible to signed
   // int.
@@ -4177,11 +4179,11 @@ Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor) {
       Context, CurContext, LocStart, LocStart, 0, GrainsizeTy,
       Context.getTrivialTypeSourceInfo(GrainsizeTy, LocStart), SC_None);
 
-  AddInitializerToDecl(Grainsize, GrainsizeExpr, false, false);
+  AddInitializerToDecl(Grainsize, GrainsizeExpr, true, false);
   if (Grainsize->isInvalidDecl()) {
     Context.Deallocate(reinterpret_cast<void*>(Grainsize));
     Diag(LocStart, diag::note_cilk_for_grainsize_conversion) << GrainsizeTy;
-    return StmtResult();
+    return StmtError();
   }
 
   GrainsizeExpr = Grainsize->getInit();
