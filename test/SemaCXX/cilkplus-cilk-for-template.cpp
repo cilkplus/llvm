@@ -1,4 +1,4 @@
-// RUN: true || %clang_cc1 -std=c++11 -fcilkplus -fsyntax-only -verify %s
+// RUN: %clang_cc1 -std=c++11 -fcilkplus -fsyntax-only -verify %s
 
 struct C { // expected-note {{candidate constructor (the implicit copy constructor) not viable: no known conversion from 'int' to 'const C &' for 1st argument}} \
            // expected-note {{candidate constructor (the implicit move constructor) not viable: no known conversion from 'int' to 'C &&' for 1st argument}}
