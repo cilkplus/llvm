@@ -28,12 +28,18 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Support/CommandLine.h"
 using namespace llvm;
 using namespace llvm::cilkplus;
 
 STATISTIC(NumStackInitsDelayed, "Number of stack-frame initializations delayed");
 STATISTIC(NumStackInitsInserted, "Number of new late stack-frame initializations");
 STATISTIC(NumCallsConditionalized, "Number of sync and parent epilogue calls made conditional");
+
+static cl::opt<bool> DisableCilkStackFrameLateInit(
+    "disable-cilk-sf-late-init", cl::Hidden,
+    cl::desc("Disable the Cilk stack frame late initialization optimization"),
+    cl::init(false));
 
 namespace {
 
@@ -109,6 +115,9 @@ private:
 } // anonymous namespace
 
 bool CilkStackFrameLateInit::runOnModule(Module &M) {
+  if (DisableCilkStackFrameLateInit)
+    return false;
+
   bool Changed = false;
   for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F)
     if (!F->isDeclaration())

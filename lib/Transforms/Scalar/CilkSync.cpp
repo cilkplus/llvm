@@ -24,6 +24,7 @@
 #include "llvm/PassSupport.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Support/CommandLine.h"
 
 #include <algorithm>
 #include <deque>
@@ -32,6 +33,11 @@ using namespace llvm;
 using namespace llvm::cilkplus;
 
 STATISTIC(NumSyncsRemoved, "Number of Cilk syncs removed");
+
+static cl::opt<bool> DisableElideCilkSync(
+    "disable-elide-cilk-sync", cl::Hidden,
+    cl::desc("Disable the Cilk sync elision optimization"),
+    cl::init(false));
 
 namespace {
   struct StackFrameInfo {
@@ -146,6 +152,9 @@ FunctionPass *llvm::createElideCilkSyncPass() {
 /// \brief Determine which syncs are redundant and remove
 /// them from the function.
 bool ElideCilkSync::runOnFunction(Function &F) {
+  if (DisableElideCilkSync)
+    return false;
+
   // Skip functions that do not have a sync, or that are a sync themselves, such
   // as a __cilk_conditional_sync.
   if (!setStackFrame(&F) || SyncFuncs.count(&F))
