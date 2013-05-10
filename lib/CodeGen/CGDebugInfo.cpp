@@ -1585,7 +1585,7 @@ llvm::DIType CGDebugInfo::CreateType(const ArrayType *Ty,
       Align = 0;
     else
       Align = CGM.getContext().getTypeAlign(Ty->getElementType());
-  } else if (Ty->isDependentSizedArrayType() || Ty->isIncompleteType()) {
+  } else if (Ty->isIncompleteType()) {
     Size = 0;
     Align = 0;
   } else {
@@ -1843,7 +1843,7 @@ llvm::DIType CGDebugInfo::getOrCreateType(QualType Ty, llvm::DIFile Unit) {
     // Interface types may have elements added to them by a
     // subsequent implementation or extension, so we keep them in
     // the ObjCInterfaceCache together with a checksum. Instead of
-    // the (possibly) incomplete interace type, we return a forward
+    // the (possibly) incomplete interface type, we return a forward
     // declaration that gets RAUW'd in CGDebugInfo::finalize().
     llvm::DenseMap<void *, std::pair<llvm::WeakVH, unsigned > >
       ::iterator it = ObjCInterfaceCache.find(TyPtr);
@@ -2097,6 +2097,17 @@ llvm::DIType CGDebugInfo::CreateMemberType(llvm::DIFile Unit, QualType FType,
   return Ty;
 }
 
+llvm::DIDescriptor CGDebugInfo::getDeclarationOrDefinition(const Decl *D) {
+  if (const TypeDecl *RD = dyn_cast<TypeDecl>(D))
+    return CreatePointeeType(QualType(RD->getTypeForDecl(), 0), llvm::DIFile());
+  llvm::DenseMap<const Decl *, llvm::WeakVH>::iterator I =
+      DeclCache.find(D->getCanonicalDecl());
+  if (I == DeclCache.end())
+    return llvm::DIDescriptor();
+  llvm::Value *V = I->second;
+  return llvm::DIDescriptor(dyn_cast_or_null<llvm::MDNode>(V));
+}
+
 /// getFunctionDeclaration - Return debug info descriptor to describe method
 /// declaration for the given method definition.
 llvm::DISubprogram CGDebugInfo::getFunctionDeclaration(const Decl *D) {
@@ -2265,6 +2276,8 @@ void CGDebugInfo::EmitFunctionStart(GlobalDecl GD, QualType FnType,
                                getLineNumber(CurLoc), Flags,
                                CGM.getLangOpts().Optimize,
                                Fn, TParamsArray, SPDecl);
+  if (HasDecl)
+    DeclCache.insert(std::make_pair(D->getCanonicalDecl(), llvm::WeakVH(SP)));
 
   // Push function on region stack.
   llvm::MDNode *SPN = SP;
@@ -2875,10 +2888,11 @@ void CGDebugInfo::EmitGlobalVariable(llvm::GlobalVariable *Var,
     LinkageName = StringRef();
   llvm::DIDescriptor DContext = 
     getContextDescriptor(dyn_cast<Decl>(D->getDeclContext()));
-  DBuilder.createStaticVariable(DContext, DeclName, LinkageName,
+  llvm::DIGlobalVariable GV = DBuilder.createStaticVariable(DContext, DeclName, LinkageName,
                                 Unit, LineNo, getOrCreateType(T, Unit),
                                 Var->hasInternalLinkage(), Var,
                                 getStaticDataMemberDeclaration(D));
+  DeclCache.insert(std::make_pair(D->getCanonicalDecl(), llvm::WeakVH(GV)));
 }
 
 /// EmitGlobalVariable - Emit information about an objective-c interface.
@@ -2923,17 +2937,36 @@ void CGDebugInfo::EmitGlobalVariable(const ValueDecl *VD,
   // Do not use DIGlobalVariable for enums.
   if (Ty.getTag() == llvm::dwarf::DW_TAG_enumeration_type)
     return;
-  DBuilder.createStaticVariable(Unit, Name, Name, Unit,
+  llvm::DIGlobalVariable GV = DBuilder.createStaticVariable(Unit, Name, Name, Unit,
                                 getLineNumber(VD->getLocation()),
                                 Ty, true, Init,
                                 getStaticDataMemberDeclaration(VD));
+  DeclCache.insert(std::make_pair(VD->getCanonicalDecl(), llvm::WeakVH(GV)));
+}
+
+llvm::DIScope CGDebugInfo::getCurrentContextDescriptor(const Decl *D) {
+  if (!LexicalBlockStack.empty())
+    return llvm::DIScope(LexicalBlockStack.back());
+  return getContextDescriptor(D);
 }
 
 void CGDebugInfo::EmitUsingDirective(const UsingDirectiveDecl &UD) {
   DBuilder.createImportedModule(
-      getContextDescriptor(cast<Decl>(UD.getDeclContext())),
+      getCurrentContextDescriptor(cast<Decl>(UD.getDeclContext())),
       getOrCreateNameSpace(UD.getNominatedNamespace()),
       getLineNumber(UD.getLocation()));
+}
+
+void CGDebugInfo::EmitUsingDecl(const UsingDecl &UD) {
+  assert(UD.shadow_size() &&
+         "We shouldn't be codegening an invalid UsingDecl containing no decls");
+  // Emitting one decl is sufficient - debuggers can detect that this is an
+  // overloaded name & provide lookup for all the overloads.
+  const UsingShadowDecl &USD = **UD.shadow_begin();
+  if (llvm::DIDescriptor Target = getDeclarationOrDefinition(USD.getUnderlyingDecl()))
+    DBuilder.createImportedDeclaration(
+        getCurrentContextDescriptor(cast<Decl>(USD.getDeclContext())), Target,
+        getLineNumber(USD.getLocation()));
 }
 
 /// getOrCreateNamesSpace - Return namespace descriptor for the given

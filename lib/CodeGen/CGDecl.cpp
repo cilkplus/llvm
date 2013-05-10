@@ -72,14 +72,13 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::Block:
   case Decl::Captured:
   case Decl::ClassScopeFunctionSpecialization:
+  case Decl::UsingShadow:
     llvm_unreachable("Declaration should not be in declstmts!");
   case Decl::Function:  // void X();
   case Decl::Record:    // struct/union/class X;
   case Decl::Enum:      // enum X;
   case Decl::EnumConstant: // enum ? { X = ? }
   case Decl::CXXRecord: // struct/union/class X; [C++]
-  case Decl::Using:          // using X; [C++]
-  case Decl::UsingShadow:
   case Decl::NamespaceAlias:
   case Decl::StaticAssert: // static_assert(X, ""); [C++0x]
   case Decl::Label:        // __label__ x;
@@ -89,6 +88,10 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
     // None of these decls require codegen support.
     return;
 
+  case Decl::Using:          // using X; [C++]
+    if (CGDebugInfo *DI = getDebugInfo())
+      DI->EmitUsingDecl(cast<UsingDecl>(D));
+    return;
   case Decl::UsingDirective: // using namespace X; [C++]
     if (CGDebugInfo *DI = getDebugInfo())
       DI->EmitUsingDirective(cast<UsingDirectiveDecl>(D));
@@ -1709,27 +1712,6 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, llvm::Value *Arg,
   llvm::Value *&DMEntry = LocalDeclMap[&D];
   assert(DMEntry == 0 && "Decl already exists in localdeclmap!");
   DMEntry = DeclPtr;
-
-  // The captured record (passed as the first parameter) is the base address.
-  if (CapturedStmtInfo && CapturedStmtInfo->isThisParmVarDecl(&D)) {
-    llvm::Value *This = Builder.CreateLoad(DeclPtr);
-    CapturedStmtInfo->setThisValue(This);
-
-    // If there is a receiver, it is stored in a field of the captured record.
-    if (FieldDecl *RecFD = CapturedStmtInfo->getReceiverFieldDecl()) {
-      QualType TagType = getContext().getTagDeclType(RecFD->getParent());
-
-      LValue LV = MakeNaturalAlignAddrLValue(This, TagType);
-      CapturedStmtInfo->setReceiverAddr(
-        Builder.CreateLoad(EmitLValueForField(LV, RecFD).getAddress()));
-
-      // Similarly for the receiver temporary.
-      if (FieldDecl *RecTmpFD = CapturedStmtInfo->getReceiverTmpFieldDecl()) {
-        CapturedStmtInfo->setReceiverTmp(
-          Builder.CreateLoad(EmitLValueForField(LV, RecTmpFD).getAddress()));
-      }
-    }
-  }
 
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {

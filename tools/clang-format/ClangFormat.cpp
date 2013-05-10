@@ -20,6 +20,7 @@
 #include "clang/Format/Format.h"
 #include "clang/Lex/Lexer.h"
 #include "clang/Rewrite/Core/Rewriter.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Signals.h"
 
@@ -27,22 +28,35 @@ using namespace llvm;
 
 static cl::opt<bool> Help("h", cl::desc("Alias for -help"), cl::Hidden);
 
-static cl::list<unsigned>
-Offsets("offset", cl::desc("Format a range starting at this file offset. Can "
-                           "only be used with one input file."));
-static cl::list<unsigned>
-Lengths("length", cl::desc("Format a range of this length. "
-                           "When it's not specified, end of file is used. "
-                           "Can only be used with one input file."));
+static cl::list<unsigned> Offsets(
+    "offset",
+    cl::desc(
+        "Format a range starting at this byte offset. Multiple ranges can be "
+        "formatted by specifying several -offset and -length pairs. Can "
+        "only be used with one input file."));
+static cl::list<unsigned> Lengths(
+    "length",
+    cl::desc("Format a range of this length (in bytes). Multiple ranges can be "
+             "formatted by specifying several -offset and -length pairs. When "
+             "only a single -offset is specified without -length, clang-format "
+             "will format up to the end of the file. Can only be used with one "
+             "input file."));
 static cl::opt<std::string> Style(
     "style",
-    cl::desc("Coding style, currently supports: LLVM, Google, Chromium."),
+    cl::desc(
+        "Coding style, currently supports: LLVM, Google, Chromium, Mozilla. "
+        "Use '-style file' to load style configuration from .clang-format file "
+        "located in one of the parent directories of the source file (or "
+        "current directory for stdin)."),
     cl::init("LLVM"));
 static cl::opt<bool> Inplace("i",
                              cl::desc("Inplace edit <file>s, if specified."));
 
 static cl::opt<bool> OutputXML(
     "output-replacements-xml", cl::desc("Output replacements as XML."));
+static cl::opt<bool>
+    DumpConfig("dump-config",
+               cl::desc("Dump configuration options to stdout and exit. Can be used with -style option."));
 
 static cl::list<std::string> FileNames(cl::Positional,
                                        cl::desc("[<file> ...]"));
@@ -59,13 +73,40 @@ static FileID createInMemoryFile(StringRef FileName, const MemoryBuffer *Source,
   return Sources.createFileID(Entry, SourceLocation(), SrcMgr::C_User);
 }
 
-static FormatStyle getStyle() {
-  FormatStyle TheStyle = getGoogleStyle();
-  if (Style == "LLVM")
-    TheStyle = getLLVMStyle();
-  if (Style == "Chromium")
-    TheStyle = getChromiumStyle();
-  return TheStyle;
+FormatStyle getStyle(StringRef StyleName, StringRef FileName) {
+  if (!StyleName.equals_lower("file"))
+    return getPredefinedStyle(StyleName);
+
+  SmallString<128> Path(FileName);
+  llvm::sys::fs::make_absolute(Path);
+  for (StringRef Directory = llvm::sys::path::parent_path(Path);
+       !Directory.empty();
+       Directory = llvm::sys::path::parent_path(Directory)) {
+    SmallString<128> ConfigFile(Directory);
+    llvm::sys::path::append(ConfigFile, ".clang-format");
+    DEBUG(llvm::dbgs() << "Trying " << ConfigFile << "...\n");
+    bool IsFile = false;
+    // Ignore errors from is_regular_file: we only need to know if we can read
+    // the file or not.
+    llvm::sys::fs::is_regular_file(Twine(ConfigFile), IsFile);
+    if (IsFile) {
+      OwningPtr<MemoryBuffer> Text;
+      if (error_code ec = MemoryBuffer::getFile(ConfigFile, Text)) {
+        llvm::errs() << ec.message() << "\n";
+        continue;
+      }
+      FormatStyle Style;
+      if (error_code ec = parseConfiguration(Text->getBuffer(), &Style)) {
+        llvm::errs() << "Error reading " << ConfigFile << ": " << ec.message()
+                     << "\n";
+        continue;
+      }
+      DEBUG(llvm::dbgs() << "Using configuration file " << ConfigFile << "\n");
+      return Style;
+    }
+  }
+  llvm::errs() << "Can't find usable .clang-format, using LLVM style\n";
+  return getLLVMStyle();
 }
 
 // Returns true on error.
@@ -113,7 +154,8 @@ static bool format(std::string FileName) {
     }
     Ranges.push_back(CharSourceRange::getCharRange(Start, End));
   }
-  tooling::Replacements Replaces = reformat(getStyle(), Lex, Sources, Ranges);
+  tooling::Replacements Replaces =
+      reformat(getStyle(Style, FileName), Lex, Sources, Ranges);
   if (OutputXML) {
     llvm::outs()
         << "<?xml version='1.0'?>\n<replacements xml:space='preserve'>\n";
@@ -165,6 +207,13 @@ int main(int argc, const char **argv) {
 
   if (Help)
     cl::PrintHelpMessage();
+
+  if (DumpConfig) {
+    std::string Config = clang::format::configurationAsText(
+        clang::format::getStyle(Style, FileNames.empty() ? "-" : FileNames[0]));
+    llvm::outs() << Config << "\n";
+    return 0;
+  }
 
   bool Error = false;
   switch (FileNames.size()) {

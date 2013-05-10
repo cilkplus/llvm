@@ -637,18 +637,6 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
     }
   }
 
-  // If CFG is emitting a captured statement and 'this' is captured,
-  // load it into CXXThisValue.
-  if (CapturedStmtInfo && CapturedStmtInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
-    QualType TagType = getContext().getTagDeclType(FD->getParent());
-    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getThisValue(),
-                                           TagType);
-    LValue ThisLValue = EmitLValueForField(LV, FD);
-
-    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
-  }
-
   // If any of the arguments have a variably modified type, make sure to
   // emit the type size.
   for (FunctionArgList::const_iterator i = Args.begin(), e = Args.end();
@@ -981,6 +969,16 @@ void CodeGenFunction::EmitBranchOnBoolExpr(const Expr *Cond,
     EmitBranchOnBoolExpr(CondOp->getRHS(), TrueBlock, FalseBlock);
     cond.end(*this);
 
+    return;
+  }
+
+  if (const CXXThrowExpr *Throw = dyn_cast<CXXThrowExpr>(Cond)) {
+    // Conditional operator handling can give us a throw expression as a
+    // condition for a case like:
+    //   br(c ? throw x : y, t, f) -> br(c, br(throw x, t, f), br(y, t, f)
+    // Fold this to:
+    //   br(c, throw x, br(y, t, f))
+    EmitCXXThrowExpr(Throw, /*KeepInsertionPoint*/false);
     return;
   }
 
@@ -1493,3 +1491,5 @@ llvm::Value *CodeGenFunction::EmitFieldAnnotations(const FieldDecl *D,
 
   return V;
 }
+
+CodeGenFunction::CGCapturedStmtInfo::~CGCapturedStmtInfo() { }

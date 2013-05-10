@@ -611,10 +611,9 @@ public:
   /// \brief API for captured statement code generation.
   class CGCapturedStmtInfo {
   public:
-
     explicit CGCapturedStmtInfo(const CapturedStmt &S,
                                 CapturedRegionKind K = CR_Default)
-      : Kind(K), ThisValue(0), CXXThisFieldDecl(0), ThisParmVarDecl(0),
+      : Kind(K), ThisValue(0), CXXThisFieldDecl(0),
         ReceiverDecl(0), ReceiverFieldDecl(0), ReceiverTmpFieldDecl(0),
         ReceiverAddr(0), ReceiverTmp(0) { 
 
@@ -642,12 +641,13 @@ public:
       }
     }
 
-    virtual ~CGCapturedStmtInfo() { }
+    virtual ~CGCapturedStmtInfo();
 
     CapturedRegionKind getKind() const { return Kind; }
 
-    void setThisValue(llvm::Value *V) { ThisValue = V; }
-    llvm::Value *getThisValue() const { return ThisValue; }
+    void setContextValue(llvm::Value *V) { ThisValue = V; }
+    // \brief Retrieve the value of the context parameter.
+    llvm::Value *getContextValue() const { return ThisValue; }
 
     /// \brief Lookup the captured field decl for a variable.
     const FieldDecl *lookup(const VarDecl *VD) const {
@@ -659,14 +659,6 @@ public:
     FieldDecl *getReceiverFieldDecl() const { return ReceiverFieldDecl; }
     FieldDecl *getReceiverTmpFieldDecl() const { return ReceiverTmpFieldDecl; }
 
-    bool isThisParmVarDecl(const VarDecl *V) const {
-      return V == ThisParmVarDecl;
-    }
-
-    void setThisParmVarDecl(VarDecl *V) {
-      ThisParmVarDecl = V;
-    }
-
     bool isReceiverDecl(const NamedDecl *V) const {
       return V && V == ReceiverDecl;
     }
@@ -676,9 +668,6 @@ public:
 
     llvm::Value *getReceiverTmp() const { return ReceiverTmp; }
     void setReceiverTmp(llvm::Value *val) { ReceiverTmp = val; }
-
-    /// \brief Emit a prologue for the captured helper.
-    virtual void EmitPrologue(CodeGenFunction &CGF) { }
 
     /// \brief Emit the captured statement body.
     virtual void EmitBody(CodeGenFunction &CGF, Stmt *S) {
@@ -701,9 +690,6 @@ public:
 
     /// \brief Captured 'this' type.
     FieldDecl *CXXThisFieldDecl;
-
-    /// \brief The captured record parameter to the helper function.
-    VarDecl *ThisParmVarDecl;
 
     /// \brief The receiver declariation.
     VarDecl *ReceiverDecl;
@@ -758,7 +744,7 @@ public:
     explicit CGCilkSpawnStmtInfo(const CapturedStmt &S)
       : CGCapturedStmtInfo(S, CR_CilkSpawn) { }
 
-    virtual void EmitPrologue(CodeGenFunction &CGF);
+    virtual void EmitBody(CodeGenFunction &CGF, Stmt *S);
     virtual StringRef getHelperName() const { return "__cilk_spawn_helper"; }
   };
 
@@ -2367,9 +2353,8 @@ public:
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
 
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
-  llvm::Function *GenerateCapturedFunction(GlobalDecl GD,
-                                           const CapturedDecl *CD,
-                                           const RecordDecl *RD);
+  llvm::Function *GenerateCapturedStmtFunction(const CapturedDecl *CD,
+                                               const RecordDecl *RD);
 
   void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
@@ -2884,7 +2869,7 @@ public:
   }
   void enterNonTrivialFullExpression(const ExprWithCleanups *E);
 
-  void EmitCXXThrowExpr(const CXXThrowExpr *E);
+  void EmitCXXThrowExpr(const CXXThrowExpr *E, bool KeepInsertionPoint = true);
 
   void EmitLambdaExpr(const LambdaExpr *E, AggValueSlot Dest);
 

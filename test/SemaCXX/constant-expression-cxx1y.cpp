@@ -334,6 +334,99 @@ namespace incdec {
   static_assert(incr(0) == 101, "");
 }
 
+namespace compound_assign {
+  constexpr bool test_int() {
+    int a = 3;
+    a += 6;
+    if (a != 9) return false;
+    a -= 2;
+    if (a != 7) return false;
+    a *= 3;
+    if (a != 21) return false;
+    if (&(a /= 10) != &a) return false;
+    if (a != 2) return false;
+    a <<= 3;
+    if (a != 16) return false;
+    a %= 6;
+    if (a != 4) return false;
+    a >>= 1;
+    if (a != 2) return false;
+    a ^= 10;
+    if (a != 8) return false;
+    a |= 5;
+    if (a != 13) return false;
+    a &= 14;
+    if (a != 12) return false;
+    return true;
+  }
+  static_assert(test_int(), "");
+
+  constexpr bool test_float() {
+    float f = 123.;
+    f *= 2;
+    if (f != 246.) return false;
+    if ((f -= 0.5) != 245.5) return false;
+    if (f != 245.5) return false;
+    f /= 0.5;
+    if (f != 491.) return false;
+    f += -40;
+    if (f != 451.) return false;
+    return true;
+  }
+  static_assert(test_float(), "");
+
+  constexpr bool test_ptr() {
+    int arr[123] = {};
+    int *p = arr;
+    if ((p += 4) != &arr[4]) return false;
+    if (p != &arr[4]) return false;
+    p += -1;
+    if (p != &arr[3]) return false;
+    if ((p -= -10) != &arr[13]) return false;
+    if (p != &arr[13]) return false;
+    p -= 11;
+    if (p != &arr[2]) return false;
+    return true;
+  }
+  static_assert(test_ptr(), "");
+
+  template<typename T>
+  constexpr bool test_overflow() {
+    T a = 1;
+    while (a != a / 2)
+      a *= 2; // expected-note {{value 2147483648 is outside the range}} expected-note {{ 9223372036854775808 }} expected-note {{floating point arithmetic produces an infinity}}
+    return true;
+  }
+
+  static_assert(test_overflow<int>(), ""); // expected-error {{constant}} expected-note {{call}}
+  static_assert(test_overflow<unsigned>(), ""); // ok, unsigned overflow is defined
+  static_assert(test_overflow<short>(), ""); // ok, short is promoted to int before multiplication
+  static_assert(test_overflow<unsigned short>(), ""); // ok
+  static_assert(test_overflow<unsigned long long>(), ""); // ok
+  static_assert(test_overflow<long long>(), ""); // expected-error {{constant}} expected-note {{call}}
+  static_assert(test_overflow<float>(), ""); // expected-error {{constant}} expected-note {{call}}
+
+  constexpr short test_promotion(short k) {
+    short s = k;
+    s *= s;
+    return s;
+  }
+  static_assert(test_promotion(100) == 10000, "");
+  static_assert(test_promotion(200) == -25536, "");
+  static_assert(test_promotion(256) == 0, "");
+
+  constexpr const char *test_bounds(const char *p, int o) {
+    return p += o; // expected-note {{element 5 of}} expected-note {{element -1 of}} expected-note {{element 1000 of}}
+  }
+  static_assert(test_bounds("foo", 0)[0] == 'f', "");
+  static_assert(test_bounds("foo", 3)[0] == 0, "");
+  static_assert(test_bounds("foo", 4)[-3] == 'o', "");
+  static_assert(test_bounds("foo" + 4, -4)[0] == 'f', "");
+  static_assert(test_bounds("foo", 5) != 0, ""); // expected-error {{constant}} expected-note {{call}}
+  static_assert(test_bounds("foo", -1) != 0, ""); // expected-error {{constant}} expected-note {{call}}
+  static_assert(test_bounds("foo", 1000) != 0, ""); // expected-error {{constant}} expected-note {{call}}
+}
+
 namespace loops {
   constexpr int fib_loop(int a) {
     int f_k = 0, f_k_plus_one = 1;
@@ -407,7 +500,7 @@ namespace loops {
     int arr[] = { 1, 2, 3, 4, 5 };
     int sum = 0;
     for (int x : arr)
-      sum = sum + x;
+      sum += x;
     return sum;
   }
   static_assert(range_for() == 15, "");
@@ -450,10 +543,53 @@ namespace loops {
     array<int, 5> arr { 1, 2, 3, 4, 5 };
     int sum = 0;
     for (int k : arr) {
-      sum = sum + k;
+      sum += k;
       if (sum > 8) break;
     }
     return sum;
   }
   static_assert(range_for_2() == 10, "");
+}
+
+namespace assignment_op {
+  struct A {
+    constexpr A() : n(5) {}
+    int n;
+    struct B {
+      int k = 1;
+      union U {
+        constexpr U() : y(4) {}
+        int x;
+        int y;
+      } u;
+    } b;
+  };
+  constexpr bool testA() {
+    A a, b;
+    a.n = 7;
+    a.b.u.y = 5;
+    b = a;
+    return b.n == 7 && b.b.u.y == 5 && b.b.k == 1;
+  }
+  static_assert(testA(), "");
+
+  struct B {
+    bool assigned = false;
+    constexpr B &operator=(const B&) {
+      assigned = true;
+      return *this;
+    }
+  };
+  struct C : B {
+    B b;
+    int n = 5;
+  };
+  constexpr bool testC() {
+    C c, d;
+    c.n = 7;
+    d = c;
+    c.n = 3;
+    return d.n == 7 && d.assigned && d.b.assigned;
+  }
+  static_assert(testC(), "");
 }

@@ -107,6 +107,11 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
     PP.AddPragmaHandler(CilkGrainsizeHandler.get());
   }
 
+  if (getLangOpts().MicrosoftExt) {
+    MSCommentHandler.reset(new PragmaCommentHandler(actions));
+    PP.AddPragmaHandler(MSCommentHandler.get());
+  }
+
   CommentSemaHandler.reset(new ActionCommentHandler(actions));
   PP.addCommentHandler(CommentSemaHandler.get());
 
@@ -444,6 +449,11 @@ Parser::~Parser() {
   if (getLangOpts().CilkPlus) {
     PP.RemovePragmaHandler(CilkGrainsizeHandler.get());
     CilkGrainsizeHandler.reset();
+  }
+
+  if (getLangOpts().MicrosoftExt) {
+    PP.RemovePragmaHandler(MSCommentHandler.get());
+    MSCommentHandler.reset();
   }
 
   PP.RemovePragmaHandler("STDC", FPContractHandler.get());

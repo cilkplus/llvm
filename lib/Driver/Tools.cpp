@@ -545,6 +545,9 @@ static bool isSignedCharDefault(const llvm::Triple &Triple) {
     if (Triple.isOSDarwin())
       return true;
     return false;
+
+  case llvm::Triple::systemz:
+    return false;
   }
 }
 
@@ -1135,11 +1138,11 @@ static std::string getR600TargetGPU(const ArgList &Args) {
   if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ)) {
     std::string GPUName = A->getValue();
     return llvm::StringSwitch<const char *>(GPUName)
-      .Cases("rv610", "rv620", "rv630", "r600")
-      .Cases("rv635", "rs780", "rs880", "r600")
+      .Cases("rv630", "rv635", "r600")
+      .Cases("rv610", "rv620", "rs780", "rs880")
       .Case("rv740", "rv770")
       .Case("palm", "cedar")
-      .Cases("sumo", "sumo2", "redwood")
+      .Cases("sumo", "sumo2", "sumo")
       .Case("hemlock", "cypress")
       .Case("aruba", "cayman")
       .Default(GPUName.c_str());
@@ -2661,6 +2664,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (Arg *A = Args.getLastArg(options::OPT_fconstexpr_depth_EQ)) {
     CmdArgs.push_back("-fconstexpr-depth");
+    CmdArgs.push_back(A->getValue());
+  }
+
+  if (Arg *A = Args.getLastArg(options::OPT_fconstexpr_steps_EQ)) {
+    CmdArgs.push_back("-fconstexpr-steps");
     CmdArgs.push_back(A->getValue());
   }
 
@@ -5827,6 +5835,9 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
          LastPICArg->getOption().matches(options::OPT_fpie))) {
       CmdArgs.push_back("-KPIC");
     }
+  } else if (getToolChain().getArch() == llvm::Triple::systemz) {
+    // At the moment we always produce z10 code.
+    CmdArgs.push_back("-march=z10");
   }
 
   Args.AddAllArgValues(CmdArgs, options::OPT_Wa_COMMA,
@@ -5958,6 +5969,8 @@ void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
     else
       CmdArgs.push_back("elf64ltsmip");
   }
+  else if (ToolChain.getArch() == llvm::Triple::systemz)
+    CmdArgs.push_back("elf64_s390");
   else
     CmdArgs.push_back("elf_x86_64");
 
@@ -6004,7 +6017,8 @@ void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
     }
     else if (ToolChain.getArch() == llvm::Triple::ppc)
       CmdArgs.push_back("/lib/ld.so.1");
-    else if (ToolChain.getArch() == llvm::Triple::ppc64)
+    else if (ToolChain.getArch() == llvm::Triple::ppc64 ||
+	     ToolChain.getArch() == llvm::Triple::systemz)
       CmdArgs.push_back("/lib64/ld64.so.1");
     else
       CmdArgs.push_back("/lib64/ld-linux-x86-64.so.2");

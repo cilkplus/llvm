@@ -42,8 +42,7 @@ void CodeGenFunction::EmitStopPoint(const Stmt *S) {
       Loc = S->getLocStart();
     DI->EmitLocation(Builder, Loc);
 
-    //if (++NumStopPoints == 1)
-      LastStopPoint = Loc;
+    LastStopPoint = Loc;
   }
 }
 
@@ -858,9 +857,9 @@ void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
     }
   }
 
-  NumReturnExprs += 1;
+  ++NumReturnExprs;
   if (RV == 0 || RV->isEvaluatable(getContext()))
-    NumSimpleReturnExprs += 1;
+    ++NumSimpleReturnExprs;
 
   cleanupScope.ForceCleanup();
   EmitBranchThroughCleanup(ReturnBlock);
@@ -1794,9 +1793,8 @@ static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S,
   QualType RecordTy = CGF.getContext().getRecordType(RD);
 
   // Initialize the captured struct.
-  AggValueSlot Slot = CGF.CreateAggTemp(RecordTy, "agg.captured");
-  LValue SlotLV = CGF.MakeAddrLValue(Slot.getAddr(), RecordTy,
-                                     Slot.getAlignment());
+  LValue SlotLV = CGF.MakeNaturalAlignAddrLValue(
+                    CGF.CreateMemTemp(RecordTy, "agg.captured"), RecordTy);
 
   RecordDecl::field_iterator CurField = RD->field_begin();
   CapturedStmt::const_capture_iterator C = S.capture_begin();
@@ -1804,7 +1802,6 @@ static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S,
                                            E = S.capture_init_end();
        I != E; ++I, ++C, ++CurField) {
     LValue LV = CGF.EmitLValueForFieldInitialization(SlotLV, *CurField);
-    ArrayRef<VarDecl *> ArrayIndexes;
     switch (C->getCaptureKind()) {
     case CapturedStmt::VCK_Receiver:
       CGF.EmitStoreOfScalar(CGF.GetAddrOfLocalVar(C->getCapturedVar()), LV, true);
@@ -1815,7 +1812,7 @@ static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S,
       CGF.EmitStoreOfScalar(ReceiverTmp, LV, true);
     } break;
     default:
-      CGF.EmitInitializerForField(*CurField, LV, *I, ArrayIndexes);
+      CGF.EmitInitializerForField(*CurField, LV, *I, ArrayRef<VarDecl *>());
       break;
     }
   }
@@ -1846,16 +1843,11 @@ CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K) {
   default:
     CGF.CapturedStmtInfo = new CGCapturedStmtInfo(S);
   }
-  CGF.CapturedStmtInfo->setThisParmVarDecl(CD->getContextParam());
-  llvm::Function *F = CGF.GenerateCapturedFunction(CurGD, CD, RD);
+  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
   delete CGF.CapturedStmtInfo;
 
-  // The function argument is the address of the captured struct.
-  llvm::SmallVector<llvm::Value *, 3> Args;
-  Args.push_back(CapStruct.getAddress());
-
   // Emit call to the helper function.
-  EmitCallOrInvoke(F, Args);
+  EmitCallOrInvoke(F, CapStruct.getAddress());
 
   // If this statement binds a temporary to a reference, then destroy the
   // temporary at the end of the reference's lifetime.
@@ -1867,15 +1859,13 @@ CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K) {
 
 /// Creates the outlined function for a CapturedStmt.
 llvm::Function *
-CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
-                                          const CapturedDecl *CD,
-                                          const RecordDecl *RD) {
+CodeGenFunction::GenerateCapturedStmtFunction(const CapturedDecl *CD,
+                                              const RecordDecl *RD) {
   assert(CapturedStmtInfo &&
     "CapturedStmtInfo should be set when generating the captured function");
 
   // Check if we should generate debug info for this function.
   maybeInitializeDebugInfo();
-  CurGD = GD;
 
   // Build the argument list.
   ASTContext &Ctx = CGM.getContext();
@@ -1891,12 +1881,44 @@ CodeGenFunction::GenerateCapturedFunction(GlobalDecl GD,
 
   llvm::Function *F =
     llvm::Function::Create(FuncLLVMTy, llvm::GlobalValue::InternalLinkage,
-                          CapturedStmtInfo->getHelperName(), &CGM.getModule());
+                           CapturedStmtInfo->getHelperName(), &CGM.getModule());
   CGM.SetInternalFunctionAttributes(CD, F, FuncInfo);
 
   // Generate the function.
   StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getBody()->getLocStart());
-  CapturedStmtInfo->EmitPrologue(*this);
+
+  // Set the context parameter in CapturedStmtInfo.
+  llvm::Value *DeclPtr = LocalDeclMap[CD->getContextParam()];
+  assert(DeclPtr && "missing context parameter for CapturedStmt");
+  CapturedStmtInfo->setContextValue(Builder.CreateLoad(DeclPtr));
+
+  // If there is a receiver, it is stored in a field of the captured record.
+  if (FieldDecl *RecFD = CapturedStmtInfo->getReceiverFieldDecl()) {
+    assert(RecFD->getParent() == RD && "incorrect record decl for receiver");
+    QualType TagType = getContext().getTagDeclType(RD);
+
+    LValue LV = MakeNaturalAlignAddrLValue(
+      CapturedStmtInfo->getContextValue(), TagType);
+    CapturedStmtInfo->setReceiverAddr(
+      Builder.CreateLoad(EmitLValueForField(LV, RecFD).getAddress()));
+
+    // Similarly for the receiver temporary.
+    if (FieldDecl *RecTmpFD = CapturedStmtInfo->getReceiverTmpFieldDecl()) {
+      CapturedStmtInfo->setReceiverTmp(
+        Builder.CreateLoad(EmitLValueForField(LV, RecTmpFD).getAddress()));
+    }
+  }
+
+  // If 'this' is captured, load it into CXXThisValue.
+  if (CapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
+    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getContextValue(),
+                                           Ctx.getTagDeclType(RD));
+    LValue ThisLValue = EmitLValueForField(LV, FD);
+
+    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
+  }
+
   CapturedStmtInfo->EmitBody(*this, CD->getBody());
   FinishFunction(CD->getBodyRBrace());
 
@@ -1940,9 +1962,8 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize) {
   CGCilkForStmtInfo CSInfo(S);
   CodeGenFunction CGF(CGM, true);
   CGF.CapturedStmtInfo = &CSInfo;
-  CGF.CapturedStmtInfo->setThisParmVarDecl(CD->getContextParam());
 
-  llvm::Function *Helper = CGF.GenerateCapturedFunction(CurGD, CD, RD);
+  llvm::Function *Helper = CGF.GenerateCapturedStmtFunction(CD, RD);
 
   llvm::BasicBlock *ThenBlock = createBasicBlock("if.then");
   llvm::BasicBlock *ContBlock = createBasicBlock("if.end");
@@ -2116,6 +2137,7 @@ void CodeGenFunction::EmitCilkForHelperBody(const Stmt *S) {
 }
 
 void
-CodeGenFunction::CGCilkSpawnStmtInfo::EmitPrologue(CodeGenFunction &CGF) {
+CodeGenFunction::CGCilkSpawnStmtInfo::EmitBody(CodeGenFunction &CGF, Stmt *S) {
   CGF.CGM.getCilkPlusRuntime().EmitCilkHelperStackFrame(CGF);
+  CGCapturedStmtInfo::EmitBody(CGF, S);
 }
