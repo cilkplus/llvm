@@ -499,6 +499,7 @@ void CodeGenFunction::EmitWhileStmt(const WhileStmt &S) {
   // the continue target.
   JumpDest LoopHeader = getJumpDestInCurrentScope("while.cond");
   EmitBlock(LoopHeader.getBlock());
+  LoopStack.Push(LoopHeader.getBlock());
 
   // Create an exit block for when the condition fails, which will
   // also become the break target.
@@ -562,6 +563,8 @@ void CodeGenFunction::EmitWhileStmt(const WhileStmt &S) {
   // Branch to the loop header again.
   EmitBranch(LoopHeader.getBlock());
 
+  LoopStack.Pop();
+
   // Emit the exit block.
   EmitBlock(LoopExit.getBlock(), true);
 
@@ -580,6 +583,8 @@ void CodeGenFunction::EmitDoStmt(const DoStmt &S) {
 
   // Emit the body of the loop.
   llvm::BasicBlock *LoopBody = createBasicBlock("do.body");
+  LoopStack.Push(LoopBody);
+
   EmitBlock(LoopBody);
   {
     RunCleanupsScope BodyScope(*this);
@@ -609,6 +614,8 @@ void CodeGenFunction::EmitDoStmt(const DoStmt &S) {
   if (EmitBoolCondBranch)
     Builder.CreateCondBr(BoolCondVal, LoopBody, LoopExit.getBlock());
 
+  LoopStack.Pop();
+
   // Emit the exit block.
   EmitBlock(LoopExit.getBlock());
 
@@ -637,6 +644,7 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S) {
   JumpDest Continue = getJumpDestInCurrentScope("for.cond");
   llvm::BasicBlock *CondBlock = Continue.getBlock();
   EmitBlock(CondBlock);
+  LoopStack.Push(CondBlock);
 
   // Create a cleanup scope for the condition variable cleanups.
   RunCleanupsScope ConditionScope(*this);
@@ -706,6 +714,8 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S) {
 
   if (DI)
     DI->EmitLexicalBlockEnd(Builder, S.getSourceRange().getEnd());
+
+  LoopStack.Pop();
 
   // Emit the fall-through block.
   EmitBlock(LoopExit.getBlock(), true);
@@ -2083,6 +2093,9 @@ void CodeGenFunction::EmitCilkForHelperBody(const Stmt *S) {
     EmitBlock(CondBlock);
     llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
 
+    LoopStack.SetParallel();
+    LoopStack.Push(CondBlock);
+
     // If there are any cleanups between here and the loop-exit scope,
     // create a block to stage a loop exit along.
     if (LoopScope.requiresCleanups())
@@ -2128,9 +2141,12 @@ void CodeGenFunction::EmitCilkForHelperBody(const Stmt *S) {
   }
 
   BreakContinueStack.pop_back();
+
   EmitBranch(CondBlock);
 
   LoopScope.ForceCleanup();
+
+  LoopStack.Pop();
 
   // Emit the fall-through block.
   EmitBlock(LoopExit.getBlock(), true);

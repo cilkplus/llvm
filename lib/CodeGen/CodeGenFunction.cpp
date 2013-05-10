@@ -34,7 +34,8 @@ using namespace CodeGen;
 
 CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
-    Builder(cgm.getModule().getContext()),
+    Builder(cgm.getModule().getContext(), llvm::ConstantFolder(),
+            CGBuilderInserterTy(this)),
     CapturedStmtInfo(0),
     CurCGCilkImplicitSyncInfo(0),
     SanitizePerformTypeCheck(CGM.getSanOpts().Null |
@@ -1493,3 +1494,50 @@ llvm::Value *CodeGenFunction::EmitFieldAnnotations(const FieldDecl *D,
 }
 
 CodeGenFunction::CGCapturedStmtInfo::~CGCapturedStmtInfo() { }
+
+void
+CodeGenFunction::InsertHelper(llvm::Instruction *I,
+                              const llvm::Twine &Name,
+                              llvm::BasicBlock *BB,
+                              llvm::BasicBlock::iterator InsertPt) const {
+  if (!LoopStack.HasInfo())
+    return;
+  const LoopInfo &L = LoopStack.GetInfo();
+  if (L.GetAttributes().IsParallel) {
+    if (llvm::TerminatorInst *TI = llvm::dyn_cast<llvm::TerminatorInst>(I)) {
+      for (unsigned i = 0, ie = TI->getNumSuccessors(); i != ie; ++i)
+        if (TI->getSuccessor(i) == L.GetHeader()) {
+          TI->setMetadata("llvm.loop.parallel", L.GetLoopID());
+          break;
+        }
+    } else if (llvm::StoreInst *SI = llvm::dyn_cast<llvm::StoreInst>(I))
+      SI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
+    else if (llvm::LoadInst *LI = llvm::dyn_cast<llvm::LoadInst>(I))
+      LI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
+  }
+}
+
+template <bool PreserveNames>
+void CGBuilderInserter<PreserveNames>::
+  InsertHelper(llvm::Instruction *I,
+               const llvm::Twine &Name,
+               llvm::BasicBlock *BB,
+               llvm::BasicBlock::iterator InsertPt) const {
+  llvm::IRBuilderDefaultInserter<PreserveNames>::InsertHelper(I, Name, BB,
+                                                              InsertPt);
+  if (CGF)
+    CGF->InsertHelper(I, Name, BB, InsertPt);
+}
+#ifdef NDEBUG
+template void CGBuilderInserter<false>::
+  InsertHelper(llvm::Instruction *I,
+               const llvm::Twine &Name,
+               llvm::BasicBlock *BB,
+               llvm::BasicBlock::iterator InsertPt) const;
+#else
+template void CGBuilderInserter<true>::
+  InsertHelper(llvm::Instruction *I,
+               const llvm::Twine &Name,
+               llvm::BasicBlock *BB,
+               llvm::BasicBlock::iterator InsertPt) const;
+#endif
