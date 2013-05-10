@@ -677,6 +677,7 @@ public:
   error_code getSymbolVersion(SymbolRef Symb, StringRef &Version,
                               bool &IsDefault) const;
   uint64_t getSymbolIndex(const Elf_Sym *sym) const;
+  error_code getRelocationAddend(DataRefImpl Rel, int64_t &Res) const;
 protected:
   virtual error_code getSymbolNext(DataRefImpl Symb, SymbolRef &Res) const;
   virtual error_code getSymbolName(DataRefImpl Symb, StringRef &Res) const;
@@ -725,8 +726,6 @@ protected:
                                        uint64_t &Res) const;
   virtual error_code getRelocationTypeName(DataRefImpl Rel,
                                            SmallVectorImpl<char> &Result) const;
-  virtual error_code getRelocationAdditionalInfo(DataRefImpl Rel,
-                                                 int64_t &Res) const;
   virtual error_code getRelocationValueString(DataRefImpl Rel,
                                            SmallVectorImpl<char> &Result) const;
 
@@ -839,6 +838,13 @@ public:
                                       ELFT::Is64Bits);
   }
 };
+
+// Use an alignment of 2 for the typedefs since that is the worst case for
+// ELF files in archives.
+typedef ELFObjectFile<ELFType<support::little, 2, false> > ELF32LEObjectFile;
+typedef ELFObjectFile<ELFType<support::little, 2, true> > ELF64LEObjectFile;
+typedef ELFObjectFile<ELFType<support::big, 2, false> > ELF32BEObjectFile;
+typedef ELFObjectFile<ELFType<support::big, 2, true> > ELF64BEObjectFile;
 
 // Iterate through the version definitions, and place each Elf_Verdef
 // in the VersionMap according to its index.
@@ -2069,10 +2075,18 @@ StringRef ELFObjectFile<ELFT>::getRelocationTypeName(uint32_t Type) const {
     switch (Type) {
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_NONE);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR24);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_LO);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_HA);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR14);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR14_BRTAKEN);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR14_BRNTAKEN);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL24);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL14);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL14_BRTAKEN);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL14_BRNTAKEN);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL32);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR64);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_HIGHER);
@@ -2219,7 +2233,7 @@ error_code ELFObjectFile<ELFT>::getRelocationTypeName(
 }
 
 template<class ELFT>
-error_code ELFObjectFile<ELFT>::getRelocationAdditionalInfo(
+error_code ELFObjectFile<ELFT>::getRelocationAddend(
     DataRefImpl Rel, int64_t &Result) const {
   const Elf_Shdr *sec = getSection(Rel.w.b);
   switch (sec->sh_type) {
@@ -2941,6 +2955,31 @@ error_code ELFObjectFile<ELFT>::getSymbolVersion(const Elf_Shdr *section,
   return object_error::success;
 }
 
+/// FIXME: Maybe we should have a base ElfObjectFile that is not a template
+/// and make these member functions?
+static inline error_code getELFRelocationAddend(const RelocationRef R,
+                                                int64_t &Addend) {
+  const ObjectFile *Obj = R.getObjectFile();
+  DataRefImpl DRI = R.getRawDataRefImpl();
+  // Little-endian 32-bit
+  if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
+    return ELFObj->getRelocationAddend(DRI, Addend);
+
+  // Big-endian 32-bit
+  if (const ELF32BEObjectFile *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
+    return ELFObj->getRelocationAddend(DRI, Addend);
+
+  // Little-endian 64-bit
+  if (const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
+    return ELFObj->getRelocationAddend(DRI, Addend);
+
+  // Big-endian 64-bit
+  if (const ELF64BEObjectFile *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
+    return ELFObj->getRelocationAddend(DRI, Addend);
+
+  llvm_unreachable("Object passed to getELFRelocationAddend() is not ELF");
+}
+
 /// This is a generic interface for retrieving GNU symbol version
 /// information from an ELFObjectFile.
 static inline error_code GetELFSymbolVersion(const ObjectFile *Obj,
@@ -2948,23 +2987,19 @@ static inline error_code GetELFSymbolVersion(const ObjectFile *Obj,
                                              StringRef &Version,
                                              bool &IsDefault) {
   // Little-endian 32-bit
-  if (const ELFObjectFile<ELFType<support::little, 4, false> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::little, 4, false> > >(Obj))
+  if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
     return ELFObj->getSymbolVersion(Sym, Version, IsDefault);
 
   // Big-endian 32-bit
-  if (const ELFObjectFile<ELFType<support::big, 4, false> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::big, 4, false> > >(Obj))
+  if (const ELF32BEObjectFile *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
     return ELFObj->getSymbolVersion(Sym, Version, IsDefault);
 
   // Little-endian 64-bit
-  if (const ELFObjectFile<ELFType<support::little, 8, true> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::little, 8, true> > >(Obj))
+  if (const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
     return ELFObj->getSymbolVersion(Sym, Version, IsDefault);
 
   // Big-endian 64-bit
-  if (const ELFObjectFile<ELFType<support::big, 8, true> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::big, 8, true> > >(Obj))
+  if (const ELF64BEObjectFile *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
     return ELFObj->getSymbolVersion(Sym, Version, IsDefault);
 
   llvm_unreachable("Object passed to GetELFSymbolVersion() is not ELF");

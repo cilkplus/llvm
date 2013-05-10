@@ -433,6 +433,10 @@ class DwarfDebug {
   // Holder for the skeleton information.
   DwarfUnits SkeletonHolder;
 
+  typedef SmallVector<std::pair<const MDNode *, const MDNode *>, 32>
+    ImportedEntityMap;
+  ImportedEntityMap ScopesWithImportedEntities;
+
 private:
 
   void addScopeVariable(LexicalScope *LS, DbgVariable *Var);
@@ -555,8 +559,17 @@ private:
   /// \brief Construct subprogram DIE.
   void constructSubprogramDIE(CompileUnit *TheCU, const MDNode *N);
 
+  /// \brief Construct imported_module or imported_declaration DIE.
+  void constructImportedEntityDIE(CompileUnit *TheCU, const MDNode *N);
+
   /// \brief Construct import_module DIE.
-  void constructImportedModuleDIE(CompileUnit *TheCU, const MDNode *N);
+  void constructImportedEntityDIE(CompileUnit *TheCU, const MDNode *N,
+                                  DIE *Context);
+
+  /// \brief Construct import_module DIE.
+  void constructImportedEntityDIE(CompileUnit *TheCU,
+                                  const DIImportedEntity &Module,
+                                  DIE *Context);
 
   /// \brief Register a source line with debug info. Returns the unique
   /// label that was emitted and which provides correspondence to the

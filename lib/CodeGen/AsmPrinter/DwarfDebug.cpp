@@ -94,6 +94,12 @@ static cl::opt<DefaultOnOff> SplitDwarf("split-dwarf", cl::Hidden,
 namespace {
   const char *DWARFGroupName = "DWARF Emission";
   const char *DbgTimerName = "DWARF Debug Writer";
+
+  struct CompareFirst {
+    template <typename T> bool operator()(const T &lhs, const T &rhs) const {
+      return lhs.first < rhs.first;
+    }
+  };
 } // end anonymous namespace
 
 //===----------------------------------------------------------------------===//
@@ -597,9 +603,16 @@ DIE *DwarfDebug::constructScopeDIE(CompileUnit *TheCU, LexicalScope *Scope) {
   }
   else {
     // There is no need to emit empty lexical block DIE.
-    if (Children.empty())
+    std::pair<ImportedEntityMap::const_iterator,
+              ImportedEntityMap::const_iterator> Range = std::equal_range(
+        ScopesWithImportedEntities.begin(), ScopesWithImportedEntities.end(),
+        std::pair<const MDNode *, const MDNode *>(DS, (const MDNode*)0),
+        CompareFirst());
+    if (Children.empty() && Range.first == Range.second)
       return NULL;
     ScopeDIE = constructLexicalScopeDIE(TheCU, Scope);
+    for (ImportedEntityMap::const_iterator i = Range.first; i != Range.second; ++i)
+      constructImportedEntityDIE(TheCU, i->second, ScopeDIE);
   }
 
   if (!ScopeDIE) return NULL;
@@ -670,7 +683,7 @@ CompileUnit *DwarfDebug::constructCompileUnit(const MDNode *N) {
 
   DIE *Die = new DIE(dwarf::DW_TAG_compile_unit);
   CompileUnit *NewCU = new CompileUnit(GlobalCUIndexCount++,
-                                       DIUnit.getLanguage(), Die, Asm,
+                                       DIUnit.getLanguage(), Die, N, Asm,
                                        this, &InfoHolder);
 
   FileIDCUMap[NewCU->getUniqueID()] = 0;
@@ -763,21 +776,48 @@ void DwarfDebug::constructSubprogramDIE(CompileUnit *TheCU,
     TheCU->addGlobalName(SP.getName(), SubprogramDie);
 }
 
-void DwarfDebug::constructImportedModuleDIE(CompileUnit *TheCU,
+void DwarfDebug::constructImportedEntityDIE(CompileUnit *TheCU,
                                             const MDNode *N) {
-  DIImportedModule Module(N);
+  DIImportedEntity Module(N);
   if (!Module.Verify())
     return;
-  DIE *IMDie = new DIE(dwarf::DW_TAG_imported_module);
+  if (DIE *D = TheCU->getOrCreateContextDIE(Module.getContext()))
+    constructImportedEntityDIE(TheCU, Module, D);
+}
+
+void DwarfDebug::constructImportedEntityDIE(CompileUnit *TheCU, const MDNode *N,
+                                            DIE *Context) {
+  DIImportedEntity Module(N);
+  if (!Module.Verify())
+    return;
+  return constructImportedEntityDIE(TheCU, Module, Context);
+}
+
+void DwarfDebug::constructImportedEntityDIE(CompileUnit *TheCU,
+                                            const DIImportedEntity &Module,
+                                            DIE *Context) {
+  assert(Module.Verify() &&
+         "Use one of the MDNode * overloads to handle invalid metadata");
+  assert(Context && "Should always have a context for an imported_module");
+  DIE *IMDie = new DIE(Module.getTag());
   TheCU->insertDIE(Module, IMDie);
-  DIE *NSDie = TheCU->getOrCreateNameSpace(Module.getNameSpace());
+  DIE *EntityDie;
+  DIDescriptor Entity = Module.getEntity();
+  if (Entity.isNameSpace())
+    EntityDie = TheCU->getOrCreateNameSpace(DINameSpace(Entity));
+  else if (Entity.isSubprogram())
+    EntityDie = TheCU->getOrCreateSubprogramDIE(DISubprogram(Entity));
+  else if (Entity.isType())
+    EntityDie = TheCU->getOrCreateTypeDIE(DIType(Entity));
+  else
+    EntityDie = TheCU->getDIE(Entity);
   unsigned FileID = getOrCreateSourceID(Module.getContext().getFilename(),
                                         Module.getContext().getDirectory(),
                                         TheCU->getUniqueID());
   TheCU->addUInt(IMDie, dwarf::DW_AT_decl_file, 0, FileID);
   TheCU->addUInt(IMDie, dwarf::DW_AT_decl_line, 0, Module.getLineNumber());
-  TheCU->addDIEEntry(IMDie, dwarf::DW_AT_import, dwarf::DW_FORM_ref4, NSDie);
-  TheCU->addToContextOwner(IMDie, Module.getContext());
+  TheCU->addDIEEntry(IMDie, dwarf::DW_AT_import, dwarf::DW_FORM_ref4, EntityDie);
+  Context->addChild(IMDie);
 }
 
 // Emit all Dwarf sections that should come prior to the content. Create
@@ -801,6 +841,13 @@ void DwarfDebug::beginModule() {
   for (unsigned i = 0, e = CU_Nodes->getNumOperands(); i != e; ++i) {
     DICompileUnit CUNode(CU_Nodes->getOperand(i));
     CompileUnit *CU = constructCompileUnit(CUNode);
+    DIArray ImportedEntities = CUNode.getImportedEntities();
+    for (unsigned i = 0, e = ImportedEntities.getNumElements(); i != e; ++i)
+      ScopesWithImportedEntities.push_back(std::make_pair(
+          DIImportedEntity(ImportedEntities.getElement(i)).getContext(),
+          ImportedEntities.getElement(i)));
+    std::sort(ScopesWithImportedEntities.begin(),
+              ScopesWithImportedEntities.end(), CompareFirst());
     DIArray GVs = CUNode.getGlobalVariables();
     for (unsigned i = 0, e = GVs.getNumElements(); i != e; ++i)
       CU->createGlobalVariableDIE(GVs.getElement(i));
@@ -815,9 +862,8 @@ void DwarfDebug::beginModule() {
       CU->getOrCreateTypeDIE(RetainedTypes.getElement(i));
     // Emit imported_modules last so that the relevant context is already
     // available.
-    DIArray ImportedModules = CUNode.getImportedModules();
-    for (unsigned i = 0, e = ImportedModules.getNumElements(); i != e; ++i)
-      constructImportedModuleDIE(CU, ImportedModules.getElement(i));
+    for (unsigned i = 0, e = ImportedEntities.getNumElements(); i != e; ++i)
+      constructImportedEntityDIE(CU, ImportedEntities.getElement(i));
     // If we're splitting the dwarf out now that we've got the entire
     // CU then construct a skeleton CU based upon it.
     if (useSplitDwarf()) {
@@ -2542,7 +2588,7 @@ CompileUnit *DwarfDebug::constructSkeletonCU(const MDNode *N) {
 
   DIE *Die = new DIE(dwarf::DW_TAG_compile_unit);
   CompileUnit *NewCU = new CompileUnit(GlobalCUIndexCount++,
-                                       DIUnit.getLanguage(), Die, Asm,
+                                       DIUnit.getLanguage(), Die, N, Asm,
                                        this, &SkeletonHolder);
 
   NewCU->addLocalString(Die, dwarf::DW_AT_GNU_dwo_name,

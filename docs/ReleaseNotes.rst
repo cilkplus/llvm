@@ -70,6 +70,16 @@ Non-comprehensive list of changes in this release
   examples of the new syntax. The old syntax using register classes still
   works, but it will be removed in a future LLVM release.
 
+* MCJIT now supports exception handling. Support for it in the old jit will be
+  removed in the 3.4 release.
+
+* Command line options can now be grouped into categories which are shown in
+  the output of ``-help``. See :ref:`grouping options into categories`.
+
+* The appearance of command line options in ``-help`` that are inherited by
+  linking with libraries that use the LLVM Command line support library can now
+  be modified at runtime. See :ref:`cl::getRegisteredOptions`.
+
 * ... next change ...
 
 .. NOTE
@@ -136,6 +146,13 @@ The R600 backend was added in this release, it supports AMD GPUs
 (HD2XXX - HD7XXX).  This backend is used in AMD's Open Source
 graphics / compute drivers which are developed as part of the `Mesa3D
 <http://www.mesa3d.org>`_ project.
+
+SystemZ/s390x Backend
+---------------------
+
+LLVM and clang now support IBM's z/Architecture.  At present this support
+is restricted to GNU/Linux (GNU triplet s390x-linux-gnu) and requires
+z10 or greater.
 
 
 External Open Source Projects Using LLVM 3.3

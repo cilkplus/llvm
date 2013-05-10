@@ -2600,17 +2600,17 @@ PPCTargetLowering::LowerFormalArguments_Darwin(
 
   SmallVector<SDValue, 8> MemOps;
   unsigned nAltivecParamsAtEnd = 0;
-  // FIXME: FuncArg and Ins[ArgNo] must reference the same argument.
-  // When passing anonymous aggregates, this is currently not true.
-  // See LowerFormalArguments_64SVR4 for a fix.
   Function::const_arg_iterator FuncArg = MF.getFunction()->arg_begin();
-  for (unsigned ArgNo = 0, e = Ins.size(); ArgNo != e; ++ArgNo, ++FuncArg) {
+  unsigned CurArgIdx = 0;
+  for (unsigned ArgNo = 0, e = Ins.size(); ArgNo != e; ++ArgNo) {
     SDValue ArgVal;
     bool needsLoad = false;
     EVT ObjectVT = Ins[ArgNo].VT;
     unsigned ObjSize = ObjectVT.getSizeInBits()/8;
     unsigned ArgSize = ObjSize;
     ISD::ArgFlagsTy Flags = Ins[ArgNo].Flags;
+    std::advance(FuncArg, Ins[ArgNo].OrigArgIndex - CurArgIdx);
+    CurArgIdx = Ins[ArgNo].OrigArgIndex;
 
     unsigned CurArgOffset = ArgOffset;
 
@@ -7404,18 +7404,6 @@ bool PPCTargetLowering::isLegalAddressingMode(const AddrMode &AM,
   }
 
   return true;
-}
-
-/// isLegalAddressImmediate - Return true if the integer value can be used
-/// as the offset of the target addressing mode for load / store of the
-/// given type.
-bool PPCTargetLowering::isLegalAddressImmediate(int64_t V,Type *Ty) const{
-  // PPC allows a sign-extended 16-bit immediate field.
-  return (V > -(1 << 16) && V < (1 << 16)-1);
-}
-
-bool PPCTargetLowering::isLegalAddressImmediate(GlobalValue* GV) const {
-  return false;
 }
 
 SDValue PPCTargetLowering::LowerRETURNADDR(SDValue Op,

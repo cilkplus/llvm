@@ -26,21 +26,27 @@
 
 using namespace llvm;
 
+namespace llvm {
+  void initializeHexagonCFGOptimizerPass(PassRegistry&);
+}
+
+
 namespace {
 
 class HexagonCFGOptimizer : public MachineFunctionPass {
 
 private:
-  HexagonTargetMachine& QTM;
+  const HexagonTargetMachine& QTM;
   const HexagonSubtarget &QST;
 
   void InvertAndChangeJumpTarget(MachineInstr*, MachineBasicBlock*);
 
  public:
   static char ID;
-  HexagonCFGOptimizer(HexagonTargetMachine& TM) : MachineFunctionPass(ID),
-                                                  QTM(TM),
-                                                  QST(*TM.getSubtargetImpl()) {}
+  HexagonCFGOptimizer(const HexagonTargetMachine& TM)
+    : MachineFunctionPass(ID), QTM(TM), QST(*TM.getSubtargetImpl()) {
+    initializeHexagonCFGOptimizerPass(*PassRegistry::getPassRegistry());
+  }
 
   const char *getPassName() const {
     return "Hexagon CFG Optimizer";
@@ -231,6 +237,16 @@ bool HexagonCFGOptimizer::runOnMachineFunction(MachineFunction &Fn) {
 //                         Public Constructor Functions
 //===----------------------------------------------------------------------===//
 
-FunctionPass *llvm::createHexagonCFGOptimizer(HexagonTargetMachine &TM) {
+static void initializePassOnce(PassRegistry &Registry) {
+  PassInfo *PI = new PassInfo("Hexagon CFG Optimizer", "hexagon-cfg",
+                              &HexagonCFGOptimizer::ID, 0, false, false);
+  Registry.registerPass(*PI, true);
+}
+
+void llvm::initializeHexagonCFGOptimizerPass(PassRegistry &Registry) {
+  CALL_ONCE_INITIALIZATION(initializePassOnce)
+}
+
+FunctionPass *llvm::createHexagonCFGOptimizer(const HexagonTargetMachine &TM) {
   return new HexagonCFGOptimizer(TM);
 }

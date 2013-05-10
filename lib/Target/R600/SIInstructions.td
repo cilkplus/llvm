@@ -495,7 +495,7 @@ defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
 //def S_MEMTIME : SMRD_ <0x0000001e, "S_MEMTIME", []>;
 //def S_DCACHE_INV : SMRD_ <0x0000001f, "S_DCACHE_INV", []>;
 //def IMAGE_LOAD : MIMG_NoPattern_ <"IMAGE_LOAD", 0x00000000>;
-//def IMAGE_LOAD_MIP : MIMG_NoPattern_ <"IMAGE_LOAD_MIP", 0x00000001>;
+def IMAGE_LOAD_MIP : MIMG_NoSampler_Helper <0x00000001, "IMAGE_LOAD_MIP">;
 //def IMAGE_LOAD_PCK : MIMG_NoPattern_ <"IMAGE_LOAD_PCK", 0x00000002>;
 //def IMAGE_LOAD_PCK_SGN : MIMG_NoPattern_ <"IMAGE_LOAD_PCK_SGN", 0x00000003>;
 //def IMAGE_LOAD_MIP_PCK : MIMG_NoPattern_ <"IMAGE_LOAD_MIP_PCK", 0x00000004>;
@@ -504,7 +504,7 @@ defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
 //def IMAGE_STORE_MIP : MIMG_NoPattern_ <"IMAGE_STORE_MIP", 0x00000009>;
 //def IMAGE_STORE_PCK : MIMG_NoPattern_ <"IMAGE_STORE_PCK", 0x0000000a>;
 //def IMAGE_STORE_MIP_PCK : MIMG_NoPattern_ <"IMAGE_STORE_MIP_PCK", 0x0000000b>;
-//def IMAGE_GET_RESINFO : MIMG_NoPattern_ <"IMAGE_GET_RESINFO", 0x0000000e>;
+def IMAGE_GET_RESINFO : MIMG_NoSampler_Helper <0x0000000e, "IMAGE_GET_RESINFO">;
 //def IMAGE_ATOMIC_SWAP : MIMG_NoPattern_ <"IMAGE_ATOMIC_SWAP", 0x0000000f>;
 //def IMAGE_ATOMIC_CMPSWAP : MIMG_NoPattern_ <"IMAGE_ATOMIC_CMPSWAP", 0x00000010>;
 //def IMAGE_ATOMIC_ADD : MIMG_NoPattern_ <"IMAGE_ATOMIC_ADD", 0x00000011>;
@@ -522,20 +522,20 @@ defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
 //def IMAGE_ATOMIC_FCMPSWAP : MIMG_NoPattern_ <"IMAGE_ATOMIC_FCMPSWAP", 0x0000001d>;
 //def IMAGE_ATOMIC_FMIN : MIMG_NoPattern_ <"IMAGE_ATOMIC_FMIN", 0x0000001e>;
 //def IMAGE_ATOMIC_FMAX : MIMG_NoPattern_ <"IMAGE_ATOMIC_FMAX", 0x0000001f>;
-def IMAGE_SAMPLE : MIMG_Load_Helper <0x00000020, "IMAGE_SAMPLE">; 
+def IMAGE_SAMPLE : MIMG_Sampler_Helper <0x00000020, "IMAGE_SAMPLE">; 
 //def IMAGE_SAMPLE_CL : MIMG_NoPattern_ <"IMAGE_SAMPLE_CL", 0x00000021>;
-def IMAGE_SAMPLE_D : MIMG_Load_Helper <0x00000022, "IMAGE_SAMPLE_D">;
+def IMAGE_SAMPLE_D : MIMG_Sampler_Helper <0x00000022, "IMAGE_SAMPLE_D">;
 //def IMAGE_SAMPLE_D_CL : MIMG_NoPattern_ <"IMAGE_SAMPLE_D_CL", 0x00000023>;
-def IMAGE_SAMPLE_L : MIMG_Load_Helper <0x00000024, "IMAGE_SAMPLE_L">;
-def IMAGE_SAMPLE_B : MIMG_Load_Helper <0x00000025, "IMAGE_SAMPLE_B">;
+def IMAGE_SAMPLE_L : MIMG_Sampler_Helper <0x00000024, "IMAGE_SAMPLE_L">;
+def IMAGE_SAMPLE_B : MIMG_Sampler_Helper <0x00000025, "IMAGE_SAMPLE_B">;
 //def IMAGE_SAMPLE_B_CL : MIMG_NoPattern_ <"IMAGE_SAMPLE_B_CL", 0x00000026>;
 //def IMAGE_SAMPLE_LZ : MIMG_NoPattern_ <"IMAGE_SAMPLE_LZ", 0x00000027>;
-def IMAGE_SAMPLE_C : MIMG_Load_Helper <0x00000028, "IMAGE_SAMPLE_C">;
+def IMAGE_SAMPLE_C : MIMG_Sampler_Helper <0x00000028, "IMAGE_SAMPLE_C">;
 //def IMAGE_SAMPLE_C_CL : MIMG_NoPattern_ <"IMAGE_SAMPLE_C_CL", 0x00000029>;
 //def IMAGE_SAMPLE_C_D : MIMG_NoPattern_ <"IMAGE_SAMPLE_C_D", 0x0000002a>;
 //def IMAGE_SAMPLE_C_D_CL : MIMG_NoPattern_ <"IMAGE_SAMPLE_C_D_CL", 0x0000002b>;
-def IMAGE_SAMPLE_C_L : MIMG_Load_Helper <0x0000002c, "IMAGE_SAMPLE_C_L">;
-def IMAGE_SAMPLE_C_B : MIMG_Load_Helper <0x0000002d, "IMAGE_SAMPLE_C_B">;
+def IMAGE_SAMPLE_C_L : MIMG_Sampler_Helper <0x0000002c, "IMAGE_SAMPLE_C_L">;
+def IMAGE_SAMPLE_C_B : MIMG_Sampler_Helper <0x0000002d, "IMAGE_SAMPLE_C_B">;
 //def IMAGE_SAMPLE_C_B_CL : MIMG_NoPattern_ <"IMAGE_SAMPLE_C_B_CL", 0x0000002e>;
 //def IMAGE_SAMPLE_C_LZ : MIMG_NoPattern_ <"IMAGE_SAMPLE_C_LZ", 0x0000002f>;
 //def IMAGE_SAMPLE_O : MIMG_NoPattern_ <"IMAGE_SAMPLE_O", 0x00000030>;
@@ -602,7 +602,9 @@ defm V_READFIRSTLANE_B32 : VOP1_32 <0x00000002, "V_READFIRSTLANE_B32", []>;
 defm V_CVT_F32_I32 : VOP1_32 <0x00000005, "V_CVT_F32_I32",
   [(set f32:$dst, (sint_to_fp i32:$src0))]
 >;
-defm V_CVT_F32_U32 : VOP1_32 <0x00000006, "V_CVT_F32_U32", []>;
+defm V_CVT_F32_U32 : VOP1_32 <0x00000006, "V_CVT_F32_U32",
+  [(set f32:$dst, (uint_to_fp i32:$src0))]
+>;
 defm V_CVT_U32_F32 : VOP1_32 <0x00000007, "V_CVT_U32_F32", []>;
 defm V_CVT_I32_F32 : VOP1_32 <0x00000008, "V_CVT_I32_F32",
   [(set i32:$dst, (fp_to_sint f32:$src0))]
@@ -624,7 +626,9 @@ defm V_MOV_FED_B32 : VOP1_32 <0x00000009, "V_MOV_FED_B32", []>;
 defm V_FRACT_F32 : VOP1_32 <0x00000020, "V_FRACT_F32",
   [(set f32:$dst, (AMDGPUfract f32:$src0))]
 >;
-defm V_TRUNC_F32 : VOP1_32 <0x00000021, "V_TRUNC_F32", []>;
+defm V_TRUNC_F32 : VOP1_32 <0x00000021, "V_TRUNC_F32",
+  [(set f32:$dst, (int_AMDGPU_trunc f32:$src0))]
+>;
 defm V_CEIL_F32 : VOP1_32 <0x00000022, "V_CEIL_F32",
   [(set f32:$dst, (fceil f32:$src0))]
 >;
@@ -848,10 +852,18 @@ defm V_MAX_LEGACY_F32 : VOP2_32 <0x0000000e, "V_MAX_LEGACY_F32",
 
 defm V_MIN_F32 : VOP2_32 <0x0000000f, "V_MIN_F32", []>;
 defm V_MAX_F32 : VOP2_32 <0x00000010, "V_MAX_F32", []>;
-defm V_MIN_I32 : VOP2_32 <0x00000011, "V_MIN_I32", []>;
-defm V_MAX_I32 : VOP2_32 <0x00000012, "V_MAX_I32", []>;
-defm V_MIN_U32 : VOP2_32 <0x00000013, "V_MIN_U32", []>;
-defm V_MAX_U32 : VOP2_32 <0x00000014, "V_MAX_U32", []>;
+defm V_MIN_I32 : VOP2_32 <0x00000011, "V_MIN_I32",
+  [(set i32:$dst, (AMDGPUsmin i32:$src0, i32:$src1))]
+>;
+defm V_MAX_I32 : VOP2_32 <0x00000012, "V_MAX_I32",
+  [(set i32:$dst, (AMDGPUsmax i32:$src0, i32:$src1))]
+>;
+defm V_MIN_U32 : VOP2_32 <0x00000013, "V_MIN_U32",
+  [(set i32:$dst, (AMDGPUumin i32:$src0, i32:$src1))]
+>;
+defm V_MAX_U32 : VOP2_32 <0x00000014, "V_MAX_U32",
+  [(set i32:$dst, (AMDGPUumax i32:$src0, i32:$src1))]
+>;
 
 defm V_LSHR_B32 : VOP2_32 <0x00000015, "V_LSHR_B32",
   [(set i32:$dst, (srl i32:$src0, i32:$src1))]
@@ -1268,6 +1280,36 @@ defm : SamplePatterns<v2i32>;
 defm : SamplePatterns<v4i32>;
 defm : SamplePatterns<v8i32>;
 defm : SamplePatterns<v16i32>;
+
+/* int_SI_imageload for texture fetches consuming varying address parameters */
+class ImageLoadPattern<Intrinsic name, MIMG opcode, ValueType addr_type> : Pat <
+    (name addr_type:$addr, v32i8:$rsrc, imm),
+    (opcode 0xf, 0, 0, 0, 0, 0, 0, 0, $addr, $rsrc)
+>;
+
+class ImageLoadArrayPattern<Intrinsic name, MIMG opcode, ValueType addr_type> : Pat <
+    (name addr_type:$addr, v32i8:$rsrc, TEX_ARRAY),
+    (opcode 0xf, 0, 0, 1, 0, 0, 0, 0, $addr, $rsrc)
+>;
+
+multiclass ImageLoadPatterns<ValueType addr_type> {
+  def : ImageLoadPattern <int_SI_imageload, IMAGE_LOAD_MIP, addr_type>;
+  def : ImageLoadArrayPattern <int_SI_imageload, IMAGE_LOAD_MIP, addr_type>;
+}
+
+defm : ImageLoadPatterns<v2i32>;
+defm : ImageLoadPatterns<v4i32>;
+
+/* Image resource information */
+def : Pat <
+  (int_SI_resinfo i32:$mipid, v32i8:$rsrc, imm),
+  (IMAGE_GET_RESINFO 0xf, 0, 0, 0, 0, 0, 0, 0, (V_MOV_B32_e32 $mipid), $rsrc)
+>;
+
+def : Pat <
+  (int_SI_resinfo i32:$mipid, v32i8:$rsrc, TEX_ARRAY),
+  (IMAGE_GET_RESINFO 0xf, 0, 0, 1, 0, 0, 0, 0, (V_MOV_B32_e32 $mipid), $rsrc)
+>;
 
 /********** ============================================ **********/
 /********** Extraction, Insertion, Building and Casting  **********/
