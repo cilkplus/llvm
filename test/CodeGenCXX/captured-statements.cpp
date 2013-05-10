@@ -5,7 +5,6 @@
 // RUN: FileCheck %s -input-file=%t -check-prefix=CHECK-4
 // RUN: FileCheck %s -input-file=%t -check-prefix=CHECK-5
 // RUN: FileCheck %s -input-file=%t -check-prefix=CHECK-6
-// RUN: FileCheck %s -input-file=%t -check-prefix=CHECK-7
 
 struct Foo {
   int x;
@@ -121,6 +120,14 @@ public:
       touch<T, id>(v);
     }
   }
+
+  template <typename U, int id2>
+  void foo(U u) {
+    #pragma clang __debug captured
+    {
+      touch<U, id + id2>(u);
+    }
+  }
 };
 
 void test_capture_var() {
@@ -131,13 +138,21 @@ void test_capture_var() {
   // CHECK-5-NEXT: ret void
   template_capture_var<int, 201>();
 
-  // CHECK-6: define {{.*}} void @_ZN3ValIfLi202EE3setEv
-  // CHECK-6-NOT: }
-  // CHECK-6: store %class.Val*
-  // CHECK-6: call void @__captured_stmt
-  // CHECK-6-NEXT: ret void
+  // CHECK-5: define {{.*}} void @_ZN3ValIfLi202EE3setEv
+  // CHECK-5-NOT: }
+  // CHECK-5: store %class.Val*
+  // CHECK-5: call void @__captured_stmt
+  // CHECK-5-NEXT: ret void
   Val<float, 202> Obj;
   Obj.set();
+
+  // CHECK-5: define {{.*}} void @_ZN3ValIfLi202EE3fooIdLi203EEEvT_
+  // CHECK-5-NOT: }
+  // CHECK-5: store %class.Val*
+  // CHECK-5: store double
+  // CHECK-5: call void @__captured_stmt
+  // CHECK-5-NEXT: ret void
+  Obj.foo<double, 203>(1.0);
 }
 
 template <typename T>
@@ -152,11 +167,11 @@ void template_capture_lambda() {
 }
 
 void test_capture_lambda() {
-  // CHECK-7: define {{.*}} void @_ZZ23template_capture_lambdaIiEvvENKS_IiEUlvE_clEv
-  // CHECK-7-NOT: }
-  // CHECK-7: store i32*
-  // CHECK-7: store i32*
-  // CHECK-7: call void @__captured_stmt
-  // CHECK-7-NEXT: ret void
+  // CHECK-6: define {{.*}} void @_ZZ23template_capture_lambdaIiEvvENKS_IiEUlvE_clEv
+  // CHECK-6-NOT: }
+  // CHECK-6: store i32*
+  // CHECK-6: store i32*
+  // CHECK-6: call void @__captured_stmt
+  // CHECK-6-NEXT: ret void
   template_capture_lambda<int>();
 }
