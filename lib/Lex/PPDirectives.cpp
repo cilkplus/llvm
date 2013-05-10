@@ -635,6 +635,7 @@ void Preprocessor::HandleDirective(Token &Result) {
 
   // Save the '#' token in case we need to return it later.
   Token SavedHash = Result;
+  DirectiveHashLoc = SavedHash.getLocation();
 
   // Read the next token, the directive flavor.  This isn't expanded due to
   // C99 6.10.3p8.

@@ -1141,14 +1141,15 @@ bool CapturedStmt::capturesVariable(const VarDecl *Var) const {
   return false;
 }
 
-CilkForGrainsizeStmt::CilkForGrainsizeStmt(Expr *Grainsize, Stmt *CilkFor)
-  : Stmt(CilkForGrainsizeStmtClass) {
+CilkForGrainsizeStmt::CilkForGrainsizeStmt(Expr *Grainsize, Stmt *CilkFor,
+                                           SourceLocation LocStart)
+  : Stmt(CilkForGrainsizeStmtClass), LocStart(LocStart) {
   SubExprs[GRAINSIZE] = Grainsize;
   SubExprs[CILK_FOR] = CilkFor;
 }
 
 CilkForGrainsizeStmt::CilkForGrainsizeStmt(EmptyShell Empty)
-  : Stmt(CilkForGrainsizeStmtClass) {
+  : Stmt(CilkForGrainsizeStmtClass), LocStart() {
   SubExprs[GRAINSIZE] = 0;
   SubExprs[CILK_FOR] = 0;
 }

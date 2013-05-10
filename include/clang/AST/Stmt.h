@@ -2188,16 +2188,17 @@ class CilkForGrainsizeStmt : public Stmt {
 private:
   enum { GRAINSIZE, CILK_FOR, LAST };
   Stmt *SubExprs[LAST];
+  SourceLocation LocStart;
 
 public:
   /// \brief Construct a Cilk for grainsize statement.
-  CilkForGrainsizeStmt(Expr *Grainsize, Stmt *CilkFor);
+  CilkForGrainsizeStmt(Expr *Grainsize, Stmt *CilkFor, SourceLocation LocStart);
 
   /// \brief Construct an empty Cilk for grainsize statement.
   explicit CilkForGrainsizeStmt(EmptyShell Empty);
 
   SourceLocation getLocStart() const LLVM_READONLY {
-    return SubExprs[GRAINSIZE]->getLocStart();
+    return LocStart;
   }
   SourceLocation getLocEnd() const LLVM_READONLY {
     return SubExprs[CILK_FOR]->getLocEnd();

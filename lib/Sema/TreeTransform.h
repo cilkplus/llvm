@@ -9495,7 +9495,8 @@ TreeTransform<Derived>::TransformCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
     Result.get() == Grainsize && SubS.get() == S->getCilkFor())
     return Owned(S);
 
-  return getSema().ActOnCilkForGrainsizePragma(Result.take(), SubS.take());
+  return getSema().ActOnCilkForGrainsizePragma(Result.take(), SubS.take(),
+                                               Grainsize->getLocStart());
 }
 
 template<typename Derived>

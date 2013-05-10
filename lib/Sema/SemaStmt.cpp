@@ -4158,15 +4158,16 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
 }
 
 StmtResult
-Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor) {
-  SourceLocation LocStart = GrainsizeExpr->getLocStart();
+Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor,
+                                  SourceLocation LocStart) {
+  SourceLocation GrainSizeStart = GrainsizeExpr->getLocStart();
 
   // Negative grainsize has unspecified behavior and is reserved for future
   // extensions.
   llvm::APSInt Result;
   if (GrainsizeExpr->EvaluateAsInt(Result, Context))
     if (Result.isNegative()) {
-      Diag(LocStart, diag::err_cilk_for_grainsize_negative);
+      Diag(GrainSizeStart, diag::err_cilk_for_grainsize_negative);
       return StmtError();
     }
 
@@ -4174,19 +4175,19 @@ Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor) {
   // int.
   QualType GrainsizeTy = Context.IntTy;
   VarDecl *Grainsize = VarDecl::Create(
-      Context, CurContext, LocStart, LocStart, 0, GrainsizeTy,
-      Context.getTrivialTypeSourceInfo(GrainsizeTy, LocStart), SC_None);
+      Context, CurContext, GrainSizeStart, GrainSizeStart, 0, GrainsizeTy,
+      Context.getTrivialTypeSourceInfo(GrainsizeTy, GrainSizeStart), SC_None);
 
   AddInitializerToDecl(Grainsize, GrainsizeExpr, true, false);
   if (Grainsize->isInvalidDecl()) {
     Context.Deallocate(reinterpret_cast<void*>(Grainsize));
-    Diag(LocStart, diag::note_cilk_for_grainsize_conversion) << GrainsizeTy;
+    Diag(GrainSizeStart, diag::note_cilk_for_grainsize_conversion) << GrainsizeTy;
     return StmtError();
   }
 
   GrainsizeExpr = Grainsize->getInit();
   Context.Deallocate(reinterpret_cast<void*>(Grainsize));
-  return new (Context) CilkForGrainsizeStmt(GrainsizeExpr, CilkFor);
+  return new (Context) CilkForGrainsizeStmt(GrainsizeExpr, CilkFor, LocStart);
 }
 
 StmtResult

@@ -794,7 +794,7 @@ void PragmaCilkGrainsizeHandler::HandlePragma(Preprocessor &PP,
   Token &GsBeginTok = Toks[0];
   GsBeginTok.startToken();
   GsBeginTok.setKind(tok::annot_pragma_cilk_grainsize_begin);
-  GsBeginTok.setLocation(GrainsizeLoc);
+  GsBeginTok.setLocation(PP.getDirectiveHashLoc());
 
   SourceLocation EndLoc = Size ? CachedToks.back().getLocation()
                                : GrainsizeLoc;

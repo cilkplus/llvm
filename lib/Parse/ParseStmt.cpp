@@ -351,7 +351,7 @@ Retry:
 
 StmtResult Parser::ParsePragmaCilkGrainsize() {
   assert(getLangOpts().CilkPlus && "Cilk Plus extension not enabled");
-  ConsumeToken(); // Eat 'annot_pragma_cilk_grainsize_begin'.
+  SourceLocation HashLoc = ConsumeToken(); // Eat 'annot_pragma_cilk_grainsize_begin'.
 
   ExprResult E = ParseExpression();
   if (E.isInvalid()) {
@@ -380,7 +380,7 @@ StmtResult Parser::ParsePragmaCilkGrainsize() {
     return StmtError();
   }
 
-  return Actions.ActOnCilkForGrainsizePragma(E.get(), FollowingStmt.get());
+  return Actions.ActOnCilkForGrainsizePragma(E.get(), FollowingStmt.get(), HashLoc);
 }
 
 /// \brief Parse an expression statement.

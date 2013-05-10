@@ -219,6 +219,9 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
   /// lexed, if any.
   SourceLocation ModuleImportLoc;
 
+  /// \brief The source location of the '#' token we just lexed, if any.
+  SourceLocation DirectiveHashLoc;
+
   /// \brief The module import path that we're currently processing.
   SmallVector<std::pair<IdentifierInfo *, SourceLocation>, 2> ModuleImportPath;
   
@@ -1109,6 +1112,12 @@ public:
   /// identifier information for the token and install it into the token,
   /// updating the token kind accordingly.
   IdentifierInfo *LookUpIdentifierInfo(Token &Identifier) const;
+
+  /// getDirectiveHashLoc - Return the location of the most recent '#' token
+  /// seen in the preprocessor.
+  SourceLocation getDirectiveHashLoc() {
+      return DirectiveHashLoc;
+  }
 
 private:
   llvm::DenseMap<IdentifierInfo*,unsigned> PoisonReasons;
