@@ -152,9 +152,6 @@ void test6() {
   } catch (float except) {
     // CHECK: call void @__cilkrts_sync
   }
-  // finally {
-  //   CHECK: call void @__cilkrts_sync
-  // }
 
   test6_anchor();
   // Elide the function implicit sync
@@ -162,6 +159,10 @@ void test6() {
   // CHECK: call void @_Z12test6_anchorv()
   // CHECK-NOT:  call void @__cilkrts_sync
   // CHECK: ret
+
+  // finally {
+  //   CHECK: call void @__cilkrts_sync
+  // }
 }
 
 

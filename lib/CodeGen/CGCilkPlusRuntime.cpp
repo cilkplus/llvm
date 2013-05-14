@@ -344,7 +344,9 @@ static CallInst *EmitCilkSetJmp(CGBuilderTy &B, Value *SF,
   Value *F = CGF.CGM.getIntrinsic(Intrinsic::eh_sjlj_setjmp);
   Buf = B.CreateBitCast(Buf, Int8PtrTy);
 
-  return B.CreateCall(F, Buf);
+  CallInst *SetjmpCall = B.CreateCall(F, Buf);
+  SetjmpCall->setCanReturnTwice();
+  return SetjmpCall;
 }
 
 /// \brief Get or create a LLVM function for __cilkrts_pop_frame.
@@ -573,7 +575,9 @@ static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
 
 /// \brief Get or create a LLVM function for __cilk_sync.
 /// Calls to this function is always inlined, as it saves
-/// the current stack/frame pointer values.
+/// the current stack/frame pointer values. This function must be marked
+/// as returns_twice to allow it to be inlined, since the call to setjmp
+/// is marked returns_twice.
 ///
 /// It is equivalent to the following C code
 ///
@@ -688,6 +692,7 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   }
 
   Fn->addFnAttr(Attribute::AlwaysInline);
+  Fn->addFnAttr(Attribute::ReturnsTwice);
   registerSyncFunction(CGF, Fn);
 
   return Fn;
