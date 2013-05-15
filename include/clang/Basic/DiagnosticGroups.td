@@ -544,3 +544,6 @@ def ASM : DiagGroup<"asm", [
 
 // OpenMP warnings.
 def SourceUsesOpenMP : DiagGroup<"source-uses-openmp">;
+
+// Cilk Plus warnings.
+def SourceUsesCilkPlus : DiagGroup<"source-uses-cilk-plus">;

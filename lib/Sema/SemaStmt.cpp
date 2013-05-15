@@ -3655,7 +3655,7 @@ StmtResult Sema::ActOnCilkSpawnStmt(Stmt *S) {
 }
 
 static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
-                                 VarDecl *&ControlVar) {
+                                 VarDecl *&ControlVar, Expr *&ControlVarInit) {
   // Location of loop control variable/expression in the initializer
   SourceLocation InitLoc;
   bool IsDeclStmt = false;
@@ -3696,6 +3696,7 @@ static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
 
     InitLoc = ControlVar->getLocation();
     IsDeclStmt = true;
+    ControlVarInit = ControlVar->getInit();
   } else {
     // In C++, the control variable shall be declared and initialized within
     // the initialization clause of the _Cilk_for loop.
@@ -3753,6 +3754,7 @@ static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
              diag::err_cilk_for_initializer_expected_variable);
       return false;
     }
+    ControlVarInit = Op->getRHS();
   }
 
   // No storage class may be specified for the variable within the
@@ -3981,7 +3983,7 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
 
     if (U->isIncrementDecrementOp()) {
       HasConstantIncrement = true;
-      Stride = llvm::APInt(64, U->isIncrementOp() ? 1 : -1, true);
+      Stride = (U->isIncrementOp() ? 1 : -1);
       StrideExpr = S.ActOnIntegerConstant(Increment->getExprLoc(), 1).get();
       if (U->isDecrementOp())
         StrideExpr = S.BuildUnaryOp(S.getCurScope(), Increment->getExprLoc(),
@@ -4004,7 +4006,7 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
     // operator++() or operator--() -- always OK
     if (Overload == OO_PlusPlus || Overload == OO_MinusMinus) {
       HasConstantIncrement = true;
-      Stride = llvm::APInt(64, Overload == OO_PlusPlus ? 1 : -1, true);
+      Stride = (Overload == OO_PlusPlus ? 1 : -1);
       StrideExpr = S.ActOnIntegerConstant(Increment->getExprLoc(), 1).get();
       if (Overload == OO_MinusMinus)
         StrideExpr = S.BuildUnaryOp(S.getCurScope(), Increment->getExprLoc(),
@@ -4190,6 +4192,43 @@ Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor,
   return new (Context) CilkForGrainsizeStmt(GrainsizeExpr, CilkFor, LocStart);
 }
 
+static void CheckForSignedUnsignedWraparounds(const VarDecl *ControlVar,
+                                              const Expr *ControlVarInit,
+                                              const Expr *Limit, Sema &S,
+                                              int CondDirection,
+                                              const llvm::APSInt &Stride,
+                                              const Expr *StrideExpr) {
+  llvm::APSInt InitVal;
+  llvm::APSInt LimitVal;
+  if (!ControlVar->getType()->isDependentType() &&
+      !ControlVarInit->isInstantiationDependent() &&
+      !Limit->isInstantiationDependent()) {
+    if (ControlVarInit->isIntegerConstantExpr(InitVal, S.Context) &&
+        Limit->isIntegerConstantExpr(LimitVal, S.Context) &&
+        CondDirection == 0) {
+      const char *StrideSign = (Stride.isNegative() ? "negative" : "positive");
+      const char *SignedUnsigned =
+          (ControlVar->getType()->isUnsignedIntegerOrEnumerationType()
+               ? "unsigned"
+               : "signed");
+      if ((Stride.isNegative() && InitVal < LimitVal) ||
+          (Stride.isStrictlyPositive() && InitVal > LimitVal)) {
+        S.Diag(StrideExpr->getExprLoc(), diag::warn_cilk_for_wraparound)
+            << StrideSign << SignedUnsigned;
+        S.Diag(StrideExpr->getExprLoc(),
+               diag::note_cilk_for_wraparound_undefined);
+      } else if (StrideExpr->isIntegerConstantExpr(S.Context)) {
+        if (LimitVal % Stride != 0) {
+          S.Diag(StrideExpr->getExprLoc(), diag::warn_cilk_for_wraparound)
+              << StrideSign << SignedUnsigned;
+          S.Diag(StrideExpr->getExprLoc(),
+                 diag::note_cilk_for_wraparound_undefined);
+        }
+      }
+    }
+  }
+}
+
 StmtResult
 Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                        Stmt *First, FullExprArg Second, FullExprArg Third,
@@ -4200,9 +4239,10 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
 
   Expr *Increment = Third.release().takeAs<Expr>();
 
-  // Check loop initializer and get control variable
+  // Check loop initializer and get control variable and its initialization
   VarDecl *ControlVar = 0;
-  if (!CheckCilkForInitStmt(*this, First, ControlVar))
+  Expr *ControlVarInit = 0;
+  if (!CheckCilkForInitStmt(*this, First, ControlVar, ControlVarInit))
     return StmtError();
 
   // Check loop condition
@@ -4217,7 +4257,17 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     return StmtError();
 
   // Check increment
-  llvm::APSInt Stride;
+  // For dependent types since we can't get the actual type, we default to a
+  // 64bit signed type.
+  llvm::APSInt Stride(64, true);
+  // Otherwise, stride should be the same type as the control var. This only
+  // matters because of the computation we do with the value of the loop limit
+  // later.
+  if (!ControlVar->getType()->isDependentType())
+    Stride = llvm::APSInt(
+        Context.getTypeSize(ControlVar->getType()),
+        ControlVar->getType()->isUnsignedIntegerOrEnumerationType());
+
   Expr *StrideExpr = 0;
   bool HasConstantIncrement = false;
   SourceLocation IncrementRHSLoc;
@@ -4243,6 +4293,10 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
         << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
       return StmtError();
     }
+
+    CheckForSignedUnsignedWraparounds(ControlVar, ControlVarInit, Limit,
+                                      *this, CondDirection, Stride,
+                                      StrideExpr);
   }
 
   ExprResult LoopCount;

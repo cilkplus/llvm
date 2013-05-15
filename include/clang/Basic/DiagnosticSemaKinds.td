@@ -6447,6 +6447,11 @@ def err_cilk_for_grainsize_negative: Error<
 def note_cilk_for_grainsize_conversion : Note<
   "grainsize must evaluate to a type convertible to %0">;
 
+def warn_cilk_for_wraparound: Warning <
+  "%0 stride causes %1 wraparound">, InGroup<SourceUsesCilkPlus>, DefaultWarn;
+
+def note_cilk_for_wraparound_undefined: Note <
+  "Wraparounds cause undefined behavior in Cilk for">;
 } // end of sema category
 
 let CategoryName = "Related Result Type Issue" in {

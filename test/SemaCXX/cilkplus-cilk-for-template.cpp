@@ -204,3 +204,78 @@ void test_grainsize() {
 
   grainsize_test3(c); // OK
 }
+
+template <typename T>
+void wraparound1() {
+  _Cilk_for(T i = 0; i != 10; i--);
+}
+
+template <typename T>
+void wraparound2() {
+  _Cilk_for(T i = 100; i != 10; i++);
+}
+
+template <typename T>
+void wraparound3() {
+  _Cilk_for(T i = 0; i != 10; i += 3);
+}
+
+template <typename T>
+void wraparound4(T x) {
+  _Cilk_for(int i = x; i != 10; i--);
+}
+
+template <typename T>
+void wraparound5() {
+  _Cilk_for (int i = 0; i < sizeof(T); ++i);
+  _Cilk_for (int i = sizeof(T); i < 10; ++i);
+}
+
+template <int x>
+void wraparound6() {
+  _Cilk_for(int i = x; i != 10; ++i);
+}
+
+template <int x>
+void wraparound7() {
+  _Cilk_for(int i = 0; i != 10; i -= x);
+}
+
+void test_wraparound() {
+  wraparound1<unsigned>(); // expected-warning@210 {{negative stride causes unsigned wraparound}} \
+                           // expected-note {{in instantiation of function template specialization 'wraparound1<unsigned int>' requested here}} \
+                           // expected-note@210 {{Wraparounds cause undefined behavior in Cilk for}}
+
+  wraparound2<unsigned>(); // expected-warning@215 {{positive stride causes unsigned wraparound}} \
+                           // expected-note {{in instantiation of function template specialization 'wraparound2<unsigned int>' requested here}} \
+                           // expected-note@215 {{Wraparounds cause undefined behavior in Cilk for}}
+
+  wraparound3<unsigned>(); // expected-warning@220 {{positive stride causes unsigned wraparound}} \
+                           // expected-note {{in instantiation of function template specialization 'wraparound3<unsigned int>' requested here}} \
+                           // expected-note@220 {{Wraparounds cause undefined behavior in Cilk for}}
+
+  wraparound1<int>(); // expected-warning@210 {{negative stride causes signed wraparound}} \
+                      // expected-note {{in instantiation of function template specialization 'wraparound1<int>' requested here}} \
+                      // expected-note@210 {{Wraparounds cause undefined behavior in Cilk for}}
+
+  wraparound2<int>(); // expected-warning@215 {{positive stride causes signed wraparound}} \
+                      // expected-note {{in instantiation of function template specialization 'wraparound2<int>' requested here}} \
+                      // expected-note@215 {{Wraparounds cause undefined behavior in Cilk for}}
+
+  wraparound3<int>(); // expected-warning@220 {{positive stride causes signed wraparound}} \
+                      // expected-note {{in instantiation of function template specialization 'wraparound3<int>' requested here}} \
+                      // expected-note@220 {{Wraparounds cause undefined behavior in Cilk for}}
+
+  wraparound4(0); // OK
+
+  wraparound5<float>(); // OK
+
+  wraparound6<0>(); // OK
+
+  wraparound6<100>(); // expected-warning@236 {{positive stride causes signed wraparound}} \
+                     // expected-note {{in instantiation of function template specialization 'wraparound6<100>' requested here}} \
+                     // expected-note@236 {{Wraparounds cause undefined behavior in Cilk for}}
+
+  wraparound7<-1>(); // OK
+}
+
