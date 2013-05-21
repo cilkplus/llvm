@@ -354,3 +354,15 @@ void test2() {
 }
 
 } // namespace
+
+namespace ptr_conversion {
+  struct X {
+    X() {}
+    operator int() { return 1; }
+  };
+
+  void test(int *p, int *q) {
+    X x;
+    _Cilk_for(int *r = p; r != q; r += x); // OK, should not crash.
+  }
+}

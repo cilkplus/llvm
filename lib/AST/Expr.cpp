@@ -2493,6 +2493,13 @@ Expr *Expr::IgnoreParenNoopCasts(ASTContext &Ctx) {
   }
 }
 
+Expr *Expr::IgnoreImpCastsAsWritten() {
+  Expr *E = this;
+  while (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E))
+    E = ICE->getSubExprAsWritten();
+  return E;
+}
+
 bool Expr::isDefaultArgument() const {
   const Expr *E = this;
   if (const MaterializeTemporaryExpr *M = dyn_cast<MaterializeTemporaryExpr>(E))

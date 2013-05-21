@@ -127,3 +127,8 @@ void test_cilk_for_cilk_spawn_no_compound() {
   // CHECK-SPAWN2: call void @__cilk_parent_epilogue
   // CHECK-SPAWN2-NEXT: ret void
 }
+
+void test_ptr(int *p, int *q, short s) {
+  int *r;
+  _Cilk_for (r = p; r != q; r += s); // OK, should not crash.
+}

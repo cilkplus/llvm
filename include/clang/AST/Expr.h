@@ -662,6 +662,14 @@ public:
   /// surround this expression.  Only skips ImplicitCastExprs.
   Expr *IgnoreImpCasts() LLVM_READONLY;
 
+  /// \brief Skip past implicit casts or other intermediate nodes introduced
+  /// by semantic analysis.
+  Expr *IgnoreImpCastsAsWritten() LLVM_READONLY;
+
+  const Expr *IgnoreImpCastsAsWritten(const Expr *E) const LLVM_READONLY {
+    return const_cast<Expr*>(this)->IgnoreImpCastsAsWritten();
+  }
+
   /// IgnoreImplicit - Skip past any implicit AST nodes which might
   /// surround this expression.
   Expr *IgnoreImplicit() LLVM_READONLY {

@@ -4440,6 +4440,25 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
       assert(!LowExpr.isInvalid() && "invalid expr");
 
       assert(Stride && "invalid null stride expression");
+      // Need to keep the orginal stride unmodified, since it has been part
+      // of the LoopCount expression. If Stride is already an implicit cast
+      // expression, then BuildBinOp may replace this cast into another type.
+      // E.g.
+      //
+      // short s = 2;
+      // _Cilk_for (int *p = a; p != b; p += s);
+      //
+      // During the loop count calculation, Stride is an implicit cast
+      // expression of type int. Since LowExpr has type unsigned long,
+      // BuildBinOp will try cast Stride into unsigned long, by replacing
+      // the int implicit cast into unsigned long implicit cast, this
+      // invalidates the loop count expression built.
+      //
+      // The solution is to get the raw Stride expression from the source
+      // and create a new implicit cast expression of desired type,
+      // if necessary.
+      //
+      Stride = Stride->IgnoreImpCastsAsWritten();
       ExprResult StepExpr
         = BuildBinOp(CurScope, VarLoc, BO_Mul, LowExpr.get(), Stride);
       assert(!StepExpr.isInvalid() && "invalid expression");
