@@ -2023,6 +2023,39 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize) {
 
     EmitCallOrInvoke(CilkForABI, Args);
 
+    // Update the Loop Control Variable
+    if (!isa<DeclStmt>(S.getInit())) {
+      llvm::Value *LCVAddr = LocalDeclMap.lookup(S.getLoopControlVar());
+      llvm::Value *LCVValue = Builder.CreateLoad(LCVAddr);
+
+      bool IsAdd = true;
+      llvm::Value *Delta = 0;
+      const Expr *IncExpr = S.getInc();
+      if (const UnaryOperator *Inc = dyn_cast<UnaryOperator>(IncExpr)) {
+        Delta = LoopCount;
+        IsAdd = Inc->isIncrementOp();
+      } else if (const BinaryOperator *Inc = dyn_cast<BinaryOperator>(IncExpr)) {
+        llvm::Value *RHS = EmitScalarExpr(Inc->getRHS());
+        assert(RHS->getType()->isIntegerTy() && "increment not integer type");
+        RHS = Builder.CreateSExtOrTrunc(RHS, LoopCount->getType());
+        Delta = Builder.CreateMul(RHS, LoopCount);
+        IsAdd = (Inc->getOpcode() == BO_AddAssign);
+      } else
+        llvm_unreachable("unexpected increment expression");
+
+      llvm::Value *Update = 0;
+      if (LCVValue->getType()->isPointerTy()) {
+        if (!IsAdd) Delta = Builder.CreateNeg(Delta);
+        Update = Builder.CreateGEP(LCVValue, Delta);
+      } else {
+        Delta = Builder.CreateSExtOrTrunc(Delta, LCVValue->getType());
+        llvm::Instruction::BinaryOps Op = (IsAdd) ? llvm::Instruction::Add
+                                                  : llvm::Instruction::Sub;
+        Update = Builder.CreateBinOp(Op, LCVValue, Delta);
+      }
+      Builder.CreateStore(Update, LCVAddr);
+    }
+
     EmitBranch(ContBlock);
   }
 
