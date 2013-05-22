@@ -58,7 +58,7 @@ void test_lcv1(void) {
   // CHECK-LCV1: call void @__cilkrts_cilk_for_64
   //
   // CHECK-LCV1-NEXT: [[R1:%[a-zA-Z0-9]+]] = load i64*
-  // CHECK-LCV1-NEXT: [[R2:%[a-zA-Z0-9]+]] = mul i64 4, %{{[0-9]+}}
+  // CHECK-LCV1-NEXT: [[R2:%[a-zA-Z0-9]+]] = mul i64 4, %
   // CHECK-LCV1-NEXT: [[R3:%[a-zA-Z0-9]+]] = add i64 [[R1]], [[R2]]
   // CHECK-LCV1-NEXT: store i64 [[R3]], i64*
 
@@ -67,7 +67,7 @@ void test_lcv1(void) {
   // CHECK-LCV1: call void @__cilkrts_cilk_for_32
   //
   // CHECK-LCV1-NEXT: [[R3:%[a-zA-Z0-9]+]] = load i32*
-  // CHECK-LCV1-NEXT: [[R4:%[a-zA-Z0-9]+]] = add i32 [[R3]], %{{[0-9]+}}
+  // CHECK-LCV1-NEXT: [[R4:%[a-zA-Z0-9]+]] = add i32 [[R3]], %
   // CHECK-LCV1-NEXT: store i32 [[R4]], i32*
 
   char c;
@@ -75,7 +75,7 @@ void test_lcv1(void) {
   // CHECK-LCV1: call void @__cilkrts_cilk_for_32
   //
   // CHECK-LCV1-NEXT: [[R5:%[a-zA-Z0-9]+]] = load i8*
-  // CHECK-LCV1-NEXT: [[Trunc:%[a-zA-Z0-9]+]] = trunc i32 %{{[0-9]+}} to i8
+  // CHECK-LCV1-NEXT: [[Trunc:%[a-zA-Z0-9]+]] = trunc i32 %{{.+}} to i8
   // CHECK-LCV1-NEXT: [[R6:%[a-zA-Z0-9]+]] = sub i8 [[R5]], [[Trunc]]
   // CHECK-LCV1-NEXT: store i8 [[R6]], i8*
 
@@ -84,7 +84,7 @@ void test_lcv1(void) {
   // CHECK-LCV1: call void @__cilkrts_cilk_for_32
   //
   // CHECK-LCV1: [[R5:%[a-zA-Z0-9]+]] = load i16*
-  // CHECK-LCV1-NEXT: [[R6:%[a-zA-Z0-9]+]] = mul i32 2, %{{[0-9]+}}
+  // CHECK-LCV1-NEXT: [[R6:%[a-zA-Z0-9]+]] = mul i32 2, %
   // CHECK-LCV1-NEXT: [[Trunc:%[a-zA-Z0-9]+]] = trunc i32 [[R6]] to i16
   // CHECK-LCV1-NEXT: [[R7:%[a-zA-Z0-9]+]] = sub i16 [[R5]], [[Trunc]]
   // CHECK-LCV1-NEXT: store i16 [[R7]], i16*
@@ -94,7 +94,7 @@ void test_lcv1(void) {
   // CHECK-LCV1: call void @__cilkrts_cilk_for_64
   //
   // CHECK-LCV1-NEXT: [[R7:%[a-zA-Z0-9]+]] = load i64*
-  // CHECK-LCV1-NEXT: [[R8:%[a-zA-Z0-9]+]] = mul i64 10, %{{[0-9]+}}
+  // CHECK-LCV1-NEXT: [[R8:%[a-zA-Z0-9]+]] = mul i64 10, %
   // CHECK-LCV1-NEXT: [[R9:%[a-zA-Z0-9]+]] = add i64 [[R7]], [[R8]]
   // CHECK-LCV1-NEXT: store i64 [[R9]], i64*
 
@@ -103,7 +103,7 @@ void test_lcv1(void) {
   // CHECK-LCV1: call void @__cilkrts_cilk_for_64
   //
   // CHECK-LCV1-NEXT: [[R10:%[a-zA-Z0-9]+]] = load i64
-  // CHECK-LCV1-NEXT: [[R11:%[a-zA-Z0-9]+]] = mul i64 2, %{{[0-9]+}}
+  // CHECK-LCV1-NEXT: [[R11:%[a-zA-Z0-9]+]] = mul i64 2, %
   // CHECK-LCV1-NEXT: [[R12:%[a-zA-Z0-9]+]] = add i64 [[R10]], [[R11]]
   // CHECK-LCV1-NEXT: store i64 [[R12]], i64*
 
@@ -117,15 +117,15 @@ void test_lcv2(void) {
   // CHECK-LCV2: call void @__cilkrts_cilk_for_[[BIT_WIDTH:32|64]]
   //
   // CHECK-LCV2-NEXT: [[R1:%[a-zA-Z0-9]+]] = load i8**
-  // CHECK-LCV2-NEXT: [[R2:%[a-zA-Z0-9]+]] = getelementptr i8* [[R1]], i[[BIT_WIDTH]] %{{[0-9]+}}
+  // CHECK-LCV2-NEXT: [[R2:%[a-zA-Z0-9]+]] = getelementptr i8* [[R1]], i[[BIT_WIDTH]] %
   // CHECK-LCV2-NEXT: store i8* [[R2]], i8**
 
   _Cilk_for (b = &buf[0]; b != &buf[99]; b += 4);
   // CHECK-LCV2: call void @__cilkrts_cilk_for_[[BIT_WIDTH:32|64]]
   //
   // CHECK-LCV2-NEXT: [[R3:%[a-zA-Z0-9]+]] = load i8**
-  // CHECK-LCV2-NEXT: [[R4:%[a-zA-Z0-9]+]] = mul i64 4, %{{[0-9]+}}
-  // CHECK-LCV2-NEXT: [[R5:%[a-zA-Z0-9]+]] = getelementptr i8* [[R3]], i[[BIT_WIDTH]] %{{[0-9]+}}
+  // CHECK-LCV2-NEXT: [[R4:%[a-zA-Z0-9]+]] = mul i64 4, %
+  // CHECK-LCV2-NEXT: [[R5:%[a-zA-Z0-9]+]] = getelementptr i8* [[R3]], i[[BIT_WIDTH]] %
   // CHECK-LCV2-NEXT: store i8* [[R5]], i8**
 
   int i2;
@@ -136,7 +136,7 @@ void test_lcv2(void) {
   // CHECK-LCV2-NEXT: [[R6:%[a-zA-Z0-9]+]] = load i32*
   // CHECK-LCV2-NEXT: [[R7:%[a-zA-Z0-9]+]] = load i8*
   // CHECK-LCV2-NEXT: [[R8:%[a-zA-Z0-9]+]] = sext i8 [[R7]] to i32
-  // CHECK-LCV2-NEXT: [[R9:%[a-zA-Z0-9]+]] = mul i32 [[R8]], %{{[0-9]+}}
+  // CHECK-LCV2-NEXT: [[R9:%[a-zA-Z0-9]+]] = mul i32 [[R8]], %
   // CHECK-LCV2-NEXT: [[R10:%[a-zA-Z0-9]+]] = add i32 [[R6]], [[R9]]
   // CHECK-LCV2-NEXT: store i32 [[R10]], i32* %i2
 
@@ -146,8 +146,8 @@ void test_lcv2(void) {
   // CHECK-LCV2: call void @__cilkrts_cilk_for_[[BIT_WIDTH:32|64]]
   //
   // CHECK-LCV2-NEXT: [[R11:%[a-zA-Z0-9]+]] = load i8**
-  // CHECK-LCV2: [[R12:%[a-zA-Z0-9]+]] = mul i64 %{{[0-9]+}}, %{{[0-9]+}}
-  // CHECK-LCV2-NEXT: [[R13:%[a-zA-Z0-9]+]] = getelementptr i8* [[R11]], i[[BIT_WIDTH]] %{{[0-9]+}}
+  // CHECK-LCV2: [[R12:%[a-zA-Z0-9]+]] = mul i64 %{{.+}}, %
+  // CHECK-LCV2-NEXT: [[R13:%[a-zA-Z0-9]+]] = getelementptr i8* [[R11]], i[[BIT_WIDTH]] %
   // CHECK-LCV2-NEXT: store i8* [[R13]], i8**
 
   _Cilk_for (int i = 0; i < 10; i++);
