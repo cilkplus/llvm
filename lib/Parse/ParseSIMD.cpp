@@ -266,6 +266,43 @@ static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
   P.ConsumeToken();
 }
 
+/// \brief Parse a pragma simd directive.
+///
+/// '#' 'pragma' 'simd' simd-clauses[opt] new-line for-statement
+///
+/// simd-clauses:
+///   simd-clause
+///   simd-clauses simd-clause
+///
+/// simd-clause:
+///   vectorlength-clause
+///   linear-clause
+///   openmp-data-clause
+///
+/// vectorlength-clause:
+///   'vectorlength' '(' constant-expression ')'
+///   'vectorlengthfor' '(' type-name ')' (deprecated)
+///
+/// linear-clause:
+///   'linear' '(' linear-variable-list ')'
+///
+/// linear-variable-list:
+///   linear-variable
+///   linear-variable-list ',' linear-variable
+///
+/// linear-variable:
+///   id-expression
+///   id-expression ':' linear-step
+///
+/// linear-step:
+///   conditional-expression
+///
+/// openmp-data-clause:
+///   private-clause
+///   firstprivate-clause (deprecated)
+///   lastprivate-clause
+///   reduction-clause
+///
 StmtResult Parser::HandlePragmaSIMDStatementOrDeclaration() {
   assert(Tok.is(tok::annot_pragma_simd));
   SourceLocation Loc = Tok.getLocation();
