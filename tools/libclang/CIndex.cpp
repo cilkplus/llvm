@@ -2366,9 +2366,10 @@ bool CursorVisitor::RunVisitorWorkList(VisitorWorkList &WL) {
         for (LambdaExpr::capture_iterator C = E->explicit_capture_begin(),
                                        CEnd = E->explicit_capture_end();
              C != CEnd; ++C) {
-          if (C->capturesThis())
+          // FIXME: Lambda init-captures.
+          if (!C->capturesVariable())
             continue;
-          
+
           if (Visit(MakeCursorVariableRef(C->getCapturedVar(),
                                           C->getLocation(),
                                           TU)))
@@ -2543,8 +2544,12 @@ void clang_toggleCrashRecovery(unsigned isEnabled) {
   
 CXTranslationUnit clang_createTranslationUnit(CXIndex CIdx,
                                               const char *ast_filename) {
-  if (!CIdx)
+  if (!CIdx || !ast_filename)
     return 0;
+
+  LOG_FUNC_SECTION {
+    *Log << ast_filename;
+  }
 
   CIndexer *CXXIdx = static_cast<CIndexer *>(CIdx);
   FileSystemOptions FileSystemOpts;
@@ -5681,8 +5686,9 @@ CXLinkageKind clang_getCursorLinkage(CXCursor cursor) {
 
   const Decl *D = cxcursor::getCursorDecl(cursor);
   if (const NamedDecl *ND = dyn_cast_or_null<NamedDecl>(D))
-    switch (ND->getLinkage()) {
-      case NoLinkage: return CXLinkage_NoLinkage;
+    switch (ND->getLinkageInternal()) {
+      case NoLinkage:
+      case VisibleNoLinkage: return CXLinkage_NoLinkage;
       case InternalLinkage: return CXLinkage_Internal;
       case UniqueExternalLinkage: return CXLinkage_UniqueExternal;
       case ExternalLinkage: return CXLinkage_External;
@@ -6117,6 +6123,20 @@ CXFile clang_Module_getTopLevelHeader(CXTranslationUnit TU,
 //===----------------------------------------------------------------------===//
 
 extern "C" {
+unsigned clang_CXXMethod_isPureVirtual(CXCursor C) {
+  if (!clang_isDeclaration(C.kind))
+    return 0;
+
+  const CXXMethodDecl *Method = 0;
+  const Decl *D = cxcursor::getCursorDecl(C);
+  if (const FunctionTemplateDecl *FunTmpl =
+          dyn_cast_or_null<FunctionTemplateDecl>(D))
+    Method = dyn_cast<CXXMethodDecl>(FunTmpl->getTemplatedDecl());
+  else
+    Method = dyn_cast_or_null<CXXMethodDecl>(D);
+  return (Method && Method->isVirtual() && Method->isPure()) ? 1 : 0;
+}
+
 unsigned clang_CXXMethod_isStatic(CXCursor C) {
   if (!clang_isDeclaration(C.kind))
     return 0;

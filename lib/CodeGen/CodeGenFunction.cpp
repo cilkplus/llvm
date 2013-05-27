@@ -198,10 +198,12 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   bool OnlySimpleReturnStmts = NumSimpleReturnExprs > 0
     && NumSimpleReturnExprs == NumReturnExprs;
   // If the function contains only a simple return statement, the
-  // cleanup code may become the first breakpoint in the function. To
-  // be safe, set the debug location for it to the location of the
-  // return statement.  Otherwise point it to end of the function's
-  // lexical scope.
+  // location before the cleanup code becomes the last useful
+  // breakpoint in the function, because the simple return expression
+  // will be evaluated after the cleanup code. To be safe, set the
+  // debug location for cleanup code to the location of the return
+  // statement. Otherwise the cleanup code should be at the end of the
+  // function's lexical scope.
   if (CGDebugInfo *DI = getDebugInfo()) {
     if (OnlySimpleReturnStmts)
        DI->EmitLocation(Builder, LastStopPoint);
@@ -236,7 +238,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   // edges will be *really* confused.
   bool EmitRetDbgLoc = true;
   if (EHStack.stable_begin() != PrologueCleanupDepth) {
-    PopCleanupBlocks(PrologueCleanupDepth, EndLoc);
+    PopCleanupBlocks(PrologueCleanupDepth);
 
     // Make sure the line table doesn't jump back into the body for
     // the ret after it's been at EndLoc.
@@ -710,6 +712,7 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
 
   SourceRange BodyRange;
   if (Stmt *Body = FD->getBody()) BodyRange = Body->getSourceRange();
+  CurEHLocation = BodyRange.getEnd();
 
   // CalleeWithThisReturn keeps track of the last callee inside this function
   // that returns 'this'. Before starting the function, we set it to null.

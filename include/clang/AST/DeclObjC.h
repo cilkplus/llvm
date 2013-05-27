@@ -452,7 +452,7 @@ public:
   }
 
   /// \brief Determine whether this method has a body.
-  virtual bool hasBody() const { return Body; }
+  virtual bool hasBody() const { return Body.isValid(); }
 
   /// \brief Retrieve the body of this method, if it has one.
   virtual Stmt *getBody() const;
@@ -463,7 +463,7 @@ public:
   void setBody(Stmt *B) { Body = B; }
 
   /// \brief Returns whether this specific method is a definition.
-  bool isThisDeclarationADefinition() const { return Body; }
+  bool isThisDeclarationADefinition() const { return hasBody(); }
 
   // Implement isa/cast/dyncast/etc.
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
@@ -552,6 +552,9 @@ public:
   ObjCPropertyDecl *FindPropertyDeclaration(IdentifierInfo *PropertyId) const;
 
   typedef llvm::DenseMap<IdentifierInfo*, ObjCPropertyDecl*> PropertyMap;
+  
+  typedef llvm::DenseMap<const ObjCProtocolDecl *, ObjCPropertyDecl*>
+            ProtocolPropertyMap;
   
   typedef llvm::SmallVector<ObjCPropertyDecl*, 8> PropertyDeclOrder;
   
@@ -1513,6 +1516,9 @@ public:
 
   virtual void collectPropertiesToImplement(PropertyMap &PM,
                                             PropertyDeclOrder &PO) const;
+                           
+void collectInheritedProtocolProperties(const ObjCPropertyDecl *Property,
+                                        ProtocolPropertyMap &PM) const;
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == ObjCProtocol; }

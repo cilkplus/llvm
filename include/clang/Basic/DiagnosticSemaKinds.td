@@ -488,6 +488,9 @@ def warn_property_attribute : Warning<
   "'%1' attribute on property %0 does not match the property inherited from %2">;
 def warn_property_types_are_incompatible : Warning<
   "property type %0 is incompatible with type %1 inherited from %2">;
+def warn_protocol_property_mismatch : Warning<
+  "property of type %0 was selected for synthesis">,
+  InGroup<DiagGroup<"protocol-property-synthesis-ambiguity">>;
 def err_undef_interface : Error<"cannot find interface declaration for %0">;
 def err_category_forward_interface : Error<
   "cannot define %select{category|class extension}0 for undefined class %1">;
@@ -499,6 +502,8 @@ def note_while_in_implementation : Note<
   "detected while default synthesizing properties in class implementation">;
 def note_class_declared : Note<
   "class is declared here">;
+def note_receiver_class_declared : Note<
+  "receiver is instance of class declared here">;
 def note_receiver_is_id : Note<
   "receiver is treated with 'id' type for purpose of method lookup">;
 def note_suppressed_class_declare : Note<
@@ -727,6 +732,8 @@ def error_category_property : Error<
   "class implementation">;
 def note_property_declare : Note<
   "property declared here">;
+def note_protocol_property_declare : Note<
+  "it could also be property of type %0 declared here">;
 def note_property_synthesize : Note<
   "property synthesized here">;
 def error_synthesize_category_decl : Error<
@@ -1781,7 +1788,9 @@ def err_attribute_uuid_malformed_guid : Error<
 def warn_nonnull_pointers_only : Warning<
   "nonnull attribute only applies to pointer arguments">;
 def err_attribute_pointers_only : Error<
-  "'%0' attribute only applies to pointer arguments">;
+  "%0 attribute only applies to pointer arguments">;
+def err_attribute_no_member_pointers : Error<
+  "%0 attribute cannot be used with pointers to members">;
 def err_attribute_invalid_implicit_this_argument : Error<
   "'%0' attribute is invalid for the implicit this argument">;
 def err_ownership_type : Error<
@@ -1948,8 +1957,10 @@ def warn_weak_identifier_undeclared : Warning<
   "weak identifier %0 never declared">;
 def err_attribute_weak_static : Error<
   "weak declaration cannot have internal linkage">;
-def warn_attribute_weak_import_invalid_on_definition : Warning<
-  "'weak_import' attribute cannot be specified on a definition">,
+def err_attribute_selectany_non_extern_data : Error<
+  "'selectany' can only be applied to data items with external linkage">;
+def warn_attribute_invalid_on_definition : Warning<
+  "'%0' attribute cannot be specified on a definition">,
   InGroup<IgnoredAttributes>;
 def err_attribute_weakref_not_static : Error<
   "weakref declaration must have internal linkage">;
@@ -3852,7 +3863,7 @@ def err_arc_objc_property_default_assign_on_object : Error<
 def err_arc_illegal_selector : Error<
   "ARC forbids use of %0 in a @selector">;
 def err_arc_illegal_method_def : Error<
-  "ARC forbids implementation of %0">;
+  "ARC forbids %select{implementation|synthesis}0 of %1">;
 def warn_arc_strong_pointer_objc_pointer : Warning<
   "method parameter of type %0 with no explicit ownership">,
   InGroup<DiagGroup<"explicit-ownership-type">>, DefaultIgnore;
@@ -4280,7 +4291,13 @@ def err_typecheck_incomplete_array_needs_initializer : Error<
   "or an initializer">;
 def err_array_init_not_init_list : Error<
   "array initializer must be an initializer "
-  "list%select{| or string literal}0">;
+  "list%select{| or string literal| or wide string literal}0">;
+def err_array_init_narrow_string_into_wchar : Error<
+  "initializing wide char array with non-wide string literal">;
+def err_array_init_wide_string_into_char : Error<
+  "initializing char array with wide string literal">;
+def err_array_init_incompat_wide_string_into_wchar : Error<
+  "initializing wide char array with incompatible wide string literal">;
 def err_array_init_different_type : Error<
   "cannot initialize array %diff{of type $ with array of type $|"
   "with different type of array}0,1">;
@@ -4744,13 +4761,17 @@ def err_default_init_const : Error<
 def err_delete_operand : Error<"cannot delete expression of type %0">;
 def ext_delete_void_ptr_operand : ExtWarn<
   "cannot delete expression with pointer-to-'void' type %0">;
-def err_ambiguous_delete_operand : Error<"ambiguous conversion of delete "
-                                         "expression of type %0 to a pointer">;
+def err_ambiguous_delete_operand : Error<
+  "ambiguous conversion of delete expression of type %0 to a pointer">;
 def warn_delete_incomplete : Warning<
   "deleting pointer to incomplete type %0 may cause undefined behavior">,
   InGroup<DiagGroup<"delete-incomplete">>;
 def err_delete_incomplete_class_type : Error<
   "deleting incomplete class type %0; no conversions to pointer type">;
+def err_delete_explicit_conversion : Error<
+  "converting delete expression from type %0 to type %1 invokes an explicit "
+  "conversion function">;
+def note_delete_conversion : Note<"conversion to pointer type %0">;
 def warn_delete_array_type : Warning<
   "'delete' applied to a pointer-to-array type %0 treated as delete[]">;
 def err_no_suitable_delete_member_function_found : Error<
@@ -4887,8 +4908,16 @@ let CategoryName = "Lambda Issue" in {
   def note_lambda_to_block_conv : Note<
     "implicit capture of lambda object due to conversion to block pointer "
     "here">;
-  def err_lambda_init_capture_unsupported : Error<
-    "sorry, initialized lambda-captures are not supported yet">;
+
+  // C++1y lambda init-captures.
+  def err_init_capture_no_expression : Error<
+    "initializer missing for lambda capture %0">;
+  def err_init_capture_multiple_expressions : Error<
+    "initializer for lambda capture %0 contains multiple expressions">;
+  def err_init_capture_deduction_failure : Error<
+    "cannot deduce type for lambda capture %0 from initializer of type %1">;
+  def err_init_capture_deduction_failure_from_init_list : Error<
+    "cannot deduce type for lambda capture %0 from initializer list">;
 }
 
 def err_return_in_captured_stmt : Error<
@@ -6063,7 +6092,9 @@ def note_empty_body_on_separate_line : Note<
 def err_va_start_used_in_non_variadic_function : Error<
   "'va_start' used in function with fixed args">;
 def warn_second_parameter_of_va_start_not_last_named_argument : Warning<
-  "second parameter of 'va_start' not last named argument">;
+  "second parameter of 'va_start' not last named argument">, InGroup<Varargs>;
+def warn_va_start_of_reference_type_is_undefined : Warning<
+  "'va_start' has undefined behavior with reference types">, InGroup<Varargs>;
 def err_first_argument_to_va_arg_not_of_type_va_list : Error<
   "first argument to 'va_arg' is of type %0 and not 'va_list'">;
 def err_second_parameter_to_va_arg_incomplete: Error<
@@ -6078,7 +6109,7 @@ def warn_second_parameter_to_va_arg_ownership_qualified : Warning<
   InGroup<NonPODVarargs>, DefaultError;
 def warn_second_parameter_to_va_arg_never_compatible : Warning<
   "second argument to 'va_arg' is of promotable type %0; this va_arg has "
-  "undefined behavior because arguments will be promoted to %1">;
+  "undefined behavior because arguments will be promoted to %1">, InGroup<Varargs>;
 
 def warn_return_missing_expr : Warning<
   "non-void %select{function|method}1 %0 should return a value">, DefaultError,
@@ -6166,6 +6197,9 @@ def warn_collection_expr_type : Warning<
 
 def err_invalid_conversion_between_ext_vectors : Error<
   "invalid conversion between ext-vector type %0 and %1">;
+
+def warn_duplicate_attribute_exact : Warning<
+  "attribute %0 is already applied">, InGroup<IgnoredAttributes>;
 
 def warn_duplicate_attribute : Warning<
   "attribute %0 is already applied with different parameters">,
@@ -6338,22 +6372,6 @@ def err_wrong_sampler_addressspace: Error<
   "sampler type cannot be used with the __local and __global address space qualifiers">;
 def err_opencl_global_invalid_addr_space : Error<
   "global variables must have a constant address space qualifier">;
-  
-// OpenMP support.
-def err_omp_expected_var_arg_suggest : Error<
-  "%0 is not a global variable, static local variable or static data member%select{|; did you mean %2?}1">;
-def err_omp_global_var_arg : Error<
-  "arguments of '#pragma omp %0' must have %select{global storage|static storage duration}1">;
-def err_omp_ref_type_arg : Error<
-  "arguments of '#pragma omp %0' cannot be of reference type %1">;
-def err_omp_var_scope : Error<
-  "'#pragma omp %0' must appear in the scope of the %1 variable declaration">;
-def err_omp_var_used : Error<
-  "'#pragma omp %0' must precede all references to variable %1">;
-def err_omp_var_thread_local : Error<
-  "variable %0 cannot be threadprivate because it is thread-local">;
-def err_omp_incomplete_type : Error<
-  "a threadprivate variable must not have incomplete type %0">;
 
 // Cilk Plus warnings and errors
 // cilk_spawn
@@ -6453,6 +6471,24 @@ def warn_cilk_for_wraparound: Warning <
 def note_cilk_for_wraparound_undefined: Note <
   "Wraparounds cause undefined behavior in Cilk for">;
 } // end of sema category
+
+let CategoryName = "OpenMP Issue" in {
+// OpenMP support.
+def err_omp_expected_var_arg_suggest : Error<
+  "%0 is not a global variable, static local variable or static data member%select{|; did you mean %2?}1">;
+def err_omp_global_var_arg : Error<
+  "arguments of '#pragma omp %0' must have %select{global storage|static storage duration}1">;
+def err_omp_ref_type_arg : Error<
+  "arguments of '#pragma omp %0' cannot be of reference type">;
+def err_omp_var_scope : Error<
+  "'#pragma omp %0' must appear in the scope of the %q1 variable declaration">;
+def err_omp_var_used : Error<
+  "'#pragma omp %0' must precede all references to variable %q1">;
+def err_omp_var_thread_local : Error<
+  "variable %0 cannot be threadprivate because it is thread-local">;
+def err_omp_threadprivate_incomplete_type : Error<
+  "threadprivate variable with incomplete type %0">;
+} // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {
 // Objective-C related result type compatibility

@@ -24,6 +24,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace clang {
 struct ASTTemplateArgumentListInfo;
@@ -142,7 +143,7 @@ public:
   // FIXME: Deprecated, move clients to getName().
   std::string getNameAsString() const { return Name.getAsString(); }
 
-  void printName(raw_ostream &os) const { return Name.printName(os); }
+  void printName(raw_ostream &os) const { os << Name; }
 
   /// getDeclName - Get the actual, stored name of the declaration,
   /// which may be a special name.
@@ -212,11 +213,24 @@ public:
   bool isCXXInstanceMember() const;
 
   /// \brief Determine what kind of linkage this entity has.
-  Linkage getLinkage() const;
+  /// This is not the linkage as defined by the standard or the codegen notion
+  /// of linkage. It is just an implementation detail that is used to compute
+  /// those.
+  Linkage getLinkageInternal() const;
+
+  /// \brief Get the linkage from a semantic point of view. Entities in
+  /// anonymous namespaces are external (in c++98).
+  Linkage getFormalLinkage() const {
+    return clang::getFormalLinkage(getLinkageInternal());
+  }
 
   /// \brief True if this decl has external linkage.
-  bool hasExternalLinkage() const {
-    return getLinkage() == ExternalLinkage;
+  bool hasExternalFormalLinkage() const {
+    return isExternalFormalLinkage(getLinkageInternal());
+  }
+
+  bool isExternallyVisible() const {
+    return clang::isExternallyVisible(getLinkageInternal());
   }
 
   /// \brief Determines the visibility of this entity.
@@ -797,7 +811,8 @@ public:
   ///  is a non-static local variable.
   bool hasLocalStorage() const {
     if (getStorageClass() == SC_None)
-      return !isFileVarDecl();
+      // Second check is for C++11 [dcl.stc]p4.
+      return !isFileVarDecl() && getTSCSpec() != TSCS_thread_local;
 
     // Return true for:  Auto, Register.
     // Return false for: Extern, Static, PrivateExtern, OpenCLWorkGroupLocal.
@@ -808,7 +823,10 @@ public:
   /// isStaticLocal - Returns true if a variable with function scope is a
   /// static local variable.
   bool isStaticLocal() const {
-    return getStorageClass() == SC_Static && !isFileVarDecl();
+    return (getStorageClass() == SC_Static ||
+            // C++11 [dcl.stc]p4
+            (getStorageClass() == SC_None && getTSCSpec() == TSCS_thread_local))
+      && !isFileVarDecl();
   }
 
   /// \brief Returns true if a variable has extern or __private_extern__

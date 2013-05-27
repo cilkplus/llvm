@@ -938,9 +938,7 @@ public:
 
   /// PopCleanupBlock - Will pop the cleanup entry on the stack and
   /// process all branch fixups.
-  /// \param EHLoc - Optional debug location for EH code.
-  void PopCleanupBlock(bool FallThroughIsBranchThrough = false,
-                       SourceLocation EHLoc=SourceLocation());
+  void PopCleanupBlock(bool FallThroughIsBranchThrough = false);
 
   /// DeactivateCleanupBlock - Deactivates the given cleanup block.
   /// The block cannot be reactivated.  Pops it if it's the top of the
@@ -1061,9 +1059,7 @@ public:
 
   /// PopCleanupBlocks - Takes the old cleanup stack size and emits
   /// the cleanup blocks that have been added.
-  /// \param EHLoc - Optional debug location for EH code.
-  void PopCleanupBlocks(EHScopeStack::stable_iterator OldCleanupStackSize,
-                        SourceLocation EHLoc=SourceLocation());
+  void PopCleanupBlocks(EHScopeStack::stable_iterator OldCleanupStackSize);
 
   void ResolveBranchFixups(llvm::BasicBlock *Target);
 
@@ -1432,6 +1428,10 @@ private:
 
   /// The current lexical scope.
   LexicalScope *CurLexicalScope;
+
+  /// The current source location that should be used for exception
+  /// handling code.
+  SourceLocation CurEHLocation;
 
   /// ByrefValueInfoMap - For each __block variable, contains a pair of the LLVM
   /// type as well as the field number that contains the actual data.
@@ -2525,7 +2525,7 @@ public:
       return ConstantEmission(C, false);
     }
 
-    operator bool() const { return ValueAndIsReference.getOpaqueValue() != 0; }
+    LLVM_EXPLICIT operator bool() const { return ValueAndIsReference.getOpaqueValue() != 0; }
 
     bool isReference() const { return ValueAndIsReference.getInt(); }
     LValue getReferenceLValue(CodeGenFunction &CGF, Expr *refExpr) const {

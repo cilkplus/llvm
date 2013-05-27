@@ -273,6 +273,18 @@ getLVForTemplateParameterList(const TemplateParameterList *params) {
 static LinkageInfo getLVForDecl(const NamedDecl *D,
                                 LVComputationKind computation);
 
+static const FunctionDecl *getOutermostFunctionContext(const Decl *D) {
+  const FunctionDecl *Ret = NULL;
+  const DeclContext *DC = D->getDeclContext();
+  while (DC->getDeclKind() != Decl::TranslationUnit) {
+    const FunctionDecl *F = dyn_cast<FunctionDecl>(DC);
+    if (F)
+      Ret = F;
+    DC = DC->getParent();
+  }
+  return Ret;
+}
+
 /// \brief Get the most restrictive linkage for the types and
 /// declarations in the given template argument list.
 ///
@@ -660,9 +672,20 @@ static LinkageInfo getLVForNamespaceScopeDecl(const NamedDecl *D,
     // this translation unit.  However, we should use the C linkage
     // rules instead for extern "C" declarations.
     if (Context.getLangOpts().CPlusPlus &&
-        !Function->isInExternCContext() &&
-        Function->getType()->getLinkage() == UniqueExternalLinkage)
-      return LinkageInfo::uniqueExternal();
+        !Function->isInExternCContext()) {
+      // Only look at the type-as-written. If this function has an auto-deduced
+      // return type, we can't compute the linkage of that type because it could
+      // require looking at the linkage of this function, and we don't need this
+      // for correctness because the type is not part of the function's
+      // signature.
+      // FIXME: This is a hack. We should be able to solve this circularity some
+      // other way.
+      QualType TypeAsWritten = Function->getType();
+      if (TypeSourceInfo *TSI = Function->getTypeSourceInfo())
+        TypeAsWritten = TSI->getType();
+      if (TypeAsWritten->getLinkage() == UniqueExternalLinkage)
+        return LinkageInfo::uniqueExternal();
+    }
 
     // Consider LV from the template and the template arguments.
     // We're at file scope, so we do not need to worry about nested
@@ -695,7 +718,7 @@ static LinkageInfo getLVForNamespaceScopeDecl(const NamedDecl *D,
   } else if (isa<EnumConstantDecl>(D)) {
     LinkageInfo EnumLV = getLVForDecl(cast<NamedDecl>(D->getDeclContext()),
                                       computation);
-    if (!isExternalLinkage(EnumLV.getLinkage()))
+    if (!isExternalFormalLinkage(EnumLV.getLinkage()))
       return LinkageInfo::none();
     LV.merge(EnumLV);
 
@@ -766,7 +789,7 @@ static LinkageInfo getLVForClassMember(const NamedDecl *D,
 
   LinkageInfo classLV =
     getLVForDecl(cast<RecordDecl>(D->getDeclContext()), classComputation);
-  if (!isExternalLinkage(classLV.getLinkage()))
+  if (!isExternalFormalLinkage(classLV.getLinkage()))
     return LinkageInfo::none();
 
   // If the class already has unique-external linkage, we can't improve.
@@ -867,39 +890,37 @@ static LinkageInfo getLVForClassMember(const NamedDecl *D,
 void NamedDecl::anchor() { }
 
 bool NamedDecl::isLinkageValid() const {
-  if (!HasCachedLinkage)
+  if (!hasCachedLinkage())
     return true;
 
   return getLVForDecl(this, LVForExplicitValue).getLinkage() ==
-    Linkage(CachedLinkage);
+         getCachedLinkage();
 }
 
-Linkage NamedDecl::getLinkage() const {
-  if (HasCachedLinkage)
-    return Linkage(CachedLinkage);
+Linkage NamedDecl::getLinkageInternal() const {
+  if (hasCachedLinkage())
+    return getCachedLinkage();
 
   // We don't care about visibility here, so ask for the cheapest
   // possible visibility analysis.
-  CachedLinkage = getLVForDecl(this, LVForExplicitValue).getLinkage();
-  HasCachedLinkage = 1;
+  setCachedLinkage(getLVForDecl(this, LVForExplicitValue).getLinkage());
 
 #ifndef NDEBUG
   verifyLinkage();
 #endif
 
-  return Linkage(CachedLinkage);
+  return getCachedLinkage();
 }
 
 LinkageInfo NamedDecl::getLinkageAndVisibility() const {
   LVComputationKind computation =
     (usesTypeVisibility(this) ? LVForType : LVForValue);
   LinkageInfo LI = getLVForDecl(this, computation);
-  if (HasCachedLinkage) {
-    assert(Linkage(CachedLinkage) == LI.getLinkage());
+  if (hasCachedLinkage()) {
+    assert(getCachedLinkage() == LI.getLinkage());
     return LI;
   }
-  HasCachedLinkage = 1;
-  CachedLinkage = LI.getLinkage();
+  setCachedLinkage(LI.getLinkage());
 
 #ifndef NDEBUG
   verifyLinkage();
@@ -924,12 +945,12 @@ void NamedDecl::verifyLinkage() const {
     NamedDecl *T = cast<NamedDecl>(*I);
     if (T == this)
       continue;
-    if (T->HasCachedLinkage != 0) {
+    if (T->hasCachedLinkage()) {
       D = T;
       break;
     }
   }
-  assert(!D || D->CachedLinkage == CachedLinkage);
+  assert(!D || D->getCachedLinkage() == getCachedLinkage());
 }
 
 Optional<Visibility>
@@ -1042,7 +1063,17 @@ static LinkageInfo getLVForLocalDecl(const NamedDecl *D,
     }
   }
 
-  return LinkageInfo::none();
+  if (!isa<TagDecl>(D))
+    return LinkageInfo::none();
+
+  const FunctionDecl *FD = getOutermostFunctionContext(D);
+  if (!FD || !FD->isInlined())
+    return LinkageInfo::none();
+  LinkageInfo LV = FD->getLinkageAndVisibility();
+  if (!isExternallyVisible(LV.getLinkage()))
+    return LinkageInfo::none();
+  return LinkageInfo(VisibleNoLinkage, LV.getVisibility(),
+                     LV.isVisibilityExplicit());
 }
 
 static LinkageInfo getLVForDecl(const NamedDecl *D,
@@ -1278,7 +1309,7 @@ bool NamedDecl::declarationReplaces(NamedDecl *OldD) const {
 }
 
 bool NamedDecl::hasLinkage() const {
-  return getLinkage() != NoLinkage;
+  return getFormalLinkage() != NoLinkage;
 }
 
 NamedDecl *NamedDecl::getUnderlyingDeclImpl() {
@@ -1502,7 +1533,7 @@ template<typename T>
 static LanguageLinkage getLanguageLinkageTemplate(const T &D) {
   // C++ [dcl.link]p1: All function types, function names with external linkage,
   // and variable names with external linkage have a language linkage.
-  if (!isExternalLinkage(D.getLinkage()))
+  if (!D.hasExternalFormalLinkage())
     return NoLanguageLinkage;
 
   // Language linkage is a C++ concept, but saying that everything else in C has
@@ -2304,7 +2335,7 @@ bool FunctionDecl::doesDeclarationForceExternallyVisibleDefinition() const {
     const FunctionDecl *Prev = this;
     bool FoundBody = false;
     while ((Prev = Prev->getPreviousDecl())) {
-      FoundBody |= Prev->Body;
+      FoundBody |= Prev->Body.isValid();
 
       if (Prev->Body) {
         // If it's not the case that both 'inline' and 'extern' are
@@ -2332,7 +2363,7 @@ bool FunctionDecl::doesDeclarationForceExternallyVisibleDefinition() const {
   const FunctionDecl *Prev = this;
   bool FoundBody = false;
   while ((Prev = Prev->getPreviousDecl())) {
-    FoundBody |= Prev->Body;
+    FoundBody |= Prev->Body.isValid();
     if (RedeclForcesDefC99(Prev))
       return false;
   }

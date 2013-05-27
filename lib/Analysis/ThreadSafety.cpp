@@ -750,16 +750,18 @@ struct LockData {
   ///
   /// FIXME: add support for re-entrant locking and lock up/downgrading
   LockKind LKind;
+  bool     Asserted;           // for asserted locks
   bool     Managed;            // for ScopedLockable objects
   SExpr    UnderlyingMutex;    // for ScopedLockable objects
 
-  LockData(SourceLocation AcquireLoc, LockKind LKind, bool M = false)
-    : AcquireLoc(AcquireLoc), LKind(LKind), Managed(M),
+  LockData(SourceLocation AcquireLoc, LockKind LKind, bool M=false,
+           bool Asrt=false)
+    : AcquireLoc(AcquireLoc), LKind(LKind), Asserted(Asrt), Managed(M),
       UnderlyingMutex(Decl::EmptyShell())
   {}
 
   LockData(SourceLocation AcquireLoc, LockKind LKind, const SExpr &Mu)
-    : AcquireLoc(AcquireLoc), LKind(LKind), Managed(false),
+    : AcquireLoc(AcquireLoc), LKind(LKind), Asserted(false), Managed(false),
       UnderlyingMutex(Mu)
   {}
 
@@ -862,6 +864,16 @@ public:
       return true;
     }
     return false;
+  }
+
+  // Returns an iterator
+  iterator findLockIter(FactManager &FM, const SExpr &M) {
+    for (iterator I = begin(), E = end(); I != E; ++I) {
+      const SExpr &Exp = FM[*I].MutID;
+      if (Exp.matches(M))
+        return I;
+    }
+    return end();
   }
 
   LockData* findLock(FactManager &FM, const SExpr &M) const {
@@ -1484,7 +1496,8 @@ void ThreadSafetyAnalyzer::addLock(FactSet &FSet, const SExpr &Mutex,
     return;
 
   if (FSet.findLock(FactMan, Mutex)) {
-    Handler.handleDoubleLock(Mutex.toString(), LDat.AcquireLoc);
+    if (!LDat.Asserted)
+      Handler.handleDoubleLock(Mutex.toString(), LDat.AcquireLoc);
   } else {
     FSet.addLock(FactMan, Mutex, LDat);
   }
@@ -1909,6 +1922,7 @@ void BuildLockset::checkPtAccess(const Expr *Exp, AccessKind AK) {
 /// the same signature as const method calls can be also treated as reads.
 ///
 void BuildLockset::handleCall(Expr *Exp, const NamedDecl *D, VarDecl *VD) {
+  SourceLocation Loc = Exp->getExprLoc();
   const AttrVec &ArgAttrs = D->getAttrs();
   MutexIDList ExclusiveLocksToAdd;
   MutexIDList SharedLocksToAdd;
@@ -1930,6 +1944,32 @@ void BuildLockset::handleCall(Expr *Exp, const NamedDecl *D, VarDecl *VD) {
       case attr::SharedLockFunction: {
         SharedLockFunctionAttr *A = cast<SharedLockFunctionAttr>(At);
         Analyzer->getMutexIDs(SharedLocksToAdd, A, Exp, D, VD);
+        break;
+      }
+
+      // An assert will add a lock to the lockset, but will not generate
+      // a warning if it is already there, and will not generate a warning
+      // if it is not removed.
+      case attr::AssertExclusiveLock: {
+        AssertExclusiveLockAttr *A = cast<AssertExclusiveLockAttr>(At);
+
+        MutexIDList AssertLocks;
+        Analyzer->getMutexIDs(AssertLocks, A, Exp, D, VD);
+        for (unsigned i=0,n=AssertLocks.size(); i<n; ++i) {
+          Analyzer->addLock(FSet, AssertLocks[i],
+                            LockData(Loc, LK_Exclusive, false, true));
+        }
+        break;
+      }
+      case attr::AssertSharedLock: {
+        AssertSharedLockAttr *A = cast<AssertSharedLockAttr>(At);
+
+        MutexIDList AssertLocks;
+        Analyzer->getMutexIDs(AssertLocks, A, Exp, D, VD);
+        for (unsigned i=0,n=AssertLocks.size(); i<n; ++i) {
+          Analyzer->addLock(FSet, AssertLocks[i],
+                            LockData(Loc, LK_Shared, false, true));
+        }
         break;
       }
 
@@ -1986,7 +2026,6 @@ void BuildLockset::handleCall(Expr *Exp, const NamedDecl *D, VarDecl *VD) {
   }
 
   // Add locks.
-  SourceLocation Loc = Exp->getExprLoc();
   for (unsigned i=0,n=ExclusiveLocksToAdd.size(); i<n; ++i) {
     Analyzer->addLock(FSet, ExclusiveLocksToAdd[i],
                             LockData(Loc, LK_Exclusive, isScopedVar));
@@ -2160,20 +2199,27 @@ void ThreadSafetyAnalyzer::intersectAndWarn(FactSet &FSet1,
                                             bool Modify) {
   FactSet FSet1Orig = FSet1;
 
+  // Find locks in FSet2 that conflict or are not in FSet1, and warn.
   for (FactSet::const_iterator I = FSet2.begin(), E = FSet2.end();
        I != E; ++I) {
     const SExpr &FSet2Mutex = FactMan[*I].MutID;
     const LockData &LDat2 = FactMan[*I].LDat;
+    FactSet::iterator I1 = FSet1.findLockIter(FactMan, FSet2Mutex);
 
-    if (const LockData *LDat1 = FSet1.findLock(FactMan, FSet2Mutex)) {
+    if (I1 != FSet1.end()) {
+      const LockData* LDat1 = &FactMan[*I1].LDat;
       if (LDat1->LKind != LDat2.LKind) {
         Handler.handleExclusiveAndShared(FSet2Mutex.toString(),
                                          LDat2.AcquireLoc,
                                          LDat1->AcquireLoc);
         if (Modify && LDat1->LKind != LK_Exclusive) {
-          FSet1.removeLock(FactMan, FSet2Mutex);
-          FSet1.addLock(FactMan, FSet2Mutex, LDat2);
+          // Take the exclusive lock, which is the one in FSet2.
+          *I1 = *I;
         }
+      }
+      else if (LDat1->Asserted && !LDat2.Asserted) {
+        // The non-asserted lock in FSet2 is the one we want to track.
+        *I1 = *I;
       }
     } else {
       if (LDat2.UnderlyingMutex.isValid()) {
@@ -2186,14 +2232,15 @@ void ThreadSafetyAnalyzer::intersectAndWarn(FactSet &FSet1,
                                             JoinLoc, LEK1);
         }
       }
-      else if (!LDat2.Managed && !FSet2Mutex.isUniversal())
+      else if (!LDat2.Managed && !FSet2Mutex.isUniversal() && !LDat2.Asserted)
         Handler.handleMutexHeldEndOfScope(FSet2Mutex.toString(),
                                           LDat2.AcquireLoc,
                                           JoinLoc, LEK1);
     }
   }
 
-  for (FactSet::const_iterator I = FSet1.begin(), E = FSet1.end();
+  // Find locks in FSet1 that are not in FSet2, and remove them.
+  for (FactSet::const_iterator I = FSet1Orig.begin(), E = FSet1Orig.end();
        I != E; ++I) {
     const SExpr &FSet1Mutex = FactMan[*I].MutID;
     const LockData &LDat1 = FactMan[*I].LDat;
@@ -2209,7 +2256,7 @@ void ThreadSafetyAnalyzer::intersectAndWarn(FactSet &FSet1,
                                             JoinLoc, LEK1);
         }
       }
-      else if (!LDat1.Managed && !FSet1Mutex.isUniversal())
+      else if (!LDat1.Managed && !FSet1Mutex.isUniversal() && !LDat1.Asserted)
         Handler.handleMutexHeldEndOfScope(FSet1Mutex.toString(),
                                           LDat1.AcquireLoc,
                                           JoinLoc, LEK2);

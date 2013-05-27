@@ -759,6 +759,10 @@ bool ASTReader::ReadDeclContextStorage(ModuleFile &M,
 
 void ASTReader::Error(StringRef Msg) {
   Error(diag::err_fe_pch_malformed, Msg);
+  if (Context.getLangOpts().Modules && !Diags.isDiagnosticInFlight()) {
+    Diag(diag::note_module_cache_path)
+      << PP.getHeaderSearchInfo().getModuleCachePath();
+  }
 }
 
 void ASTReader::Error(unsigned DiagID,
@@ -1715,6 +1719,10 @@ InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
          )) {
       if (Complain) {
         Error(diag::err_fe_pch_file_modified, Filename, F.FileName);
+        if (Context.getLangOpts().Modules && !Diags.isDiagnosticInFlight()) {
+          Diag(diag::note_module_cache_path)
+            << PP.getHeaderSearchInfo().getModuleCachePath();
+        }
       }
 
       IsOutOfDate = true;
@@ -2892,6 +2900,9 @@ ASTReader::ASTReadResult ASTReader::ReadAST(const std::string &FileName,
                                             ModuleKind Type,
                                             SourceLocation ImportLoc,
                                             unsigned ClientLoadCapabilities) {
+  llvm::SaveAndRestore<SourceLocation>
+    SetCurImportLocRAII(CurrentImportLoc, ImportLoc);
+
   // Bump the generation number.
   unsigned PreviousGeneration = CurrentGeneration++;
 
@@ -7159,7 +7170,7 @@ CXXTemporary *ASTReader::ReadCXXTemporary(ModuleFile &F,
 }
 
 DiagnosticBuilder ASTReader::Diag(unsigned DiagID) {
-  return Diag(SourceLocation(), DiagID);
+  return Diag(CurrentImportLoc, DiagID);
 }
 
 DiagnosticBuilder ASTReader::Diag(SourceLocation Loc, unsigned DiagID) {

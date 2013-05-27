@@ -1138,6 +1138,31 @@ namespace ComplexConstexpr {
   static_assert(&__imag test6 == &__real test6 + 1, "");
 }
 
+// _Atomic(T) is exactly like T for the purposes of constant expression
+// evaluation..
+namespace Atomic {
+  constexpr _Atomic int n = 3;
+
+  struct S { _Atomic(double) d; };
+  constexpr S s = { 0.5 };
+  constexpr double d1 = s.d;
+  constexpr double d2 = n;
+  constexpr _Atomic double d3 = n;
+
+  constexpr _Atomic(int) n2 = d3;
+  static_assert(d1 == 0.5, "");
+  static_assert(d3 == 3.0, "");
+
+  namespace PR16056 {
+    struct TestVar {
+      _Atomic(int) value;
+      constexpr TestVar(int value) : value(value) {}
+    };
+    constexpr TestVar testVar{-1};
+    static_assert(testVar.value == -1, "");
+  }
+}
+
 namespace InstantiateCaseStmt {
   template<int x> constexpr int f() { return x; }
   template<int x> int g(int c) { switch(c) { case f<x>(): return 1; } return 0; }
@@ -1502,4 +1527,12 @@ namespace PR15884 {
   // expected-error@-2 {{constexpr variable 'p' must be initialized by a constant expression}}
   // expected-note@-3 {{pointer to temporary is not a constant expression}}
   // expected-note@-4 {{temporary created here}}
+}
+
+namespace AfterError {
+  // FIXME: Suppress the 'no return statements' diagnostic if the body is invalid.
+  constexpr int error() { // expected-error {{no return statement}}
+    return foobar; // expected-error {{undeclared identifier}}
+  }
+  constexpr int k = error(); // expected-error {{must be initialized by a constant expression}}
 }

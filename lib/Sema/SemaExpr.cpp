@@ -197,11 +197,11 @@ static void diagnoseUseOfInternalDeclInInlineFunction(Sema &S,
     return;
   if (!Current->isInlined())
     return;
-  if (Current->getLinkage() != ExternalLinkage)
+  if (!Current->isExternallyVisible())
     return;
-  
+
   // Check if the decl has internal linkage.
-  if (D->getLinkage() != InternalLinkage)
+  if (D->getFormalLinkage() != InternalLinkage)
     return;
 
   // Downgrade from ExtWarn to Extension if
@@ -1550,7 +1550,7 @@ Sema::BuildDeclRefExpr(ValueDecl *D, QualType Ty, ExprValueKind VK,
       Diags.getDiagnosticLevel(diag::warn_arc_repeated_use_of_weak,
                                E->getLocStart());
     if (Level != DiagnosticsEngine::Ignored)
-      getCurFunction()->recordUseOfWeak(E);
+      recordUseOfEvaluatedWeak(E);
   }
 
   // Just in case we're building an illegal pointer-to-member.
@@ -1821,7 +1821,8 @@ ExprResult Sema::ActOnIdExpression(Scope *S,
                                    UnqualifiedId &Id,
                                    bool HasTrailingLParen,
                                    bool IsAddressOfOperand,
-                                   CorrectionCandidateCallback *CCC) {
+                                   CorrectionCandidateCallback *CCC,
+                                   bool IsInlineAsmIdentifier) {
   assert(!(IsAddressOfOperand && HasTrailingLParen) &&
          "cannot be direct & operand and have a trailing lparen");
 
@@ -1936,6 +1937,10 @@ ExprResult Sema::ActOnIdExpression(Scope *S,
           return ActOnDependentIdExpression(SS, TemplateKWLoc, NameInfo,
                                             IsAddressOfOperand, TemplateArgs);
       }
+
+      // Don't diagnose an empty lookup for inline assmebly.
+      if (IsInlineAsmIdentifier)
+        return ExprError();
 
       CorrectionCandidateCallback DefaultValidator;
       if (DiagnoseEmptyLookup(S, SS, R, CCC ? *CCC : DefaultValidator))
@@ -2152,7 +2157,7 @@ Sema::LookupInObjCMethod(LookupResult &Lookup, Scope *S,
           DiagnosticsEngine::Level Level =
             Diags.getDiagnosticLevel(diag::warn_arc_repeated_use_of_weak, Loc);
           if (Level != DiagnosticsEngine::Ignored)
-            getCurFunction()->recordUseOfWeak(Result);
+            recordUseOfEvaluatedWeak(Result);
         }
         if (CurContext->isClosure())
           Diag(Loc, diag::warn_implicitly_retains_self)
@@ -4468,7 +4473,7 @@ Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
 ExprResult
 Sema::ActOnCompoundLiteral(SourceLocation LParenLoc, ParsedType Ty,
                            SourceLocation RParenLoc, Expr *InitExpr) {
-  assert((Ty != 0) && "ActOnCompoundLiteral(): missing type");
+  assert(Ty && "ActOnCompoundLiteral(): missing type");
   // FIXME: put back this assert when initializers are worked out.
   //assert((InitExpr != 0) && "ActOnCompoundLiteral(): missing expression");
 
@@ -5630,7 +5635,14 @@ ExprResult Sema::ActOnConditionalOp(SourceLocation QuestionLoc,
   Expr *commonExpr = 0;
   if (LHSExpr == 0) {
     commonExpr = CondExpr;
-
+    // Lower out placeholder types first.  This is important so that we don't
+    // try to capture a placeholder. This happens in few cases in C++; such
+    // as Objective-C++'s dictionary subscripting syntax.
+    if (commonExpr->hasPlaceholderType()) {
+      ExprResult result = CheckPlaceholderExpr(commonExpr);
+      if (!result.isUsable()) return ExprError();
+      commonExpr = result.take();
+    }
     // We usually want to apply unary conversions *before* saving, except
     // in the special case of a C++ l-value conditional.
     if (!(getLangOpts().CPlusPlus
@@ -9932,7 +9944,7 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
     if (Cap.isThisCapture())
       continue;
     BlockDecl::Capture NewCap(Cap.getVariable(), Cap.isBlockCapture(),
-                              Cap.isNested(), Cap.getCopyExpr());
+                              Cap.isNested(), Cap.getInitExpr());
     Captures.push_back(NewCap);
   }
   BSI->TheDecl->setCaptures(Context, Captures.begin(), Captures.end(),
@@ -10384,112 +10396,52 @@ Sema::VerifyIntegerConstantExpression(Expr *E, llvm::APSInt *Result,
     //   have a single non-explicit conversion function to an integral or
     //   unscoped enumeration type
     ExprResult Converted;
-    if (!Diagnoser.Suppress) {
-      class CXX11ConvertDiagnoser : public ICEConvertDiagnoser {
-      public:
-        CXX11ConvertDiagnoser() : ICEConvertDiagnoser(false, true) { }
-        
-        virtual DiagnosticBuilder diagnoseNotInt(Sema &S, SourceLocation Loc,
-                                                 QualType T) {
-          return S.Diag(Loc, diag::err_ice_not_integral) << T;
-        }
-        
-        virtual DiagnosticBuilder diagnoseIncomplete(Sema &S,
-                                                     SourceLocation Loc,
-                                                     QualType T) {
-          return S.Diag(Loc, diag::err_ice_incomplete_type) << T;
-        }
-        
-        virtual DiagnosticBuilder diagnoseExplicitConv(Sema &S,
-                                                       SourceLocation Loc,
-                                                       QualType T,
-                                                       QualType ConvTy) {
-          return S.Diag(Loc, diag::err_ice_explicit_conversion) << T << ConvTy;
-        }
-        
-        virtual DiagnosticBuilder noteExplicitConv(Sema &S,
-                                                   CXXConversionDecl *Conv,
-                                                   QualType ConvTy) {
-          return S.Diag(Conv->getLocation(), diag::note_ice_conversion_here)
-                   << ConvTy->isEnumeralType() << ConvTy;
-        }
-        
-        virtual DiagnosticBuilder diagnoseAmbiguous(Sema &S, SourceLocation Loc,
-                                                    QualType T) {
-          return S.Diag(Loc, diag::err_ice_ambiguous_conversion) << T;
-        }
-        
-        virtual DiagnosticBuilder noteAmbiguous(Sema &S,
-                                                CXXConversionDecl *Conv,
-                                                QualType ConvTy) {
-          return S.Diag(Conv->getLocation(), diag::note_ice_conversion_here)
-                   << ConvTy->isEnumeralType() << ConvTy;
-        }
-        
-        virtual DiagnosticBuilder diagnoseConversion(Sema &S,
-                                                     SourceLocation Loc,
-                                                     QualType T,
-                                                     QualType ConvTy) {
-          return DiagnosticBuilder::getEmpty();
-        }
-      } ConvertDiagnoser;
+    class CXX11ConvertDiagnoser : public ICEConvertDiagnoser {
+    public:
+      CXX11ConvertDiagnoser(bool Silent)
+          : ICEConvertDiagnoser(/*AllowScopedEnumerations*/false,
+                                Silent, true) {}
 
-      Converted = ConvertToIntegralOrEnumerationType(DiagLoc, E,
-                                                     ConvertDiagnoser,
-                                             /*AllowScopedEnumerations*/ false);
-    } else {
-      // The caller wants to silently enquire whether this is an ICE. Don't
-      // produce any diagnostics if it isn't.
-      class SilentICEConvertDiagnoser : public ICEConvertDiagnoser {
-      public:
-        SilentICEConvertDiagnoser() : ICEConvertDiagnoser(true, true) { }
-        
-        virtual DiagnosticBuilder diagnoseNotInt(Sema &S, SourceLocation Loc,
-                                                 QualType T) {
-          return DiagnosticBuilder::getEmpty();
-        }
-        
-        virtual DiagnosticBuilder diagnoseIncomplete(Sema &S,
-                                                     SourceLocation Loc,
-                                                     QualType T) {
-          return DiagnosticBuilder::getEmpty();
-        }
-        
-        virtual DiagnosticBuilder diagnoseExplicitConv(Sema &S,
-                                                       SourceLocation Loc,
-                                                       QualType T,
-                                                       QualType ConvTy) {
-          return DiagnosticBuilder::getEmpty();
-        }
-        
-        virtual DiagnosticBuilder noteExplicitConv(Sema &S,
-                                                   CXXConversionDecl *Conv,
-                                                   QualType ConvTy) {
-          return DiagnosticBuilder::getEmpty();
-        }
-        
-        virtual DiagnosticBuilder diagnoseAmbiguous(Sema &S, SourceLocation Loc,
-                                                    QualType T) {
-          return DiagnosticBuilder::getEmpty();
-        }
-        
-        virtual DiagnosticBuilder noteAmbiguous(Sema &S,
-                                                CXXConversionDecl *Conv,
-                                                QualType ConvTy) {
-          return DiagnosticBuilder::getEmpty();
-        }
-        
-        virtual DiagnosticBuilder diagnoseConversion(Sema &S,
-                                                     SourceLocation Loc,
-                                                     QualType T,
-                                                     QualType ConvTy) {
-          return DiagnosticBuilder::getEmpty();
-        }
-      } ConvertDiagnoser;
-      
-      Converted = ConvertToIntegralOrEnumerationType(DiagLoc, E,
-                                                     ConvertDiagnoser, false);
-    }
+      virtual SemaDiagnosticBuilder diagnoseNotInt(Sema &S, SourceLocation Loc,
+                                                   QualType T) {
+        return S.Diag(Loc, diag::err_ice_not_integral) << T;
+      }
+
+      virtual SemaDiagnosticBuilder diagnoseIncomplete(
+          Sema &S, SourceLocation Loc, QualType T) {
+        return S.Diag(Loc, diag::err_ice_incomplete_type) << T;
+      }
+
+      virtual SemaDiagnosticBuilder diagnoseExplicitConv(
+          Sema &S, SourceLocation Loc, QualType T, QualType ConvTy) {
+        return S.Diag(Loc, diag::err_ice_explicit_conversion) << T << ConvTy;
+      }
+
+      virtual SemaDiagnosticBuilder noteExplicitConv(
+          Sema &S, CXXConversionDecl *Conv, QualType ConvTy) {
+        return S.Diag(Conv->getLocation(), diag::note_ice_conversion_here)
+                 << ConvTy->isEnumeralType() << ConvTy;
+      }
+
+      virtual SemaDiagnosticBuilder diagnoseAmbiguous(
+          Sema &S, SourceLocation Loc, QualType T) {
+        return S.Diag(Loc, diag::err_ice_ambiguous_conversion) << T;
+      }
+
+      virtual SemaDiagnosticBuilder noteAmbiguous(
+          Sema &S, CXXConversionDecl *Conv, QualType ConvTy) {
+        return S.Diag(Conv->getLocation(), diag::note_ice_conversion_here)
+                 << ConvTy->isEnumeralType() << ConvTy;
+      }
+
+      virtual SemaDiagnosticBuilder diagnoseConversion(
+          Sema &S, SourceLocation Loc, QualType T, QualType ConvTy) {
+        llvm_unreachable("conversion functions are permitted");
+      }
+    } ConvertDiagnoser(Diagnoser.Suppress);
+
+    Converted = PerformContextualImplicitConversion(DiagLoc, E,
+                                                    ConvertDiagnoser);
     if (Converted.isInvalid())
       return Converted;
     E = Converted.take();
@@ -11259,17 +11211,18 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       cast<CapturingScopeInfo>(FunctionScopes[FunctionScopesIndex]);
 
     // Check whether we've already captured it.
-    if (CSI->CaptureMap.count(Var)) {
+    if (CSI->isCaptured(Var)) {
+      const CapturingScopeInfo::Capture &Cap = CSI->getCapture(Var);
+
       // If we found a capture, any subcaptures are nested.
       Nested = true;
       
       // Retrieve the capture type for this variable.
-      CaptureType = CSI->getCapture(Var).getCaptureType();
+      CaptureType = Cap.getCaptureType();
       
       // Compute the type of an expression that refers to this variable.
       DeclRefType = CaptureType.getNonReferenceType();
       
-      const CapturingScopeInfo::Capture &Cap = CSI->getCapture(Var);
       if (Cap.isCopyCapture() &&
           !(isa<LambdaScopeInfo>(CSI) && cast<LambdaScopeInfo>(CSI)->Mutable))
         DeclRefType.addConst();
@@ -11590,7 +11543,7 @@ static void MarkVarDeclODRUsed(Sema &SemaRef, VarDecl *Var,
   // Keep track of used but undefined variables.
   // FIXME: We shouldn't suppress this warning for static data members.
   if (Var->hasDefinition(SemaRef.Context) == VarDecl::DeclarationOnly &&
-      Var->getLinkage() != ExternalLinkage &&
+      !Var->isExternallyVisible() &&
       !(Var->isStaticDataMember() && Var->hasInit())) {
     SourceLocation &old = SemaRef.UndefinedButUsed[Var->getCanonicalDecl()];
     if (old.isInvalid()) old = Loc;

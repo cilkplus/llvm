@@ -5896,7 +5896,7 @@ void Sema::CheckConstructor(CXXConstructorDecl *Constructor) {
 bool Sema::CheckDestructor(CXXDestructorDecl *Destructor) {
   CXXRecordDecl *RD = Destructor->getParent();
   
-  if (Destructor->isVirtual()) {
+  if (!Destructor->getOperatorDelete() && Destructor->isVirtual()) {
     SourceLocation Loc;
     
     if (!Destructor->isImplicit())
@@ -9307,7 +9307,7 @@ void Sema::DefineImplicitMoveAssignment(SourceLocation CurrentLocation,
   ParmVarDecl *Other = MoveAssignOperator->getParamDecl(0);
   QualType OtherRefType = Other->getType()->
       getAs<RValueReferenceType>()->getPointeeType();
-  assert(OtherRefType.getQualifiers() == 0 &&
+  assert(!OtherRefType.getQualifiers() &&
          "Bad argument type of defaulted move assignment");
 
   // Our location for everything implicitly-generated.
@@ -11824,7 +11824,7 @@ bool Sema::DefineUsedVTables() {
     Consumer.HandleVTable(Class, VTablesUsed[Canonical]);
 
     // Optionally warn if we're emitting a weak vtable.
-    if (Class->hasExternalLinkage() &&
+    if (Class->isExternallyVisible() &&
         Class->getTemplateSpecializationKind() != TSK_ImplicitInstantiation) {
       const FunctionDecl *KeyFunctionDef = 0;
       if (!KeyFunction || 

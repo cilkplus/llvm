@@ -1341,6 +1341,8 @@ void StmtPrinter::VisitCXXTemporaryObjectExpr(CXXTemporaryObjectExpr *Node) {
   for (CXXTemporaryObjectExpr::arg_iterator Arg = Node->arg_begin(),
                                          ArgEnd = Node->arg_end();
        Arg != ArgEnd; ++Arg) {
+    if (Arg->isDefaultArgument())
+      break;
     if (Arg != Node->arg_begin())
       OS << ", ";
     PrintExpr(*Arg);
@@ -1388,6 +1390,13 @@ void StmtPrinter::VisitLambdaExpr(LambdaExpr *Node) {
       if (Node->getCaptureDefault() != LCD_ByCopy)
         OS << '=';
       OS << C->getCapturedVar()->getName();
+      break;
+
+    case LCK_Init:
+      if (C->getInitCaptureField()->getType()->isReferenceType())
+        OS << '&';
+      OS << C->getInitCaptureField()->getName();
+      PrintExpr(Node->getInitCaptureInit(C));
       break;
     }
   }

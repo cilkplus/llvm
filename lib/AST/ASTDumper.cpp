@@ -62,6 +62,9 @@ namespace  {
   // Null statements
   static const TerminalColor NullColor = { raw_ostream::BLUE, false };
 
+  // Undeserialized entities
+  static const TerminalColor UndeserializedColor = { raw_ostream::GREEN, true };
+
   // CastKind from CastExpr's
   static const TerminalColor CastColor = { raw_ostream::RED, false };
 
@@ -450,9 +453,7 @@ void ASTDumper::dumpBareDeclRef(const Decl *D) {
 
   if (const NamedDecl *ND = dyn_cast<NamedDecl>(D)) {
     ColorScope Color(*this, DeclNameColor);
-    OS << " '";
-    ND->getDeclName().printName(OS);
-    OS << "'";
+    OS << " '" << ND->getDeclName() << '\'';
   }
 
   if (const ValueDecl *VD = dyn_cast<ValueDecl>(D))
@@ -480,19 +481,27 @@ bool ASTDumper::hasNodes(const DeclContext *DC) {
   if (!DC)
     return false;
 
-  return DC->decls_begin() != DC->decls_end();
+  return DC->hasExternalLexicalStorage() ||
+         DC->noload_decls_begin() != DC->noload_decls_end();
 }
 
 void ASTDumper::dumpDeclContext(const DeclContext *DC) {
   if (!DC)
     return;
-  for (DeclContext::decl_iterator I = DC->decls_begin(), E = DC->decls_end();
+  bool HasUndeserializedDecls = DC->hasExternalLexicalStorage();
+  for (DeclContext::decl_iterator I = DC->noload_decls_begin(), E = DC->noload_decls_end();
        I != E; ++I) {
     DeclContext::decl_iterator Next = I;
     ++Next;
-    if (Next == E)
+    if (Next == E && !HasUndeserializedDecls)
       lastChild();
     dumpDecl(*I);
+  }
+  if (HasUndeserializedDecls) {
+    lastChild();
+    IndentScope Indent(*this);
+    ColorScope Color(*this, UndeserializedColor);
+    OS << "<undeserialized declarations>";
   }
 }
 
@@ -668,15 +677,16 @@ void ASTDumper::dumpDecl(const Decl *D) {
   dumpSourceRange(D->getSourceRange());
 
   bool HasAttrs = D->attr_begin() != D->attr_end();
-  bool HasComment = D->getASTContext().getCommentForDecl(D, 0);
+  const FullComment *Comment =
+      D->getASTContext().getLocalCommentForDeclUncached(D);
   // Decls within functions are visited by the body
   bool HasDeclContext = !isa<FunctionDecl>(*D) && !isa<ObjCMethodDecl>(*D) &&
                          hasNodes(dyn_cast<DeclContext>(D));
 
-  setMoreChildren(HasAttrs || HasComment || HasDeclContext);
+  setMoreChildren(HasAttrs || Comment || HasDeclContext);
   ConstDeclVisitor<ASTDumper>::Visit(D);
 
-  setMoreChildren(HasComment || HasDeclContext);
+  setMoreChildren(Comment || HasDeclContext);
   for (Decl::attr_iterator I = D->attr_begin(), E = D->attr_end();
        I != E; ++I) {
     if (I + 1 == E)
@@ -686,7 +696,7 @@ void ASTDumper::dumpDecl(const Decl *D) {
 
   setMoreChildren(HasDeclContext);
   lastChild();
-  dumpFullComment(D->getASTContext().getCommentForDecl(D, 0));
+  dumpFullComment(Comment);
 
   setMoreChildren(false);
   if (HasDeclContext)
@@ -764,6 +774,19 @@ void ASTDumper::VisitFunctionDecl(const FunctionDecl *D) {
     OS << " pure";
   else if (D->isDeletedAsWritten())
     OS << " delete";
+
+  if (const FunctionProtoType *FPT = D->getType()->getAs<FunctionProtoType>()) {
+    FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+    switch (EPI.ExceptionSpecType) {
+    default: break;
+    case EST_Unevaluated:
+      OS << " noexcept-unevaluated " << EPI.ExceptionSpecDecl;
+      break;
+    case EST_Uninstantiated:
+      OS << " noexcept-uninstantiated " << EPI.ExceptionSpecTemplate;
+      break;
+    }
+  }
 
   bool OldMoreChildren = hasMoreChildren();
   const FunctionTemplateSpecializationInfo *FTSI =
@@ -1332,7 +1355,7 @@ void ASTDumper::dumpStmt(const Stmt *S) {
     return;
   }
 
-  setMoreChildren(S->children());
+  setMoreChildren(!S->children().empty());
   ConstStmtVisitor<ASTDumper>::Visit(S);
   setMoreChildren(false);
   for (Stmt::const_child_range CI = S->children(); CI; ++CI) {

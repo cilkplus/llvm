@@ -852,7 +852,6 @@ Use ``__has_feature(cxx_return_type_deduction)`` or
 ``__has_extension(cxx_return_type_deduction)`` to determine if support
 for return type deduction for functions (using ``auto`` as a return type)
 is enabled.
-Clang's implementation of this feature is incomplete.
 
 C++1y runtime-sized arrays
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1411,7 +1410,9 @@ should only be used for timing small intervals.  When not supported by the
 target, the return value is always zero.  This builtin takes no arguments and
 produces an unsigned long long result.
 
-Query for this feature with ``__has_builtin(__builtin_readcyclecounter)``.
+Query for this feature with ``__has_builtin(__builtin_readcyclecounter)``. Note
+that even if present, its use may depend on run-time privilege or other OS
+controlled state.
 
 .. _langext-__builtin_shufflevector:
 

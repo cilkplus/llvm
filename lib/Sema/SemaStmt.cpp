@@ -868,52 +868,50 @@ Sema::ActOnStartOfSwitchStmt(SourceLocation SwitchLoc, Expr *Cond,
 
   public:
     SwitchConvertDiagnoser(Expr *Cond)
-      : ICEConvertDiagnoser(false, true), Cond(Cond) { }
+        : ICEConvertDiagnoser(/*AllowScopedEnumerations*/true, false, true),
+          Cond(Cond) {}
 
-    virtual DiagnosticBuilder diagnoseNotInt(Sema &S, SourceLocation Loc,
-                                             QualType T) {
+    virtual SemaDiagnosticBuilder diagnoseNotInt(Sema &S, SourceLocation Loc,
+                                                 QualType T) {
       return S.Diag(Loc, diag::err_typecheck_statement_requires_integer) << T;
     }
 
-    virtual DiagnosticBuilder diagnoseIncomplete(Sema &S, SourceLocation Loc,
-                                                 QualType T) {
+    virtual SemaDiagnosticBuilder diagnoseIncomplete(
+        Sema &S, SourceLocation Loc, QualType T) {
       return S.Diag(Loc, diag::err_switch_incomplete_class_type)
                << T << Cond->getSourceRange();
     }
 
-    virtual DiagnosticBuilder diagnoseExplicitConv(Sema &S, SourceLocation Loc,
-                                                   QualType T,
-                                                   QualType ConvTy) {
+    virtual SemaDiagnosticBuilder diagnoseExplicitConv(
+        Sema &S, SourceLocation Loc, QualType T, QualType ConvTy) {
       return S.Diag(Loc, diag::err_switch_explicit_conversion) << T << ConvTy;
     }
 
-    virtual DiagnosticBuilder noteExplicitConv(Sema &S, CXXConversionDecl *Conv,
-                                               QualType ConvTy) {
+    virtual SemaDiagnosticBuilder noteExplicitConv(
+        Sema &S, CXXConversionDecl *Conv, QualType ConvTy) {
       return S.Diag(Conv->getLocation(), diag::note_switch_conversion)
         << ConvTy->isEnumeralType() << ConvTy;
     }
 
-    virtual DiagnosticBuilder diagnoseAmbiguous(Sema &S, SourceLocation Loc,
-                                                QualType T) {
+    virtual SemaDiagnosticBuilder diagnoseAmbiguous(Sema &S, SourceLocation Loc,
+                                                    QualType T) {
       return S.Diag(Loc, diag::err_switch_multiple_conversions) << T;
     }
 
-    virtual DiagnosticBuilder noteAmbiguous(Sema &S, CXXConversionDecl *Conv,
-                                            QualType ConvTy) {
+    virtual SemaDiagnosticBuilder noteAmbiguous(
+        Sema &S, CXXConversionDecl *Conv, QualType ConvTy) {
       return S.Diag(Conv->getLocation(), diag::note_switch_conversion)
       << ConvTy->isEnumeralType() << ConvTy;
     }
 
-    virtual DiagnosticBuilder diagnoseConversion(Sema &S, SourceLocation Loc,
-                                                 QualType T,
-                                                 QualType ConvTy) {
-      return DiagnosticBuilder::getEmpty();
+    virtual SemaDiagnosticBuilder diagnoseConversion(
+        Sema &S, SourceLocation Loc, QualType T, QualType ConvTy) {
+      llvm_unreachable("conversion functions are permitted");
     }
   } SwitchDiagnoser(Cond);
 
-  CondResult
-    = ConvertToIntegralOrEnumerationType(SwitchLoc, Cond, SwitchDiagnoser,
-                                         /*AllowScopedEnumerations*/ true);
+  CondResult =
+      PerformContextualImplicitConversion(SwitchLoc, Cond, SwitchDiagnoser);
   if (CondResult.isInvalid()) return StmtError();
   Cond = CondResult.take();
 
@@ -2651,8 +2649,7 @@ Sema::PerformMoveOrCopyInitialization(const InitializedEntity &Entity,
 StmtResult
 Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   // If this is the first return we've seen, infer the return type.
-  // [expr.prim.lambda]p4 in C++11; block literals follow a superset of those
-  // rules which allows multiple return statements.
+  // [expr.prim.lambda]p4 in C++11; block literals follow the same rules.
   CapturingScopeInfo *CurCap = cast<CapturingScopeInfo>(getCurFunction());
   QualType FnRetType = CurCap->ReturnType;
 
@@ -2665,14 +2662,30 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   // For blocks/lambdas with implicit return types, we check each return
   // statement individually, and deduce the common return type when the block
   // or lambda is completed.
-  if (CurCap->HasImplicitReturnType) {
+  if (AutoType *AT =
+          FnRetType.isNull() ? 0 : FnRetType->getContainedAutoType()) {
+    // In C++1y, the return type may involve 'auto'.
+    FunctionDecl *FD = cast<LambdaScopeInfo>(CurCap)->CallOperator;
+    if (CurContext->isDependentContext()) {
+      // C++1y [dcl.spec.auto]p12:
+      //   Return type deduction [...] occurs when the definition is
+      //   instantiated even if the function body contains a return
+      //   statement with a non-type-dependent operand.
+      CurCap->ReturnType = FnRetType = Context.DependentTy;
+    } else if (DeduceFunctionTypeFromReturnExpr(FD, ReturnLoc, RetValExp, AT)) {
+      FD->setInvalidDecl();
+      return StmtError();
+    } else
+      CurCap->ReturnType = FnRetType = FD->getResultType();
+  } else if (CurCap->HasImplicitReturnType) {
+    // FIXME: Fold this into the 'auto' codepath above.
     if (RetValExp && !isa<InitListExpr>(RetValExp)) {
       ExprResult Result = DefaultFunctionArrayLvalueConversion(RetValExp);
       if (Result.isInvalid())
         return StmtError();
       RetValExp = Result.take();
 
-      if (!RetValExp->isTypeDependent())
+      if (!CurContext->isDependentContext())
         FnRetType = RetValExp->getType();
       else
         FnRetType = CurCap->ReturnType = Context.DependentTy;
@@ -2848,7 +2861,6 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   if (RetValExp && DiagnoseUnexpandedParameterPack(RetValExp))
     return StmtError();
 
-  // FIXME: Unify this and C++1y auto function handling.
   if (isa<CapturingScopeInfo>(getCurFunction()))
     return ActOnCapScopeReturnStmt(ReturnLoc, RetValExp);
 
@@ -3344,17 +3356,16 @@ static void buildCapturedStmtCaptureList(
     if (Cap->isThisCapture()) {
       Captures.push_back(CapturedStmt::Capture(Cap->getLocation(),
                                                CapturedStmt::VCK_This));
-      CaptureInits.push_back(Cap->getCopyExpr());
+      CaptureInits.push_back(Cap->getInitExpr());
       continue;
     }
-
 
     CapturedStmt::VariableCaptureKind Kind
       = Cap->isCopyCapture() ? CapturedStmt::VCK_ByCopy : CapturedStmt::VCK_ByRef;
 
     Captures.push_back(CapturedStmt::Capture(Cap->getLocation(), Kind,
-                                            Cap->getVariable()));
-    CaptureInits.push_back(Cap->getCopyExpr());
+                                             Cap->getVariable()));
+    CaptureInits.push_back(Cap->getInitExpr());
   }
 }
 

@@ -86,6 +86,9 @@ struct FormatStyle {
   /// \brief If true, "if (a) return;" can be put on a single line.
   bool AllowShortIfStatementsOnASingleLine;
 
+  /// \brief If true, "while (true) continue;" can be put on a single line.
+  bool AllowShortLoopsOnASingleLine;
+
   /// \brief Add a space in front of an Objective-C protocol list, i.e. use
   /// Foo <Protocol> instead of Foo<Protocol>.
   bool ObjCSpaceBeforeProtocolList;
@@ -93,6 +96,30 @@ struct FormatStyle {
   /// \brief If \c true, aligns escaped newlines as far left as possible.
   /// Otherwise puts them into the right-most column.
   bool AlignEscapedNewlinesLeft;
+
+  /// \brief The number of characters to use for indentation.
+  unsigned IndentWidth;
+
+  /// \brief If true, \c IndentWidth consecutive spaces will be replaced with
+  /// tab characters.
+  bool UseTab;
+
+  /// \brief Different ways to attach braces to their surrounding context.
+  enum BraceBreakingStyle {
+    /// Always attach braces to surrounding context.
+    BS_Attach,
+    /// Like \c Attach, but break before braces on function, namespace and
+    /// class definitions.
+    BS_Linux,
+    /// Like \c Attach, but break before function definitions.
+    BS_Stroustrup
+  };
+
+  /// \brief The brace breaking style to use.
+  BraceBreakingStyle BreakBeforeBraces;
+
+  /// \brief If \c true, format { 1 }, otherwise {1}.
+  bool SpacesInBracedLists;
 
   bool operator==(const FormatStyle &R) const {
     return AccessModifierOffset == R.AccessModifierOffset &&
@@ -102,18 +129,22 @@ struct FormatStyle {
            AllowShortIfStatementsOnASingleLine ==
                R.AllowShortIfStatementsOnASingleLine &&
            BinPackParameters == R.BinPackParameters &&
+           BreakBeforeBraces == R.BreakBeforeBraces &&
            ColumnLimit == R.ColumnLimit &&
            ConstructorInitializerAllOnOneLineOrOnePerLine ==
                R.ConstructorInitializerAllOnOneLineOrOnePerLine &&
            DerivePointerBinding == R.DerivePointerBinding &&
            IndentCaseLabels == R.IndentCaseLabels &&
+           IndentWidth == R.IndentWidth &&
            MaxEmptyLinesToKeep == R.MaxEmptyLinesToKeep &&
            ObjCSpaceBeforeProtocolList == R.ObjCSpaceBeforeProtocolList &&
            PenaltyExcessCharacter == R.PenaltyExcessCharacter &&
            PenaltyReturnTypeOnItsOwnLine == R.PenaltyReturnTypeOnItsOwnLine &&
            PointerBindsToType == R.PointerBindsToType &&
            SpacesBeforeTrailingComments == R.SpacesBeforeTrailingComments &&
-           Standard == R.Standard;
+           SpacesInBracedLists == R.SpacesInBracedLists &&
+           Standard == R.Standard &&
+           UseTab == R.UseTab;
   }
 
 };
@@ -134,11 +165,13 @@ FormatStyle getChromiumStyle();
 /// https://developer.mozilla.org/en-US/docs/Developer_Guide/Coding_Style.
 FormatStyle getMozillaStyle();
 
-/// \brief Returns a predefined style by name.
+/// \brief Gets a predefined style by name.
 ///
 /// Currently supported names: LLVM, Google, Chromium, Mozilla. Names are
 /// compared case-insensitively.
-FormatStyle getPredefinedStyle(StringRef Name);
+///
+/// Returns true if the Style has been set.
+bool getPredefinedStyle(StringRef Name, FormatStyle *Style);
 
 /// \brief Parse configuration from YAML-formatted text.
 llvm::error_code parseConfiguration(StringRef Text, FormatStyle *Style);
@@ -153,15 +186,18 @@ std::string configurationAsText(const FormatStyle &Style);
 /// everything that might influence its formatting or might be influenced by its
 /// formatting.
 ///
-/// \param DiagClient A custom DiagnosticConsumer. Can be 0, in this case
-/// diagnostic is output to llvm::errs().
-///
 /// Returns the \c Replacements necessary to make all \p Ranges comply with
 /// \p Style.
 tooling::Replacements reformat(const FormatStyle &Style, Lexer &Lex,
                                SourceManager &SourceMgr,
-                               std::vector<CharSourceRange> Ranges,
-                               DiagnosticConsumer *DiagClient = 0);
+                               std::vector<CharSourceRange> Ranges);
+
+/// \brief Reformats the given \p Ranges in \p Code.
+///
+/// Otherwise identical to the reformat() function consuming a \c Lexer.
+tooling::Replacements reformat(const FormatStyle &Style, StringRef Code,
+                               std::vector<tooling::Range> Ranges,
+                               StringRef FileName = "<stdin>");
 
 /// \brief Returns the \c LangOpts that the formatter expects you to set.
 LangOptions getFormattingLangOpts();

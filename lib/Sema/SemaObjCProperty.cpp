@@ -714,6 +714,59 @@ static void setImpliedPropertyAttributeForReadOnlyProperty(
   return;
 }
 
+/// DiagnosePropertyMismatchDeclInProtocols - diagnose properties declared
+/// in inherited protocols with mismatched types. Since any of them can
+/// be candidate for synthesis.
+static void
+DiagnosePropertyMismatchDeclInProtocols(Sema &S, SourceLocation AtLoc,
+                                        ObjCInterfaceDecl *ClassDecl,
+                                        ObjCPropertyDecl *Property) {
+  ObjCInterfaceDecl::ProtocolPropertyMap PropMap;
+  for (ObjCInterfaceDecl::all_protocol_iterator
+       PI = ClassDecl->all_referenced_protocol_begin(),
+       E = ClassDecl->all_referenced_protocol_end(); PI != E; ++PI) {
+    if (const ObjCProtocolDecl *PDecl = (*PI)->getDefinition())
+      PDecl->collectInheritedProtocolProperties(Property, PropMap);
+  }
+  if (ObjCInterfaceDecl *SDecl = ClassDecl->getSuperClass())
+    while (SDecl) {
+      for (ObjCInterfaceDecl::all_protocol_iterator
+           PI = SDecl->all_referenced_protocol_begin(),
+           E = SDecl->all_referenced_protocol_end(); PI != E; ++PI) {
+        if (const ObjCProtocolDecl *PDecl = (*PI)->getDefinition())
+          PDecl->collectInheritedProtocolProperties(Property, PropMap);
+      }
+      SDecl = SDecl->getSuperClass();
+    }
+  
+  if (PropMap.empty())
+    return;
+  
+  QualType RHSType = S.Context.getCanonicalType(Property->getType());
+  bool FirsTime = true;
+  for (ObjCInterfaceDecl::ProtocolPropertyMap::iterator
+       I = PropMap.begin(), E = PropMap.end(); I != E; I++) {
+    ObjCPropertyDecl *Prop = I->second;
+    QualType LHSType = S.Context.getCanonicalType(Prop->getType());
+    if (!S.Context.propertyTypesAreCompatible(LHSType, RHSType)) {
+      bool IncompatibleObjC = false;
+      QualType ConvertedType;
+      if (!S.isObjCPointerConversion(RHSType, LHSType, ConvertedType, IncompatibleObjC)
+          || IncompatibleObjC) {
+        if (FirsTime) {
+          S.Diag(Property->getLocation(), diag::warn_protocol_property_mismatch)
+            << Property->getType();
+          FirsTime = false;
+        }
+        S.Diag(Prop->getLocation(), diag::note_protocol_property_declare)
+          << Prop->getType();
+      }
+    }
+  }
+  if (!FirsTime && AtLoc.isValid())
+    S.Diag(AtLoc, diag::note_property_synthesize);
+}
+
 /// DiagnoseClassAndClassExtPropertyMismatch - diagnose inconsistant property
 /// attribute declared in primary class and attributes overridden in any of its
 /// class extensions.
@@ -879,6 +932,8 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
         }
       }
     }
+    if (Synthesize && isa<ObjCProtocolDecl>(property->getDeclContext()))
+      DiagnosePropertyMismatchDeclInProtocols(*this, AtLoc, IDecl, property);
     
     DiagnoseClassAndClassExtPropertyMismatch(*this, IDecl, property);
         
@@ -1158,6 +1213,18 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
            diag::warn_property_getter_owning_mismatch);
       Diag(property->getLocation(), diag::note_property_declare);
     }
+    if (getLangOpts().ObjCAutoRefCount && Synthesize)
+      switch (getterMethod->getMethodFamily()) {
+        case OMF_retain:
+        case OMF_retainCount:
+        case OMF_release:
+        case OMF_autorelease:
+          Diag(getterMethod->getLocation(), diag::err_arc_illegal_method_def)
+            << 1 << getterMethod->getSelector();
+          break;
+        default:
+          break;
+      }
   }
   if (ObjCMethodDecl *setterMethod = property->getSetterMethodDecl()) {
     setterMethod->createImplicitParams(Context, IDecl);

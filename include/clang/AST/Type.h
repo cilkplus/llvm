@@ -441,7 +441,7 @@ public:
   bool operator==(Qualifiers Other) const { return Mask == Other.Mask; }
   bool operator!=(Qualifiers Other) const { return Mask != Other.Mask; }
 
-  operator bool() const { return hasQualifiers(); }
+  LLVM_EXPLICIT operator bool() const { return hasQualifiers(); }
 
   Qualifiers &operator+=(Qualifiers R) {
     addQualifiers(R);
@@ -1194,7 +1194,7 @@ private:
     mutable unsigned CacheValid : 1;
 
     /// \brief Linkage of this type.
-    mutable unsigned CachedLinkage : 2;
+    mutable unsigned CachedLinkage : 3;
 
     /// \brief Whether this type involves and local or unnamed types.
     mutable unsigned CachedLocalOrUnnamed : 1;
@@ -3335,7 +3335,11 @@ public:
     attr_thiscall,
     attr_pascal,
     attr_pnaclcall,
-    attr_inteloclbicc
+    attr_inteloclbicc,
+    attr_ptr32,
+    attr_ptr64,
+    attr_sptr,
+    attr_uptr
   };
 
 private:
@@ -3364,6 +3368,17 @@ public:
 
   bool isSugared() const { return true; }
   QualType desugar() const { return getEquivalentType(); }
+
+  bool isMSTypeSpec() const {
+    switch (getAttrKind()) {
+    default:  return false;
+    case attr_ptr32:
+    case attr_ptr64:
+    case attr_sptr:
+    case attr_uptr:
+      return true;
+    }
+  }
 
   void Profile(llvm::FoldingSetNodeID &ID) {
     Profile(ID, getAttrKind(), ModifiedType, EquivalentType);

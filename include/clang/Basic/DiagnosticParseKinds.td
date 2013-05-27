@@ -844,13 +844,12 @@ def err_cilk_for_following_grainsize: Error<
 def warn_pragma_omp_ignored : Warning <
   "unexpected '#pragma omp ...' in program">, InGroup<SourceUsesOpenMP>, DefaultIgnore;
 def warn_omp_extra_tokens_at_eol : Warning <
-  "extra tokens at end of '#pragma omp %0' are ignored">,
+  "extra tokens at the end of '#pragma omp %0' are ignored">,
   InGroup<ExtraTokens>;
 def err_omp_unknown_directive : Error <
   "expected an OpenMP directive">;
 def err_omp_unexpected_directive : Error <
   "unexpected OpenMP directive '#pragma omp %0'">;
-
 } // end of Parse Issue category.
 
 let CategoryName = "Modules Issue" in {

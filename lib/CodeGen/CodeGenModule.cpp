@@ -606,60 +606,65 @@ static bool hasUnwindExceptions(const LangOptions &LangOpts) {
 
 void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
                                                            llvm::Function *F) {
+  llvm::AttrBuilder B;
+
   if (CodeGenOpts.UnwindTables)
-    F->setHasUWTable();
+    B.addAttribute(llvm::Attribute::UWTable);
 
   if (!hasUnwindExceptions(LangOpts))
-    F->addFnAttr(llvm::Attribute::NoUnwind);
+    B.addAttribute(llvm::Attribute::NoUnwind);
 
   if (D->hasAttr<NakedAttr>()) {
     // Naked implies noinline: we should not be inlining such functions.
-    F->addFnAttr(llvm::Attribute::Naked);
-    F->addFnAttr(llvm::Attribute::NoInline);
+    B.addAttribute(llvm::Attribute::Naked);
+    B.addAttribute(llvm::Attribute::NoInline);
+  } else if (D->hasAttr<NoInlineAttr>()) {
+    B.addAttribute(llvm::Attribute::NoInline);
+  } else if ((D->hasAttr<AlwaysInlineAttr>() ||
+              D->hasAttr<ForceInlineAttr>()) &&
+             !F->getAttributes().hasAttribute(llvm::AttributeSet::FunctionIndex,
+                                              llvm::Attribute::NoInline)) {
+    // (noinline wins over always_inline, and we can't specify both in IR)
+    B.addAttribute(llvm::Attribute::AlwaysInline);
   }
 
-  if (D->hasAttr<NoInlineAttr>())
-    F->addFnAttr(llvm::Attribute::NoInline);
-
-  // (noinline wins over always_inline, and we can't specify both in IR)
-  if ((D->hasAttr<AlwaysInlineAttr>() || D->hasAttr<ForceInlineAttr>()) &&
-      !F->getAttributes().hasAttribute(llvm::AttributeSet::FunctionIndex,
-                                       llvm::Attribute::NoInline))
-    F->addFnAttr(llvm::Attribute::AlwaysInline);
-
-  // FIXME: Communicate hot and cold attributes to LLVM more directly.
-  if (D->hasAttr<ColdAttr>())
-    F->addFnAttr(llvm::Attribute::OptimizeForSize);
+  if (D->hasAttr<ColdAttr>()) {
+    B.addAttribute(llvm::Attribute::OptimizeForSize);
+    B.addAttribute(llvm::Attribute::Cold);
+  }
 
   if (D->hasAttr<MinSizeAttr>())
-    F->addFnAttr(llvm::Attribute::MinSize);
-
-  if (isa<CXXConstructorDecl>(D) || isa<CXXDestructorDecl>(D))
-    F->setUnnamedAddr(true);
-
-  if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(D))
-    if (MD->isVirtual())
-      F->setUnnamedAddr(true);
+    B.addAttribute(llvm::Attribute::MinSize);
 
   if (LangOpts.getStackProtector() == LangOptions::SSPOn)
-    F->addFnAttr(llvm::Attribute::StackProtect);
+    B.addAttribute(llvm::Attribute::StackProtect);
   else if (LangOpts.getStackProtector() == LangOptions::SSPReq)
-    F->addFnAttr(llvm::Attribute::StackProtectReq);
+    B.addAttribute(llvm::Attribute::StackProtectReq);
 
   // Add sanitizer attributes if function is not blacklisted.
   if (!SanitizerBlacklist.isIn(*F)) {
     // When AddressSanitizer is enabled, set SanitizeAddress attribute
     // unless __attribute__((no_sanitize_address)) is used.
     if (SanOpts.Address && !D->hasAttr<NoSanitizeAddressAttr>())
-      F->addFnAttr(llvm::Attribute::SanitizeAddress);
+      B.addAttribute(llvm::Attribute::SanitizeAddress);
     // Same for ThreadSanitizer and __attribute__((no_sanitize_thread))
     if (SanOpts.Thread && !D->hasAttr<NoSanitizeThreadAttr>()) {
-      F->addFnAttr(llvm::Attribute::SanitizeThread);
+      B.addAttribute(llvm::Attribute::SanitizeThread);
     }
     // Same for MemorySanitizer and __attribute__((no_sanitize_memory))
     if (SanOpts.Memory && !D->hasAttr<NoSanitizeMemoryAttr>())
-      F->addFnAttr(llvm::Attribute::SanitizeMemory);
+      B.addAttribute(llvm::Attribute::SanitizeMemory);
   }
+
+  F->addAttributes(llvm::AttributeSet::FunctionIndex,
+                   llvm::AttributeSet::get(
+                       F->getContext(), llvm::AttributeSet::FunctionIndex, B));
+
+  if (isa<CXXConstructorDecl>(D) || isa<CXXDestructorDecl>(D))
+    F->setUnnamedAddr(true);
+  else if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(D))
+    if (MD->isVirtual())
+      F->setUnnamedAddr(true);
 
   unsigned alignment = D->getMaxAlignment() / Context.getCharWidth();
   if (alignment)
@@ -1767,7 +1772,7 @@ void CodeGenModule::MaybeHandleStaticInExternC(const SomeDecl *D,
     return;
 
   // Must have internal linkage and an ordinary name.
-  if (!D->getIdentifier() || D->getLinkage() != InternalLinkage)
+  if (!D->getIdentifier() || D->getFormalLinkage() != InternalLinkage)
     return;
 
   // Must be in an extern "C" context. Entities declared directly within
@@ -1941,7 +1946,13 @@ CodeGenModule::GetLLVMLinkageVarDefinition(const VarDecl *D,
     return llvm::Function::DLLImportLinkage;
   else if (D->hasAttr<DLLExportAttr>())
     return llvm::Function::DLLExportLinkage;
-  else if (D->hasAttr<WeakAttr>()) {
+  else if (D->hasAttr<SelectAnyAttr>()) {
+    // selectany symbols are externally visible, so use weak instead of
+    // linkonce.  MSVC optimizes away references to const selectany globals, so
+    // all definitions should be the same and ODR linkage should be used.
+    // http://msdn.microsoft.com/en-us/library/5tkz6s71.aspx
+    return llvm::GlobalVariable::WeakODRLinkage;
+  } else if (D->hasAttr<WeakAttr>()) {
     if (GV->isConstant())
       return llvm::GlobalVariable::WeakODRLinkage;
     else
@@ -2877,10 +2888,13 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
   case Decl::ClassTemplate:
   case Decl::FunctionTemplate:
   case Decl::TypeAliasTemplate:
-  case Decl::NamespaceAlias:
   case Decl::Block:
   case Decl::Empty:
     break;
+  case Decl::NamespaceAlias:
+    if (CGDebugInfo *DI = getModuleDebugInfo())
+        DI->EmitNamespaceAlias(cast<NamespaceAliasDecl>(*D));
+    return;
   case Decl::UsingDirective: // using namespace X; [C++]
     if (CGDebugInfo *DI = getModuleDebugInfo())
       DI->EmitUsingDirective(cast<UsingDirectiveDecl>(*D));

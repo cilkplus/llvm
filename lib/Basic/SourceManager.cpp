@@ -536,6 +536,43 @@ SourceManager::getFakeContentCacheForRecovery() const {
   return FakeContentCacheForRecovery;
 }
 
+/// \brief Returns the previous in-order FileID or an invalid FileID if there
+/// is no previous one.
+FileID SourceManager::getPreviousFileID(FileID FID) const {
+  if (FID.isInvalid())
+    return FileID();
+
+  int ID = FID.ID;
+  if (ID == -1)
+    return FileID();
+
+  if (ID > 0) {
+    if (ID-1 == 0)
+      return FileID();
+  } else if (unsigned(-(ID-1) - 2) >= LoadedSLocEntryTable.size()) {
+    return FileID();
+  }
+
+  return FileID::get(ID-1);
+}
+
+/// \brief Returns the next in-order FileID or an invalid FileID if there is
+/// no next one.
+FileID SourceManager::getNextFileID(FileID FID) const {
+  if (FID.isInvalid())
+    return FileID();
+
+  int ID = FID.ID;
+  if (ID > 0) {
+    if (unsigned(ID+1) >= local_sloc_entry_size())
+      return FileID();
+  } else if (ID+1 >= -1) {
+    return FileID();
+  }
+
+  return FileID::get(ID+1);
+}
+
 //===----------------------------------------------------------------------===//
 // Methods to create new FileID's and macro expansions.
 //===----------------------------------------------------------------------===//
@@ -998,6 +1035,77 @@ bool SourceManager::isMacroBodyExpansion(SourceLocation Loc) const {
   return Expansion.isMacroBodyExpansion();
 }
 
+bool SourceManager::isAtStartOfImmediateMacroExpansion(SourceLocation Loc,
+                                             SourceLocation *MacroBegin) const {
+  assert(Loc.isValid() && Loc.isMacroID() && "Expected a valid macro loc");
+
+  std::pair<FileID, unsigned> DecompLoc = getDecomposedLoc(Loc);
+  if (DecompLoc.second > 0)
+    return false; // Does not point at the start of expansion range.
+
+  bool Invalid = false;
+  const SrcMgr::ExpansionInfo &ExpInfo =
+      getSLocEntry(DecompLoc.first, &Invalid).getExpansion();
+  if (Invalid)
+    return false;
+  SourceLocation ExpLoc = ExpInfo.getExpansionLocStart();
+
+  if (ExpInfo.isMacroArgExpansion()) {
+    // For macro argument expansions, check if the previous FileID is part of
+    // the same argument expansion, in which case this Loc is not at the
+    // beginning of the expansion.
+    FileID PrevFID = getPreviousFileID(DecompLoc.first);
+    if (!PrevFID.isInvalid()) {
+      const SrcMgr::SLocEntry &PrevEntry = getSLocEntry(PrevFID, &Invalid);
+      if (Invalid)
+        return false;
+      if (PrevEntry.isExpansion() &&
+          PrevEntry.getExpansion().getExpansionLocStart() == ExpLoc)
+        return false;
+    }
+  }
+
+  if (MacroBegin)
+    *MacroBegin = ExpLoc;
+  return true;
+}
+
+bool SourceManager::isAtEndOfImmediateMacroExpansion(SourceLocation Loc,
+                                               SourceLocation *MacroEnd) const {
+  assert(Loc.isValid() && Loc.isMacroID() && "Expected a valid macro loc");
+
+  FileID FID = getFileID(Loc);
+  SourceLocation NextLoc = Loc.getLocWithOffset(1);
+  if (isInFileID(NextLoc, FID))
+    return false; // Does not point at the end of expansion range.
+
+  bool Invalid = false;
+  const SrcMgr::ExpansionInfo &ExpInfo =
+      getSLocEntry(FID, &Invalid).getExpansion();
+  if (Invalid)
+    return false;
+
+  if (ExpInfo.isMacroArgExpansion()) {
+    // For macro argument expansions, check if the next FileID is part of the
+    // same argument expansion, in which case this Loc is not at the end of the
+    // expansion.
+    FileID NextFID = getNextFileID(FID);
+    if (!NextFID.isInvalid()) {
+      const SrcMgr::SLocEntry &NextEntry = getSLocEntry(NextFID, &Invalid);
+      if (Invalid)
+        return false;
+      if (NextEntry.isExpansion() &&
+          NextEntry.getExpansion().getExpansionLocStart() ==
+              ExpInfo.getExpansionLocStart())
+        return false;
+    }
+  }
+
+  if (MacroEnd)
+    *MacroEnd = ExpInfo.getExpansionLocEnd();
+  return true;
+}
+
 
 //===----------------------------------------------------------------------===//
 // Queries about the code at a SourceLocation.
@@ -1150,7 +1258,7 @@ static void ComputeLineNumbers(DiagnosticsEngine &Diag, ContentCache *FI,
 
       // If we found a newline, adjust the pointer and jump to the handling code.
       if (Mask != 0) {
-        NextBuf += llvm::CountTrailingZeros_32(Mask);
+        NextBuf += llvm::countTrailingZeros(Mask);
         goto FoundSpecialChar;
       }
       NextBuf += 16;
@@ -1850,6 +1958,9 @@ SourceManager::getMacroArgExpandedLocation(SourceLocation Loc) const {
 
 std::pair<FileID, unsigned>
 SourceManager::getDecomposedIncludedLoc(FileID FID) const {
+  if (FID.isInvalid())
+    return std::make_pair(FileID(), 0);
+
   // Uses IncludedLocMap to retrieve/cache the decomposed loc.
 
   typedef std::pair<FileID, unsigned> DecompTy;
@@ -1861,11 +1972,14 @@ SourceManager::getDecomposedIncludedLoc(FileID FID) const {
     return DecompLoc; // already in map.
 
   SourceLocation UpperLoc;
-  const SrcMgr::SLocEntry &Entry = getSLocEntry(FID);
-  if (Entry.isExpansion())
-    UpperLoc = Entry.getExpansion().getExpansionLocStart();
-  else
-    UpperLoc = Entry.getFile().getIncludeLoc();
+  bool Invalid = false;
+  const SrcMgr::SLocEntry &Entry = getSLocEntry(FID, &Invalid);
+  if (!Invalid) {
+    if (Entry.isExpansion())
+      UpperLoc = Entry.getExpansion().getExpansionLocStart();
+    else
+      UpperLoc = Entry.getFile().getIncludeLoc();
+  }
 
   if (UpperLoc.isValid())
     DecompLoc = getDecomposedLoc(UpperLoc);
@@ -1924,6 +2038,12 @@ bool SourceManager::isBeforeInTranslationUnit(SourceLocation LHS,
 
   std::pair<FileID, unsigned> LOffs = getDecomposedLoc(LHS);
   std::pair<FileID, unsigned> ROffs = getDecomposedLoc(RHS);
+
+  // getDecomposedLoc may have failed to return a valid FileID because, e.g. it
+  // is a serialized one referring to a file that was removed after we loaded
+  // the PCH.
+  if (LOffs.first.isInvalid() || ROffs.first.isInvalid())
+    return LOffs.first.isInvalid() && !ROffs.first.isInvalid();
 
   // If the source locations are in the same file, just compare offsets.
   if (LOffs.first == ROffs.first)

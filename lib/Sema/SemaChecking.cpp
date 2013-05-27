@@ -1355,6 +1355,11 @@ bool Sema::SemaBuiltinVAStart(CallExpr *TheCall) {
   bool SecondArgIsLastNamedArgument = false;
   const Expr *Arg = TheCall->getArg(1)->IgnoreParenCasts();
 
+  // These are valid if SecondArgIsLastNamedArgument is false after the next
+  // block.
+  QualType Type;
+  SourceLocation ParamLoc;
+
   if (const DeclRefExpr *DR = dyn_cast<DeclRefExpr>(Arg)) {
     if (const ParmVarDecl *PV = dyn_cast<ParmVarDecl>(DR->getDecl())) {
       // FIXME: This isn't correct for methods (results in bogus warning).
@@ -1367,12 +1372,21 @@ bool Sema::SemaBuiltinVAStart(CallExpr *TheCall) {
       else
         LastArg = *(getCurMethodDecl()->param_end()-1);
       SecondArgIsLastNamedArgument = PV == LastArg;
+
+      Type = PV->getType();
+      ParamLoc = PV->getLocation();
     }
   }
 
   if (!SecondArgIsLastNamedArgument)
     Diag(TheCall->getArg(1)->getLocStart(),
          diag::warn_second_parameter_of_va_start_not_last_named_argument);
+  else if (Type->isReferenceType()) {
+    Diag(Arg->getLocStart(),
+         diag::warn_va_start_of_reference_type_is_undefined);
+    Diag(ParamLoc, diag::note_parameter_type) << Type;
+  }
+
   return false;
 }
 
@@ -5133,7 +5147,15 @@ void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC) {
     CheckImplicitConversion(S, E, T, CC);
 
   // Now continue drilling into this expression.
-
+  
+  if (PseudoObjectExpr * POE = dyn_cast<PseudoObjectExpr>(E)) {
+    if (POE->getResultExpr())
+      E = POE->getResultExpr();
+  }
+  
+  if (const OpaqueValueExpr *OVE = dyn_cast<OpaqueValueExpr>(E))
+    return AnalyzeImplicitConversions(S, OVE->getSourceExpr(), CC);
+  
   // Skip past explicit casts.
   if (isa<ExplicitCastExpr>(E)) {
     E = cast<ExplicitCastExpr>(E)->getSubExpr()->IgnoreParenImpCasts();
