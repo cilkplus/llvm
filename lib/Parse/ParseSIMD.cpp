@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Parse/Parser.h"
+#include "clang/Sema/Scope.h"
 #include "RAIIObjectsForParser.h"
 
 using namespace clang;
@@ -123,7 +124,7 @@ struct SIMDLinearItemParser {
     CXXScopeSpec SS;
     SourceLocation TemplateKWLoc;
     UnqualifiedId Name;
-    if (P.ParseUnqualifiedId(SS, 
+    if (P.ParseUnqualifiedId(SS,
                              false, // EnteringContext
                              false, // AllowDestructorName
                              false, // AllowConstructorName,
@@ -147,7 +148,7 @@ struct SIMDPrivateItemParser {
     CXXScopeSpec SS;
     SourceLocation TemplateKWLoc;
     UnqualifiedId Name;
-    if (P.ParseUnqualifiedId(SS, 
+    if (P.ParseUnqualifiedId(SS,
                              false, // EnteringContext
                              false, // AllowDestructorName
                              false, // AllowConstructorName,
@@ -196,7 +197,7 @@ struct SIMDReductionItemParser {
     CXXScopeSpec SS;
     SourceLocation TemplateKWLoc;
     UnqualifiedId Name;
-    if (P.ParseUnqualifiedId(SS, 
+    if (P.ParseUnqualifiedId(SS,
                              false, // EnteringContext
                              false, // AllowDestructorName
                              false, // AllowConstructorName,
@@ -210,7 +211,7 @@ struct SIMDReductionItemParser {
 } // namespace
 
 static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
-                             SmallVector<const Attr *, 4> &AttrList) {
+                             SmallVectorImpl<const Attr *> &AttrList) {
   const Token &Tok = P.getCurToken();
 
   while (Tok.isNot(tok::annot_pragma_simd_end)) {
@@ -293,6 +294,8 @@ static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
   const SourceManager &SM = P.getPreprocessor().getSourceManager();
   unsigned StartLineNumber = SM.getSpellingLineNumber(BeginLoc);
   unsigned EndLineNumber = SM.getSpellingLineNumber(EndLoc);
+  (void)StartLineNumber;
+  (void)EndLineNumber;
   assert(StartLineNumber == EndLineNumber);
 
   P.ConsumeToken();
@@ -335,7 +338,7 @@ static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
 ///   lastprivate-clause
 ///   reduction-clause
 ///
-StmtResult Parser::HandlePragmaSIMDStatementOrDeclaration() {
+StmtResult Parser::ParseSIMDDirective() {
   assert(Tok.is(tok::annot_pragma_simd));
   SourceLocation Loc = PP.getDirectiveHashLoc();
   ConsumeToken();
@@ -351,15 +354,165 @@ StmtResult Parser::HandlePragmaSIMDStatementOrDeclaration() {
 
   FinishPragmaSIMD(*this, Loc);
 
-  if (Tok.is(tok::r_brace)) {
+  // Parse the following statement.
+  if (!Tok.is(tok::kw_for)) {
     PP.Diag(Loc, diag::warn_pragma_simd_expected_loop);
     return StmtEmpty();
   }
 
-  StmtVector Stmts;
-  StmtResult R(ParseStatementOrDeclaration(Stmts, false));
+  // FIXME: refactor the common code with _Cilk_for statement parsing.
+  SourceLocation ForLoc = ConsumeToken();  // eat 'for'.
+
+  if (Tok.isNot(tok::l_paren)) {
+    Diag(Tok, diag::err_expected_lparen_after) << "for";
+    SkipUntil(tok::semi);
+    return StmtError();
+  }
+
+  bool C99orCXXorObjC = getLangOpts().C99 || getLangOpts().CPlusPlus ||
+                        getLangOpts().ObjC1;
+
+  // Start the loop scope.
+  //
+  // A program contains a return, break or goto statement that would transfer
+  // control into or out of a simd for loop is ill-formed.
+  //
+  unsigned ScopeFlags = Scope::ContinueScope;
+  if (C99orCXXorObjC)
+    ScopeFlags |= Scope::DeclScope | Scope::ControlScope;
+
+  ParseScope ForScope(this, ScopeFlags);
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  if (Tok.is(tok::code_completion)) {
+    Actions.CodeCompleteOrdinaryName(getCurScope(),
+                                     C99orCXXorObjC ? Sema::PCC_ForInit
+                                                    : Sema::PCC_Expression);
+    cutOffParsing();
+    return StmtError();
+  }
+
+  ParsedAttributesWithRange attrs(AttrFactory);
+  MaybeParseCXX11Attributes(attrs);
+
+  // 'for' '(' for-init-stmt
+  // 'for' '(' assignment-expr;
+  StmtResult FirstPart;
+
+  if (Tok.is(tok::semi)) {  // "for (;"
+    ProhibitAttributes(attrs);
+    // no initialization, eat the ';'.
+    Diag(Tok, diag::err_simd_for_missing_initialization);
+    ConsumeToken();
+  } else if (isForInitDeclaration(false)) {  // for (int i = 0;
+    // Parse declaration, which eats the ';'.
+    if (!C99orCXXorObjC)   // Use of C99-style for loops in C90 mode?
+      Diag(Tok, diag::ext_c99_variable_decl_in_for_loop);
+
+    SourceLocation DeclStart = Tok.getLocation();
+    SourceLocation DeclEnd;
+    StmtVector Stmts;
+
+    // Still use Declarator::ForContext.
+    DeclGroupPtrTy DG = ParseSimpleDeclaration(Stmts, Declarator::ForContext,
+                                               DeclEnd, attrs,
+                                               /*RequireSemi*/false,
+                                               /*ForRangeInit*/0);
+    FirstPart = Actions.ActOnDeclStmt(DG, DeclStart, Tok.getLocation());
+
+    if(Tok.is(tok::semi))
+      ConsumeToken(); // Eat the ';'.
+    else
+      Diag(Tok, diag::err_simd_for_missing_semi);
+  } else {
+    ProhibitAttributes(attrs);
+    ExprResult E = ParseExpression();
+
+    if (!E.isInvalid())
+      FirstPart = Actions.ActOnExprStmt(E);
+
+    if (Tok.is(tok::semi))
+      ConsumeToken(); // Eat the ';'
+    else if (!E.isInvalid())
+      Diag(Tok, diag::err_simd_for_missing_semi);
+    else {
+      // Skip until semicolon or rparen, don't consume it.
+      SkipUntil(tok::r_paren, true, true);
+      if (Tok.is(tok::semi))
+        ConsumeToken();
+    }
+  }
+
+  // 'for' '(' for-init-stmt condition ;
+  // 'for' '(' assignment-expr; condition ;
+  FullExprArg SecondPart(Actions);
+  FullExprArg ThirdPart(Actions);
+
+  if (Tok.is(tok::r_paren)) { // for (...;)
+    Diag(Tok, diag::err_simd_for_missing_condition);
+    Diag(Tok, diag::err_simd_for_missing_increment);
+  } else {
+    if (Tok.is(tok::semi)) {  // for (...;;
+      // No condition part.
+      Diag(Tok, diag::err_simd_for_missing_condition);
+      ConsumeToken(); // Eat the ';'
+    } else {
+      ExprResult E = ParseExpression();
+      if (!E.isInvalid())
+        E = Actions.ActOnBooleanCondition(getCurScope(), ForLoc, E.get());
+      SecondPart = Actions.MakeFullExpr(E.get(), ForLoc);
+
+      if (Tok.isNot(tok::semi)) {
+        if (!E.isInvalid())
+          Diag(Tok, diag::err_simd_for_missing_semi);
+        else
+          // Skip until semicolon or rparen, don't consume it.
+          SkipUntil(tok::r_paren, true, true);
+      }
+
+      if (Tok.is(tok::semi))
+        ConsumeToken();
+    }
+
+    // Parse the third part.
+    if (Tok.is(tok::r_paren)) { // for (...;...;)
+      // No increment part
+      Diag(Tok, diag::err_simd_for_missing_increment);
+    } else {
+      ExprResult E = ParseExpression();
+      // FIXME: The C++11 standard doesn't actually say that this is a
+      // discarded-value expression, but it clearly should be.
+      ThirdPart = Actions.MakeFullDiscardedValueExpr(E.take());
+    }
+  }
+
+  // Match the ')'.
+  T.consumeClose();
+
+  ParseScope InnerScope(this, Scope::DeclScope,
+                        C99orCXXorObjC && Tok.isNot(tok::l_brace));
+
+  // Read the body statement.
+  StmtResult Body(ParseStatement());
+
+  // Pop the body scope if needed.
+  InnerScope.Exit();
+
+  // Leave the for-scope.
+  ForScope.Exit();
+
+  if (!FirstPart.isUsable() || !SecondPart.get() || !ThirdPart.get() ||
+      !Body.isUsable())
+    return StmtError();
+
+  StmtResult R = Actions.ActOnForStmt(ForLoc, T.getOpenLocation(),
+                                      FirstPart.take(), SecondPart,
+                                      /*SecondVar =*/0, ThirdPart,
+                                      T.getCloseLocation(), Body.take());
   if (R.isInvalid())
-    return R;
+    return StmtError();
 
   return Actions.ActOnPragmaSIMD(Loc, R.get(), SIMDAttrList);
 }

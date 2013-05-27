@@ -456,9 +456,13 @@ private:
   /// \brief Handle the annotation token produced for
   /// #pragma simd
   void HandlePragmaSIMD();
-  /// \brief Handle the annotation token produced for
-  /// #pragma simd
-  StmtResult HandlePragmaSIMDStatementOrDeclaration();
+
+  /// \brief Parse a pragma SIMD statement.
+  /// {code}
+  /// #pragma simd ...
+  /// for-statement 
+  /// {code}
+  StmtResult ParseSIMDDirective();
 
   /// GetLookAheadToken - This peeks ahead N tokens and returns that token
   /// without consuming any tokens.  LookAhead(0) returns 'Tok', LookAhead(1)
@@ -1706,18 +1710,9 @@ private:
   /// expression in the context of the C 'clause-1' or the C++
   // 'for-init-statement' part of a 'for' statement.
   /// Returns true for declaration, false for expression.
-  bool isForInitDeclaration() {
+  bool isForInitDeclaration(bool AllowForRangeDecl = true) {
     if (getLangOpts().CPlusPlus)
-      return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/true);
-    return isDeclarationSpecifier(true);
-  }
-
-  /// isCilkForInitDeclaration - Disambiguates between a declaration or an
-  /// expression in the context of 'for-init-stmt' part of a '_Cilk_for'
-  /// statement. Returns true for declaration, false for expression.
-  bool isCilkForInitDeclaration() {
-    if (getLangOpts().CPlusPlus)
-      return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false);
+      return isCXXSimpleDeclaration(AllowForRangeDecl);
     return isDeclarationSpecifier(true);
   }
 

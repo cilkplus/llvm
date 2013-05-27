@@ -336,8 +336,7 @@ Retry:
 
   case tok::annot_pragma_simd:
     ProhibitAttributes(Attrs);
-    return HandlePragmaSIMDStatementOrDeclaration();
-
+    return ParseSIMDDirective();
   }
 
   // If we reached this code, the statement must end in a semicolon.
@@ -2780,7 +2779,7 @@ StmtResult Parser::ParseCilkForStmt() {
     // no control variable declaration initialization, eat the ';'.
     Diag(Tok, diag::err_cilk_for_missing_control_variable);
     ConsumeToken();
-  } else if (isCilkForInitDeclaration()) {  // _Cilk_for (int i = 0;
+  } else if (isForInitDeclaration(false)) {  // _Cilk_for (int i = 0;
     // Parse declaration, which eats the ';'.
     if (!C99orCXXorObjC)   // Use of C99-style for loops in C90 mode?
       Diag(Tok, diag::ext_c99_variable_decl_in_for_loop);

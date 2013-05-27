@@ -840,6 +840,19 @@ def err_cilk_for_expect_assign: Error<
 def err_cilk_for_following_grainsize: Error<
   "'#pragma cilk' must be followed by a '_Cilk_for' loop">;
 
+// Pragma SIMD
+def err_simd_for_missing_initialization: Error<
+  "missing initialization in simd for">;
+
+def err_simd_for_missing_condition: Error<
+  "missing loop condition expression in simd for">;
+
+def err_simd_for_missing_increment: Error<
+  "missing loop increment expression in simd for">;
+
+def err_simd_for_missing_semi: Error<
+  "expected ';' in simd for">;
+
 def err_simd_invalid_clause: Error<
   "invalid pragma simd clause">;
 
