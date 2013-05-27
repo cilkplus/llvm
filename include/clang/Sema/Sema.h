@@ -6743,7 +6743,14 @@ public:
   void ActOnPragmaFPContract(tok::OnOffSwitch OOS);
 
   /// ActOnPragmaSIMD - Called on well formed \#pragma simd
-  StmtResult ActOnPragmaSIMD(SourceLocation PragmaLoc, Stmt *S);
+  StmtResult ActOnPragmaSIMD(SourceLocation PragmaLoc, Stmt *S,
+                             ArrayRef<const Attr *> Attrs);
+
+  AttrResult ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
+                                   Expr *VectorLengthExpr);
+
+  AttrResult ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
+                                      QualType &VectorLengthForType);
 
   /// AddAlignmentAttributesForRecord - Adds any needed alignment attributes to
   /// a the record decl, to handle '\#pragma pack' and '\#pragma options align'.

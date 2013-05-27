@@ -393,6 +393,21 @@ void CodeGenFunction::EmitLabelStmt(const LabelStmt &S) {
 }
 
 void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
+  const ArrayRef<const Attr*> &Attrs = S.getAttrs();
+  for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
+    switch (Attrs[i]->getKind()) {
+    case clang::attr::SIMD:
+      LoopStack.SetParallel();
+      break;
+    case clang::attr::SIMDLength:
+      break;
+    case clang::attr::SIMDLengthFor:
+      break;
+    default:
+      // Not yet handled
+      ;
+    }
+  }
   EmitStmt(S.getSubStmt());
 }
 

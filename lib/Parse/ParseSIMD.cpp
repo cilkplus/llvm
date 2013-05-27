@@ -64,32 +64,55 @@ bool ParseSIMDList(Parser &P, Sema &S, T &ItemParser) {
   }
 }
 
-static bool ParseSIMDVectorLengthFor(Parser &P) {
+template <typename T>
+static bool ParseSIMDExpression(Parser &P, Sema &S, T &ItemParser) {
   BalancedDelimiterTracker BDT(P, tok::l_paren);
   if (BDT.expectAndConsume(diag::err_expected_lparen))
     return false;
 
-  TypeResult TN = P.ParseTypeName();
-  if (TN.isInvalid()) {
+  bool ParsedItem = ItemParser.Parse(P, S);
+  if (!ParsedItem) {
     P.SkipUntil(tok::r_paren, tok::annot_pragma_simd_end,
                 false, // StopAtSemi
                 true); // DontConsume
     return false;
   }
 
-  BDT.consumeClose();
-  return !BDT.getCloseLocation().isInvalid();
+  const Token &Tok = P.getCurToken();
+  if (Tok.isNot(tok::r_paren)) {
+    if (ParsedItem) {
+      P.Diag(Tok, diag::err_expected_rparen);
+      P.Diag(BDT.getOpenLocation(), diag::note_matching) << "(";
+      P.SkipUntil(tok::annot_pragma_simd_end, false, true);
+    }
+    return false;
+  } else {
+    BDT.consumeClose();
+    return !BDT.getCloseLocation().isInvalid();
+  }
 }
 
 namespace {
 
 // Helper to parse an item of the vectorlength clause.
 struct SIMDVectorLengthItemParser {
+  Expr *E;
   bool Parse(Parser &P, Sema &S) {
     ExprResult C = P.ParseConstantExpression();
-    if (C.isInvalid()) {
+    if (C.isInvalid())
       return false;
-    }
+    E = C.get();
+    return E;
+  }
+};
+
+struct SIMDVectorLengthForItemParser {
+  QualType T;
+  bool Parse(Parser &P, Sema &S) {
+    TypeResult TN = P.ParseTypeName();
+    if (TN.isInvalid())
+      return false;
+    T = TN.get().get();
     return true;
   }
 };
@@ -186,8 +209,8 @@ struct SIMDReductionItemParser {
 
 } // namespace
 
-static bool ParseSIMDClauses(Parser &P, Sema &S)
-{
+static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
+                             SmallVector<const Attr *, 4> &AttrList) {
   const Token &Tok = P.getCurToken();
 
   while (Tok.isNot(tok::annot_pragma_simd_end)) {
@@ -196,16 +219,20 @@ static bool ParseSIMDClauses(Parser &P, Sema &S)
       return false;
     }
 
+    AttrResult A = AttrEmpty();
     if (II->isStr("vectorlength")) {
       P.ConsumeToken();
       SIMDVectorLengthItemParser ItemParser;
-      if (!ParseSIMDList(P, S, ItemParser))
+      if (!ParseSIMDExpression(P, S, ItemParser) || !ItemParser.E)
         return false;
+      A = S.ActOnPragmaSIMDLength(BeginLoc, ItemParser.E);
     }
     else if (II->isStr("vectorlengthfor")) {
       P.ConsumeToken();
-      if (!ParseSIMDVectorLengthFor(P))
+      SIMDVectorLengthForItemParser ItemParser;
+      if (!ParseSIMDExpression(P, S, ItemParser))
         return false;
+      A = S.ActOnPragmaSIMDLengthFor(BeginLoc, ItemParser.T);
     }
     else if (II->isStr("linear")) {
       P.ConsumeToken();
@@ -241,6 +268,11 @@ static bool ParseSIMDClauses(Parser &P, Sema &S)
       P.Diag(Tok, diag::err_simd_invalid_clause);
       return false;
     }
+
+    if (A.isInvalid()) {
+      return false;
+    }
+    AttrList.push_back(A.get());
   }
 
   return true;
@@ -305,10 +337,13 @@ static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
 ///
 StmtResult Parser::HandlePragmaSIMDStatementOrDeclaration() {
   assert(Tok.is(tok::annot_pragma_simd));
-  SourceLocation Loc = Tok.getLocation();
+  SourceLocation Loc = PP.getDirectiveHashLoc();
   ConsumeToken();
 
-  if (!ParseSIMDClauses(*this, Actions)) {
+  SmallVector<const Attr *, 4> SIMDAttrList;
+  SIMDAttrList.push_back(::new SIMDAttr(Loc, Actions.Context));
+
+  if (!ParseSIMDClauses(*this, Actions, Loc, SIMDAttrList)) {
     SkipUntil(tok::annot_pragma_simd_end, false, true);
     FinishPragmaSIMD(*this, Loc);
     return StmtError();
@@ -321,14 +356,10 @@ StmtResult Parser::HandlePragmaSIMDStatementOrDeclaration() {
     return StmtEmpty();
   }
 
-#if 1
-  return StmtEmpty();
-#else
   StmtVector Stmts;
   StmtResult R(ParseStatementOrDeclaration(Stmts, false));
   if (R.isInvalid())
     return R;
 
-  return Actions.ActOnPragmaSIMD(Loc, R.get());
-#endif
+  return Actions.ActOnPragmaSIMD(Loc, R.get(), SIMDAttrList);
 }

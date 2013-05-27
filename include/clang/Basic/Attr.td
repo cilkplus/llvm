@@ -1013,3 +1013,13 @@ def Unaligned : IgnoredAttr {
 def SIMD : InheritableAttr {
   let Spellings = [];
 }
+
+def SIMDLength : Attr {
+  let Spellings = [Keyword<"vectorlength">];
+  let Args = [ExprArgument<"ValueExpr">];
+}
+
+def SIMDLengthFor : Attr {
+  let Spellings = [Keyword<"vectorlengthfor">];
+  let Args = [TypeArgument<"TypeHint">];
+}

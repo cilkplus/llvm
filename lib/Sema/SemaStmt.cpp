@@ -4611,13 +4611,41 @@ void Sema::ActOnCilkForStmtError() {
 }
 
 StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
-                                 Stmt *SubStmt) {
+                                 Stmt *SubStmt, ArrayRef<const Attr *> Attrs) {
   if (isa<ForStmt>(SubStmt) ||
       isa<WhileStmt>(SubStmt) ||
       isa<DoStmt>(SubStmt)) {
-    const Attr* Attrs[] = { ::new (Context) SIMDAttr(PragmaLoc, Context) };
     return ActOnAttributedStmt(PragmaLoc, Attrs, SubStmt);
   }
   Diag(PragmaLoc, diag::warn_pragma_simd_expected_loop);
   return SubStmt;
+}
+
+AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
+                                       Expr *VectorLengthExpr) {
+  /* Perform checks that Expr is a constant, power of 2 */
+  if (VectorLengthExpr->getType().isNull())
+    return AttrError();
+
+  llvm::APSInt Constant;
+  if (!VectorLengthExpr->EvaluateAsInt(Constant, Context)) {
+    Diag(VectorLengthExpr->getLocStart(),
+         diag::err_pragma_simd_invalid_vectorlength_expr) << 0;
+    return AttrError();
+  }
+  if (!Constant.isPowerOf2()) {
+    Diag(VectorLengthExpr->getLocStart(),
+         diag::err_pragma_simd_invalid_vectorlength_expr) << 1;
+    return AttrError();
+  }
+  return AttrResult(::new (Context)
+                    SIMDLengthAttr(VectorLengthLoc, Context, VectorLengthExpr));
+}
+
+AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
+                                          QualType &VectorLengthForType) {
+  if (VectorLengthForType.isNull())
+    return AttrError();
+  return AttrResult(::new (Context) SIMDLengthForAttr(
+      VectorLengthForLoc, Context, VectorLengthForType));
 }

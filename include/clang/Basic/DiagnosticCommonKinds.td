@@ -88,6 +88,10 @@ def err_attribute_not_type_attr : Error<
 def err_enum_template : Error<"enumeration cannot be a template">;
 def warn_pragma_simd_expected_loop : Warning<
   "expected loop statement following '#pragma simd' - ignored">;
+def err_pragma_simd_invalid_vectorlength_expr: Error<
+  "Invalid vectorlength expression: "
+  "Must be a%select{n integer constant| power of two}0">;
+
 
 }
 

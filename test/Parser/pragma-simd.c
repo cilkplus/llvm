@@ -27,33 +27,40 @@ void test_invalid_clause()
 void test_vectorlength()
 {
   int i;
+  /* expected-error@+1 {{Invalid vectorlength expression: Must be a power of two}} */
+  #pragma simd vectorlength(3)
   /* expected-error@+1 {{expected '('}} */
   #pragma simd vectorlength
   /* expected-error@+1 {{expected expression}} */
   #pragma simd vectorlength(
   /* expected-error@+1 {{expected expression}} */
   #pragma simd vectorlength()
-  /* expected-error@+2 {{expected expression}} */
   /* expected-error@+1 {{expected expression}} */
   #pragma simd vectorlength(,
-  /* expected-error@+2 {{expected expression}} */
   /* expected-error@+1 {{expected expression}} */
   #pragma simd vectorlength(,)
   /* expected-error@+1 {{expected '('}} */
   #pragma simd vectorlength 4)
-  /* expected-error@+1 {{expected ')'}} */
+  /* expected-error@+2 {{expected ')'}} */
+  /* expected-note@+1 {{to match this '('}} */
   #pragma simd vectorlength(4
-  /* expected-error@+1 {{expected expression}} */
+  /* expected-error@+2 {{expected ')'}} */
+  /* expected-note@+1 {{to match this '('}} */
   #pragma simd vectorlength(4,
-  /* expected-error@+1 {{expected expression}} */
+  /* expected-error@+2 {{expected ')'}} */
+  /* expected-note@+1 {{to match this '('}} */
   #pragma simd vectorlength(4,)
   /* expected-error@+1 {{expected expression}} */
   #pragma simd vectorlength(,4)
-  /* expected-error@+1 {{expected ','}} */
+  /* expected-error@+2 {{expected ')'}} */
+  /* expected-note@+1 {{to match this '('}} */
   #pragma simd vectorlength(4 4)
-  /* expected-error@+1 {{expected expression}} */
+  /* expected-error@+2 {{expected ')'}} */
+  /* expected-note@+1 {{to match this '('}} */
   #pragma simd vectorlength(4,,4)
   #pragma simd vectorlength(4)
+  /* expected-error@+2 {{expected ')'}} */
+  /* expected-note@+1 {{to match this '('}} */
   #pragma simd vectorlength(4,8)
   for (i = 0; i < 16; ++i) ;
 }
@@ -226,7 +233,7 @@ void test_multiple_clauses()
 {
   int i;
   float x = 0, y = 0, z = 0;
-  #pragma simd vectorlength(4, 8) reduction(+:x, y) reduction(-:z)
+  #pragma simd vectorlength(4) reduction(+:x, y) reduction(-:z)
   for (i = 0; i < 16; ++i)
     ;
 }
