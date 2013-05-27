@@ -2908,8 +2908,8 @@ StmtResult Parser::ParseCilkForStmt() {
   // Leave the for-scope.
   CilkForScope.Exit();
 
-  if (FirstPart.isInvalid() || !FirstPart.get() || !SecondPart.get() ||
-      !ThirdPart.get() || Body.isInvalid() || !Body.get()) {
+  if (!FirstPart.isUsable() || !SecondPart.get() || !ThirdPart.get() ||
+      !Body.isUsable()) {
     Actions.ActOnCilkForStmtError();
     return StmtError();
   }
