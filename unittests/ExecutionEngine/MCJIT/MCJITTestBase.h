@@ -44,10 +44,18 @@ protected:
     // The architectures below are known to be compatible with MCJIT as they
     // are copied from test/ExecutionEngine/MCJIT/lit.local.cfg and should be
     // kept in sync.
+    SupportedArchs.push_back(Triple::aarch64);
     SupportedArchs.push_back(Triple::arm);
     SupportedArchs.push_back(Triple::mips);
     SupportedArchs.push_back(Triple::x86);
     SupportedArchs.push_back(Triple::x86_64);
+
+    // Some architectures have sub-architectures in which tests will fail, like
+    // ARM. These two vectors will define if they do have sub-archs (to avoid
+    // extra work for those who don't), and if so, if they are listed to work
+    HasSubArchs.push_back(Triple::arm);
+    SupportedSubArchs.push_back("armv6");
+    SupportedSubArchs.push_back("armv7");
 
     // The operating systems below are known to be incompatible with MCJIT as
     // they are copied from the test/ExecutionEngine/MCJIT/lit.local.cfg and
@@ -165,7 +173,7 @@ protected:
     std::string Error;
     TheJIT.reset(EB.setEngineKind(EngineKind::JIT)
                  .setUseMCJIT(true) /* can this be folded into the EngineKind enum? */
-                 .setJITMemoryManager(MM)
+                 .setMCJITMemoryManager(MM)
                  .setErrorStr(&Error)
                  .setOptLevel(CodeGenOpt::None)
                  .setAllocateGVsWithCode(false) /*does this do anything?*/
@@ -188,7 +196,7 @@ protected:
   OwningPtr<TargetMachine> TM;
   OwningPtr<ExecutionEngine> TheJIT;
   IRBuilder<> Builder;
-  JITMemoryManager *MM;
+  RTDyldMemoryManager *MM;
 
   OwningPtr<Module> M;
 };

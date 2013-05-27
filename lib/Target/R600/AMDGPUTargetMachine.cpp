@@ -64,12 +64,13 @@ AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, StringRef TT,
   InstrItins(&Subtarget.getInstrItineraryData()) {
   // TLInfo uses InstrInfo so it must be initialized after.
   if (Subtarget.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX) {
-    InstrInfo = new R600InstrInfo(*this);
-    TLInfo = new R600TargetLowering(*this);
+    InstrInfo.reset(new R600InstrInfo(*this));
+    TLInfo.reset(new R600TargetLowering(*this));
   } else {
-    InstrInfo = new SIInstrInfo(*this);
-    TLInfo = new SITargetLowering(*this);
+    InstrInfo.reset(new SIInstrInfo(*this));
+    TLInfo.reset(new SITargetLowering(*this));
   }
+  initAsmInfo();
 }
 
 AMDGPUTargetMachine::~AMDGPUTargetMachine() {
@@ -110,6 +111,8 @@ AMDGPUPassConfig::addPreISel() {
   if (ST.device()->getGeneration() > AMDGPUDeviceInfo::HD6XXX) {
     addPass(createAMDGPUStructurizeCFGPass());
     addPass(createSIAnnotateControlFlowPass());
+  } else {
+    addPass(createR600TextureIntrinsicsReplacer());
   }
   return false;
 }

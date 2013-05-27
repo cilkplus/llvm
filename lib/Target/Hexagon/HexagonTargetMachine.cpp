@@ -79,6 +79,7 @@ HexagonTargetMachine::HexagonTargetMachine(const Target &T, StringRef TT,
     FrameLowering(Subtarget),
     InstrItins(&Subtarget.getInstrItineraryData()) {
     setMCUseCFI(false);
+    initAsmInfo();
 }
 
 // addPassesForOptimizations - Allow the backend (target) to add Target
@@ -158,9 +159,10 @@ bool HexagonPassConfig::addPostRegAlloc() {
 
 bool HexagonPassConfig::addPreSched2() {
   const HexagonTargetMachine &TM = getHexagonTargetMachine();
-  HexagonTargetObjectFile &TLOF =
-    (HexagonTargetObjectFile&)(getTargetLowering()->getObjFileLowering());
+  const HexagonTargetObjectFile &TLOF =
+    (const HexagonTargetObjectFile &)getTargetLowering()->getObjFileLowering();
 
+  addPass(createHexagonCopyToCombine());
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&IfConverterID);
   if (!TLOF.IsSmallDataEnabled()) {
@@ -168,9 +170,6 @@ bool HexagonPassConfig::addPreSched2() {
     printAndVerify("After hexagon split const32/64 pass");
   }
   return true;
-  if (getOptLevel() != CodeGenOpt::None)
-    addPass(&IfConverterID);
-  return false;
 }
 
 bool HexagonPassConfig::addPreEmitPass() {

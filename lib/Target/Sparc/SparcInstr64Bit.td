@@ -59,10 +59,6 @@ defm SRAX : F3_S<"srax", 0b100111, 1, sra, i64, I64Regs>;
 // preferable to use a constant pool load instead, depending on the
 // microarchitecture.
 
-// The %g0 register is constant 0.
-// This is useful for stx %g0, [...], for example.
-def : Pat<(i64 0), (i64 G0)>, Requires<[Is64Bit]>;
-
 // Single-instruction patterns.
 
 // The ALU instructions want their simm13 operands as i32 immediates.
@@ -322,12 +318,32 @@ def MOVXCCri : Pseudo<(outs IntRegs:$rd),
                       (ins i32imm:$i, IntRegs:$f, CCOp:$cond),
                       "mov$cond %xcc, $i, $rd",
                       [(set i32:$rd,
-                       (SPselecticc simm11:$i, i32:$f, imm:$cond))]>;
+                       (SPselectxcc simm11:$i, i32:$f, imm:$cond))]>;
+def FMOVS_XCC : Pseudo<(outs FPRegs:$rd),
+                      (ins FPRegs:$rs2, FPRegs:$f, CCOp:$cond),
+                      "fmovs$cond %xcc, $rs2, $rd",
+                      [(set f32:$rd,
+                       (SPselectxcc f32:$rs2, f32:$f, imm:$cond))]>;
+def FMOVD_XCC : Pseudo<(outs DFPRegs:$rd),
+                      (ins DFPRegs:$rs2, DFPRegs:$f, CCOp:$cond),
+                      "fmovd$cond %xcc, $rs2, $rd",
+                      [(set f64:$rd,
+                       (SPselectxcc f64:$rs2, f64:$f, imm:$cond))]>;
 } // Uses, Constraints
 
 def : Pat<(SPselectxcc i64:$t, i64:$f, imm:$cond),
           (MOVXCCrr $t, $f, imm:$cond)>;
 def : Pat<(SPselectxcc (i64 simm11:$t), i64:$f, imm:$cond),
           (MOVXCCri (as_i32imm $t), $f, imm:$cond)>;
+
+def : Pat<(SPselecticc i64:$t, i64:$f, imm:$cond),
+          (MOVICCrr $t, $f, imm:$cond)>;
+def : Pat<(SPselecticc (i64 simm11:$t), i64:$f, imm:$cond),
+          (MOVICCri (as_i32imm $t), $f, imm:$cond)>;
+
+def : Pat<(SPselectfcc i64:$t, i64:$f, imm:$cond),
+          (MOVFCCrr $t, $f, imm:$cond)>;
+def : Pat<(SPselectfcc (i64 simm11:$t), i64:$f, imm:$cond),
+          (MOVFCCri (as_i32imm $t), $f, imm:$cond)>;
 
 } // Predicates = [Is64Bit]

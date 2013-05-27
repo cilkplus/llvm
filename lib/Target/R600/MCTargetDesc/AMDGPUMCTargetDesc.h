@@ -33,8 +33,7 @@ extern Target TheAMDGPUTarget;
 
 MCCodeEmitter *createR600MCCodeEmitter(const MCInstrInfo &MCII,
                                        const MCRegisterInfo &MRI,
-                                       const MCSubtargetInfo &STI,
-                                       MCContext &Ctx);
+                                       const MCSubtargetInfo &STI);
 
 MCCodeEmitter *createSIMCCodeEmitter(const MCInstrInfo &MCII,
                                      const MCRegisterInfo &MRI,

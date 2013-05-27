@@ -327,15 +327,14 @@ namespace llvm {
     /// @param Scope        Scope in which this type is defined.
     /// @param Name         Value parameter name.
     /// @param Ty           Parameter type.
-    /// @param Value        Constant parameter value.
+    /// @param Val          Constant parameter value.
     /// @param File         File where this type parameter is defined.
     /// @param LineNo       Line number.
     /// @param ColumnNo     Column Number.
     DITemplateValueParameter
-    createTemplateValueParameter(DIDescriptor Scope, StringRef Name, DIType Ty,
-                                 uint64_t Value,
-                                 MDNode *File = 0, unsigned LineNo = 0,
-                                 unsigned ColumnNo = 0);
+    createTemplateValueParameter(DIDescriptor Scope, StringRef Name,
+                                 DIType Ty, Value *Val, MDNode *File = 0,
+                                 unsigned LineNo = 0, unsigned ColumnNo = 0);
 
     /// createArrayType - Create debugging information entry for an array.
     /// @param Size         Array size.
@@ -506,7 +505,7 @@ namespace llvm {
     DISubprogram createFunction(DIDescriptor Scope, StringRef Name,
                                 StringRef LinkageName,
                                 DIFile File, unsigned LineNo,
-                                DIType Ty, bool isLocalToUnit,
+                                DICompositeType Ty, bool isLocalToUnit,
                                 bool isDefinition,
                                 unsigned ScopeLine,
                                 unsigned Flags = 0,
@@ -537,7 +536,7 @@ namespace llvm {
     DISubprogram createMethod(DIDescriptor Scope, StringRef Name,
                               StringRef LinkageName,
                               DIFile File, unsigned LineNo,
-                              DIType Ty, bool isLocalToUnit,
+                              DICompositeType Ty, bool isLocalToUnit,
                               bool isDefinition,
                               unsigned Virtuality = 0, unsigned VTableIndex = 0,
                               MDNode *VTableHolder = 0,
@@ -578,7 +577,15 @@ namespace llvm {
     /// @param NS The namespace being imported here
     /// @param Line Line number
     DIImportedEntity createImportedModule(DIScope Context, DINameSpace NS,
-                                          unsigned Line);
+                                          unsigned Line,
+                                          StringRef Name = StringRef());
+
+    /// \brief Create a descriptor for an imported module.
+    /// @param Context The scope this module is imported into
+    /// @param NS An aliased namespace
+    /// @param Line Line number
+    DIImportedEntity createImportedModule(DIScope Context, DIImportedEntity NS,
+                                          unsigned Line, StringRef Name);
 
     /// \brief Create a descriptor for an imported function.
     /// @param Context The scope this module is imported into

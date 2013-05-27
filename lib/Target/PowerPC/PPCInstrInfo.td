@@ -162,6 +162,10 @@ def PPCeh_sjlj_longjmp : SDNode<"PPCISD::EH_SJLJ_LONGJMP",
                                 SDTypeProfile<0, 1, [SDTCisPtrTy<0>]>,
                                 [SDNPHasChain, SDNPSideEffect]>;
 
+def SDT_PPCsc     : SDTypeProfile<0, 1, [SDTCisInt<0>]>;
+def PPCsc         : SDNode<"PPCISD::SC", SDT_PPCsc,
+                           [SDNPHasChain, SDNPSideEffect]>;
+
 def PPCvcmp       : SDNode<"PPCISD::VCMP" , SDT_PPCvcmp, []>;
 def PPCvcmp_o     : SDNode<"PPCISD::VCMPo", SDT_PPCvcmp, [SDNPOutGlue]>;
 
@@ -246,13 +250,15 @@ def maskimm32 : PatLeaf<(imm), [{
     return false;
 }]>;
 
-def immSExt16  : PatLeaf<(imm), [{
-  // immSExt16 predicate - True if the immediate fits in a 16-bit sign extended
-  // field.  Used by instructions like 'addi'.
-  if (N->getValueType(0) == MVT::i32)
-    return (int32_t)N->getZExtValue() == (short)N->getZExtValue();
-  else
-    return (int64_t)N->getZExtValue() == (short)N->getZExtValue();
+def imm32SExt16  : Operand<i32>, ImmLeaf<i32, [{
+  // imm32SExt16 predicate - True if the i32 immediate fits in a 16-bit
+  // sign extended field.  Used by instructions like 'addi'.
+  return (int32_t)Imm == (short)Imm;
+}]>;
+def imm64SExt16  : Operand<i64>, ImmLeaf<i64, [{
+  // imm64SExt16 predicate - True if the i64 immediate fits in a 16-bit
+  // sign extended field.  Used by instructions like 'addi'.
+  return (int64_t)Imm == (short)Imm;
 }]>;
 def immZExt16  : PatLeaf<(imm), [{
   // immZExt16 predicate - True if the immediate fits in a 16-bit zero extended
@@ -283,7 +289,7 @@ def imm16ShiftedSExt : PatLeaf<(imm), [{
 }], HI16>;
 
 // Some r+i load/store instructions (such as LD, STD, LDU, etc.) that require
-// restricted memrix (offset/4) constants are alignment sensitive. If these
+// restricted memrix (4-aligned) constants are alignment sensitive. If these
 // offsets are hidden behind TOC entries than the values of the lower-order
 // bits cannot be checked directly. As a result, we need to also incorporate
 // an alignment check into the relevant patterns.
@@ -428,6 +434,7 @@ def PPCS16ImmAsmOperand : AsmOperandClass {
 }
 def s16imm  : Operand<i32> {
   let PrintMethod = "printS16ImmOperand";
+  let EncoderMethod = "getS16ImmEncoding";
   let ParserMatchClass = PPCS16ImmAsmOperand;
 }
 def PPCU16ImmAsmOperand : AsmOperandClass {
@@ -451,16 +458,6 @@ def calltarget : Operand<iPTR> {
 }
 def aaddr : Operand<iPTR> {
   let PrintMethod = "printAbsAddrOperand";
-}
-def symbolHi: Operand<i32> {
-  let PrintMethod = "printSymbolHi";
-  let EncoderMethod = "getHA16Encoding";
-  let ParserMatchClass = PPCS16ImmAsmOperand;
-}
-def symbolLo: Operand<i32> {
-  let PrintMethod = "printSymbolLo";
-  let EncoderMethod = "getLO16Encoding";
-  let ParserMatchClass = PPCS16ImmAsmOperand;
 }
 def PPCCRBitMaskOperand : AsmOperandClass {
  let Name = "CRBitMask"; let PredicateMethod = "isCRBitMask";
@@ -488,12 +485,14 @@ def ptr_rc_idx : Operand<iPTR>, PointerLikeRegClass<0> {
 
 def PPCDispRIOperand : AsmOperandClass {
  let Name = "DispRI"; let PredicateMethod = "isS16Imm";
+ let RenderMethod = "addImmOperands";
 }
 def dispRI : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIOperand;
 }
 def PPCDispRIXOperand : AsmOperandClass {
  let Name = "DispRIX"; let PredicateMethod = "isS16ImmX4";
+ let RenderMethod = "addImmOperands";
 }
 def dispRIX : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIXOperand;
@@ -508,8 +507,8 @@ def memrr : Operand<iPTR> {
   let PrintMethod = "printMemRegReg";
   let MIOperandInfo = (ops ptr_rc_nor0:$ptrreg, ptr_rc_idx:$offreg);
 }
-def memrix : Operand<iPTR> {   // memri where the imm is shifted 2 bits.
-  let PrintMethod = "printMemRegImmShifted";
+def memrix : Operand<iPTR> {   // memri where the imm is 4-aligned.
+  let PrintMethod = "printMemRegImm";
   let MIOperandInfo = (ops dispRIX:$imm, ptr_rc_nor0:$reg);
   let EncoderMethod = "getMemRIXEncoding";
 }
@@ -530,7 +529,7 @@ def pred : Operand<OtherVT> {
 def iaddr  : ComplexPattern<iPTR, 2, "SelectAddrImm",    [], []>;
 def xaddr  : ComplexPattern<iPTR, 2, "SelectAddrIdx",    [], []>;
 def xoaddr : ComplexPattern<iPTR, 2, "SelectAddrIdxOnly",[], []>;
-def ixaddr : ComplexPattern<iPTR, 2, "SelectAddrImmShift", [], []>; // "std"
+def ixaddr : ComplexPattern<iPTR, 2, "SelectAddrImmX4",  [], []>; // "std"
 
 // The address in a single register. This is used with the SjLj
 // pseudo-instructions.
@@ -987,6 +986,12 @@ let isBranch = 1, isTerminator = 1 in {
                         "#EH_SjLj_Setup\t$dst", []>;
 }
 
+// System call.
+let PPC970_Unit = 7 in {
+  def SC     : SCForm<17, 1, (outs), (ins i32imm:$lev),
+                      "sc $lev", BrB, [(PPCsc (i32 imm:$lev))]>;
+}
+
 // DCB* instructions.
 def DCBA   : DCB_Form<758, 0, (outs), (ins memrr:$dst),
                       "dcba $dst", LdStDCBF, [(int_ppc_dcba xoaddr:$dst)]>,
@@ -1389,41 +1394,41 @@ def SYNC : XForm_24_sync<31, 598, (outs), (ins),
 //
 
 let PPC970_Unit = 1 in {  // FXU Operations.
-def ADDI   : DForm_2<14, (outs gprc:$rD), (ins gprc_nor0:$rA, symbolLo:$imm),
+def ADDI   : DForm_2<14, (outs gprc:$rD), (ins gprc_nor0:$rA, s16imm:$imm),
                      "addi $rD, $rA, $imm", IntSimple,
-                     [(set i32:$rD, (add i32:$rA, immSExt16:$imm))]>;
+                     [(set i32:$rD, (add i32:$rA, imm32SExt16:$imm))]>;
 let BaseName = "addic" in {
 let Defs = [CARRY] in
 def ADDIC  : DForm_2<12, (outs gprc:$rD), (ins gprc:$rA, s16imm:$imm),
                      "addic $rD, $rA, $imm", IntGeneral,
-                     [(set i32:$rD, (addc i32:$rA, immSExt16:$imm))]>,
+                     [(set i32:$rD, (addc i32:$rA, imm32SExt16:$imm))]>,
                      RecFormRel, PPC970_DGroup_Cracked;
 let Defs = [CARRY, CR0] in
 def ADDICo : DForm_2<13, (outs gprc:$rD), (ins gprc:$rA, s16imm:$imm),
                      "addic. $rD, $rA, $imm", IntGeneral,
                      []>, isDOT, RecFormRel;
 }
-def ADDIS  : DForm_2<15, (outs gprc:$rD), (ins gprc_nor0:$rA, symbolHi:$imm),
+def ADDIS  : DForm_2<15, (outs gprc:$rD), (ins gprc_nor0:$rA, s16imm:$imm),
                      "addis $rD, $rA, $imm", IntSimple,
                      [(set i32:$rD, (add i32:$rA, imm16ShiftedSExt:$imm))]>;
 let isCodeGenOnly = 1 in
-def LA     : DForm_2<14, (outs gprc:$rD), (ins gprc_nor0:$rA, symbolLo:$sym),
+def LA     : DForm_2<14, (outs gprc:$rD), (ins gprc_nor0:$rA, s16imm:$sym),
                      "la $rD, $sym($rA)", IntGeneral,
                      [(set i32:$rD, (add i32:$rA,
                                           (PPClo tglobaladdr:$sym, 0)))]>;
 def MULLI  : DForm_2< 7, (outs gprc:$rD), (ins gprc:$rA, s16imm:$imm),
                      "mulli $rD, $rA, $imm", IntMulLI,
-                     [(set i32:$rD, (mul i32:$rA, immSExt16:$imm))]>;
+                     [(set i32:$rD, (mul i32:$rA, imm32SExt16:$imm))]>;
 let Defs = [CARRY] in
 def SUBFIC : DForm_2< 8, (outs gprc:$rD), (ins gprc:$rA, s16imm:$imm),
                      "subfic $rD, $rA, $imm", IntGeneral,
-                     [(set i32:$rD, (subc immSExt16:$imm, i32:$rA))]>;
+                     [(set i32:$rD, (subc imm32SExt16:$imm, i32:$rA))]>;
 
 let isReMaterializable = 1, isAsCheapAsAMove = 1, isMoveImm = 1 in {
-  def LI  : DForm_2_r0<14, (outs gprc:$rD), (ins symbolLo:$imm),
+  def LI  : DForm_2_r0<14, (outs gprc:$rD), (ins s16imm:$imm),
                        "li $rD, $imm", IntSimple,
-                       [(set i32:$rD, immSExt16:$imm)]>;
-  def LIS : DForm_2_r0<15, (outs gprc:$rD), (ins symbolHi:$imm),
+                       [(set i32:$rD, imm32SExt16:$imm)]>;
+  def LIS : DForm_2_r0<15, (outs gprc:$rD), (ins s16imm:$imm),
                        "lis $rD, $imm", IntSimple,
                        [(set i32:$rD, imm16ShiftedSExt:$imm)]>;
 }
@@ -1689,6 +1694,12 @@ let Defs = [CTR], Pattern = [(PPCmtctr i32:$rS)] in {
 def MTCTR : XFXForm_7_ext<31, 467, 9, (outs), (ins gprc:$rS),
                           "mtctr $rS", SprMTSPR>,
             PPC970_DGroup_First, PPC970_Unit_FXU;
+}
+let hasSideEffects = 1, isCodeGenOnly = 1, Defs = [CTR] in {
+let Pattern = [(int_ppc_mtctr i32:$rS)] in
+def MTCTRloop : XFXForm_7_ext<31, 467, 9, (outs), (ins gprc:$rS),
+                              "mtctr $rS", SprMTSPR>,
+                PPC970_DGroup_First, PPC970_Unit_FXU;
 }
 
 let Defs = [LR] in {
@@ -2004,7 +2015,7 @@ def : Pat<(or i32:$in, imm:$imm),
 def : Pat<(xor i32:$in, imm:$imm),
           (XORIS (XORI $in, (LO16 imm:$imm)), (HI16 imm:$imm))>;
 // SUBFIC
-def : Pat<(sub immSExt16:$imm, i32:$in),
+def : Pat<(sub imm32SExt16:$imm, i32:$in),
           (SUBFIC $in, imm:$imm)>;
 
 // SHL/SRL

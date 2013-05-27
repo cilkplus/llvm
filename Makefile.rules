@@ -639,22 +639,17 @@ endif
 ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
   ifneq ($(HOST_OS), Darwin)
     ifdef TOOLNAME
-      LD.Flags += $(RPATH) -Wl,'$$ORIGIN/../lib'
-      ifdef EXAMPLE_TOOL
-        LD.Flags += $(RPATH) -Wl,$(ExmplDir) $(DynamicFlag)
-      else
-        LD.Flags += $(RPATH) -Wl,$(ToolDir) $(DynamicFlag)
+      LD.Flags += $(RPATH) -Wl,'$$ORIGIN/../lib' $(DynamicFlag)
+    endif
+  else
+    ifneq ($(DARWIN_MAJVERS),4)
+      LD.Flags += $(RPATH) -Wl,@executable_path/../lib
+    endif
+    ifeq ($(RC_XBS),YES)
+      TempFile := $(shell mkdir -p ${OBJROOT}/dSYMs ; mktemp ${OBJROOT}/dSYMs/llvm-lto.XXXXXX)
+      LD.Flags += -Wl,-object_path_lto -Wl,$(TempFile)
     endif
   endif
-else
-  ifneq ($(DARWIN_MAJVERS),4)
-    LD.Flags += $(RPATH) -Wl,@executable_path/../lib
-  endif
-  ifeq ($(RC_XBS),YES)
-    TempFile := $(shell mkdir -p ${OBJROOT}/dSYMs ; mktemp ${OBJROOT}/dSYMs/llvm-lto.XXXXXX)
-    LD.Flags += -Wl,-object_path_lto -Wl,$(TempFile)
-  endif
-endif
 endif
 
 

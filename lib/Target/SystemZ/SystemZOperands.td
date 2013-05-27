@@ -24,14 +24,30 @@ class ImmediateAsmOperand<string name>
 class Immediate<ValueType vt, code pred, SDNodeXForm xform, string asmop>
   : PatLeaf<(vt imm), pred, xform>, Operand<vt> {
   let PrintMethod = "print"##asmop##"Operand";
+  let DecoderMethod = "decode"##asmop##"Operand";
   let ParserMatchClass = !cast<AsmOperandClass>(asmop);
 }
 
+// Constructs an asm operand for a PC-relative address.  SIZE says how
+// many bits there are.
+class PCRelAsmOperand<string size> : ImmediateAsmOperand<"PCRel"##size> {
+  let PredicateMethod = "isImm";
+  let ParserMethod = "parsePCRel"##size;
+}
+
+// Constructs an operand for a PC-relative address with address type VT.
+// ASMOP is the associated asm operand.
+class PCRelOperand<ValueType vt, AsmOperandClass asmop> : Operand<vt> {
+  let PrintMethod = "printPCRelOperand";
+  let ParserMatchClass = asmop;
+}
+
 // Constructs both a DAG pattern and instruction operand for a PC-relative
-// address with address size VT.  SELF is the name of the operand.
-class PCRelAddress<ValueType vt, string self>
+// address with address size VT.  SELF is the name of the operand and
+// ASMOP is the associated asm operand.
+class PCRelAddress<ValueType vt, string self, AsmOperandClass asmop>
   : ComplexPattern<vt, 1, "selectPCRelAddress", [z_pcrel_wrapper]>,
-    Operand<vt> {
+    PCRelOperand<vt, asmop> {
   let MIOperandInfo = (ops !cast<Operand>(self));
 }
 
@@ -45,11 +61,14 @@ class AddressAsmOperand<string format, string bitsize, string dispsize>
 }
 
 // Constructs both a DAG pattern and instruction operand for an addressing mode.
-// The mode is selected by custom code in selectTYPE...SUFFIX().  The address
-// registers have BITSIZE bits and displacements have DISPSIZE bits.  NUMOPS is
-// the number of operands that make up an address and OPERANDS lists the types
-// of those operands using (ops ...).  FORMAT is the type of addressing mode,
-// which needs to match the names used in AddressAsmOperand.
+// The mode is selected by custom code in select<TYPE><DISPSIZE><SUFFIX>(),
+// encoded by custom code in get<FORMAT><DISPSIZE>Encoding() and decoded
+// by custom code in decode<TYPE><BITSIZE>Disp<DISPSIZE>Operand().
+// The address registers have BITSIZE bits and displacements have
+// DISPSIZE bits.  NUMOPS is the number of operands that make up an
+// address and OPERANDS lists the types of those operands using (ops ...).
+// FORMAT is the type of addressing mode, which needs to match the names
+// used in AddressAsmOperand.
 class AddressingMode<string type, string bitsize, string dispsize,
                      string suffix, int numops, string format, dag operands>
   : ComplexPattern<!cast<ValueType>("i"##bitsize), numops,
@@ -57,6 +76,8 @@ class AddressingMode<string type, string bitsize, string dispsize,
                    [add, sub, or, frameindex, z_adjdynalloc]>,
     Operand<!cast<ValueType>("i"##bitsize)> {
   let PrintMethod = "print"##format##"Operand";
+  let EncoderMethod = "get"##format##dispsize##"Encoding";
+  let DecoderMethod = "decode"##format##bitsize##"Disp"##dispsize##"Operand";
   let MIOperandInfo = operands;
   let ParserMatchClass =
     !cast<AddressAsmOperand>(format##bitsize##"Disp"##dispsize);
@@ -334,30 +355,39 @@ def fpimmneg0 : PatLeaf<(fpimm), [{ return N->isExactlyValue(-0.0); }]>;
 // Symbolic address operands
 //===----------------------------------------------------------------------===//
 
+// PC-relative asm operands.
+def PCRel16 : PCRelAsmOperand<"16">;
+def PCRel32 : PCRelAsmOperand<"32">;
+
 // PC-relative offsets of a basic block.  The offset is sign-extended
 // and multiplied by 2.
-def brtarget16 : Operand<OtherVT> {
+def brtarget16 : PCRelOperand<OtherVT, PCRel16> {
   let EncoderMethod = "getPC16DBLEncoding";
+  let DecoderMethod = "decodePC16DBLOperand";
 }
-def brtarget32 : Operand<OtherVT> {
+def brtarget32 : PCRelOperand<OtherVT, PCRel32> {
   let EncoderMethod = "getPC32DBLEncoding";
+  let DecoderMethod = "decodePC32DBLOperand";
 }
 
 // A PC-relative offset of a global value.  The offset is sign-extended
 // and multiplied by 2.
-def pcrel32 : PCRelAddress<i64, "pcrel32"> {
+def pcrel32 : PCRelAddress<i64, "pcrel32", PCRel32> {
   let EncoderMethod = "getPC32DBLEncoding";
+  let DecoderMethod = "decodePC32DBLOperand";
 }
 
 // A PC-relative offset of a global value when the value is used as a
 // call target.  The offset is sign-extended and multiplied by 2.
-def pcrel16call : PCRelAddress<i64, "pcrel16call"> {
+def pcrel16call : PCRelAddress<i64, "pcrel16call", PCRel16> {
   let PrintMethod = "printCallOperand";
   let EncoderMethod = "getPLT16DBLEncoding";
+  let DecoderMethod = "decodePC16DBLOperand";
 }
-def pcrel32call : PCRelAddress<i64, "pcrel32call"> {
+def pcrel32call : PCRelAddress<i64, "pcrel32call", PCRel32> {
   let PrintMethod = "printCallOperand";
   let EncoderMethod = "getPLT32DBLEncoding";
+  let DecoderMethod = "decodePC32DBLOperand";
 }
 
 //===----------------------------------------------------------------------===//

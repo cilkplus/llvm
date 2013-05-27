@@ -127,7 +127,8 @@ lexical features of LLVM:
 #. Comments are delimited with a '``;``' and go until the end of line.
 #. Unnamed temporaries are created when the result of a computation is
    not assigned to a named value.
-#. Unnamed temporaries are numbered sequentially
+#. Unnamed temporaries are numbered sequentially (using a per-function
+   incrementing counter, starting with 0).
 
 It also shows a convention that we follow in this document. When
 demonstrating instructions, we will follow an instruction with a comment
@@ -563,7 +564,11 @@ A function definition contains a list of basic blocks, forming the CFG
 start with a label (giving the basic block a symbol table entry),
 contains a list of instructions, and ends with a
 :ref:`terminator <terminators>` instruction (such as a branch or function
-return).
+return). If explicit label is not provided, a block is assigned an
+implicit numbered label, using a next value from the same counter as used
+for unnamed temporaries (:ref:`see above<identifiers>`). For example, if a
+function entry block does not have explicit label, it will be assigned
+label "%0", then first unnamed temporary in that block will be "%1", etc.
 
 The first basic block in a function is special in two ways: it is
 immediately executed on entrance to the function, and it is not allowed
@@ -807,6 +812,11 @@ example:
     This attribute indicates that the inliner should attempt to inline
     this function into callers whenever possible, ignoring any active
     inlining size threshold for this caller.
+``cold``
+    This attribute indicates that this function is rarely called. When
+    computing edge weights, basic blocks post-dominated by a cold
+    function call are also considered to be cold; and, thus, given low
+    weight.
 ``nonlazybind``
     This attribute suppresses lazy symbol binding for the function. This
     may make calls to the function faster, at the cost of extra program
@@ -6657,6 +6667,9 @@ When directly supported, reading the cycle counter should not modify any
 memory. Implementations are allowed to either return a application
 specific value or a system wide value. On backends without support, this
 is lowered to a constant 0.
+
+Note that runtime support may be conditional on the privilege-level code is
+running at and the host platform.
 
 Standard C Library Intrinsics
 -----------------------------

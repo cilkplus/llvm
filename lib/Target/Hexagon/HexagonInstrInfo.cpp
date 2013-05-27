@@ -630,111 +630,6 @@ bool HexagonInstrInfo::isBranch (const MachineInstr *MI) const {
   return MI->getDesc().isBranch();
 }
 
-bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
-  switch (MI->getOpcode()) {
-    default: return false;
-    // Store Byte
-    case Hexagon::STrib_nv_V4:
-    case Hexagon::STrib_indexed_nv_V4:
-    case Hexagon::STrib_indexed_shl_nv_V4:
-    case Hexagon::STrib_shl_nv_V4:
-    case Hexagon::STb_GP_nv_V4:
-    case Hexagon::POST_STbri_nv_V4:
-    case Hexagon::STrib_cPt_nv_V4:
-    case Hexagon::STrib_cdnPt_nv_V4:
-    case Hexagon::STrib_cNotPt_nv_V4:
-    case Hexagon::STrib_cdnNotPt_nv_V4:
-    case Hexagon::STrib_indexed_cPt_nv_V4:
-    case Hexagon::STrib_indexed_cdnPt_nv_V4:
-    case Hexagon::STrib_indexed_cNotPt_nv_V4:
-    case Hexagon::STrib_indexed_cdnNotPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cdnPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cNotPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cdnNotPt_nv_V4:
-    case Hexagon::POST_STbri_cPt_nv_V4:
-    case Hexagon::POST_STbri_cdnPt_nv_V4:
-    case Hexagon::POST_STbri_cNotPt_nv_V4:
-    case Hexagon::POST_STbri_cdnNotPt_nv_V4:
-    case Hexagon::STb_GP_cPt_nv_V4:
-    case Hexagon::STb_GP_cNotPt_nv_V4:
-    case Hexagon::STb_GP_cdnPt_nv_V4:
-    case Hexagon::STb_GP_cdnNotPt_nv_V4:
-    case Hexagon::STrib_abs_nv_V4:
-    case Hexagon::STrib_abs_cPt_nv_V4:
-    case Hexagon::STrib_abs_cdnPt_nv_V4:
-    case Hexagon::STrib_abs_cNotPt_nv_V4:
-    case Hexagon::STrib_abs_cdnNotPt_nv_V4:
-
-    // Store Halfword
-    case Hexagon::STrih_nv_V4:
-    case Hexagon::STrih_indexed_nv_V4:
-    case Hexagon::STrih_indexed_shl_nv_V4:
-    case Hexagon::STrih_shl_nv_V4:
-    case Hexagon::STh_GP_nv_V4:
-    case Hexagon::POST_SThri_nv_V4:
-    case Hexagon::STrih_cPt_nv_V4:
-    case Hexagon::STrih_cdnPt_nv_V4:
-    case Hexagon::STrih_cNotPt_nv_V4:
-    case Hexagon::STrih_cdnNotPt_nv_V4:
-    case Hexagon::STrih_indexed_cPt_nv_V4:
-    case Hexagon::STrih_indexed_cdnPt_nv_V4:
-    case Hexagon::STrih_indexed_cNotPt_nv_V4:
-    case Hexagon::STrih_indexed_cdnNotPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cdnPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cNotPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cdnNotPt_nv_V4:
-    case Hexagon::POST_SThri_cPt_nv_V4:
-    case Hexagon::POST_SThri_cdnPt_nv_V4:
-    case Hexagon::POST_SThri_cNotPt_nv_V4:
-    case Hexagon::POST_SThri_cdnNotPt_nv_V4:
-    case Hexagon::STh_GP_cPt_nv_V4:
-    case Hexagon::STh_GP_cNotPt_nv_V4:
-    case Hexagon::STh_GP_cdnPt_nv_V4:
-    case Hexagon::STh_GP_cdnNotPt_nv_V4:
-    case Hexagon::STrih_abs_nv_V4:
-    case Hexagon::STrih_abs_cPt_nv_V4:
-    case Hexagon::STrih_abs_cdnPt_nv_V4:
-    case Hexagon::STrih_abs_cNotPt_nv_V4:
-    case Hexagon::STrih_abs_cdnNotPt_nv_V4:
-
-    // Store Word
-    case Hexagon::STriw_nv_V4:
-    case Hexagon::STriw_indexed_nv_V4:
-    case Hexagon::STriw_indexed_shl_nv_V4:
-    case Hexagon::STriw_shl_nv_V4:
-    case Hexagon::STw_GP_nv_V4:
-    case Hexagon::POST_STwri_nv_V4:
-    case Hexagon::STriw_cPt_nv_V4:
-    case Hexagon::STriw_cdnPt_nv_V4:
-    case Hexagon::STriw_cNotPt_nv_V4:
-    case Hexagon::STriw_cdnNotPt_nv_V4:
-    case Hexagon::STriw_indexed_cPt_nv_V4:
-    case Hexagon::STriw_indexed_cdnPt_nv_V4:
-    case Hexagon::STriw_indexed_cNotPt_nv_V4:
-    case Hexagon::STriw_indexed_cdnNotPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cdnPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cNotPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cdnNotPt_nv_V4:
-    case Hexagon::POST_STwri_cPt_nv_V4:
-    case Hexagon::POST_STwri_cdnPt_nv_V4:
-    case Hexagon::POST_STwri_cNotPt_nv_V4:
-    case Hexagon::POST_STwri_cdnNotPt_nv_V4:
-    case Hexagon::STw_GP_cPt_nv_V4:
-    case Hexagon::STw_GP_cNotPt_nv_V4:
-    case Hexagon::STw_GP_cdnPt_nv_V4:
-    case Hexagon::STw_GP_cdnNotPt_nv_V4:
-    case Hexagon::STriw_abs_nv_V4:
-    case Hexagon::STriw_abs_cPt_nv_V4:
-    case Hexagon::STriw_abs_cdnPt_nv_V4:
-    case Hexagon::STriw_abs_cNotPt_nv_V4:
-    case Hexagon::STriw_abs_cdnNotPt_nv_V4:
-      return true;
-  }
-}
-
 bool HexagonInstrInfo::isNewValueInst(const MachineInstr *MI) const {
   if (isNewValueJump(MI))
     return true;
@@ -862,6 +757,18 @@ unsigned HexagonInstrInfo::getInvertedPredicatedOpcode(const int Opc) const {
   }
 }
 
+// New Value Store instructions.
+bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
+
+  return ((F >> HexagonII::NVStorePos) & HexagonII::NVStoreMask);
+}
+
+bool HexagonInstrInfo::isNewValueStore(unsigned Opcode) const {
+  const uint64_t F = get(Opcode).TSFlags;
+
+  return ((F >> HexagonII::NVStorePos) & HexagonII::NVStoreMask);
+}
 
 int HexagonInstrInfo::
 getMatchingCondBranchOpcode(int Opc, bool invertPredicate) const {
@@ -1120,6 +1027,16 @@ bool HexagonInstrInfo::isPredicatedNew(unsigned Opcode) const {
   return ((F >> HexagonII::PredicatedNewPos) & HexagonII::PredicatedNewMask);
 }
 
+// Returns true, if a ST insn can be promoted to a new-value store.
+bool HexagonInstrInfo::mayBeNewStore(const MachineInstr *MI) const {
+  const HexagonRegisterInfo& QRI = getRegisterInfo();
+  const uint64_t F = MI->getDesc().TSFlags;
+
+  return ((F >> HexagonII::mayNVStorePos) &
+           HexagonII::mayNVStoreMask &
+           QRI.Subtarget.hasV4TOps());
+}
+
 bool
 HexagonInstrInfo::DefinesPredicate(MachineInstr *MI,
                                    std::vector<MachineOperand> &Pred) const {
@@ -1304,6 +1221,8 @@ isValidAutoIncImm(const EVT VT, const int Offset) const {
 
 bool HexagonInstrInfo::
 isMemOp(const MachineInstr *MI) const {
+//  return MI->getDesc().mayLoad() && MI->getDesc().mayStore();
+
   switch (MI->getOpcode())
   {
     default: return false;
@@ -1609,6 +1528,59 @@ bool HexagonInstrInfo::isNewValue(const MachineInstr* MI) const {
 bool HexagonInstrInfo::isDotNewInst (const MachineInstr* MI) const {
   return (isNewValueInst(MI) ||
      (isPredicated(MI) && isPredicatedNew(MI)));
+}
+
+// Returns the most basic instruction for the .new predicated instructions and
+// new-value stores.
+// For example, all of the following instructions will be converted back to the
+// same instruction:
+// 1) if (p0.new) memw(R0+#0) = R1.new  --->
+// 2) if (p0) memw(R0+#0)= R1.new      -------> if (p0) memw(R0+#0) = R1
+// 3) if (p0.new) memw(R0+#0) = R1      --->
+//
+
+int HexagonInstrInfo::GetDotOldOp(const int opc) const {
+  int NewOp = opc;
+  if (isPredicated(NewOp) && isPredicatedNew(NewOp)) { // Get predicate old form
+    NewOp = Hexagon::getPredOldOpcode(NewOp);
+    if (NewOp < 0)
+      assert(0 && "Couldn't change predicate new instruction to its old form.");
+  }
+
+  if (isNewValueStore(NewOp)) { // Convert into non new-value format
+    NewOp = Hexagon::getNonNVStore(NewOp);
+    if (NewOp < 0)
+      assert(0 && "Couldn't change new-value store to its old form.");
+  }
+  return NewOp;
+}
+
+// Return the new value instruction for a given store.
+int HexagonInstrInfo::GetDotNewOp(const MachineInstr* MI) const {
+  int NVOpcode = Hexagon::getNewValueOpcode(MI->getOpcode());
+  if (NVOpcode >= 0) // Valid new-value store instruction.
+    return NVOpcode;
+
+  switch (MI->getOpcode()) {
+  default: llvm_unreachable("Unknown .new type");
+  // store new value byte
+  case Hexagon::STrib_shl_V4:
+    return Hexagon::STrib_shl_nv_V4;
+
+  case Hexagon::STrih_shl_V4:
+    return Hexagon::STrih_shl_nv_V4;
+
+  case Hexagon::STriw_f:
+    return Hexagon::STriw_nv_V4;
+
+  case Hexagon::STriw_indexed_f:
+    return Hexagon::STriw_indexed_nv_V4;
+
+  case Hexagon::STriw_shl_V4:
+    return Hexagon::STriw_shl_nv_V4;
+
+  }
+  return 0;
 }
 
 // Return .new predicate version for an instruction.

@@ -138,8 +138,6 @@ void AMDGPUTargetLowering::InitAMDILLowering() {
     setOperationAction(ISD::SMUL_LOHI, VT, Expand);
     setOperationAction(ISD::UMUL_LOHI, VT, Expand);
 
-    // GPU doesn't have a rotl, rotr, or byteswap instruction
-    setOperationAction(ISD::ROTR, VT, Expand);
     setOperationAction(ISD::BSWAP, VT, Expand);
 
     // GPU doesn't have any counting operators
@@ -331,7 +329,7 @@ SDValue
 AMDGPUTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const {
   SDValue Data = Op.getOperand(0);
   VTSDNode *BaseType = cast<VTSDNode>(Op.getOperand(1));
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT DVT = Data.getValueType();
   EVT BVT = BaseType->getVT();
   unsigned baseBits = BVT.getScalarType().getSizeInBits();
@@ -387,7 +385,7 @@ AMDGPUTargetLowering::LowerBRCOND(SDValue Op, SelectionDAG &DAG) const {
   SDValue Result;
   Result = DAG.getNode(
       AMDGPUISD::BRANCH_COND,
-      Op.getDebugLoc(),
+      SDLoc(Op),
       Op.getValueType(),
       Chain, Jump, Cond);
   return Result;
@@ -395,7 +393,7 @@ AMDGPUTargetLowering::LowerBRCOND(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue
 AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT OVT = Op.getValueType();
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
@@ -476,7 +474,7 @@ AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue
 AMDGPUTargetLowering::LowerSDIV32(SDValue Op, SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT OVT = Op.getValueType();
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
@@ -547,7 +545,7 @@ AMDGPUTargetLowering::LowerSDIV64(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue
 AMDGPUTargetLowering::LowerSREM8(SDValue Op, SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT OVT = Op.getValueType();
   MVT INTTY = MVT::i32;
   if (OVT == MVT::v2i8) {
@@ -564,7 +562,7 @@ AMDGPUTargetLowering::LowerSREM8(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue
 AMDGPUTargetLowering::LowerSREM16(SDValue Op, SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT OVT = Op.getValueType();
   MVT INTTY = MVT::i32;
   if (OVT == MVT::v2i16) {
@@ -581,7 +579,7 @@ AMDGPUTargetLowering::LowerSREM16(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue
 AMDGPUTargetLowering::LowerSREM32(SDValue Op, SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT OVT = Op.getValueType();
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);

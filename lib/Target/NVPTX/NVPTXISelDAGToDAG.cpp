@@ -42,6 +42,11 @@ static cl::opt<int> UsePrecDivF32(
              " IEEE Compliant F32 div.rnd if avaiable."),
     cl::init(2));
 
+static cl::opt<bool>
+UsePrecSqrtF32("nvptx-prec-sqrtf32",
+          cl::desc("NVPTX Specific: 0 use sqrt.approx, 1 use sqrt.rn."),
+          cl::init(true));
+
 /// createNVPTXISelDag - This pass converts a legalized DAG into a
 /// NVPTX-specific DAG, ready for instruction scheduling.
 FunctionPass *llvm::createNVPTXISelDag(NVPTXTargetMachine &TM,
@@ -74,6 +79,8 @@ NVPTXDAGToDAGISel::NVPTXDAGToDAGISel(NVPTXTargetMachine &tm,
 
   // Decide how to translate f32 div
   do_DIVF32_PREC = UsePrecDivF32;
+  // Decide how to translate f32 sqrt
+  do_SQRTF32_PREC = UsePrecSqrtF32;
   // sm less than sm_20 does not support div.rnd. Use div.full.
   if (do_DIVF32_PREC == 2 && !Subtarget.reqPTX20())
     do_DIVF32_PREC = 1;
@@ -155,7 +162,7 @@ static unsigned int getCodeAddrSpace(MemSDNode *N,
 }
 
 SDNode *NVPTXDAGToDAGISel::SelectLoad(SDNode *N) {
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   LoadSDNode *LD = cast<LoadSDNode>(N);
   EVT LoadedVT = LD->getMemoryVT();
   SDNode *NVPTXLD = NULL;
@@ -394,7 +401,7 @@ SDNode *NVPTXDAGToDAGISel::SelectLoadVector(SDNode *N) {
   SDValue Op1 = N->getOperand(1);
   SDValue Addr, Offset, Base;
   unsigned Opcode;
-  DebugLoc DL = N->getDebugLoc();
+  SDLoc DL(N);
   SDNode *LD;
   MemSDNode *MemSD = cast<MemSDNode>(N);
   EVT LoadedVT = MemSD->getMemoryVT();
@@ -775,7 +782,7 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDUVector(SDNode *N) {
   SDValue Chain = N->getOperand(0);
   SDValue Op1 = N->getOperand(1);
   unsigned Opcode;
-  DebugLoc DL = N->getDebugLoc();
+  SDLoc DL(N);
   SDNode *LD;
 
   EVT RetVT = N->getValueType(0);
@@ -972,7 +979,7 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDUVector(SDNode *N) {
 }
 
 SDNode *NVPTXDAGToDAGISel::SelectStore(SDNode *N) {
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   StoreSDNode *ST = cast<StoreSDNode>(N);
   EVT StoreVT = ST->getMemoryVT();
   SDNode *NVPTXST = NULL;
@@ -1207,7 +1214,7 @@ SDNode *NVPTXDAGToDAGISel::SelectStoreVector(SDNode *N) {
   SDValue Op1 = N->getOperand(1);
   SDValue Addr, Offset, Base;
   unsigned Opcode;
-  DebugLoc DL = N->getDebugLoc();
+  SDLoc DL(N);
   SDNode *ST;
   EVT EltVT = Op1.getValueType();
   MemSDNode *MemSD = cast<MemSDNode>(N);

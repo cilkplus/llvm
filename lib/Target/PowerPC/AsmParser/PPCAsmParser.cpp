@@ -247,7 +247,7 @@ public:
 
   unsigned getCRBitMask() const {
     assert(isCRBitMask() && "Invalid access!");
-    return 7 - CountTrailingZeros_32(Imm.Val);
+    return 7 - countTrailingZeros<uint64_t>(Imm.Val);
   }
 
   bool isToken() const { return Kind == Token; }
@@ -342,22 +342,6 @@ public:
     assert(N == 1 && "Invalid number of operands!");
     if (Kind == Immediate)
       Inst.addOperand(MCOperand::CreateImm(getImm()));
-    else
-      Inst.addOperand(MCOperand::CreateExpr(getExpr()));
-  }
-
-  void addDispRIOperands(MCInst &Inst, unsigned N) const {
-    assert(N == 1 && "Invalid number of operands!");
-    if (Kind == Immediate)
-      Inst.addOperand(MCOperand::CreateImm(getImm()));
-    else
-      Inst.addOperand(MCOperand::CreateExpr(getExpr()));
-  }
-
-  void addDispRIXOperands(MCInst &Inst, unsigned N) const {
-    assert(N == 1 && "Invalid number of operands!");
-    if (Kind == Immediate)
-      Inst.addOperand(MCOperand::CreateImm(getImm() / 4));
     else
       Inst.addOperand(MCOperand::CreateExpr(getExpr()));
   }

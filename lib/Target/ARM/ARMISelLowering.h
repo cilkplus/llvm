@@ -270,7 +270,7 @@ namespace llvm {
     }
 
     /// getSetCCResultType - Return the value type to use for ISD::SETCC.
-    virtual EVT getSetCCResultType(EVT VT) const;
+    virtual EVT getSetCCResultType(LLVMContext &Context, EVT VT) const;
 
     virtual MachineBasicBlock *
       EmitInstrWithCustomInserter(MachineInstr *MI,
@@ -412,7 +412,7 @@ namespace llvm {
     void addQRTypeForNEON(MVT VT);
 
     typedef SmallVector<std::pair<unsigned, SDValue>, 8> RegsToPassVector;
-    void PassF64ArgInRegs(DebugLoc dl, SelectionDAG &DAG,
+    void PassF64ArgInRegs(SDLoc dl, SelectionDAG &DAG,
                           SDValue Chain, SDValue &Arg,
                           RegsToPassVector &RegsToPass,
                           CCValAssign &VA, CCValAssign &NextVA,
@@ -421,12 +421,12 @@ namespace llvm {
                           ISD::ArgFlagsTy Flags) const;
     SDValue GetF64FormalArgument(CCValAssign &VA, CCValAssign &NextVA,
                                  SDValue &Root, SelectionDAG &DAG,
-                                 DebugLoc dl) const;
+                                 SDLoc dl) const;
 
     CCAssignFn *CCAssignFnForNode(CallingConv::ID CC, bool Return,
                                   bool isVarArg) const;
     SDValue LowerMemOpCallTo(SDValue Chain, SDValue StackPtr, SDValue Arg,
-                             DebugLoc dl, SelectionDAG &DAG,
+                             SDLoc dl, SelectionDAG &DAG,
                              const CCValAssign &VA,
                              ISD::ArgFlagsTy Flags) const;
     SDValue LowerEH_SJLJ_SETJMP(SDValue Op, SelectionDAG &DAG) const;
@@ -463,7 +463,7 @@ namespace llvm {
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
                             const SmallVectorImpl<ISD::InputArg> &Ins,
-                            DebugLoc dl, SelectionDAG &DAG,
+                            SDLoc dl, SelectionDAG &DAG,
                             SmallVectorImpl<SDValue> &InVals,
                             bool isThisReturn, SDValue ThisVal) const;
 
@@ -471,24 +471,26 @@ namespace llvm {
       LowerFormalArguments(SDValue Chain,
                            CallingConv::ID CallConv, bool isVarArg,
                            const SmallVectorImpl<ISD::InputArg> &Ins,
-                           DebugLoc dl, SelectionDAG &DAG,
+                           SDLoc dl, SelectionDAG &DAG,
                            SmallVectorImpl<SDValue> &InVals) const;
 
     int StoreByValRegs(CCState &CCInfo, SelectionDAG &DAG,
-                       DebugLoc dl, SDValue &Chain,
+                       SDLoc dl, SDValue &Chain,
                        const Value *OrigArg,
                        unsigned InRegsParamRecordIdx,
                        unsigned OffsetFromOrigArg,
                        unsigned ArgOffset,
+                       unsigned ArgSize,
                        bool ForceMutable) const;
 
     void VarArgStyleRegisters(CCState &CCInfo, SelectionDAG &DAG,
-                              DebugLoc dl, SDValue &Chain,
+                              SDLoc dl, SDValue &Chain,
                               unsigned ArgOffset,
                               bool ForceMutable = false) const;
 
     void computeRegArea(CCState &CCInfo, MachineFunction &MF,
                         unsigned InRegsParamRecordIdx,
+                        unsigned ArgSize,
                         unsigned &ArgRegsSize,
                         unsigned &ArgRegsSaveSize) const;
 
@@ -522,16 +524,16 @@ namespace llvm {
                   CallingConv::ID CallConv, bool isVarArg,
                   const SmallVectorImpl<ISD::OutputArg> &Outs,
                   const SmallVectorImpl<SDValue> &OutVals,
-                  DebugLoc dl, SelectionDAG &DAG) const;
+                  SDLoc dl, SelectionDAG &DAG) const;
 
     virtual bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const;
 
     virtual bool mayBeEmittedAsTailCall(CallInst *CI) const;
 
     SDValue getARMCmp(SDValue LHS, SDValue RHS, ISD::CondCode CC,
-                      SDValue &ARMcc, SelectionDAG &DAG, DebugLoc dl) const;
+                      SDValue &ARMcc, SelectionDAG &DAG, SDLoc dl) const;
     SDValue getVFPCmp(SDValue LHS, SDValue RHS,
-                      SelectionDAG &DAG, DebugLoc dl) const;
+                      SelectionDAG &DAG, SDLoc dl) const;
     SDValue duplicateCmp(SDValue Cmp, SelectionDAG &DAG) const;
 
     SDValue OptimizeVFPBrcond(SDValue Op, SelectionDAG &DAG) const;

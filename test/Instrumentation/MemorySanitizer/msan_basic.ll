@@ -1,12 +1,22 @@
 ; RUN: opt < %s -msan -msan-check-access-address=0 -S | FileCheck %s
 ; RUN: opt < %s -msan -msan-check-access-address=0 -msan-track-origins=1 -S | FileCheck -check-prefix=CHECK-ORIGINS %s
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
+target triple = "x86_64-unknown-linux-gnu"
 
 ; Check the presence of __msan_init
 ; CHECK: @llvm.global_ctors {{.*}} @__msan_init
 
-; Check the presence and the linkage type of __msan_track_origins
+; Check the presence and the linkage type of __msan_track_origins and
+; other interface symbols.
 ; CHECK: @__msan_track_origins = weak_odr constant i32 0
+; CHECK: @__msan_keep_going = weak_odr constant i32 0
+; CHECK: @__msan_retval_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_retval_origin_tls = external thread_local(initialexec) global i32
+; CHECK: @__msan_param_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_param_origin_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_va_arg_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_va_arg_overflow_size_tls = external thread_local(initialexec) global i64
+; CHECK: @__msan_origin_tls = external thread_local(initialexec) global i32
 
 
 ; Check instrumentation of stores

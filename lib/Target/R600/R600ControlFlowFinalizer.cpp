@@ -14,8 +14,6 @@
 
 #define DEBUG_TYPE "r600cf"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
-
 #include "AMDGPU.h"
 #include "R600Defines.h"
 #include "R600InstrInfo.h"
@@ -24,8 +22,11 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/Support/raw_ostream.h"
 
-namespace llvm {
+using namespace llvm;
+
+namespace {
 
 class R600ControlFlowFinalizer : public MachineFunctionPass {
 
@@ -116,8 +117,15 @@ private:
       const MachineOperand &MO = *I;
       if (!MO.isReg())
         continue;
-      if (MO.isDef())
-        DstMI = MO.getReg();
+      if (MO.isDef()) {
+        unsigned Reg = MO.getReg();
+        if (AMDGPU::R600_Reg128RegClass.contains(Reg))
+          DstMI = Reg;
+        else
+          DstMI = TRI.getMatchingSuperReg(Reg,
+              TRI.getSubRegFromChannel(TRI.getHWRegChan(Reg)),
+              &AMDGPU::R600_Reg128RegClass);
+      }
       if (MO.isUse()) {
         unsigned Reg = MO.getReg();
         if (AMDGPU::R600_Reg128RegClass.contains(Reg))
@@ -148,7 +156,7 @@ private:
     for (MachineBasicBlock::iterator E = MBB.end(); I != E; ++I) {
       if (IsTrivialInst(I))
         continue;
-      if (AluInstCount > MaxFetchInst)
+      if (AluInstCount >= MaxFetchInst)
         break;
       if ((IsTex && !TII->usesTextureCache(I)) ||
           (!IsTex && !TII->usesVertexCache(I)))
@@ -172,22 +180,20 @@ private:
       AMDGPU::ALU_LITERAL_Z,
       AMDGPU::ALU_LITERAL_W
     };
-    for (unsigned i = 0, e = MI->getNumOperands(); i < e; ++i) {
-      MachineOperand &MO = MI->getOperand(i);
-      if (!MO.isReg())
+    const SmallVector<std::pair<MachineOperand *, int64_t>, 3 > Srcs =
+        TII->getSrcs(MI);
+    for (unsigned i = 0, e = Srcs.size(); i < e; ++i) {
+      if (Srcs[i].first->getReg() != AMDGPU::ALU_LITERAL_X)
         continue;
-      if (MO.getReg() != AMDGPU::ALU_LITERAL_X)
-        continue;
-      unsigned ImmIdx = TII->getOperandIdx(MI->getOpcode(), R600Operands::IMM);
-      int64_t Imm = MI->getOperand(ImmIdx).getImm();
+      int64_t Imm = Srcs[i].second;
       std::vector<int64_t>::iterator It =
           std::find(Lits.begin(), Lits.end(), Imm);
       if (It != Lits.end()) {
         unsigned Index = It - Lits.begin();
-        MO.setReg(LiteralRegs[Index]);
+        Srcs[i].first->setReg(LiteralRegs[Index]);
       } else {
         assert(Lits.size() < 4 && "Too many literals in Instruction Group");
-        MO.setReg(LiteralRegs[Lits.size()]);
+        Srcs[i].first->setReg(LiteralRegs[Lits.size()]);
         Lits.push_back(Imm);
       }
     }
@@ -316,16 +322,13 @@ public:
     TRI(TII->getRegisterInfo()),
     ST(tm.getSubtarget<AMDGPUSubtarget>()) {
       const AMDGPUSubtarget &ST = tm.getSubtarget<AMDGPUSubtarget>();
-      if (ST.device()->getGeneration() <= AMDGPUDeviceInfo::HD4XXX)
-        MaxFetchInst = 8;
-      else
-        MaxFetchInst = 16;
+      MaxFetchInst = ST.getTexVTXClauseSize();
   }
 
   virtual bool runOnMachineFunction(MachineFunction &MF) {
     unsigned MaxStack = 0;
     unsigned CurrentStack = 0;
-    bool hasPush;
+    bool HasPush = false;
     for (MachineFunction::iterator MB = MF.begin(), ME = MF.end(); MB != ME;
         ++MB) {
       MachineBasicBlock &MBB = *MB;
@@ -354,7 +357,7 @@ public:
         case AMDGPU::CF_ALU_PUSH_BEFORE:
           CurrentStack++;
           MaxStack = std::max(MaxStack, CurrentStack);
-          hasPush = true;
+          HasPush = true;
         case AMDGPU::CF_ALU:
           I = MI;
           AluClauses.push_back(MakeALUClause(MBB, I));
@@ -475,7 +478,7 @@ public:
           break;
         }
       }
-      MFI->StackSize = getHWStackSize(MaxStack, hasPush);
+      MFI->StackSize = getHWStackSize(MaxStack, HasPush);
     }
 
     return false;
@@ -488,7 +491,7 @@ public:
 
 char R600ControlFlowFinalizer::ID = 0;
 
-}
+} // end anonymous namespace
 
 
 llvm::FunctionPass *llvm::createR600ControlFlowFinalizer(TargetMachine &TM) {

@@ -18,10 +18,16 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
+
+static cl::opt<bool> NoDPLoadStore("mno-ldc1-sdc1", cl::init(false),
+                                   cl::desc("Expand double precision loads and "
+                                            "stores to their single precision "
+                                            "counterparts."));
 
 MipsSEInstrInfo::MipsSEInstrInfo(MipsTargetMachine &tm)
   : MipsInstrInfo(tm,
@@ -245,17 +251,38 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   default:
     return false;
   case Mips::RetRA:
-    ExpandRetRA(MBB, MI, Mips::RET);
+    expandRetRA(MBB, MI, Mips::RET);
+    break;
+  case Mips::PseudoCVT_S_W:
+    expandCvtFPInt(MBB, MI, Mips::CVT_S_W, Mips::MTC1, false, false, false);
+    break;
+  case Mips::PseudoCVT_D32_W:
+    expandCvtFPInt(MBB, MI, Mips::CVT_D32_W, Mips::MTC1, true, false, false);
+    break;
+  case Mips::PseudoCVT_S_L:
+    expandCvtFPInt(MBB, MI, Mips::CVT_S_L, Mips::DMTC1, false, true, true);
+    break;
+  case Mips::PseudoCVT_D64_W:
+    expandCvtFPInt(MBB, MI, Mips::CVT_D64_W, Mips::MTC1, true, false, true);
+    break;
+  case Mips::PseudoCVT_D64_L:
+    expandCvtFPInt(MBB, MI, Mips::CVT_D64_L, Mips::DMTC1, false, false, true);
     break;
   case Mips::BuildPairF64:
-    ExpandBuildPairF64(MBB, MI);
+    expandBuildPairF64(MBB, MI);
     break;
   case Mips::ExtractElementF64:
-    ExpandExtractElementF64(MBB, MI);
+    expandExtractElementF64(MBB, MI);
+    break;
+  case Mips::PseudoLDC1:
+    expandDPLoadStore(MBB, MI, Mips::LDC1, Mips::LWC1);
+    break;
+  case Mips::PseudoSDC1:
+    expandDPLoadStore(MBB, MI, Mips::SDC1, Mips::SWC1);
     break;
   case Mips::MIPSeh_return32:
   case Mips::MIPSeh_return64:
-    ExpandEhReturn(MBB, MI);
+    expandEhReturn(MBB, MI);
     break;
   }
 
@@ -263,9 +290,9 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   return true;
 }
 
-/// GetOppositeBranchOpc - Return the inverse of the specified
+/// getOppositeBranchOpc - Return the inverse of the specified
 /// opcode, e.g. turning BEQ to BNE.
-unsigned MipsSEInstrInfo::GetOppositeBranchOpc(unsigned Opc) const {
+unsigned MipsSEInstrInfo::getOppositeBranchOpc(unsigned Opc) const {
   switch (Opc) {
   default:           llvm_unreachable("Illegal opcode!");
   case Mips::BEQ:    return Mips::BNE;
@@ -346,7 +373,7 @@ MipsSEInstrInfo::loadImmediate(int64_t Imm, MachineBasicBlock &MBB,
   return Reg;
 }
 
-unsigned MipsSEInstrInfo::GetAnalyzableBrOpc(unsigned Opc) const {
+unsigned MipsSEInstrInfo::getAnalyzableBrOpc(unsigned Opc) const {
   return (Opc == Mips::BEQ    || Opc == Mips::BNE    || Opc == Mips::BGTZ   ||
           Opc == Mips::BGEZ   || Opc == Mips::BLTZ   || Opc == Mips::BLEZ   ||
           Opc == Mips::BEQ64  || Opc == Mips::BNE64  || Opc == Mips::BGTZ64 ||
@@ -356,13 +383,35 @@ unsigned MipsSEInstrInfo::GetAnalyzableBrOpc(unsigned Opc) const {
          Opc : 0;
 }
 
-void MipsSEInstrInfo::ExpandRetRA(MachineBasicBlock &MBB,
+void MipsSEInstrInfo::expandRetRA(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I,
                                 unsigned Opc) const {
   BuildMI(MBB, I, I->getDebugLoc(), get(Opc)).addReg(Mips::RA);
 }
 
-void MipsSEInstrInfo::ExpandExtractElementF64(MachineBasicBlock &MBB,
+void MipsSEInstrInfo::expandCvtFPInt(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator I,
+                                     unsigned CvtOpc, unsigned MovOpc,
+                                     bool DstIsLarger, bool SrcIsLarger,
+                                     bool IsI64) const {
+  const MCInstrDesc &CvtDesc = get(CvtOpc), &MovDesc = get(MovOpc);
+  const MachineOperand &Dst = I->getOperand(0), &Src = I->getOperand(1);
+  unsigned DstReg = Dst.getReg(), SrcReg = Src.getReg(), TmpReg = DstReg;
+  unsigned KillSrc =  getKillRegState(Src.isKill());
+  DebugLoc DL = I->getDebugLoc();
+  unsigned SubIdx = (IsI64 ? Mips::sub_32 : Mips::sub_fpeven);
+
+  if (DstIsLarger)
+    TmpReg = getRegisterInfo().getSubReg(DstReg, SubIdx);
+
+  if (SrcIsLarger)
+    DstReg = getRegisterInfo().getSubReg(DstReg, SubIdx);
+
+  BuildMI(MBB, I, DL, MovDesc, TmpReg).addReg(SrcReg, KillSrc);
+  BuildMI(MBB, I, DL, CvtDesc, DstReg).addReg(TmpReg, RegState::Kill);
+}
+
+void MipsSEInstrInfo::expandExtractElementF64(MachineBasicBlock &MBB,
                                           MachineBasicBlock::iterator I) const {
   unsigned DstReg = I->getOperand(0).getReg();
   unsigned SrcReg = I->getOperand(1).getReg();
@@ -377,7 +426,7 @@ void MipsSEInstrInfo::ExpandExtractElementF64(MachineBasicBlock &MBB,
   BuildMI(MBB, I, dl, Mfc1Tdd, DstReg).addReg(SubReg);
 }
 
-void MipsSEInstrInfo::ExpandBuildPairF64(MachineBasicBlock &MBB,
+void MipsSEInstrInfo::expandBuildPairF64(MachineBasicBlock &MBB,
                                        MachineBasicBlock::iterator I) const {
   unsigned DstReg = I->getOperand(0).getReg();
   unsigned LoReg = I->getOperand(1).getReg(), HiReg = I->getOperand(2).getReg();
@@ -393,7 +442,57 @@ void MipsSEInstrInfo::ExpandBuildPairF64(MachineBasicBlock &MBB,
     .addReg(HiReg);
 }
 
-void MipsSEInstrInfo::ExpandEhReturn(MachineBasicBlock &MBB,
+/// Add 4 to the displacement of operand MO.
+static void fixDisp(MachineOperand &MO) {
+  switch (MO.getType()) {
+  default:
+    llvm_unreachable("Unhandled operand type.");
+  case MachineOperand::MO_Immediate:
+    MO.setImm(MO.getImm() + 4);
+    break;
+  case MachineOperand::MO_GlobalAddress:
+  case MachineOperand::MO_ConstantPoolIndex:
+  case MachineOperand::MO_BlockAddress:
+  case MachineOperand::MO_TargetIndex:
+  case MachineOperand::MO_ExternalSymbol:
+    MO.setOffset(MO.getOffset() + 4);
+    break;
+  }
+}
+
+void MipsSEInstrInfo::expandDPLoadStore(MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator I,
+                                        unsigned OpcD, unsigned OpcS) const {
+  // If NoDPLoadStore is false, just change the opcode.
+  if (!NoDPLoadStore) {
+    genInstrWithNewOpc(OpcD, I);
+    return;
+  }
+
+  // Expand a double precision FP load or store to two single precision
+  // instructions.
+
+  const TargetRegisterInfo &TRI = getRegisterInfo();
+  const MachineOperand &ValReg = I->getOperand(0);
+  unsigned LoReg = TRI.getSubReg(ValReg.getReg(), Mips::sub_fpeven);
+  unsigned HiReg = TRI.getSubReg(ValReg.getReg(), Mips::sub_fpodd);
+
+  if (!TM.getSubtarget<MipsSubtarget>().isLittle())
+    std::swap(LoReg, HiReg);
+
+  // Create an instruction which loads from or stores to the lower memory
+  // address.
+  MachineInstrBuilder MIB = genInstrWithNewOpc(OpcS, I);
+  MIB->getOperand(0).setReg(LoReg);
+
+  // Create an instruction which loads from or stores to the higher memory
+  // address.
+  MIB = genInstrWithNewOpc(OpcS, I);
+  MIB->getOperand(0).setReg(HiReg);
+  fixDisp(MIB->getOperand(2));
+}
+
+void MipsSEInstrInfo::expandEhReturn(MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator I) const {
   // This pseudo instruction is generated as part of the lowering of
   // ISD::EH_RETURN. We convert it to a stack increment by OffsetReg, and

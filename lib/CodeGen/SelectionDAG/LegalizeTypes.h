@@ -1,4 +1,4 @@
-//===-- LegalizeTypes.h - Definition of the DAG Type Legalizer class ------===//
+//===-- LegalizeTypes.h - DAG Type Legalizer class definition ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -71,6 +71,10 @@ private:
   /// isTypeLegal - Return true if this type is legal on this target.
   bool isTypeLegal(EVT VT) const {
     return TLI.getTypeAction(*DAG.getContext(), VT) == TargetLowering::TypeLegal;
+  }
+
+  EVT getSetCCResultType(EVT VT) const {
+    return TLI.getSetCCResultType(*DAG.getContext(), VT);
   }
 
   /// IgnoreNodeResults - Pretend all of this node's results are legal.
@@ -195,7 +199,7 @@ private:
   /// final size.
   SDValue SExtPromotedInteger(SDValue Op) {
     EVT OldVT = Op.getValueType();
-    DebugLoc dl = Op.getDebugLoc();
+    SDLoc dl(Op);
     Op = GetPromotedInteger(Op);
     return DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, Op.getValueType(), Op,
                        DAG.getValueType(OldVT));
@@ -205,7 +209,7 @@ private:
   /// final size.
   SDValue ZExtPromotedInteger(SDValue Op) {
     EVT OldVT = Op.getValueType();
-    DebugLoc dl = Op.getDebugLoc();
+    SDLoc dl(Op);
     Op = GetPromotedInteger(Op);
     return DAG.getZeroExtendInReg(Op, dl, OldVT.getScalarType());
   }
@@ -357,7 +361,7 @@ private:
   SDValue ExpandIntOp_ATOMIC_STORE(SDNode *N);
 
   void IntegerExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                  ISD::CondCode &CCCode, DebugLoc dl);
+                                  ISD::CondCode &CCCode, SDLoc dl);
 
   //===--------------------------------------------------------------------===//
   // Float to Integer Conversion Support: LegalizeFloatTypes.cpp
@@ -484,7 +488,7 @@ private:
   SDValue ExpandFloatOp_STORE(SDNode *N, unsigned OpNo);
 
   void FloatExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                ISD::CondCode &CCCode, DebugLoc dl);
+                                ISD::CondCode &CCCode, SDLoc dl);
 
   //===--------------------------------------------------------------------===//
   // Scalarization Support: LegalizeVectorTypes.cpp

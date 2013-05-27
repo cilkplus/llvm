@@ -61,7 +61,7 @@ namespace {
       if (!isMask_32(value)) {
         return false;
       }
-      int msksize = 32 - CountLeadingZeros_32(value);
+      int msksize = 32 - countLeadingZeros(value);
       return (msksize >= 1 && msksize <= 8) ||
               msksize == 16 || msksize == 24 || msksize == 32;
     }
@@ -109,7 +109,7 @@ bool XCoreDAGToDAGISel::SelectADDRspii(SDValue Addr, SDValue &Base,
 }
 
 SDNode *XCoreDAGToDAGISel::Select(SDNode *N) {
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   switch (N->getOpcode()) {
   default: break;
   case ISD::Constant: {
@@ -117,7 +117,7 @@ SDNode *XCoreDAGToDAGISel::Select(SDNode *N) {
     if (immMskBitp(N)) {
       // Transformation function: get the size of a mask
       // Look for the first non-zero bit
-      SDValue MskSize = getI32Imm(32 - CountLeadingZeros_32(Val));
+      SDValue MskSize = getI32Imm(32 - countLeadingZeros(Val));
       return CurDAG->getMachineNode(XCore::MKMSK_rus, dl,
                                     MVT::i32, MskSize);
     }
@@ -204,12 +204,12 @@ replaceInChain(SelectionDAG *CurDAG, SDValue Chain, SDValue Old, SDValue New)
   }
   if (!found)
     return SDValue();
-  return CurDAG->getNode(ISD::TokenFactor, Chain->getDebugLoc(), MVT::Other,
+  return CurDAG->getNode(ISD::TokenFactor, SDLoc(Chain), MVT::Other,
                          &Ops[0], Ops.size());
 }
 
 SDNode *XCoreDAGToDAGISel::SelectBRIND(SDNode *N) {
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   // (brind (int_xcore_checkevent (addr)))
   SDValue Chain = N->getOperand(0);
   SDValue Addr = N->getOperand(1);

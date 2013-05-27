@@ -636,13 +636,13 @@ void AsmPrinter::emitPrologLabel(const MachineInstr &MI) {
     OutStreamer.EmitCompactUnwindEncoding(MMI->getCompactUnwindEncoding());
 
   MachineModuleInfo &MMI = MF->getMMI();
-  std::vector<MachineMove> &Moves = MMI.getFrameMoves();
+  std::vector<MCCFIInstruction> Instructions = MMI.getFrameInstructions();
   bool FoundOne = false;
   (void)FoundOne;
-  for (std::vector<MachineMove>::iterator I = Moves.begin(),
-         E = Moves.end(); I != E; ++I) {
+  for (std::vector<MCCFIInstruction>::iterator I = Instructions.begin(),
+         E = Instructions.end(); I != E; ++I) {
     if (I->getLabel() == Label) {
-      EmitCFIFrameMove(*I);
+      emitCFIInstruction(*I);
       FoundOne = true;
     }
   }

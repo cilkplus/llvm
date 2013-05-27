@@ -74,6 +74,7 @@
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/ValueMap.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -299,30 +300,30 @@ void MemorySanitizer::initializeCallbacks(Module &M) {
   RetvalTLS = new GlobalVariable(
     M, ArrayType::get(IRB.getInt64Ty(), 8), false,
     GlobalVariable::ExternalLinkage, 0, "__msan_retval_tls", 0,
-    GlobalVariable::GeneralDynamicTLSModel);
+    GlobalVariable::InitialExecTLSModel);
   RetvalOriginTLS = new GlobalVariable(
     M, OriginTy, false, GlobalVariable::ExternalLinkage, 0,
-    "__msan_retval_origin_tls", 0, GlobalVariable::GeneralDynamicTLSModel);
+    "__msan_retval_origin_tls", 0, GlobalVariable::InitialExecTLSModel);
 
   ParamTLS = new GlobalVariable(
     M, ArrayType::get(IRB.getInt64Ty(), 1000), false,
     GlobalVariable::ExternalLinkage, 0, "__msan_param_tls", 0,
-    GlobalVariable::GeneralDynamicTLSModel);
+    GlobalVariable::InitialExecTLSModel);
   ParamOriginTLS = new GlobalVariable(
     M, ArrayType::get(OriginTy, 1000), false, GlobalVariable::ExternalLinkage,
-    0, "__msan_param_origin_tls", 0, GlobalVariable::GeneralDynamicTLSModel);
+    0, "__msan_param_origin_tls", 0, GlobalVariable::InitialExecTLSModel);
 
   VAArgTLS = new GlobalVariable(
     M, ArrayType::get(IRB.getInt64Ty(), 1000), false,
     GlobalVariable::ExternalLinkage, 0, "__msan_va_arg_tls", 0,
-    GlobalVariable::GeneralDynamicTLSModel);
+    GlobalVariable::InitialExecTLSModel);
   VAArgOverflowSizeTLS = new GlobalVariable(
     M, IRB.getInt64Ty(), false, GlobalVariable::ExternalLinkage, 0,
     "__msan_va_arg_overflow_size_tls", 0,
-    GlobalVariable::GeneralDynamicTLSModel);
+    GlobalVariable::InitialExecTLSModel);
   OriginTLS = new GlobalVariable(
     M, IRB.getInt32Ty(), false, GlobalVariable::ExternalLinkage, 0,
-    "__msan_origin_tls", 0, GlobalVariable::GeneralDynamicTLSModel);
+    "__msan_origin_tls", 0, GlobalVariable::InitialExecTLSModel);
 
   // We insert an empty inline asm after __msan_report* to avoid callback merge.
   EmptyAsm = InlineAsm::get(FunctionType::get(IRB.getVoidTy(), false),
@@ -1963,9 +1964,29 @@ struct VarArgAMD64Helper : public VarArgHelper {
   }
 };
 
-VarArgHelper* CreateVarArgHelper(Function &Func, MemorySanitizer &Msan,
+/// \brief A no-op implementation of VarArgHelper.
+struct VarArgNoOpHelper : public VarArgHelper {
+  VarArgNoOpHelper(Function &F, MemorySanitizer &MS,
+                   MemorySanitizerVisitor &MSV) {}
+
+  void visitCallSite(CallSite &CS, IRBuilder<> &IRB) {}
+
+  void visitVAStartInst(VAStartInst &I) {}
+
+  void visitVACopyInst(VACopyInst &I) {}
+
+  void finalizeInstrumentation() {}
+};
+
+VarArgHelper *CreateVarArgHelper(Function &Func, MemorySanitizer &Msan,
                                  MemorySanitizerVisitor &Visitor) {
-  return new VarArgAMD64Helper(Func, Msan, Visitor);
+  // VarArg handling is only implemented on AMD64. False positives are possible
+  // on other platforms.
+  llvm::Triple TargetTriple(Func.getParent()->getTargetTriple());
+  if (TargetTriple.getArch() == llvm::Triple::x86_64)
+    return new VarArgAMD64Helper(Func, Msan, Visitor);
+  else
+    return new VarArgNoOpHelper(Func, Msan, Visitor);
 }
 
 }  // namespace

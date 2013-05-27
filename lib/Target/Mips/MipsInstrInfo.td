@@ -26,7 +26,8 @@ def SDT_MipsCallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
 def SDT_ExtractLOHI : SDTypeProfile<1, 2, [SDTCisInt<0>, SDTCisVT<1, untyped>,
                                            SDTCisVT<2, i32>]>;
 def SDT_InsertLOHI : SDTypeProfile<1, 2, [SDTCisVT<0, untyped>,
-                                          SDTCisVT<1, i32>, SDTCisSameAs<1, 2>]>;
+                                          SDTCisVT<1, i32>,
+                                          SDTCisSameAs<1, 2>]>;
 def SDT_MipsMultDiv : SDTypeProfile<1, 2, [SDTCisVT<0, untyped>, SDTCisInt<1>,
                                     SDTCisSameAs<1, 2>]>;
 def SDT_MipsMAddMSub : SDTypeProfile<1, 3,
@@ -104,7 +105,8 @@ def MipsMSubu : SDNode<"MipsISD::MSubu", SDT_MipsMAddMSub>;
 // DivRem(u) nodes
 def MipsDivRem    : SDNode<"MipsISD::DivRem", SDT_MipsMultDiv>;
 def MipsDivRemU   : SDNode<"MipsISD::DivRemU", SDT_MipsMultDiv>;
-def MipsDivRem16  : SDNode<"MipsISD::DivRem16", SDT_MipsDivRem16, [SDNPOutGlue]>;
+def MipsDivRem16  : SDNode<"MipsISD::DivRem16", SDT_MipsDivRem16,
+                           [SDNPOutGlue]>;
 def MipsDivRemU16 : SDNode<"MipsISD::DivRemU16", SDT_MipsDivRem16,
                            [SDNPOutGlue]>;
 
@@ -389,6 +391,7 @@ class ArithLogicI<string opstr, Operand Od, RegisterOperand RO,
          [(set RO:$rt, (OpNode RO:$rs, imm_type:$imm16))],
          IIAlu, FrmI, opstr> {
   let isReMaterializable = 1;
+  let TwoOperandAliasConstraint = "$rs = $rt";
 }
 
 // Arithmetic Multiply ADD/SUB
@@ -521,7 +524,7 @@ multiclass StoreLeftRightM<string opstr, SDNode OpNode, RegisterClass RC> {
 }
 
 // Conditional Branch
-class CBranch<string opstr, PatFrag cond_op, RegisterClass RC> :
+class CBranch<string opstr, PatFrag cond_op, RegisterOperand RC> :
   InstSE<(outs), (ins RC:$rs, RC:$rt, brtarget:$offset),
          !strconcat(opstr, "\t$rs, $rt, $offset"),
          [(brcond (i32 (cond_op RC:$rs, RC:$rt)), bb:$offset)], IIBranch,
@@ -532,7 +535,7 @@ class CBranch<string opstr, PatFrag cond_op, RegisterClass RC> :
   let Defs = [AT];
 }
 
-class CBranchZero<string opstr, PatFrag cond_op, RegisterClass RC> :
+class CBranchZero<string opstr, PatFrag cond_op, RegisterOperand RC> :
   InstSE<(outs), (ins RC:$rs, brtarget:$offset),
          !strconcat(opstr, "\t$rs, $offset"),
          [(brcond (i32 (cond_op RC:$rs, 0)), bb:$offset)], IIBranch, FrmI> {
@@ -637,6 +640,11 @@ class SYNC_FT :
   InstSE<(outs), (ins i32imm:$stype), "sync $stype", [(MipsSync imm:$stype)],
          NoItinerary, FrmOther>;
 
+let hasSideEffects = 1 in
+class TEQ_FT<string opstr, RegisterOperand RO> :
+  InstSE<(outs), (ins RO:$rs, RO:$rt, uimm16:$code_),
+         !strconcat(opstr, "\t$rs, $rt, $code_"), [], NoItinerary, FrmI>;
+
 // Mul, Div
 class Mult<string opstr, InstrItinClass itin, RegisterOperand RO,
            list<Register> DefRegs> :
@@ -651,12 +659,14 @@ class Mult<string opstr, InstrItinClass itin, RegisterOperand RO,
 // operands.
 class MultDivPseudo<Instruction RealInst, RegisterClass R0, RegisterOperand R1,
                     SDPatternOperator OpNode, InstrItinClass Itin,
-                    bit IsComm = 1, bit HasSideEffects = 0> :
+                    bit IsComm = 1, bit HasSideEffects = 0,
+                    bit UsesCustomInserter = 0> :
   PseudoSE<(outs R0:$ac), (ins R1:$rs, R1:$rt),
            [(set R0:$ac, (OpNode R1:$rs, R1:$rt))], Itin>,
   PseudoInstExpansion<(RealInst R1:$rs, R1:$rt)> {
   let isCommutable = IsComm;
   let hasSideEffects = HasSideEffects;
+  let usesCustomInserter = UsesCustomInserter;
 }
 
 // Pseudo multiply add/sub instruction with explicit accumulator register
@@ -923,6 +933,7 @@ defm SWL : StoreLeftRightM<"swl", MipsSWL, CPURegs>, LW_FM<0x2a>;
 defm SWR : StoreLeftRightM<"swr", MipsSWR, CPURegs>, LW_FM<0x2e>;
 
 def SYNC : SYNC_FT, SYNC_FM;
+def TEQ : TEQ_FT<"teq", CPURegsOpnd>, TEQ_FM<0x34>;
 
 /// Load-linked, Store-conditional
 let Predicates = [NotN64, HasStdEnc] in {
@@ -940,12 +951,12 @@ def J       : JumpFJ<jmptarget, "j", br, bb>, FJ<2>,
               Requires<[RelocStatic, HasStdEnc]>, IsBranch;
 def JR      : IndirectBranch<CPURegs>, MTLO_FM<8>;
 def B       : UncondBranch<"b">, B_FM;
-def BEQ     : CBranch<"beq", seteq, CPURegs>, BEQ_FM<4>;
-def BNE     : CBranch<"bne", setne, CPURegs>, BEQ_FM<5>;
-def BGEZ    : CBranchZero<"bgez", setge, CPURegs>, BGEZ_FM<1, 1>;
-def BGTZ    : CBranchZero<"bgtz", setgt, CPURegs>, BGEZ_FM<7, 0>;
-def BLEZ    : CBranchZero<"blez", setle, CPURegs>, BGEZ_FM<6, 0>;
-def BLTZ    : CBranchZero<"bltz", setlt, CPURegs>, BGEZ_FM<1, 0>;
+def BEQ     : CBranch<"beq", seteq, CPURegsOpnd>, BEQ_FM<4>;
+def BNE     : CBranch<"bne", setne, CPURegsOpnd>, BEQ_FM<5>;
+def BGEZ    : CBranchZero<"bgez", setge, CPURegsOpnd>, BGEZ_FM<1, 1>;
+def BGTZ    : CBranchZero<"bgtz", setgt, CPURegsOpnd>, BGEZ_FM<7, 0>;
+def BLEZ    : CBranchZero<"blez", setle, CPURegsOpnd>, BGEZ_FM<6, 0>;
+def BLTZ    : CBranchZero<"bltz", setlt, CPURegsOpnd>, BGEZ_FM<1, 0>;
 
 def BAL_BR: BAL_FT, BAL_FM;
 
@@ -989,9 +1000,10 @@ def PseudoMULT  : MultDivPseudo<MULT, ACRegs, CPURegsOpnd, MipsMult, IIImul>;
 def PseudoMULTu : MultDivPseudo<MULTu, ACRegs, CPURegsOpnd, MipsMultu, IIImul>;
 def SDIV  : Div<"div", IIIdiv, CPURegsOpnd, [HI, LO]>, MULT_FM<0, 0x1a>;
 def UDIV  : Div<"divu", IIIdiv, CPURegsOpnd, [HI, LO]>, MULT_FM<0, 0x1b>;
-def PseudoSDIV : MultDivPseudo<SDIV, ACRegs, CPURegsOpnd, MipsDivRem, IIIdiv, 0>;
+def PseudoSDIV : MultDivPseudo<SDIV, ACRegs, CPURegsOpnd, MipsDivRem, IIIdiv,
+                               0, 1, 1>;
 def PseudoUDIV : MultDivPseudo<UDIV, ACRegs, CPURegsOpnd, MipsDivRemU, IIIdiv,
-                               0>;
+                               0, 1, 1>;
 
 def MTHI : MoveToLOHI<"mthi", CPURegs, [HI]>, MTLO_FM<0x11>;
 def MTLO : MoveToLOHI<"mtlo", CPURegs, [LO]>, MTLO_FM<0x13>;
@@ -1095,7 +1107,12 @@ def : InstAlias<"mfc2 $rt, $rd",
                 (MFC2_3OP CPURegsOpnd:$rt, CPURegsOpnd:$rd, 0), 0>;
 def : InstAlias<"mtc2 $rt, $rd",
                 (MTC2_3OP CPURegsOpnd:$rd, 0, CPURegsOpnd:$rt), 0>;
-
+def : InstAlias<"bnez $rs,$offset",
+                 (BNE CPURegsOpnd:$rs, ZERO, brtarget:$offset), 1>,
+                 Requires<[NotMips64]>;
+def : InstAlias<"beqz $rs,$offset",
+                 (BEQ CPURegsOpnd:$rs, ZERO, brtarget:$offset), 1>,
+                 Requires<[NotMips64]>;
 //===----------------------------------------------------------------------===//
 // Assembler Pseudo Instructions
 //===----------------------------------------------------------------------===//
@@ -1260,11 +1277,18 @@ def : MipsPat<(brcond RC:$cond, bb:$dst),
 
 defm : BrcondPats<CPURegs, BEQ, BNE, SLT, SLTu, SLTi, SLTiu, ZERO>;
 
+def : MipsPat<(brcond (i32 (setlt i32:$lhs, 1)), bb:$dst),
+              (BLEZ i32:$lhs, bb:$dst)>;
+def : MipsPat<(brcond (i32 (setgt i32:$lhs, -1)), bb:$dst),
+              (BGEZ i32:$lhs, bb:$dst)>;
+
 // setcc patterns
 multiclass SeteqPats<RegisterClass RC, Instruction SLTiuOp, Instruction XOROp,
                      Instruction SLTuOp, Register ZEROReg> {
   def : MipsPat<(seteq RC:$lhs, 0),
                 (SLTiuOp RC:$lhs, 1)>;
+  def : MipsPat<(setne RC:$lhs, 0),
+                (SLTuOp ZEROReg, RC:$lhs)>;
   def : MipsPat<(seteq RC:$lhs, RC:$rhs),
                 (SLTiuOp (XOROp RC:$lhs, RC:$rhs), 1)>;
   def : MipsPat<(setne RC:$lhs, RC:$rhs),

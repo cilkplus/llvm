@@ -17,21 +17,12 @@
 //
 def s16imm64 : Operand<i64> {
   let PrintMethod = "printS16ImmOperand";
+  let EncoderMethod = "getS16ImmEncoding";
   let ParserMatchClass = PPCS16ImmAsmOperand;
 }
 def u16imm64 : Operand<i64> {
   let PrintMethod = "printU16ImmOperand";
   let ParserMatchClass = PPCU16ImmAsmOperand;
-}
-def symbolHi64 : Operand<i64> {
-  let PrintMethod = "printSymbolHi";
-  let EncoderMethod = "getHA16Encoding";
-  let ParserMatchClass = PPCS16ImmAsmOperand;
-}
-def symbolLo64 : Operand<i64> {
-  let PrintMethod = "printSymbolLo";
-  let EncoderMethod = "getLO16Encoding";
-  let ParserMatchClass = PPCS16ImmAsmOperand;
 }
 def tocentry : Operand<iPTR> {
   let MIOperandInfo = (ops i64imm:$imm);
@@ -293,6 +284,12 @@ def MTCTR8 : XFXForm_7_ext<31, 467, 9, (outs), (ins g8rc:$rS),
                            "mtctr $rS", SprMTSPR>,
              PPC970_DGroup_First, PPC970_Unit_FXU;
 }
+let hasSideEffects = 1, isCodeGenOnly = 1, Defs = [CTR8] in {
+let Pattern = [(int_ppc_mtctr i64:$rS)] in
+def MTCTR8loop : XFXForm_7_ext<31, 467, 9, (outs), (ins g8rc:$rS),
+                               "mtctr $rS", SprMTSPR>,
+                 PPC970_DGroup_First, PPC970_Unit_FXU;
+}
 
 let Pattern = [(set i64:$rT, readcyclecounter)] in
 def MFTB8 : XFXForm_1_ext<31, 339, 268, (outs g8rc:$rT), (ins),
@@ -329,10 +326,10 @@ let Interpretation64Bit = 1 in {
 let neverHasSideEffects = 1 in {
 
 let isReMaterializable = 1, isAsCheapAsAMove = 1, isMoveImm = 1 in {
-def LI8  : DForm_2_r0<14, (outs g8rc:$rD), (ins symbolLo64:$imm),
+def LI8  : DForm_2_r0<14, (outs g8rc:$rD), (ins s16imm64:$imm),
                       "li $rD, $imm", IntSimple,
-                      [(set i64:$rD, immSExt16:$imm)]>;
-def LIS8 : DForm_2_r0<15, (outs g8rc:$rD), (ins symbolHi64:$imm),
+                      [(set i64:$rD, imm64SExt16:$imm)]>;
+def LIS8 : DForm_2_r0<15, (outs g8rc:$rD), (ins s16imm64:$imm),
                       "lis $rD, $imm", IntSimple,
                       [(set i64:$rD, imm16ShiftedSExt:$imm)]>;
 }
@@ -404,18 +401,18 @@ defm ADDC8 : XOForm_1rc<31, 10, 0, (outs g8rc:$rT), (ins g8rc:$rA, g8rc:$rB),
 let Defs = [CARRY] in
 def ADDIC8 : DForm_2<12, (outs g8rc:$rD), (ins g8rc:$rA, s16imm64:$imm),
                      "addic $rD, $rA, $imm", IntGeneral,
-                     [(set i64:$rD, (addc i64:$rA, immSExt16:$imm))]>;
-def ADDI8  : DForm_2<14, (outs g8rc:$rD), (ins g8rc_nox0:$rA, symbolLo64:$imm),
+                     [(set i64:$rD, (addc i64:$rA, imm64SExt16:$imm))]>;
+def ADDI8  : DForm_2<14, (outs g8rc:$rD), (ins g8rc_nox0:$rA, s16imm64:$imm),
                      "addi $rD, $rA, $imm", IntSimple,
-                     [(set i64:$rD, (add i64:$rA, immSExt16:$imm))]>;
-def ADDIS8 : DForm_2<15, (outs g8rc:$rD), (ins g8rc_nox0:$rA, symbolHi64:$imm),
+                     [(set i64:$rD, (add i64:$rA, imm64SExt16:$imm))]>;
+def ADDIS8 : DForm_2<15, (outs g8rc:$rD), (ins g8rc_nox0:$rA, s16imm64:$imm),
                      "addis $rD, $rA, $imm", IntSimple,
                      [(set i64:$rD, (add i64:$rA, imm16ShiftedSExt:$imm))]>;
 
 let Defs = [CARRY] in {
 def SUBFIC8: DForm_2< 8, (outs g8rc:$rD), (ins g8rc:$rA, s16imm64:$imm),
                      "subfic $rD, $rA, $imm", IntGeneral,
-                     [(set i64:$rD, (subc immSExt16:$imm, i64:$rA))]>;
+                     [(set i64:$rD, (subc imm64SExt16:$imm, i64:$rA))]>;
 defm SUBFC8 : XOForm_1r<31, 8, 0, (outs g8rc:$rT), (ins g8rc:$rA, g8rc:$rB),
                         "subfc", "$rT, $rA, $rB", IntGeneral,
                         [(set i64:$rT, (subc i64:$rB, i64:$rA))]>,
@@ -750,25 +747,25 @@ def ADDItocL: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, tocentry:$disp),
                        (PPCaddiTocL i64:$reg, tglobaladdr:$disp))]>, isPPC64;
 
 // Support for thread-local storage.
-def ADDISgotTprelHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, symbolHi64:$disp),
+def ADDISgotTprelHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, s16imm64:$disp),
                          "#ADDISgotTprelHA",
                          [(set i64:$rD,
                            (PPCaddisGotTprelHA i64:$reg,
                                                tglobaltlsaddr:$disp))]>,
                   isPPC64;
-def LDgotTprelL: Pseudo<(outs g8rc:$rD), (ins symbolLo64:$disp, g8rc_nox0:$reg),
+def LDgotTprelL: Pseudo<(outs g8rc:$rD), (ins s16imm64:$disp, g8rc_nox0:$reg),
                         "#LDgotTprelL",
                         [(set i64:$rD,
                           (PPCldGotTprelL tglobaltlsaddr:$disp, i64:$reg))]>,
                  isPPC64;
 def : Pat<(PPCaddTls i64:$in, tglobaltlsaddr:$g),
           (ADD8TLS $in, tglobaltlsaddr:$g)>;
-def ADDIStlsgdHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, symbolHi64:$disp),
+def ADDIStlsgdHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, s16imm64:$disp),
                          "#ADDIStlsgdHA",
                          [(set i64:$rD,
                            (PPCaddisTlsgdHA i64:$reg, tglobaltlsaddr:$disp))]>,
                   isPPC64;
-def ADDItlsgdL : Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, symbolLo64:$disp),
+def ADDItlsgdL : Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, s16imm64:$disp),
                        "#ADDItlsgdL",
                        [(set i64:$rD,
                          (PPCaddiTlsgdL i64:$reg, tglobaltlsaddr:$disp))]>,
@@ -778,12 +775,12 @@ def GETtlsADDR : Pseudo<(outs g8rc:$rD), (ins g8rc:$reg, tlsgd:$sym),
                         [(set i64:$rD,
                           (PPCgetTlsAddr i64:$reg, tglobaltlsaddr:$sym))]>,
                  isPPC64;
-def ADDIStlsldHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, symbolHi64:$disp),
+def ADDIStlsldHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, s16imm64:$disp),
                          "#ADDIStlsldHA",
                          [(set i64:$rD,
                            (PPCaddisTlsldHA i64:$reg, tglobaltlsaddr:$disp))]>,
                   isPPC64;
-def ADDItlsldL : Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, symbolLo64:$disp),
+def ADDItlsldL : Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, s16imm64:$disp),
                        "#ADDItlsldL",
                        [(set i64:$rD,
                          (PPCaddiTlsldL i64:$reg, tglobaltlsaddr:$disp))]>,
@@ -793,13 +790,13 @@ def GETtlsldADDR : Pseudo<(outs g8rc:$rD), (ins g8rc:$reg, tlsgd:$sym),
                           [(set i64:$rD,
                             (PPCgetTlsldAddr i64:$reg, tglobaltlsaddr:$sym))]>,
                    isPPC64;
-def ADDISdtprelHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, symbolHi64:$disp),
+def ADDISdtprelHA: Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, s16imm64:$disp),
                           "#ADDISdtprelHA",
                           [(set i64:$rD,
                             (PPCaddisDtprelHA i64:$reg,
                                               tglobaltlsaddr:$disp))]>,
                    isPPC64;
-def ADDIdtprelL : Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, symbolLo64:$disp),
+def ADDIdtprelL : Pseudo<(outs g8rc:$rD), (ins g8rc_nox0:$reg, s16imm64:$disp),
                          "#ADDIdtprelL",
                          [(set i64:$rD,
                            (PPCaddiDtprelL i64:$reg, tglobaltlsaddr:$disp))]>,

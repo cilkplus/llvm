@@ -1772,6 +1772,27 @@ static bool hasLiveCondCodeDef(MachineInstr *MI) {
   return false;
 }
 
+/// getTruncatedShiftCount - check whether the shift count for a machine operand
+/// is non-zero.
+inline static unsigned getTruncatedShiftCount(MachineInstr *MI,
+                                              unsigned ShiftAmtOperandIdx) {
+  // The shift count is six bits with the REX.W prefix and five bits without.
+  unsigned ShiftCountMask = (MI->getDesc().TSFlags & X86II::REX_W) ? 63 : 31;
+  unsigned Imm = MI->getOperand(ShiftAmtOperandIdx).getImm();
+  return Imm & ShiftCountMask;
+}
+
+/// isTruncatedShiftCountForLEA - check whether the given shift count is appropriate
+/// can be represented by a LEA instruction.
+inline static bool isTruncatedShiftCountForLEA(unsigned ShAmt) {
+  // Left shift instructions can be transformed into load-effective-address
+  // instructions if we can encode them appropriately.
+  // A LEA instruction utilizes a SIB byte to encode it's scale factor.
+  // The SIB.scale field is two bits wide which means that we can encode any
+  // shift amount less than 4.
+  return ShAmt < 4 && ShAmt > 0;
+}
+
 /// convertToThreeAddressWithLEA - Helper for convertToThreeAddress when
 /// 16-bit LEA is disabled, use 32-bit LEA to form 3-address code by promoting
 /// to a 32-bit superregister and then truncating back down to a 16-bit
@@ -1891,6 +1912,13 @@ X86InstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
                                     MachineBasicBlock::iterator &MBBI,
                                     LiveVariables *LV) const {
   MachineInstr *MI = MBBI;
+
+  // The following opcodes also sets the condition code register(s). Only
+  // convert them to equivalent lea if the condition code register def's
+  // are dead!
+  if (hasLiveCondCodeDef(MI))
+    return 0;
+
   MachineFunction &MF = *MI->getParent()->getParent();
   // All instructions input are two-addr instructions.  Get the known operands.
   const MachineOperand &Dest = MI->getOperand(0);
@@ -1935,10 +1963,8 @@ X86InstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
   }
   case X86::SHL64ri: {
     assert(MI->getNumOperands() >= 3 && "Unknown shift instruction!");
-    // NOTE: LEA doesn't produce flags like shift does, but LLVM never uses
-    // the flags produced by a shift yet, so this is safe.
-    unsigned ShAmt = MI->getOperand(2).getImm();
-    if (ShAmt == 0 || ShAmt >= 4) return 0;
+    unsigned ShAmt = getTruncatedShiftCount(MI, 2);
+    if (!isTruncatedShiftCountForLEA(ShAmt)) return 0;
 
     // LEA can't handle RSP.
     if (TargetRegisterInfo::isVirtualRegister(Src.getReg()) &&
@@ -1953,10 +1979,8 @@ X86InstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
   }
   case X86::SHL32ri: {
     assert(MI->getNumOperands() >= 3 && "Unknown shift instruction!");
-    // NOTE: LEA doesn't produce flags like shift does, but LLVM never uses
-    // the flags produced by a shift yet, so this is safe.
-    unsigned ShAmt = MI->getOperand(2).getImm();
-    if (ShAmt == 0 || ShAmt >= 4) return 0;
+    unsigned ShAmt = getTruncatedShiftCount(MI, 2);
+    if (!isTruncatedShiftCountForLEA(ShAmt)) return 0;
 
     // LEA can't handle ESP.
     if (TargetRegisterInfo::isVirtualRegister(Src.getReg()) &&
@@ -1972,10 +1996,8 @@ X86InstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
   }
   case X86::SHL16ri: {
     assert(MI->getNumOperands() >= 3 && "Unknown shift instruction!");
-    // NOTE: LEA doesn't produce flags like shift does, but LLVM never uses
-    // the flags produced by a shift yet, so this is safe.
-    unsigned ShAmt = MI->getOperand(2).getImm();
-    if (ShAmt == 0 || ShAmt >= 4) return 0;
+    unsigned ShAmt = getTruncatedShiftCount(MI, 2);
+    if (!isTruncatedShiftCountForLEA(ShAmt)) return 0;
 
     if (DisableLEA16)
       return is64Bit ? convertToThreeAddressWithLEA(MIOpc, MFI, MBBI, LV) : 0;
@@ -1985,11 +2007,6 @@ X86InstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
     break;
   }
   default: {
-    // The following opcodes also sets the condition code register(s). Only
-    // convert them to equivalent lea if the condition code register def's
-    // are dead!
-    if (hasLiveCondCodeDef(MI))
-      return 0;
 
     switch (MIOpc) {
     default: return 0;
@@ -3171,6 +3188,25 @@ inline static bool isRedundantFlagInstr(MachineInstr *FlagI, unsigned SrcReg,
 inline static bool isDefConvertible(MachineInstr *MI) {
   switch (MI->getOpcode()) {
   default: return false;
+
+  // The shift instructions only modify ZF if their shift count is non-zero.
+  // N.B.: The processor truncates the shift count depending on the encoding.
+  case X86::SAR8ri:    case X86::SAR16ri:  case X86::SAR32ri:case X86::SAR64ri:
+  case X86::SHR8ri:    case X86::SHR16ri:  case X86::SHR32ri:case X86::SHR64ri:
+     return getTruncatedShiftCount(MI, 2) != 0;
+
+  // Some left shift instructions can be turned into LEA instructions but only
+  // if their flags aren't used. Avoid transforming such instructions.
+  case X86::SHL8ri:    case X86::SHL16ri:  case X86::SHL32ri:case X86::SHL64ri:{
+    unsigned ShAmt = getTruncatedShiftCount(MI, 2);
+    if (isTruncatedShiftCountForLEA(ShAmt)) return false;
+    return ShAmt != 0;
+  }
+
+  case X86::SHRD16rri8:case X86::SHRD32rri8:case X86::SHRD64rri8:
+  case X86::SHLD16rri8:case X86::SHLD32rri8:case X86::SHLD64rri8:
+     return getTruncatedShiftCount(MI, 3) != 0;
+
   case X86::SUB64ri32: case X86::SUB64ri8: case X86::SUB32ri:
   case X86::SUB32ri8:  case X86::SUB16ri:  case X86::SUB16ri8:
   case X86::SUB8ri:    case X86::SUB64rr:  case X86::SUB32rr:
@@ -3200,8 +3236,37 @@ inline static bool isDefConvertible(MachineInstr *MI) {
   case X86::OR8ri:     case X86::OR64rr:   case X86::OR32rr:
   case X86::OR16rr:    case X86::OR8rr:    case X86::OR64rm:
   case X86::OR32rm:    case X86::OR16rm:   case X86::OR8rm:
+  case X86::NEG8r:     case X86::NEG16r:   case X86::NEG32r: case X86::NEG64r:
+  case X86::SAR8r1:    case X86::SAR16r1:  case X86::SAR32r1:case X86::SAR64r1:
+  case X86::SHR8r1:    case X86::SHR16r1:  case X86::SHR32r1:case X86::SHR64r1:
+  case X86::SHL8r1:    case X86::SHL16r1:  case X86::SHL32r1:case X86::SHL64r1:
+  case X86::ADC32ri:   case X86::ADC32ri8:
+  case X86::ADC32rr:   case X86::ADC64ri32:
+  case X86::ADC64ri8:  case X86::ADC64rr:
+  case X86::SBB32ri:   case X86::SBB32ri8:
+  case X86::SBB32rr:   case X86::SBB64ri32:
+  case X86::SBB64ri8:  case X86::SBB64rr:
   case X86::ANDN32rr:  case X86::ANDN32rm:
   case X86::ANDN64rr:  case X86::ANDN64rm:
+  case X86::BEXTR32rr: case X86::BEXTR64rr:
+  case X86::BEXTR32rm: case X86::BEXTR64rm:
+  case X86::BLSI32rr:  case X86::BLSI32rm:
+  case X86::BLSI64rr:  case X86::BLSI64rm:
+  case X86::BLSMSK32rr:case X86::BLSMSK32rm:
+  case X86::BLSMSK64rr:case X86::BLSMSK64rm:
+  case X86::BLSR32rr:  case X86::BLSR32rm:
+  case X86::BLSR64rr:  case X86::BLSR64rm:
+  case X86::BZHI32rr:  case X86::BZHI32rm:
+  case X86::BZHI64rr:  case X86::BZHI64rm:
+  case X86::LZCNT16rr: case X86::LZCNT16rm:
+  case X86::LZCNT32rr: case X86::LZCNT32rm:
+  case X86::LZCNT64rr: case X86::LZCNT64rm:
+  case X86::POPCNT16rr:case X86::POPCNT16rm:
+  case X86::POPCNT32rr:case X86::POPCNT32rm:
+  case X86::POPCNT64rr:case X86::POPCNT64rm:
+  case X86::TZCNT16rr: case X86::TZCNT16rm:
+  case X86::TZCNT32rr: case X86::TZCNT32rm:
+  case X86::TZCNT64rr: case X86::TZCNT64rm:
     return true;
   }
 }
@@ -3420,20 +3485,38 @@ optimizeCompareInstr(MachineInstr *CmpInstr, unsigned SrcReg, unsigned SrcReg2,
 
   // The instruction to be updated is either Sub or MI.
   Sub = IsCmpZero ? MI : Sub;
-  // Move Movr0Inst to the place right before Sub.
+  // Move Movr0Inst to the appropriate place before Sub.
   if (Movr0Inst) {
-    Sub->getParent()->remove(Movr0Inst);
-    Sub->getParent()->insert(MachineBasicBlock::iterator(Sub), Movr0Inst);
+    // Look backwards until we find a def that doesn't use the current EFLAGS.
+    Def = Sub;
+    MachineBasicBlock::reverse_iterator
+      InsertI = MachineBasicBlock::reverse_iterator(++Def),
+                InsertE = Sub->getParent()->rend();
+    for (; InsertI != InsertE; ++InsertI) {
+      MachineInstr *Instr = &*InsertI;
+      if (!Instr->readsRegister(X86::EFLAGS, TRI) &&
+          Instr->modifiesRegister(X86::EFLAGS, TRI)) {
+        Sub->getParent()->remove(Movr0Inst);
+        Instr->getParent()->insert(MachineBasicBlock::iterator(Instr),
+                                   Movr0Inst);
+        break;
+      }
+    }
+    if (InsertI == InsertE)
+      return false;
   }
 
   // Make sure Sub instruction defines EFLAGS and mark the def live.
-  unsigned LastOperand = Sub->getNumOperands() - 1;
-  assert(Sub->getNumOperands() >= 2 &&
-         Sub->getOperand(LastOperand).isReg() &&
-         Sub->getOperand(LastOperand).getReg() == X86::EFLAGS &&
-         "EFLAGS should be the last operand of SUB, ADD, OR, XOR, AND");
-  Sub->getOperand(LastOperand).setIsDef(true);
-  Sub->getOperand(LastOperand).setIsDead(false);
+  unsigned i = 0, e = Sub->getNumOperands();
+  for (; i != e; ++i) {
+    MachineOperand &MO = Sub->getOperand(i);
+    if (MO.isReg() && MO.isDef() && MO.getReg() == X86::EFLAGS) {
+      MO.setIsDead(false);
+      break;
+    }
+  }
+  assert(i != e && "Unable to locate a def EFLAGS operand");
+
   CmpInstr->eraseFromParent();
 
   // Modify the condition code of instructions in OpsToUpdate.
@@ -4250,7 +4333,7 @@ X86InstrInfo::unfoldMemoryOperand(SelectionDAG &DAG, SDNode *N,
   std::vector<SDValue> AddrOps;
   std::vector<SDValue> BeforeOps;
   std::vector<SDValue> AfterOps;
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   unsigned NumOps = N->getNumOperands();
   for (unsigned i = 0; i != NumOps-1; ++i) {
     SDValue Op = N->getOperand(i);

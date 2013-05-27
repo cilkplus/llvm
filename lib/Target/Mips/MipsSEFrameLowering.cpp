@@ -262,7 +262,7 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
   if (StackSize == 0 && !MFI->adjustsStack()) return;
 
   MachineModuleInfo &MMI = MF.getMMI();
-  std::vector<MachineMove> &Moves = MMI.getFrameMoves();
+  const MCRegisterInfo &MRI = MMI.getContext().getRegisterInfo();
   MachineLocation DstML, SrcML;
 
   // Adjust stack.
@@ -272,9 +272,8 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
   MCSymbol *AdjustSPLabel = MMI.getContext().CreateTempSymbol();
   BuildMI(MBB, MBBI, dl,
           TII.get(TargetOpcode::PROLOG_LABEL)).addSym(AdjustSPLabel);
-  DstML = MachineLocation(MachineLocation::VirtualFP);
-  SrcML = MachineLocation(MachineLocation::VirtualFP, -StackSize);
-  Moves.push_back(MachineMove(AdjustSPLabel, DstML, SrcML));
+  MMI.addFrameInst(
+      MCCFIInstruction::createDefCfaOffset(AdjustSPLabel, -StackSize));
 
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
 
@@ -298,21 +297,22 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
       // If Reg is a double precision register, emit two cfa_offsets,
       // one for each of the paired single precision registers.
       if (Mips::AFGR64RegClass.contains(Reg)) {
-        MachineLocation DstML0(MachineLocation::VirtualFP, Offset);
-        MachineLocation DstML1(MachineLocation::VirtualFP, Offset + 4);
-        MachineLocation SrcML0(RegInfo->getSubReg(Reg, Mips::sub_fpeven));
-        MachineLocation SrcML1(RegInfo->getSubReg(Reg, Mips::sub_fpodd));
+        unsigned Reg0 =
+            MRI.getDwarfRegNum(RegInfo->getSubReg(Reg, Mips::sub_fpeven), true);
+        unsigned Reg1 =
+            MRI.getDwarfRegNum(RegInfo->getSubReg(Reg, Mips::sub_fpodd), true);
 
         if (!STI.isLittle())
-          std::swap(SrcML0, SrcML1);
+          std::swap(Reg0, Reg1);
 
-        Moves.push_back(MachineMove(CSLabel, DstML0, SrcML0));
-        Moves.push_back(MachineMove(CSLabel, DstML1, SrcML1));
+        MMI.addFrameInst(
+            MCCFIInstruction::createOffset(CSLabel, Reg0, Offset));
+        MMI.addFrameInst(
+            MCCFIInstruction::createOffset(CSLabel, Reg1, Offset + 4));
       } else {
         // Reg is either in CPURegs or FGR32.
-        DstML = MachineLocation(MachineLocation::VirtualFP, Offset);
-        SrcML = MachineLocation(Reg);
-        Moves.push_back(MachineMove(CSLabel, DstML, SrcML));
+        MMI.addFrameInst(MCCFIInstruction::createOffset(
+            CSLabel, MRI.getDwarfRegNum(Reg, 1), Offset));
       }
     }
   }
@@ -335,9 +335,8 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
             TII.get(TargetOpcode::PROLOG_LABEL)).addSym(CSLabel2);
     for (int I = 0; I < 4; ++I) {
       int64_t Offset = MFI->getObjectOffset(MipsFI->getEhDataRegFI(I));
-      DstML = MachineLocation(MachineLocation::VirtualFP, Offset);
-      SrcML = MachineLocation(ehDataReg(I));
-      Moves.push_back(MachineMove(CSLabel2, DstML, SrcML));
+      unsigned Reg = MRI.getDwarfRegNum(ehDataReg(I), true);
+      MMI.addFrameInst(MCCFIInstruction::createOffset(CSLabel2, Reg, Offset));
     }
   }
 
@@ -350,9 +349,8 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
     MCSymbol *SetFPLabel = MMI.getContext().CreateTempSymbol();
     BuildMI(MBB, MBBI, dl,
             TII.get(TargetOpcode::PROLOG_LABEL)).addSym(SetFPLabel);
-    DstML = MachineLocation(FP);
-    SrcML = MachineLocation(MachineLocation::VirtualFP);
-    Moves.push_back(MachineMove(SetFPLabel, DstML, SrcML));
+    MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
+        SetFPLabel, MRI.getDwarfRegNum(FP, true)));
   }
 }
 

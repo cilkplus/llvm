@@ -736,7 +736,7 @@ static void ProcessSourceNode(SDNode *N, SelectionDAG *DAG,
                            DenseMap<SDValue, unsigned> &VRBaseMap,
                     SmallVector<std::pair<unsigned, MachineInstr*>, 32> &Orders,
                            SmallSet<unsigned, 8> &Seen) {
-  unsigned Order = DAG->GetOrdering(N);
+  unsigned Order = N->getIROrder();
   if (!Order || !Seen.insert(Order)) {
     // Process any valid SDDbgValues even if node does not have any order
     // assigned.
@@ -883,7 +883,7 @@ EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
             // Insert at the instruction, which may be in a different
             // block, if the block was split by a custom inserter.
             MachineBasicBlock::iterator Pos = MI;
-            MI->getParent()->insert(llvm::next(Pos), DbgMI);
+            MI->getParent()->insert(Pos, DbgMI);
           }
         }
       }

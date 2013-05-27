@@ -119,34 +119,21 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
   bool saveLR = XFI->getUsesLR();
   // Do we need to allocate space on the stack?
   if (FrameSize) {
-    bool LRSavedOnEntry = false;
     int Opcode;
     if (saveLR && (MFI->getObjectOffset(XFI->getLRSpillSlot()) == 0)) {
       Opcode = (isU6) ? XCore::ENTSP_u6 : XCore::ENTSP_lu6;
       MBB.addLiveIn(XCore::LR);
       saveLR = false;
-      LRSavedOnEntry = true;
     } else {
       Opcode = (isU6) ? XCore::EXTSP_u6 : XCore::EXTSP_lu6;
     }
     BuildMI(MBB, MBBI, dl, TII.get(Opcode)).addImm(FrameSize);
 
     if (emitFrameMoves) {
-      std::vector<MachineMove> &Moves = MMI->getFrameMoves();
 
       // Show update of SP.
       MCSymbol *FrameLabel = MMI->getContext().CreateTempSymbol();
       BuildMI(MBB, MBBI, dl, TII.get(XCore::PROLOG_LABEL)).addSym(FrameLabel);
-
-      MachineLocation SPDst(MachineLocation::VirtualFP);
-      MachineLocation SPSrc(MachineLocation::VirtualFP, -FrameSize * 4);
-      Moves.push_back(MachineMove(FrameLabel, SPDst, SPSrc));
-
-      if (LRSavedOnEntry) {
-        MachineLocation CSDst(MachineLocation::VirtualFP, 0);
-        MachineLocation CSSrc(XCore::LR);
-        Moves.push_back(MachineMove(FrameLabel, CSDst, CSSrc));
-      }
     }
   }
   if (saveLR) {
@@ -157,9 +144,6 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
     if (emitFrameMoves) {
       MCSymbol *SaveLRLabel = MMI->getContext().CreateTempSymbol();
       BuildMI(MBB, MBBI, dl, TII.get(XCore::PROLOG_LABEL)).addSym(SaveLRLabel);
-      MachineLocation CSDst(MachineLocation::VirtualFP, LRSpillOffset);
-      MachineLocation CSSrc(XCore::LR);
-      MMI->getFrameMoves().push_back(MachineMove(SaveLRLabel, CSDst, CSSrc));
     }
   }
 
@@ -172,9 +156,6 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
     if (emitFrameMoves) {
       MCSymbol *SaveR10Label = MMI->getContext().CreateTempSymbol();
       BuildMI(MBB, MBBI, dl, TII.get(XCore::PROLOG_LABEL)).addSym(SaveR10Label);
-      MachineLocation CSDst(MachineLocation::VirtualFP, FPSpillOffset);
-      MachineLocation CSSrc(XCore::R10);
-      MMI->getFrameMoves().push_back(MachineMove(SaveR10Label, CSDst, CSSrc));
     }
     // Set the FP from the SP.
     unsigned FramePtr = XCore::R10;
@@ -184,25 +165,6 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
       // Show FP is now valid.
       MCSymbol *FrameLabel = MMI->getContext().CreateTempSymbol();
       BuildMI(MBB, MBBI, dl, TII.get(XCore::PROLOG_LABEL)).addSym(FrameLabel);
-      MachineLocation SPDst(FramePtr);
-      MachineLocation SPSrc(MachineLocation::VirtualFP);
-      MMI->getFrameMoves().push_back(MachineMove(FrameLabel, SPDst, SPSrc));
-    }
-  }
-
-  if (emitFrameMoves) {
-    // Frame moves for callee saved.
-    std::vector<MachineMove> &Moves = MMI->getFrameMoves();
-    std::vector<std::pair<MCSymbol*, CalleeSavedInfo> >&SpillLabels =
-        XFI->getSpillLabels();
-    for (unsigned I = 0, E = SpillLabels.size(); I != E; ++I) {
-      MCSymbol *SpillLabel = SpillLabels[I].first;
-      CalleeSavedInfo &CSI = SpillLabels[I].second;
-      int Offset = MFI->getObjectOffset(CSI.getFrameIdx());
-      unsigned Reg = CSI.getReg();
-      MachineLocation CSDst(MachineLocation::VirtualFP, Offset);
-      MachineLocation CSSrc(Reg);
-      Moves.push_back(MachineMove(SpillLabel, CSDst, CSSrc));
     }
   }
 }

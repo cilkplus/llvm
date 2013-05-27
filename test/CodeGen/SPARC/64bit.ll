@@ -26,7 +26,7 @@ define i64 @sra_reg(i64 %a, i64 %b) {
 ;     restore %g0, %g0, %o0
 ;
 ; CHECK: ret_imm0
-; CHECK: or %g0, %g0, %i0
+; CHECK: or %g0, 0, %i0
 define i64 @ret_imm0() {
   ret i64 0
 }
@@ -180,4 +180,48 @@ define i64 @signed_divide(i64 %a, i64 %b) {
 define i64 @unsigned_divide(i64 %a, i64 %b) {
   %r = udiv i64 %a, %b
   ret i64 %r
+}
+
+define void @access_fi() {
+entry:
+  %b = alloca [32 x i8], align 1
+  %arraydecay = getelementptr inbounds [32 x i8]* %b, i64 0, i64 0
+  call void @g(i8* %arraydecay) #2
+  ret void
+}
+
+declare void @g(i8*)
+
+; CHECK: expand_setcc
+; CHECK: subcc %i0, 1,
+; CHECK: movl %xcc, 1,
+define i32 @expand_setcc(i64 %a) {
+  %cond = icmp sle i64 %a, 0
+  %cast2 = zext i1 %cond to i32
+  %RV = sub i32 1, %cast2
+  ret i32 %RV
+}
+
+; CHECK: spill_i64
+; CHECK: stx
+; CHECK: ldx
+define i64 @spill_i64(i64 %x) {
+  call void asm sideeffect "", "~{i0},~{i1},~{i2},~{i3},~{i4},~{i5},~{o0},~{o1},~{o2},~{o3},~{o4},~{o5},~{o7},~{l0},~{l1},~{l2},~{l3},~{l4},~{l5},~{l6},~{l7},~{g1},~{g2},~{g3},~{g4},~{g5},~{g6},~{g7}"()
+  ret i64 %x
+}
+
+; CHECK: bitcast_i64_f64
+; CHECK: std
+; CHECK: ldx
+define i64 @bitcast_i64_f64(double %x) {
+  %y = bitcast double %x to i64
+  ret i64 %y
+}
+
+; CHECK: bitcast_f64_i64
+; CHECK: stx
+; CHECK: ldd
+define double @bitcast_f64_i64(i64 %x) {
+  %y = bitcast i64 %x to double
+  ret double %y
 }

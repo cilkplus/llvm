@@ -153,7 +153,7 @@ namespace llvm {
     DIE *getParent() const { return Parent; }
     /// Climb up the parent chain to get the compile unit DIE this DIE belongs
     /// to.
-    DIE *getCompileUnit() const;
+    DIE *getCompileUnit();
     void setTag(unsigned Tag) { Abbrev.setTag(Tag); }
     void setOffset(unsigned O) { Offset = O; }
     void setSize(unsigned S) { Size = S; }
@@ -325,7 +325,9 @@ namespace llvm {
   class DIEEntry : public DIEValue {
     DIE *const Entry;
   public:
-    explicit DIEEntry(DIE *E) : DIEValue(isEntry), Entry(E) {}
+    explicit DIEEntry(DIE *E) : DIEValue(isEntry), Entry(E) {
+      assert(E && "Cannot construct a DIEEntry with a null DIE");
+    }
 
     DIE *getEntry() const { return Entry; }
 
