@@ -2882,6 +2882,7 @@ public:
                                          Stmt *CilkFor,
                                          SourceLocation LocStart);
 
+  bool CheckIfBodyModifiesLoopControlVar(Stmt *Body);
   StmtResult ActOnCilkForStmt(SourceLocation CilkForLoc,
                               SourceLocation LParenLoc,
                               Stmt *First, FullExprArg Second,

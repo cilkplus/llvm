@@ -421,6 +421,10 @@ def IntToVoidPointerCast : DiagGroup<"int-to-void-pointer-cast">;
 def IntToPointerCast : DiagGroup<"int-to-pointer-cast",
                                  [IntToVoidPointerCast]>;
 
+// Cilk Plus warnings.
+def SourceUsesCilkPlus : DiagGroup<"source-uses-cilk-plus">;
+def CilkPlusLoopControlVarModification : DiagGroup<"cilk-loop-control-var-modification">;
+
 def Extra : DiagGroup<"extra", [
     MissingFieldInitializers,
     IgnoredQualifiers,
@@ -454,7 +458,8 @@ def Most : DiagGroup<"most", [
     ObjCMissingSuperCalls,
     OverloadedVirtual,
     PrivateExtern,
-    SelTypeCast
+    SelTypeCast,
+    CilkPlusLoopControlVarModification
  ]>;
 
 // Thread Safety warnings 
@@ -549,6 +554,3 @@ def ASM : DiagGroup<"asm", [
 
 // OpenMP warnings.
 def SourceUsesOpenMP : DiagGroup<"source-uses-openmp">;
-
-// Cilk Plus warnings.
-def SourceUsesCilkPlus : DiagGroup<"source-uses-cilk-plus">;

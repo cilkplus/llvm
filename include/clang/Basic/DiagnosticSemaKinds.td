@@ -6473,6 +6473,14 @@ def err_cilk_for_increment_inconsistent : Error<
   "loop increment is inconsistent with condition in '_Cilk_for': expected %select{negative|positive}0 stride">;
 def err_cilk_for_increment_zero : Error<
   "loop increment must be non-zero in '_Cilk_for'">;
+def err_cilk_for_loop_modifies_control_var : Error <
+  "Modifying the loop control variable inside a '_Cilk_for' has undefined behavior">;
+def warn_cilk_for_loop_control_var_func : Warning <
+  "Modifying the loop control variable inside a '_Cilk_for' using a function call has undefined behavior">, InGroup<CilkPlusLoopControlVarModification>, DefaultIgnore;
+def warn_cilk_for_loop_control_var_aliased: Warning <
+  "Modifying the loop control variable '%0' through an alias in '_Cilk_for' has undefined behavior">, InGroup<CilkPlusLoopControlVarModification>, DefaultIgnore;
+def note_cilk_for_loop_control_var_declared_here: Note <
+  "'_Cilk_for' loop control variable declared here">;
 
 def note_cilk_for_begin_expr: Note<
   "loop begin expression here">;

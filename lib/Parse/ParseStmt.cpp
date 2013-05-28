@@ -2919,6 +2919,11 @@ StmtResult Parser::ParseCilkForStmt() {
     return StmtError();
   }
 
+  if (Actions.CheckIfBodyModifiesLoopControlVar(Body.get())) {
+    Actions.ActOnCilkForStmtError();
+    return StmtError();
+  }
+
   StmtResult Result = Actions.ActOnCilkForStmt(CilkForLoc, T.getOpenLocation(),
                                                FirstPart.take(), SecondPart,
                                                ThirdPart, T.getCloseLocation(),

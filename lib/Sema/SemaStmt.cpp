@@ -19,6 +19,7 @@
 #include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
+#include "clang/AST/ParentMap.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
@@ -537,6 +538,208 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
     }
   } else
     D.TraverseStmt(RHS);
+}
+
+namespace {
+typedef llvm::SmallVectorImpl<VarDecl const *> VarDeclVec;
+
+// This visitor looks for references to the loop control variable inside a
+// _Cilk_for body.
+class CilkForControlVarVisitor
+    : public RecursiveASTVisitor<CilkForControlVarVisitor> {
+private:
+
+  // This visitor looks for potential errors and warnings about the modification
+  // of the loop control variable.
+  class ControlVarUsageVisitor
+      : public RecursiveASTVisitor<ControlVarUsageVisitor> {
+  public:
+    bool Error;
+
+    // Constructor
+    ControlVarUsageVisitor(Sema &S, DeclRefExpr *LCV, const ParentMap &P,
+                           bool AddressOf)
+        : Error(false), Sema(S), CurLCV(LCV), LCVDecl(CurLCV->getDecl()),
+          PMap(P), AddressOf(AddressOf) {}
+
+    // Check if the type is a pointer/reference to const data. If not, emit
+    // diagnostic
+    void CheckTypeAndDiagnose(QualType Ty, const SourceLocation &Loc,
+                              unsigned DiagID, llvm::StringRef Param = "") {
+      if ((Ty->isReferenceType() || (Ty->isPointerType() && AddressOf)) &&
+          !Ty->getPointeeType().isConstQualified()) {
+        if (!Param.empty())
+          Sema.Diag(Loc, DiagID) << Param;
+        else
+          Sema.Diag(Loc, DiagID);
+        Sema.Diag(LCVDecl->getLocation(),
+                  diag::note_cilk_for_loop_control_var_declared_here);
+      }
+    }
+
+    // Detect cases where the LCV is directly being assigned or an alias being
+    // created
+    bool VisitBinaryOperator(BinaryOperator *BO) {
+      Expr *LHS =
+          BO->getLHS()->IgnoreImpCasts()->IgnoreParenNoopCasts(Sema.Context);
+      if (BO->isAssignmentOp()) {
+        if (CurLCV == LHS) {
+          Sema.Diag(BO->getLocStart(),
+                    diag::err_cilk_for_loop_modifies_control_var);
+          Sema.Diag(LCVDecl->getLocation(),
+                    diag::note_cilk_for_loop_control_var_declared_here);
+          Error = true;
+        } else {
+          CheckTypeAndDiagnose(BO->getType(), BO->getLocStart(),
+                               diag::warn_cilk_for_loop_control_var_aliased,
+                               LCVDecl->getName());
+        }
+      }
+      return true;
+    }
+
+    // Detect cases of variable declarations that declare an alias to the LCV
+    bool VisitVarDecl(VarDecl *VD) {
+      CheckTypeAndDiagnose(VD->getType(), VD->getLocation(),
+                           diag::warn_cilk_for_loop_control_var_aliased,
+                           LCVDecl->getName());
+      return true;
+    }
+
+    // Detect cases where a function call can modify the loop control variable
+    bool VisitCallExpr(CallExpr *Call) {
+      Stmt *P = PMap.getParent(CurLCV);
+
+      // If we took the address of the LCV, ignore the &
+      if (AddressOf)
+        P = PMap.getParent(P);
+
+      if (CastExpr *CE = dyn_cast<CastExpr>(P)) {
+        // Look at the very top level cast to ignore any non-relevant casts
+        CastExpr *TopLevelCast = CE;
+        while (CastExpr *C = dyn_cast<CastExpr>(PMap.getParent(TopLevelCast))) {
+          TopLevelCast = C;
+        }
+
+        CastKind Kind = TopLevelCast->getCastKind();
+        QualType CastTy = TopLevelCast->getType();
+
+        bool PtrOrRefConstQualified = false;
+        if (AddressOf)
+          PtrOrRefConstQualified = CastTy->getPointeeType().isConstQualified();
+        else
+          PtrOrRefConstQualified = CastTy.isConstQualified();
+
+        if (Kind != CK_LValueToRValue &&
+            !((Kind == CK_NoOp || Kind == CK_BitCast) &&
+              PtrOrRefConstQualified)) {
+          Sema.Diag(CurLCV->getLocation(),
+                    diag::warn_cilk_for_loop_control_var_func);
+          Sema.Diag(LCVDecl->getLocation(),
+                    diag::note_cilk_for_loop_control_var_declared_here);
+        }
+      } else {
+        // If its not a cast expression, we need to check which parameter(s)
+        // can modify the loop control variable because in a rare case of the
+        // comma operator where code like:
+        //   int *p = (func(0), &i);
+        // will generate a false positive in the 'func(0)' function call
+        for (unsigned i = 0, len = Call->getNumArgs(); i != len; ++i) {
+          Expr *Arg = Call->getArg(i)->IgnoreImpCasts()
+              ->IgnoreParenNoopCasts(Sema.Context);
+
+          // Remove the & from the argument so that we can compare the argument
+          // with the LCV to see if they are the same
+          if (UnaryOperator *UO = dyn_cast<UnaryOperator>(Arg)) {
+            if (UO->getOpcode() == UO_AddrOf)
+              Arg = UO->getSubExpr();
+          }
+          if (Arg == CurLCV) {
+            Sema.Diag(CurLCV->getLocation(),
+                      diag::warn_cilk_for_loop_control_var_func);
+            Sema.Diag(LCVDecl->getLocation(),
+                      diag::note_cilk_for_loop_control_var_declared_here);
+          }
+        }
+      }
+
+      return true;
+    }
+
+    // Detect cases of ++/--.
+    bool VisitUnaryOperator(UnaryOperator *UO) {
+      if (UO->isIncrementDecrementOp()) {
+        Sema.Diag(UO->getLocStart(),
+                  diag::err_cilk_for_loop_modifies_control_var);
+        Sema.Diag(LCVDecl->getLocation(),
+                  diag::note_cilk_for_loop_control_var_declared_here);
+        Error = true;
+      }
+
+      return true;
+    }
+
+  private:
+    Sema &Sema;
+    DeclRefExpr *CurLCV;  // Reference to the current loop control var
+    const ValueDecl *LCVDecl; // The declaration of the current loop control var
+    const ParentMap &PMap;
+    bool AddressOf;
+  };
+
+public:
+  bool Error;
+
+  // Constructor
+  CilkForControlVarVisitor(Sema &S, const ParentMap &PM, const VarDeclVec &LCVs)
+      : Error(false), Sema(S), PMap(PM), LoopControlVarsInScope(LCVs) {}
+
+  // Checks if the given DeclRefExpr is a reference to a loop control variable
+  // in scope
+  bool IsValidLoopControlVar(const DeclRefExpr *DeclRef) {
+    VarDeclVec::const_iterator LCV =
+        std::find(LoopControlVarsInScope.begin(), LoopControlVarsInScope.end(),
+                  DeclRef->getDecl());
+    return LCV != LoopControlVarsInScope.end();
+  }
+
+  bool VisitDeclRefExpr(DeclRefExpr *DeclRef) {
+    if (IsValidLoopControlVar(DeclRef)) {
+      Stmt *P = PMap.getParentIgnoreParenImpCasts(DeclRef);
+      bool AddressOf = false;
+      // Check to see if the address of the loop control variable was taken and
+      // strip off any casts from its parent.
+      if (UnaryOperator *UO = dyn_cast<UnaryOperator>(P)) {
+        if (UO->getOpcode() == UO_AddrOf) {
+          AddressOf = true;
+          P = PMap.getParentIgnoreParenImpCasts(P);
+          while (dyn_cast<CastExpr>(P)) {
+            P = PMap.getParentIgnoreParenImpCasts(P);
+          }
+
+          // If the parent is a comma operator, get its parent to see if there
+          // are any assignments.
+          if (BinaryOperator *BO = dyn_cast<BinaryOperator>(P)) {
+            if (BO->getOpcode() == BO_Comma)
+              P = PMap.getParentIgnoreParenImpCasts(P);
+          }
+        }
+      }
+
+      // Use the usage visitor to analyze if the parent tries to modify the
+      // loop control variable
+      ControlVarUsageVisitor V(Sema, DeclRef, PMap, AddressOf);
+      V.TraverseStmt(P);
+      Error |= V.Error;
+    }
+    return true;
+  }
+
+private:
+  Sema &Sema;
+  const ParentMap &PMap;
+  const VarDeclVec &LoopControlVarsInScope;
+};
 }
 
 StmtResult
@@ -4253,6 +4456,28 @@ static void CheckForSignedUnsignedWraparounds(const VarDecl *ControlVar,
       }
     }
   }
+}
+
+bool Sema::CheckIfBodyModifiesLoopControlVar(Stmt *Body) {
+  assert(!FunctionScopes.empty() && "Must be inside a _Cilk_for scope");
+
+  llvm::SmallVector<VarDecl const *, 1> LoopControlVarsInScope;
+
+  // Store all the _Cilk_for loop control vars upto the top most _Cilk_for
+  for (SmallVectorImpl<sema::FunctionScopeInfo *>::reverse_iterator
+           I = FunctionScopes.rbegin(),
+           E = FunctionScopes.rend();
+       I != E; ++I) {
+    if (CilkForScopeInfo *CSI = dyn_cast<CilkForScopeInfo>(*I)) {
+      LoopControlVarsInScope.push_back(CSI->LoopControlVar);
+    }
+  }
+
+  ParentMap PMap(Body);
+  CilkForControlVarVisitor V(*this, PMap, LoopControlVarsInScope);
+  V.TraverseStmt(Body);
+
+  return V.Error;
 }
 
 static bool CheckCilkForIncrement(Sema &S, Expr *Increment, const Expr *Limit,

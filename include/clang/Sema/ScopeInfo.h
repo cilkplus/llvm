@@ -605,10 +605,10 @@ public:
   VarDecl *InnerLoopControlVar;
 
   CilkForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CapturedDecl *CD,
-                   RecordDecl *RD, ImplicitParamDecl *Context, const VarDecl *VD,
-                   SourceLocation Loc)
-    : CapturedRegionScopeInfo(Diag, S, CD, RD, Context, CR_CilkFor),
-      CilkForLoc(Loc), LoopControlVar(VD), InnerLoopControlVar(0) {
+                   RecordDecl *RD, ImplicitParamDecl *Context,
+                   const VarDecl *VD, SourceLocation Loc)
+      : CapturedRegionScopeInfo(Diag, S, CD, RD, Context, CR_CilkFor),
+        CilkForLoc(Loc), LoopControlVar(VD), InnerLoopControlVar(0) {
     Kind = SK_CilkFor;
   }
 
