@@ -1023,3 +1023,8 @@ def SIMDLengthFor : Attr {
   let Spellings = [Keyword<"vectorlengthfor">];
   let Args = [TypeArgument<"TypeHint">];
 }
+
+def SIMDLinear : Attr {
+  let Spellings = [Keyword<"linear">];
+  let Args = [VariadicExprArgument<"Steps">];
+}

@@ -4649,3 +4649,70 @@ AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
   return AttrResult(::new (Context) SIMDLengthForAttr(
       VectorLengthForLoc, Context, VectorLengthForType));
 }
+
+ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
+                                               DeclarationNameInfo Name) {
+  // linear-variable must be a variable with scalar type
+  LookupResult Lookup(*this, Name, LookupOrdinaryName);
+  LookupParsedName(Lookup, CurScope, &SS, true);
+  if (Lookup.isAmbiguous()) {
+    Diag(Name.getLoc(), diag::err_pragma_simd_ambiguous_linear_var);
+    return ExprError();
+  }
+  VarDecl *VD = 0;
+  if (!Lookup.isSingleResult()) {
+    if (Lookup.empty()) {
+      Diag(Name.getLoc(), diag::err_undeclared_var_use) << Name.getName();
+    }
+    else
+      ; // TODO: What diagnostics in the case of multiple found decls?
+    return ExprError();
+  } else {
+    if (!(VD = Lookup.getAsSingle<VarDecl>())) {
+      Diag(Name.getLoc(), diag::err_pragma_simd_invalid_linear_var);
+      return ExprError();
+    }
+  }
+  QualType VDQT = VD->getType();
+  const Type *VDT = 0;
+  if (!VDQT.isNull())
+    VDT = VDQT.getTypePtrOrNull();
+  if (!VDT || !VDT->isScalarType()) {
+    Diag(Name.getLoc(), diag::err_pragma_simd_invalid_linear_var);
+    return ExprError();
+  }
+
+  // FIXME: Need a way to build this expression without modifying VD->isUsed
+  return BuildDeclRefExpr(VD, VD->getType().getNonReferenceType(),
+                          VK_LValue, Name.getLoc()).take();
+}
+
+AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
+                                       ArrayRef<Expr *> Exprs) {
+  for (unsigned i = 1, e = Exprs.size(); i < e; i += 2) {
+    // linear-step must be either an integer constant expression,
+    // or be a reference to a variable with integral type.
+    if (Exprs[i]) {
+      Expr *Step = Exprs[i];
+      llvm::APSInt Constant;
+      if (!Step->EvaluateAsInt(Constant, Context)) {
+        if (!isa<DeclRefExpr>(Step)) {
+          Diag(Step->getLocStart(), diag::err_pragma_simd_invalid_linear_step);
+          return AttrError();
+        }
+        QualType SQT = Step->getType();
+        const Type *ST = 0;
+        if (!SQT.isNull())
+          ST = SQT.getTypePtrOrNull();
+        if (!ST || !ST->isIntegralType(Context)) {
+          Diag(Step->getLocStart(), diag::err_pragma_simd_invalid_linear_step);
+          return AttrError();
+        }
+      }
+      if (!Constant.getBoolValue())
+        Diag(Step->getLocStart(), diag::warn_pragma_simd_linear_expr_zero);
+    }
+  }
+  return AttrResult(::new (Context) SIMDLinearAttr(
+      LinearLoc, Context, (Expr **)Exprs.data(), Exprs.size()));
+}

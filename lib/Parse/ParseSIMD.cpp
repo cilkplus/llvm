@@ -120,24 +120,39 @@ struct SIMDVectorLengthForItemParser {
 
 // Helper to parse an item of the linear clause.
 struct SIMDLinearItemParser {
+  SmallVector<Expr *, 8> Exprs;
   bool Parse(Parser &P, Sema &S) {
     CXXScopeSpec SS;
     SourceLocation TemplateKWLoc;
     UnqualifiedId Name;
-    if (P.ParseUnqualifiedId(SS,
+    if (P.getLangOpts().CPlusPlus &&
+        P.ParseOptionalCXXScopeSpecifier(SS, ParsedType(), false)) {
+      return false;
+    }
+    else if (P.ParseUnqualifiedId(SS,
                              false, // EnteringContext
                              false, // AllowDestructorName
                              false, // AllowConstructorName,
                              ParsedType(), TemplateKWLoc, Name)) {
       return false;
     }
+
+    ExprResult D = S.ActOnPragmaSIMDLinearVariable(SS, S.GetNameFromUnqualifiedId(Name));
+    if (D.isInvalid())
+      return false;
+    Expr *DRExpr = D.get();
+
+    Expr *Step = 0;
     const Token &Tok = P.getCurToken();
     if (Tok.is(tok::colon)) {
       P.ConsumeToken();
       ExprResult C = P.ParseConstantExpression();
       if (C.isInvalid())
         return false;
+      Step = C.get();
     }
+    Exprs.push_back(DRExpr);
+    Exprs.push_back(Step);
     return true;
   }
 };
@@ -240,6 +255,7 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
       SIMDLinearItemParser ItemParser;
       if (!ParseSIMDList(P, S, ItemParser))
         return false;
+      A = S.ActOnPragmaSIMDLinear(BeginLoc, ItemParser.Exprs);
     }
     else if (II->isStr("private")) {
       P.ConsumeToken();
@@ -340,7 +356,8 @@ static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
 ///
 StmtResult Parser::ParseSIMDDirective() {
   assert(Tok.is(tok::annot_pragma_simd));
-  SourceLocation Loc = PP.getDirectiveHashLoc();
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation HashLoc = PP.getDirectiveHashLoc();
   ConsumeToken();
 
   SmallVector<const Attr *, 4> SIMDAttrList;
@@ -514,5 +531,5 @@ StmtResult Parser::ParseSIMDDirective() {
   if (R.isInvalid())
     return StmtError();
 
-  return Actions.ActOnPragmaSIMD(Loc, R.get(), SIMDAttrList);
+  return Actions.ActOnPragmaSIMD(HashLoc, R.get(), SIMDAttrList);
 }

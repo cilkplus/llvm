@@ -6752,6 +6752,12 @@ public:
   AttrResult ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
                                       QualType &VectorLengthForType);
 
+  ExprResult ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
+                                           DeclarationNameInfo Name);
+
+  AttrResult ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
+                                   ArrayRef<Expr *> Exprs);
+
   /// AddAlignmentAttributesForRecord - Adds any needed alignment attributes to
   /// a the record decl, to handle '\#pragma pack' and '\#pragma options align'.
   void AddAlignmentAttributesForRecord(RecordDecl *RD);

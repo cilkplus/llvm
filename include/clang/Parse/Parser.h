@@ -1328,12 +1328,14 @@ private:
                                   bool EnteringContext, IdentifierInfo &II,
                                   CXXScopeSpec &SS);
 
+public:
   bool ParseOptionalCXXScopeSpecifier(CXXScopeSpec &SS,
                                       ParsedType ObjectType,
                                       bool EnteringContext,
                                       bool *MayBePseudoDestructor = 0,
                                       bool IsTypename = false,
                                       IdentifierInfo **LastII = 0);
+private:
 
   void CheckForLParenAfterColonColon();
 

@@ -27,7 +27,7 @@ void test_invalid_clause()
 void test_vectorlength()
 {
   int i;
-  /* expected-error@+1 {{Invalid vectorlength expression: Must be a power of two}} */
+  /* expected-error@+1 {{invalid vectorlength expression: must be a power of two}} */
   #pragma simd vectorlength(3)
   for (i = 0; i < 16; ++i) ;
   /* expected-error@+1 {{expected '('}} */
@@ -128,13 +128,20 @@ void test_linear()
   /* expected-error@+1 {{expected identifier}} */
   #pragma simd linear(0)
   for (i = 0; i < 16; ++i) ;
+  /* expected-error@+1 {{use of undeclared identifier 'x'}} */
   #pragma simd linear(x)
   for (i = 0; i < 16; ++i) ;
+  /* expected-error@+2 {{use of undeclared identifier 'x'}} */
+  /* expected-error@+1 {{use of undeclared identifier 'y'}} */
   #pragma simd linear(x, y)
   for (i = 0; i < 16; ++i) ;
+  /* expected-error@+3 {{use of undeclared identifier 'x'}} */
+  /* expected-error@+2 {{use of undeclared identifier 'y'}} */
+  /* expected-error@+1 {{use of undeclared identifier 'z'}} */
   #pragma simd linear(x, y, z)
   for (i = 0; i < 16; ++i) ;
 
+  int x, y;
   /* expected-error@+1 {{expected expression}} */
   #pragma simd linear(x:)
   for (i = 0; i < 16; ++i) ;
@@ -148,6 +155,7 @@ void test_linear()
   for (i = 0; i < 16; ++i) ;
   #pragma simd linear(x:1,y)
   for (i = 0; i < 16; ++i) ;
+  /* expected-error@+1 {{use of undeclared identifier 'z'}} */
   #pragma simd linear(x:1,y,z:1)
   for (i = 0; i < 16; ++i) ;
 }
