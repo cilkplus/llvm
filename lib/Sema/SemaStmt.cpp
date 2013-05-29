@@ -4628,6 +4628,8 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
     return AttrError();
 
   llvm::APSInt Constant;
+  Constant.setIsUnsigned(true);
+
   if (!VectorLengthExpr->EvaluateAsInt(Constant, Context)) {
     Diag(VectorLengthExpr->getLocStart(),
          diag::err_pragma_simd_invalid_vectorlength_expr) << 0;
@@ -4638,8 +4640,14 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
          diag::err_pragma_simd_invalid_vectorlength_expr) << 1;
     return AttrError();
   }
+
+  uint64_t value = *Constant.getRawData();
+  ExprResult C = ActOnIntegerConstant(VectorLengthExpr->getLocStart(), value);
+  if (C.isInvalid())
+    return AttrError();
+  Expr *ConstExpr = C.get();
   return AttrResult(::new (Context)
-                    SIMDLengthAttr(VectorLengthLoc, Context, VectorLengthExpr));
+                    SIMDLengthAttr(VectorLengthLoc, Context, ConstExpr));
 }
 
 AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
