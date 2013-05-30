@@ -20,6 +20,7 @@
 
 namespace llvm {
 class BasicBlock;
+class Instruction;
 class MDNode;
 } // end namespace llvm
 
@@ -33,6 +34,8 @@ struct LoopAttributes {
 
   /// Toggle llvm.loop.parallel metadata generation.
   bool IsParallel;
+  /// VectorizerWidth
+  unsigned VectorizerWidth;
 };
 
 /// LoopInfo - Information used when generating a structured loop.
@@ -42,9 +45,11 @@ public:
   LoopInfo(llvm::BasicBlock *Header, const LoopAttributes &Attrs);
 
   /// Get the loop id metadata for this loop.
-  llvm::MDNode *GetLoopID() const;
+  llvm::MDNode *GetLoopID() const { return LoopID; }
+
   /// Get the header block of this loop.
   llvm::BasicBlock *GetHeader() const { return Header; }
+
   /// Get the set of attributes active for this loop.
   const LoopAttributes &GetAttributes() const { return Attrs; }
 
@@ -72,16 +77,22 @@ public:
   /// End the current loop.
   void Pop();
 
+  /// Function called by the CodeGenFunction when an instruction is created.
+  void InsertHelper(llvm::Instruction *I) const;
+
   /// Set the next pushed loop as parallel.
   void SetParallel() { StagedAttrs.IsParallel = true; }
 
+  /// Set the vectorizer width for the next loop pushed.
+  void SetVectorizerWidth(unsigned W) { StagedAttrs.VectorizerWidth = W; }
+
+private:
   /// Returns true if there is LoopInfo on the stack.
   bool HasInfo() const { return !Active.empty(); }
   /// Return the LoopInfo for the current loop. HasInfo should be called first
   /// to ensure LoopInfo is present.
-  const LoopInfo &GetInfo() const; 
+  const LoopInfo &GetInfo() const { return Active.back(); }
 
-private:
   /// The set of attributes that will be applied to the next pushed loop.
   LoopAttributes StagedAttrs;
   llvm::SmallVector<LoopInfo, 4> Active;

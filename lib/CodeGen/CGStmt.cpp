@@ -399,8 +399,15 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
     case clang::attr::SIMD:
       LoopStack.SetParallel();
       break;
-    case clang::attr::SIMDLength:
-      break;
+    case clang::attr::SIMDLength: {
+      const SIMDLengthAttr *SIMDLength = 0;
+      SIMDLength = static_cast<const SIMDLengthAttr*>(Attrs[i]);
+      RValue Width = EmitAnyExpr(SIMDLength->getValueExpr(),
+                                 AggValueSlot::ignored(), true);
+      llvm::ConstantInt *C = dyn_cast<llvm::ConstantInt>(Width.getScalarVal());
+      assert(C);
+      LoopStack.SetVectorizerWidth(C->getZExtValue());
+    } break;
     case clang::attr::SIMDLengthFor:
       break;
     default:

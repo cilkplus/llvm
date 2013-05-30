@@ -16,23 +16,48 @@
 using namespace clang;
 using namespace CodeGen;
 
-LoopAttributes::LoopAttributes() : IsParallel(false) {
+static llvm::MDNode *MakeMetadata(llvm::LLVMContext &Ctx, 
+                                  llvm::StringRef Name, unsigned V) {
+  using namespace llvm;
+  Value *Args[] = { MDString::get(Ctx, Name),
+                    ConstantInt::get(Type::getInt32Ty(Ctx), V) };
+  return MDNode::get(Ctx, Args);
+}
+
+static llvm::MDNode *CreateMetadata(llvm::LLVMContext &Ctx,
+                                    const LoopAttributes &Attrs) {
+  using namespace llvm;
+
+  SmallVector<Value*, 4> Args;
+  // Reserve operand 0 for loop id self reference.
+  Args.push_back(0);
+
+  if (Attrs.VectorizerWidth > 0)
+    Args.push_back(MakeMetadata(Ctx, "llvm.vectorizer.width",
+                                Attrs.VectorizerWidth));
+
+  if (!Attrs.IsParallel &&
+      Args.size() < 2)
+    return 0;
+
+  assert(Args.size() > 0);
+  assert(Args[0] == 0);
+  MDNode *LoopID = MDNode::get(Ctx, Args);
+  LoopID->replaceOperandWith(0, LoopID);
+  return LoopID;
+}
+
+LoopAttributes::LoopAttributes() : IsParallel(false), VectorizerWidth(0) {
 }
 
 void LoopAttributes::Clear() {
   IsParallel = false;
+  VectorizerWidth = 0;
 }
 
 LoopInfo::LoopInfo(llvm::BasicBlock *Header, const LoopAttributes &Attrs)
   : LoopID(0), Header(Header), Attrs(Attrs) {
-}
-
-llvm::MDNode *LoopInfo::GetLoopID() const {
-  if (LoopID) return LoopID;
-  // Create a loop id metadata of the form '!n = metadata !{metadata !n}'
-  LoopID = llvm::MDNode::get(Header->getContext(), 0);
-  LoopID->replaceOperandWith(0, LoopID);
-  return LoopID;
+  LoopID = CreateMetadata(Header->getContext(), Attrs);
 }
 
 void LoopInfoStack::Push(llvm::BasicBlock *Header) {
@@ -46,8 +71,28 @@ void LoopInfoStack::Pop() {
   Active.pop_back();
 }
 
-const LoopInfo &LoopInfoStack::GetInfo() const {
-  assert(HasInfo());
-  return Active.back();
-}
+void LoopInfoStack::InsertHelper(llvm::Instruction *I) const {
+  if (!HasInfo())
+    return;
 
+  const LoopInfo &L = GetInfo();
+
+  if (!L.GetLoopID())
+    return;
+
+  if (llvm::TerminatorInst *TI = llvm::dyn_cast<llvm::TerminatorInst>(I)) {
+    for (unsigned i = 0, ie = TI->getNumSuccessors(); i < ie; ++i)
+      if (TI->getSuccessor(i) == L.GetHeader()) {
+        TI->setMetadata("llvm.loop", L.GetLoopID());
+        break;
+      }
+    return;
+  }
+
+  if (L.GetAttributes().IsParallel) {
+    if (llvm::StoreInst *SI = llvm::dyn_cast<llvm::StoreInst>(I))
+      SI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
+    else if (llvm::LoadInst *LI = llvm::dyn_cast<llvm::LoadInst>(I))
+      LI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
+  }
+}

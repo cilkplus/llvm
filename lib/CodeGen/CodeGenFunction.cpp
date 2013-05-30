@@ -1503,21 +1503,7 @@ CodeGenFunction::InsertHelper(llvm::Instruction *I,
                               const llvm::Twine &Name,
                               llvm::BasicBlock *BB,
                               llvm::BasicBlock::iterator InsertPt) const {
-  if (!LoopStack.HasInfo())
-    return;
-  const LoopInfo &L = LoopStack.GetInfo();
-  if (L.GetAttributes().IsParallel) {
-    if (llvm::TerminatorInst *TI = llvm::dyn_cast<llvm::TerminatorInst>(I)) {
-      for (unsigned i = 0, ie = TI->getNumSuccessors(); i != ie; ++i)
-        if (TI->getSuccessor(i) == L.GetHeader()) {
-          TI->setMetadata("llvm.loop.parallel", L.GetLoopID());
-          break;
-        }
-    } else if (llvm::StoreInst *SI = llvm::dyn_cast<llvm::StoreInst>(I))
-      SI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
-    else if (llvm::LoadInst *LI = llvm::dyn_cast<llvm::LoadInst>(I))
-      LI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
-  }
+  LoopStack.InsertHelper(I);
 }
 
 template <bool PreserveNames>
