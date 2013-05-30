@@ -4641,13 +4641,14 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
     return AttrError();
   }
 
-  uint64_t value = *Constant.getRawData();
-  ExprResult C = ActOnIntegerConstant(VectorLengthExpr->getLocStart(), value);
-  if (C.isInvalid())
+  ExprResult E =
+      Owned(IntegerLiteral::Create(Context, Constant, Context.UnsignedIntTy,
+                                   VectorLengthExpr->getLocStart()));
+  if (E.isInvalid())
     return AttrError();
-  Expr *ConstExpr = C.get();
+
   return AttrResult(::new (Context)
-                    SIMDLengthAttr(VectorLengthLoc, Context, ConstExpr));
+                    SIMDLengthAttr(VectorLengthLoc, Context, E.get()));
 }
 
 AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
@@ -4669,11 +4670,8 @@ ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
   }
   VarDecl *VD = 0;
   if (!Lookup.isSingleResult()) {
-    if (Lookup.empty()) {
+    if (Lookup.empty())
       Diag(Name.getLoc(), diag::err_undeclared_var_use) << Name.getName();
-    }
-    else
-      ; // TODO: What diagnostics in the case of multiple found decls?
     return ExprError();
   } else {
     if (!(VD = Lookup.getAsSingle<VarDecl>())) {
@@ -4690,9 +4688,14 @@ ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
     return ExprError();
   }
 
-  // FIXME: Need a way to build this expression without modifying VD->isUsed
-  return BuildDeclRefExpr(VD, VD->getType().getNonReferenceType(),
-                          VK_LValue, Name.getLoc()).take();
+  bool RefersToEnclosingScope = (CurContext != VD->getDeclContext() &&
+                                 VD->getDeclContext()->isFunctionOrMethod());
+  DeclRefExpr *E =
+      DeclRefExpr::Create(Context, NestedNameSpecifierLoc(), SourceLocation(),
+                          VD, RefersToEnclosingScope, Name,
+                          VD->getType().getNonReferenceType(), VK_LValue);
+
+  return Owned(E);
 }
 
 AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
