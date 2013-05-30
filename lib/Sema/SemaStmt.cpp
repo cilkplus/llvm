@@ -4726,3 +4726,170 @@ AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
   return AttrResult(::new (Context) SIMDLinearAttr(
       LinearLoc, Context, const_cast<Expr **>(Exprs.data()), Exprs.size()));
 }
+
+namespace {
+/// \brief Helper class to diagnose a SIMD for loop body.
+//
+/// FIXME: Check OpenMP directive and construct.
+class DiagnoseSIMDForBodyHelper
+  : public RecursiveASTVisitor<DiagnoseSIMDForBodyHelper> {
+  Sema &SemaRef;
+  /// \brief The current simd for loop location.
+  SourceLocation LoopLoc;
+  bool &IsInvalid;
+
+  void Diag(SourceLocation L, const char *Msg, SourceRange Range) {
+    SemaRef.Diag(L, SemaRef.PDiag(diag::err_simd_for_body_no_construct)
+                      << Msg << Range);
+    IsInvalid = true;
+  }
+
+public:
+  DiagnoseSIMDForBodyHelper(Sema &S, bool &IsInvalid, SourceLocation Loc)
+    : SemaRef(S), LoopLoc(Loc), IsInvalid(IsInvalid) { }
+
+  bool VisitGotoStmt(GotoStmt *S) {
+    Diag(S->getLocStart(), "goto", S->getSourceRange());
+    return true;
+  }
+
+  bool VisitIndirectGotoStmt(IndirectGotoStmt *S) {
+    Diag(S->getLocStart(), "indirect goto", S->getSourceRange());
+    return true;
+  }
+
+  bool VisitCallExpr(CallExpr *E) {
+    if (E->isCilkSpawnCall())
+      Diag(E->getCilkSpawnLoc(), "_Cilk_spawn", E->getSourceRange());
+    else if (FunctionDecl *FD = E->getDirectCallee()) {
+      StringRef Name = FD->getName();
+      if (Name.equals("setjmp") ||
+          Name.equals("_setjmp") ||
+          Name.equals("__builtin_setjmp") ||
+          Name.equals("longjmp") ||
+          Name.equals("_longjmp") ||
+          Name.equals("__builtin_longjmp")) {
+#if 0
+        // Cannot find a realiable way to check if this call is a setjmp
+        // or longjmp call. Although the spec declares this being ill-formed,
+        // a warning would be more appropriate.
+        SemaRef.Diag(E->getLocStart(),
+          SemaRef.PDiag(diag::warn_simd_for_setjmp_longjmp)
+          << Name.data() << E->getSourceRange());
+#else
+        Diag(E->getLocStart(), Name.data(), E->getSourceRange());
+#endif
+      }
+    }
+    return true;
+  }
+
+  bool VisitCilkSyncStmt(CilkSyncStmt *S) {
+    Diag(S->getLocStart(), "_Cilk_sync", S->getSourceRange());
+    return true;
+  }
+
+  bool VisitCilkForStmt(CilkForStmt *S) {
+    Diag(S->getLocStart(), "_Cilk_for", S->getSourceRange());
+    return true;
+  }
+
+  bool VisitCXXTryStmt(CXXTryStmt *S) {
+    Diag(S->getLocStart(), "try", S->getSourceRange());
+    return true;
+  }
+
+  bool VisitCXXThrowExpr(CXXThrowExpr *E) {
+    Diag(E->getLocStart(), "throw", E->getSourceRange());
+    return true;
+  }
+
+  // Check if there is a declaration of a non-static variable of a type with
+  // a (non-trivial) destructor.
+  //
+  bool VisitDeclStmt(DeclStmt *S) {
+    for (DeclStmt::decl_iterator I = S->decl_begin(), E = S->decl_end();
+        I != E; ++I) {
+      VarDecl *VD = dyn_cast<VarDecl>(*I);
+
+      // An extern variable should be allowed, although spec does not say so.
+      if (!VD || VD->isStaticLocal() || VD->hasExternalStorage())
+        continue;
+
+      QualType T = VD->getType();
+
+      // Do not have a type yet.
+      if (T.isNull())
+        continue;
+
+      // If this is a reference that binds to a tempory, then consider its
+      // non-reference type.
+      if (T->isReferenceType() && VD->extendsLifetimeOfTemporary())
+        T = T.getNonReferenceType();
+
+      if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
+        if (RD->hasNonTrivialDestructor()) {
+          SemaRef.Diag(VD->getLocStart(),
+              SemaRef.PDiag(diag::err_simd_for_body_no_nontrivial_destructor)
+              << VD->getSourceRange());
+          IsInvalid = true;
+        }
+    }
+    return true;
+  }
+
+  bool VisitAttributedStmt(AttributedStmt *S) {
+    if (!S->getSubStmt())
+      return true;
+
+    ArrayRef<const Attr*> Attrs = S->getAttrs();
+    for (ArrayRef<const Attr*>::iterator I = Attrs.begin(), E = Attrs.end();
+        I != E; ++I) {
+      // This is a SIMD for loop.
+      if ((*I)->getKind() == attr::SIMD) {
+        SemaRef.Diag(S->getSubStmt()->getLocStart(),
+            SemaRef.PDiag(diag::err_simd_for_nested));
+        SemaRef.Diag(LoopLoc, SemaRef.PDiag(diag::note_simd_for_nested));
+        IsInvalid = true;
+        break;
+      }
+    }
+    return true;
+  }
+};
+} // namespace
+
+// The following language constructs shall not appear within the body of an
+// elemental function, nor in a SIMD loop.
+//
+// * goto statement
+// * _Cilk_spawn
+// * _Cilk_for
+// * OpenMP directive or construct
+// * try statement
+// * call to setjmp
+// * declaration of a non-static variable of a type with a destructor
+//
+static bool CheckSIMDForBody(Sema &S, Stmt *Body, SourceLocation ForLoc) {
+  bool IsInvalid(false);
+  DiagnoseSIMDForBodyHelper D(S, IsInvalid, ForLoc);
+  D.TraverseStmt(Body);
+  return IsInvalid;
+}
+
+StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
+                                  SourceLocation LParenLoc,
+                                  Stmt *First, FullExprArg Second,
+                                  FullExprArg Third,
+                                  SourceLocation RParenLoc,
+                                  Stmt *Body) {
+  assert(First && "expected loop init");
+  assert(Second.get() && "expected loop condition");
+  assert(Third.get() && "expected loop increment");
+
+  if (CheckSIMDForBody(*this, Body, ForLoc))
+    return StmtError();
+
+  return ActOnForStmt(ForLoc, LParenLoc, First, Second, /*SecondVar=*/0, Third,
+                      RParenLoc, Body);
+}

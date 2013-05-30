@@ -524,10 +524,10 @@ StmtResult Parser::ParseSIMDDirective() {
       !Body.isUsable())
     return StmtError();
 
-  StmtResult R = Actions.ActOnForStmt(ForLoc, T.getOpenLocation(),
-                                      FirstPart.take(), SecondPart,
-                                      /*SecondVar =*/0, ThirdPart,
-                                      T.getCloseLocation(), Body.take());
+  StmtResult R = Actions.ActOnSIMDForStmt(ForLoc, T.getOpenLocation(),
+                                          FirstPart.take(), SecondPart,
+                                          ThirdPart, T.getCloseLocation(),
+                                          Body.take());
   if (R.isInvalid())
     return StmtError();
 

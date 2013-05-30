@@ -6470,6 +6470,16 @@ def warn_cilk_for_wraparound: Warning <
 
 def note_cilk_for_wraparound_undefined: Note <
   "Wraparounds cause undefined behavior in Cilk for">;
+
+// simd for
+def err_simd_for_body_no_construct: Error<
+  "%0 is not allowed within simd for">;
+def err_simd_for_nested: Error<
+  "nested simd for not supported">;
+def note_simd_for_nested: Note<
+  "outer simd for here">;
+def err_simd_for_body_no_nontrivial_destructor: Error<
+  "non-static variable with a non-trivial destructor is not allowed within simd for">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

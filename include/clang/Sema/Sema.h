@@ -6758,6 +6758,13 @@ public:
   AttrResult ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
                                    ArrayRef<Expr *> Exprs);
 
+  StmtResult ActOnSIMDForStmt(SourceLocation ForLoc,
+                              SourceLocation LParenLoc,
+                              Stmt *First, FullExprArg Second,
+                              FullExprArg Third,
+                              SourceLocation RParenLoc,
+                              Stmt *Body);
+
   /// AddAlignmentAttributesForRecord - Adds any needed alignment attributes to
   /// a the record decl, to handle '\#pragma pack' and '\#pragma options align'.
   void AddAlignmentAttributesForRecord(RecordDecl *RD);
