@@ -4641,9 +4641,11 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
     return AttrError();
   }
 
-  ExprResult E =
-      Owned(IntegerLiteral::Create(Context, Constant, Context.UnsignedIntTy,
-                                   VectorLengthExpr->getLocStart()));
+
+
+  ExprResult E = Owned(IntegerLiteral::Create(
+      Context, Constant, Context.getCanonicalType(VectorLengthExpr->getType()),
+      VectorLengthExpr->getLocStart()));
   if (E.isInvalid())
     return AttrError();
 
