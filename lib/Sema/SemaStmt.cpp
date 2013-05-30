@@ -4725,5 +4725,5 @@ AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
     }
   }
   return AttrResult(::new (Context) SIMDLinearAttr(
-      LinearLoc, Context, (Expr **)Exprs.data(), Exprs.size()));
+      LinearLoc, Context, const_cast<Expr **>(Exprs.data()), Exprs.size()));
 }
