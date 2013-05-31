@@ -4612,12 +4612,9 @@ void Sema::ActOnCilkForStmtError() {
 
 StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
                                  Stmt *SubStmt, ArrayRef<const Attr *> Attrs) {
-  if (isa<ForStmt>(SubStmt) ||
-      isa<WhileStmt>(SubStmt) ||
-      isa<DoStmt>(SubStmt)) {
+  if (isa<ForStmt>(SubStmt))
     return ActOnAttributedStmt(PragmaLoc, Attrs, SubStmt);
-  }
-  Diag(PragmaLoc, diag::warn_pragma_simd_expected_loop);
+  Diag(PragmaLoc, diag::err_pragma_simd_expected_for_loop);
   return SubStmt;
 }
 

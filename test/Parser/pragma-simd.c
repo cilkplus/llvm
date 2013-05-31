@@ -1,12 +1,12 @@
 // RUN: %clang_cc1 -fsyntax-only -ferror-limit 0 -verify %s
 
-/* expected-warning@+1 {{expected loop statement following '#pragma simd' - ignored}} */
+/* expected-error@+1 {{expected for statement following '#pragma simd'}} */
 #pragma simd
 
-/* expected-warning@+1 {{expected loop statement following '#pragma simd' - ignored}} */
+/* expected-error@+1 {{expected for statement following '#pragma simd'}} */
 #pragma simd foo
 
-/* expected-warning@+1 {{expected loop statement following '#pragma simd' - ignored}} */
+/* expected-error@+1 {{expected for statement following '#pragma simd'}} */
 #pragma simd vectorlength(4)
 
 void test_no_clause()

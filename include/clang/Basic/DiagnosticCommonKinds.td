@@ -86,8 +86,8 @@ def note_decl_hiding_tag_type : Note<
 def err_attribute_not_type_attr : Error<
   "%0 attribute cannot be applied to types">;
 def err_enum_template : Error<"enumeration cannot be a template">;
-def warn_pragma_simd_expected_loop : Warning<
-  "expected loop statement following '#pragma simd' - ignored">;
+def err_pragma_simd_expected_for_loop : Error<
+  "expected for statement following '#pragma simd'">;
 def err_pragma_simd_invalid_vectorlength_expr : Error<
   "invalid vectorlength expression: "
   "must be a%select{n integer constant| power of two}0">;

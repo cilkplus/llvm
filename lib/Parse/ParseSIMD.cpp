@@ -299,7 +299,7 @@ void Parser::HandlePragmaSIMD() {
   assert(Tok.is(tok::annot_pragma_simd));
   SourceLocation Loc = Tok.getLocation();
   SkipUntil(tok::annot_pragma_simd_end);
-  PP.Diag(Loc, diag::warn_pragma_simd_expected_loop);
+  PP.Diag(Loc, diag::err_pragma_simd_expected_for_loop);
 }
 
 static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
@@ -373,7 +373,7 @@ StmtResult Parser::ParseSIMDDirective() {
 
   // Parse the following statement.
   if (!Tok.is(tok::kw_for)) {
-    PP.Diag(Loc, diag::warn_pragma_simd_expected_loop);
+    PP.Diag(Loc, diag::err_pragma_simd_expected_for_loop);
     return StmtEmpty();
   }
 
