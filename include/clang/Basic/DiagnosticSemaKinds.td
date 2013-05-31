@@ -6480,6 +6480,26 @@ def note_simd_for_nested: Note<
   "outer simd for here">;
 def err_simd_for_body_no_nontrivial_destructor: Error<
   "non-static variable with a non-trivial destructor is not allowed within simd for">;
+def err_simd_for_decl_multiple_variables : Error<
+  "cannot declare more than one loop control variable in simd for">;
+def err_simd_for_initializer_expected_decl : Error<
+  "expected control variable declaration in simd for initialization">;
+def err_simd_for_invalid_lcv_type : Error<
+  "loop control variable shall have an integer or pointer type, %0 type here">;
+def err_simd_for_control_variable_not_initialized : Error<
+  "simd for loop control variable must be initialized">;
+def err_simd_for_initialization_must_be_decl : Error<
+  "loop initialization must be a declaration in simd for">;
+def err_simd_for_init_multiple_variables : Error<
+  "cannot initialize more than one loop control variable in simd for">;
+def err_simd_for_expect_loop_control_variable : Error<
+  "expect a loop control variable in simd for">;
+def err_simd_for_control_variable_storage_class : Error<
+  "loop control variable cannot have storage class '%0' in simd for">;
+def err_simd_for_control_variable_qualifier : Error<
+  "loop control variable cannot be '%0' in simd for">;
+def err_simd_for_control_variable_not_local : Error<
+  "non-local loop control variable in simd for">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

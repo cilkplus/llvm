@@ -88,3 +88,82 @@ void test_linear(int arr[]) {
   for (int i = 0; i < 10; ++i);
 #pragma clang diagnostic pop
 }
+
+int k;
+extern int m; // expected-note {{'m' declared here}}
+
+void test_init() {
+  int i, j;
+
+  #pragma simd
+  for (i = 0; i < 10; ++i); // OK
+
+  #pragma simd
+  for (((i) = 0); i < 10; ++i); // OK
+
+  // expected-error@+2 {{cannot declare more than one loop control variable in simd for}}
+  #pragma simd
+  for (int i = 0, j = 0; i < 10; ++i);
+
+  // expected-error@+2 {{cannot initialize more than one loop control variable in simd for}}
+  #pragma simd
+  for (i = 0, j = 0; i < 10; ++i);
+
+  // expected-error@+2 {{simd for loop control variable must be initialized}}
+  #pragma simd
+  for (int i; i < 10; ++i);
+
+  int a[1];
+  // expected-error@+2 {{expect a loop control variable in simd for}}
+  #pragma simd
+  for (a[0] = 0; i < 10; i++);
+
+  // expected-error@+2 {{expect a loop control variable in simd for}}
+  #pragma simd
+  for (*&i = 0; *&i < 10; (*&i)++);
+
+  extern int *get_intptr();
+  // expected-error@+2 {{expect a loop control variable in simd for}}
+  #pragma simd
+  for (*get_intptr() = 0; i < 10; i++);
+
+  // expected-error@+2 {{loop control variable cannot have storage class 'auto' in simd for}}
+  #pragma simd
+  for (auto int i = 0; i < 10; ++i);
+
+  // expected-error@+2 {{loop control variable cannot have storage class 'static' in simd for}}
+  #pragma simd
+  for (static int i = 0; i < 10; ++i);
+
+  // expected-error@+2 {{loop control variable cannot have storage class 'register' in simd for}}
+  #pragma simd
+  for (register int i = 0; i < 10; ++i);
+
+  // expected-error@+2 {{non-local loop control variable in simd for}}
+  #pragma simd
+  for (k = 0; k < 10; ++k);
+
+  // expected-error@+2 {{loop control variable cannot have storage class 'extern' in simd for}}
+  #pragma simd
+  for (m = 0; m < 10; ++m);
+
+  // expected-error@+2 {{loop control variable cannot be 'volatile' in simd for}}
+  #pragma simd
+  for (volatile int i = 0; i < 10; ++i);
+
+  // expected-note@+1 {{'f' declared here}}
+  float f;
+  // expected-error@+2 {{loop control variable shall have an integer or pointer type}}
+  #pragma simd
+  for (f = 0.0f; f < 10.0f; ++f);
+
+  // expected-note@+1 {{'u' declared here}}
+  union { int i; void *p; } u, v;
+  // expected-error@+2 {{expect a loop control variable in simd for}}
+  #pragma simd
+  for (u.i = 0; u.i < 10; u.i += 1);
+
+  // expected-error@+2 {{loop control variable shall have an integer or pointer type}}
+  #pragma simd
+  for (u = v; u.i < 10; u.i += 1);
+}

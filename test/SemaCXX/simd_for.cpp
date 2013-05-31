@@ -94,3 +94,52 @@ void test_simd_for_body5() {
     __builtin_longjmp(0, 1);  // expected-error{{__builtin_longjmp is not allowed within simd for}}
   }
 }
+
+template <typename T>
+void test_lcv_type() {
+  int i = 0;
+  // expected-error@+2 {{loop control variable shall have an integer or pointer type, 'T [10]' type here}}
+  #pragma simd
+  for (T a[10] = {0}; i < 10; ++i);
+
+  // expected-error@+2 {{loop control variable shall have an integer or pointer type, 'int [10]' type here}}
+  #pragma simd
+  for (int a[10] = {0}; i < 10; ++i);
+
+  #pragma simd
+  for (T j = 0; j < 10; ++j); // OK
+
+  extern T* get();
+  #pragma simd
+  for (T *p = 0; p < get(); ++p); // OK
+
+  T k = 0;
+  #pragma simd
+  for (decltype(k) i = 0; i < 10; ++i); // OK
+
+  // expected-error@+2 {{loop control variable shall have an integer or pointer type, 'decltype(k) &' type here}}
+  #pragma simd
+  for (decltype(k)& i = 0; i < 10; ++i);
+}
+
+void test_init() {
+  int j = 0;
+
+  #pragma simd
+  for (auto i = 0; i < 10; ++i); // OK
+
+  // expected-error@+2 {{use of undeclared identifier 'bar'}}
+  #pragma simd
+  for (auto x = bar(); j < 10; j++);
+
+  #pragma simd
+  for (decltype(j) i = 0; i < 10; ++i); // OK
+
+  // expected-error@+2 {{loop control variable shall have an integer or pointer type, 'int &' type here}}
+  #pragma simd
+  for (int &i = j; i < 10; ++i);
+
+  // expected-error@+2 {{loop control variable shall have an integer or pointer type, 'int &&' type here}}
+  #pragma simd
+  for (int &&i = 0; i < 10; ++i);
+}

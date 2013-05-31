@@ -4736,17 +4736,17 @@ class DiagnoseSIMDForBodyHelper
   Sema &SemaRef;
   /// \brief The current simd for loop location.
   SourceLocation LoopLoc;
-  bool &IsInvalid;
+  bool &IsValid;
 
   void Diag(SourceLocation L, const char *Msg, SourceRange Range) {
     SemaRef.Diag(L, SemaRef.PDiag(diag::err_simd_for_body_no_construct)
                       << Msg << Range);
-    IsInvalid = true;
+    IsValid = true;
   }
 
 public:
-  DiagnoseSIMDForBodyHelper(Sema &S, bool &IsInvalid, SourceLocation Loc)
-    : SemaRef(S), LoopLoc(Loc), IsInvalid(IsInvalid) { }
+  DiagnoseSIMDForBodyHelper(Sema &S, bool &IsValid, SourceLocation Loc)
+    : SemaRef(S), LoopLoc(Loc), IsValid(IsValid) { }
 
   bool VisitGotoStmt(GotoStmt *S) {
     Diag(S->getLocStart(), "goto", S->getSourceRange());
@@ -4836,7 +4836,7 @@ public:
           SemaRef.Diag(VD->getLocStart(),
               SemaRef.PDiag(diag::err_simd_for_body_no_nontrivial_destructor)
               << VD->getSourceRange());
-          IsInvalid = true;
+          IsValid = false;
         }
     }
     return true;
@@ -4854,7 +4854,7 @@ public:
         SemaRef.Diag(S->getSubStmt()->getLocStart(),
             SemaRef.PDiag(diag::err_simd_for_nested));
         SemaRef.Diag(LoopLoc, SemaRef.PDiag(diag::note_simd_for_nested));
-        IsInvalid = true;
+        IsValid = false;
         break;
       }
     }
@@ -4875,10 +4875,162 @@ public:
 // * declaration of a non-static variable of a type with a destructor
 //
 static bool CheckSIMDForBody(Sema &S, Stmt *Body, SourceLocation ForLoc) {
-  bool IsInvalid(false);
-  DiagnoseSIMDForBodyHelper D(S, IsInvalid, ForLoc);
+  bool IsValid(true);
+  DiagnoseSIMDForBodyHelper D(S, IsValid, ForLoc);
   D.TraverseStmt(Body);
-  return IsInvalid;
+  return IsValid;
+}
+
+static bool CheckSIMDForInit(Sema &S, Stmt *Init, VarDecl *&ControlVar) {
+  // Location of loop control variable/expression in the initializer.
+  SourceLocation InitLoc;
+  if (DeclStmt *DS = dyn_cast<DeclStmt>(Init)) {
+    // The initialization shall declare or initialize a single variable,
+    // called the control variable.
+    if (!DS->isSingleDecl()) {
+      DeclStmt::decl_iterator DI = DS->decl_begin();
+      ++DI;
+      S.Diag((*DI)->getLocation(), diag::err_simd_for_decl_multiple_variables);
+      return false;
+    }
+
+    ControlVar = dyn_cast<VarDecl>(*DS->decl_begin());
+    // Only allow VarDecls in the initializer.
+    if (!ControlVar) {
+      S.Diag(Init->getLocStart(), diag::err_simd_for_initializer_expected_decl)
+        << Init->getSourceRange();
+      return false;
+    }
+
+    if (ControlVar->isInvalidDecl())
+      return false;
+
+    // The control variable shall be declared and initialized within the
+    // initialization clause of the simd for loop.
+
+    // A template type may have a default constructor.
+    bool IsDependent = ControlVar->getType()->isDependentType();
+
+    if (!IsDependent && !ControlVar->getInit()) {
+      S.Diag(ControlVar->getLocation(),
+          diag::err_simd_for_control_variable_not_initialized);
+      return false;
+    }
+
+    InitLoc = ControlVar->getLocation();
+  } else {
+    // In C++, the control variable shall be declared and initialized within
+    // the initialization clause of the simd for loop.
+    if (S.getLangOpts().CPlusPlus) {
+      S.Diag(Init->getLocStart(),
+             diag::err_simd_for_initialization_must_be_decl);
+      return false;
+    }
+
+    // In C only, the control variable may be previously declared, but if so
+    // shall be reinitialized, i.e., assigned, in the initialization clause.
+    BinaryOperator *Op = 0;
+    if (Expr *E = dyn_cast<Expr>(Init)) {
+      E = E->IgnoreParenNoopCasts(S.Context);
+      Op = dyn_cast_or_null<BinaryOperator>(E);
+    }
+
+    if (!Op) {
+      S.Diag(Init->getLocStart(),
+          diag::err_simd_for_control_variable_not_initialized);
+      return false;
+    }
+
+    // The initialization shall declare or initialize a single variable,
+    // called the control variable.
+    if (Op->getOpcode() == BO_Comma) {
+      S.Diag(Op->getRHS()->getExprLoc(),
+             diag::err_simd_for_init_multiple_variables);
+      return false;
+    }
+
+    if (!Op->isAssignmentOp()) {
+      S.Diag(Op->getLHS()->getExprLoc(),
+             diag::err_simd_for_control_variable_not_initialized)
+        << Init->getSourceRange();
+      return false;
+    }
+
+    // Get the decl for the LHS of the control variable initialization
+    assert(Op->getLHS() && "BinaryOperator has no LHS!");
+    DeclRefExpr *LHS = dyn_cast<DeclRefExpr>(
+      Op->getLHS()->IgnoreParenNoopCasts(S.Context));
+    if (!LHS) {
+      S.Diag(Op->getLHS()->getExprLoc(),
+             diag::err_simd_for_expect_loop_control_variable)
+        << Init->getSourceRange();
+      return false;
+    }
+
+    // But, use the source location of the LHS for diagnostics
+    InitLoc = LHS->getLocation();
+
+    // Only a VarDecl may be used in the initializer
+    ControlVar = dyn_cast<VarDecl>(LHS->getDecl());
+    if (!ControlVar) {
+      S.Diag(Op->getLHS()->getExprLoc(),
+             diag::err_simd_for_expect_loop_control_variable)
+        << Init->getSourceRange();
+      return false;
+    }
+  }
+
+  bool IsDeclStmt = isa<DeclStmt>(Init);
+
+  // No storage class may be specified for the variable within the
+  // initialization clause.
+  StorageClass SC = ControlVar->getStorageClass();
+  if (SC != SC_None) {
+    S.Diag(InitLoc, diag::err_simd_for_control_variable_storage_class)
+      << ControlVar->getStorageClassSpecifierString(SC);
+    if (!IsDeclStmt)
+      S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
+        << ControlVar->getIdentifier();
+    return false;
+  }
+
+  // Don't allow non-local variables to be used as the control variable
+  if (!ControlVar->isLocalVarDecl()) {
+    S.Diag(InitLoc, diag::err_simd_for_control_variable_not_local);
+    return false;
+  }
+
+  QualType VarType = ControlVar->getType();
+
+  // For decltype types, get the actual type
+  const Type *VarTyPtr = VarType.getTypePtrOrNull();
+  if (VarTyPtr && isa<DecltypeType>(VarTyPtr))
+    VarType = cast<DecltypeType>(VarTyPtr)->getUnderlyingType();
+
+  // The variable may not be const or volatile.
+  // Assignment to const variables is checked before sema for cilk_for
+  if (VarType.isVolatileQualified()) {
+    S.Diag(InitLoc, diag::err_simd_for_control_variable_qualifier)
+      << "volatile";
+    if (!IsDeclStmt)
+      S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
+        << ControlVar->getIdentifier();
+    return false;
+  }
+
+  // The variable shall have integer or pointer type.
+  bool ValidTy = VarType->isIntegerType() || VarType->isPointerType();
+  if (VarType->isAggregateType() || VarType->isReferenceType()
+                                 || (!ValidTy && !VarType->isDependentType())) {
+    S.Diag(InitLoc, diag::err_simd_for_invalid_lcv_type)
+      << VarType;
+    if (!IsDeclStmt)
+      S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
+        << ControlVar->getIdentifier();
+    return false;
+  }
+
+  return true;
 }
 
 StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
@@ -4891,7 +5043,13 @@ StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
   assert(Second.get() && "expected loop condition");
   assert(Third.get() && "expected loop increment");
 
-  if (CheckSIMDForBody(*this, Body, ForLoc))
+  // Check the loop init and get the control variable.
+  VarDecl *ControlVar = 0;
+  if (!CheckSIMDForInit(*this, First, ControlVar))
+    return StmtError();
+
+  // Check the loop body.
+  if (!CheckSIMDForBody(*this, Body, ForLoc))
     return StmtError();
 
   return ActOnForStmt(ForLoc, LParenLoc, First, Second, /*SecondVar=*/0, Third,
