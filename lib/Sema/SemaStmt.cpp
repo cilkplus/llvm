@@ -4762,7 +4762,11 @@ public:
     if (E->isCilkSpawnCall())
       Diag(E->getCilkSpawnLoc(), "_Cilk_spawn", E->getSourceRange());
     else if (FunctionDecl *FD = E->getDirectCallee()) {
-      StringRef Name = FD->getIdentifier() ? FD->getName() : "";
+      IdentifierInfo *II = FD->getIdentifier();
+      if (!II)
+        return true;
+
+      StringRef Name = II->getName();
       if (Name.equals("setjmp") ||
           Name.equals("_setjmp") ||
           Name.equals("__builtin_setjmp") ||
