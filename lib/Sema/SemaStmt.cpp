@@ -4014,6 +4014,12 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
   if (CXXOperatorCallExpr *C = dyn_cast<CXXOperatorCallExpr>(Increment)) {
     OverloadedOperatorKind Overload = C->getOperator();
 
+    if (!IsCilkForControlVarRef(C->getArg(0), ControlVar)) {
+      S.Diag(C->getArg(0)->getExprLoc(),
+             diag::err_cilk_for_increment_not_control_var) << ControlVar;
+      return false;
+    }
+
     // operator++() or operator--() -- always OK
     if (Overload == OO_PlusPlus || Overload == OO_MinusMinus) {
       HasConstantIncrement = true;
@@ -4030,12 +4036,6 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
       RHS = C->getArg(1);
       OperatorName = (Overload == OO_PlusEqual ? "+=" : "-=");
       Direction = Overload == OO_PlusEqual ? 1 : -1;
-    }
-
-    if (!IsCilkForControlVarRef(C->getArg(0), ControlVar)) {
-      S.Diag(C->getArg(0)->getExprLoc(),
-             diag::err_cilk_for_increment_not_control_var) << ControlVar;
-      return false;
     }
   }
 

@@ -281,3 +281,15 @@ void test_grainsize() {
   #pragma cilk grainsize = alignof(int) // OK
   _Cilk_for(int i = 0; i < 100; ++i);
 }
+
+namespace ns_bad_increment {
+
+struct X { operator int(); };
+int operator++(const X &, int);
+
+void foo() {
+  X x;
+  _Cilk_for (int i = 0; i < 10; x++); // expected-error {{loop increment does not modify control variable 'i' in '_Cilk_for'}}
+}
+
+} // namespace
