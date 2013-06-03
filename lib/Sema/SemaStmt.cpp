@@ -4651,9 +4651,20 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
 }
 
 AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
+                                          SourceLocation TypeLoc,
                                           QualType &VectorLengthForType) {
   if (VectorLengthForType.isNull())
     return AttrError();
+
+  QualType Ty = VectorLengthForType.getCanonicalType();
+  if (Ty->isVoidType()) {
+    Diag(TypeLoc, diag::err_simd_for_length_for_void);
+    return AttrError();
+  }
+  if (Ty->isIncompleteType()) {
+    Diag(TypeLoc, diag::err_simd_for_length_for_incomplete) << Ty;
+    return AttrError();
+  }
   return AttrResult(::new (Context) SIMDLengthForAttr(
       VectorLengthForLoc, Context, VectorLengthForType));
 }

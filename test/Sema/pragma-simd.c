@@ -32,6 +32,58 @@ void test_vectorlength() {
   #pragma simd vectorlength(I())
 }
 
+void test_vectorlengthfor() {
+  int i;
+  #pragma simd vectorlengthfor(char)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(short)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(int)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(long)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(long long)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(unsigned long long)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(float)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(double)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(void *)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(void ****)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(void const *)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(void * const)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(void const * const)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(short *)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(int[45])
+  for (i = 0; i < 10; ++i);
+  enum E { A, B, C };
+  #pragma simd vectorlengthfor(enum E)
+  for (i = 0; i < 10; ++i);
+  struct S { int a; int b; int c; };
+  #pragma simd vectorlengthfor(struct S)
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(void(int, int))
+  for (i = 0; i < 10; ++i);
+
+
+  struct Incomplete;
+  #pragma simd vectorlengthfor(struct Incomplete) // expected-error {{cannot select vector length for incomplete type 'struct Incomplete'}}
+  for (i = 0; i < 10; ++i);
+  typedef struct Incomplete I;
+  #pragma simd vectorlengthfor(I) // expected-error {{cannot select vector length for incomplete type 'I' (aka 'struct Incomplete')}}
+  for (i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(void) // expected-error {{cannot select vector length for void type}}
+  for (i = 0; i < 10; ++i);
+}
+
 struct A { int a; };
 
 void test_linear(int arr[]) {

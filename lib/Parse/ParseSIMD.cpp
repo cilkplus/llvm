@@ -109,7 +109,9 @@ struct SIMDVectorLengthItemParser {
 
 struct SIMDVectorLengthForItemParser {
   QualType T;
+  SourceLocation Loc;
   bool Parse(Parser &P, Sema &S) {
+    Loc = P.getCurToken().getLocation();
     TypeResult TN = P.ParseTypeName();
     if (TN.isInvalid())
       return false;
@@ -248,7 +250,7 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
       SIMDVectorLengthForItemParser ItemParser;
       if (!ParseSIMDExpression(P, S, ItemParser))
         return false;
-      A = S.ActOnPragmaSIMDLengthFor(BeginLoc, ItemParser.T);
+      A = S.ActOnPragmaSIMDLengthFor(BeginLoc, ItemParser.Loc, ItemParser.T);
     }
     else if (II->isStr("linear")) {
       P.ConsumeToken();

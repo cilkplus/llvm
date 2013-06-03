@@ -143,3 +143,44 @@ void test_init() {
   #pragma simd
   for (int &&i = 0; i < 10; ++i);
 }
+
+template <typename T>
+void test_vectorlengthfor_template() {
+  #pragma simd vectorlengthfor(T)
+  for (int i = 0; i < 10; ++i);
+}
+
+template <typename T>
+void test_vectorlengthfor_template2(T t) {
+  #pragma simd vectorlengthfor(T)
+  for (int i = 0; i < 10; ++i);
+}
+
+
+void test_vectorlengthfor() {
+  #pragma simd vectorlengthfor(A)
+  for (int i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(B)
+  for (int i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(decltype(makeB))
+  for (int i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(decltype(nullptr))
+  for (int i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(int &)
+  for (int i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(int &&)
+  for (int i = 0; i < 10; ++i);
+  #pragma simd vectorlengthfor(const int&)
+  for (int i = 0; i < 10; ++i);
+
+  #pragma simd vectorlengthfor(auto) // expected-error {{'auto' not allowed here}}
+  for (int i = 0; i < 10; ++i);
+
+  test_vectorlengthfor_template<A>();
+  test_vectorlengthfor_template<B>();
+  A a;
+  test_vectorlengthfor_template2<>([&](int, void*) { const A& aa = a; });
+
+  // FIXME: the following should cause an error once template support is added.
+  test_vectorlengthfor_template<void>();
+}

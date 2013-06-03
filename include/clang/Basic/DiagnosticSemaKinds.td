@@ -6500,6 +6500,10 @@ def err_simd_for_control_variable_qualifier : Error<
   "loop control variable cannot be '%0' in simd for">;
 def err_simd_for_control_variable_not_local : Error<
   "non-local loop control variable in simd for">;
+def err_simd_for_length_for_incomplete: Error<
+  "cannot select vector length for incomplete type %0">;
+def err_simd_for_length_for_void: Error<
+  "cannot select vector length for void type">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

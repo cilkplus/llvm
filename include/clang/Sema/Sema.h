@@ -6750,6 +6750,7 @@ public:
                                    Expr *VectorLengthExpr);
 
   AttrResult ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
+                                      SourceLocation TypeLoc,
                                       QualType &VectorLengthForType);
 
   ExprResult ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
