@@ -4301,7 +4301,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
         (CondDirection < 0 && Stride.isStrictlyPositive())) {
       Diag(Increment->getExprLoc(), diag::err_cilk_for_increment_inconsistent)
         << (CondDirection > 0);
-      Diag(Increment->getExprLoc(), diag::note_cilk_constant_stride)
+      Diag(Increment->getExprLoc(), diag::note_constant_stride)
         << Stride.toString(10, true)
         << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
       return StmtError();
@@ -5187,7 +5187,8 @@ static bool ExtractSIMDForCondition(Sema &S,
   return false;
 }
 
-static bool CheckSIMDForCond(Sema &S, Expr *Cond, const VarDecl *ControlVar) {
+static bool CheckSIMDForCond(Sema &S, Expr *Cond, int &Direction,
+                             const VarDecl *ControlVar) {
   BinaryOperatorKind CondOp;
   SourceLocation OpLoc;
   Expr *LHS = 0;
@@ -5199,23 +5200,161 @@ static bool CheckSIMDForCond(Sema &S, Expr *Cond, const VarDecl *ControlVar) {
   // The operator denoted OP shall be one of !=, <=, <, >=, or >.
   switch (CondOp) {
   case BO_NE:
+    Direction = 0;
+    break;
   case BO_LE:
   case BO_LT:
+    Direction = 1;
+    break;
   case BO_GE:
   case BO_GT:
+    Direction = -1;
     break;
   default:
     S.Diag(OpLoc, diag::err_simd_for_invalid_cond_operator);
     return false;
   }
 
-  // Direction is not in use yet for a simd for loop.
-  int Direction = 0;
   unsigned CondDiagError = diag::err_simd_for_cond_test_control_var;
   unsigned CondDiagNote = diag::note_simd_for_cond_allowed;
   return CanonicalizeForCondOperands(S, ControlVar, Cond, LHS, RHS,
                                      Direction, CondDiagError,
                                      CondDiagNote);
+}
+
+static bool CheckSIMDForIncrementCore(Sema &S, Expr *Increment,
+                                      bool &HasConstantIncrement,
+                                      llvm::APSInt &Stride,
+                                      const VarDecl *ControlVar,
+                                      SourceLocation &RHSLoc) {
+  Increment = Increment->IgnoreParens();
+  if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(Increment))
+    Increment = E->getSubExpr();
+  if (CXXBindTemporaryExpr *E = dyn_cast<CXXBindTemporaryExpr>(Increment))
+    Increment = E->getSubExpr();
+
+  // Simple increment or decrement -- always OK
+  if (UnaryOperator *U = dyn_cast<UnaryOperator>(Increment)) {
+    if (!IsControlVarRef(U->getSubExpr(), ControlVar)) {
+      S.Diag(U->getSubExpr()->getExprLoc(),
+             diag::err_simd_for_increment_not_control_var) << ControlVar;
+      return false;
+    }
+
+    if (U->isIncrementDecrementOp()) {
+      HasConstantIncrement = true;
+      Stride = (U->isIncrementOp() ? 1 : -1);
+      return true;
+    }
+  }
+
+  // In the case of += or -=, whether built-in or overloaded, we need to check
+  // the type of the right-hand side. In that case, RHS will be set to a
+  // non-null value.
+  Expr *RHS = 0;
+  // Direction is 1 if the operator is +=, -1 if it is -=
+  int Direction = 0;
+  StringRef OperatorName;
+
+  if (CXXOperatorCallExpr *C = dyn_cast<CXXOperatorCallExpr>(Increment)) {
+    OverloadedOperatorKind Overload = C->getOperator();
+
+    if (!IsControlVarRef(C->getArg(0), ControlVar)) {
+      S.Diag(C->getArg(0)->getExprLoc(),
+             diag::err_simd_for_increment_not_control_var) << ControlVar;
+      return false;
+    }
+
+    // operator++() or operator--() -- always OK
+    if (Overload == OO_PlusPlus || Overload == OO_MinusMinus) {
+      HasConstantIncrement = true;
+      Stride = (Overload == OO_PlusPlus ? 1 : -1);
+      return true;
+    }
+
+    // operator+=() or operator-=() -- defer checking of the RHS type
+    if (Overload == OO_PlusEqual || Overload == OO_MinusEqual) {
+      RHS = C->getArg(1);
+      OperatorName = (Overload == OO_PlusEqual ? "+=" : "-=");
+      Direction = Overload == OO_PlusEqual ? 1 : -1;
+    }
+  }
+
+  if (BinaryOperator *B = dyn_cast<CompoundAssignOperator>(Increment)) {
+    if (!IsControlVarRef(B->getLHS(), ControlVar)) {
+      S.Diag(B->getLHS()->getExprLoc(),
+             diag::err_simd_for_increment_not_control_var) << ControlVar;
+      return false;
+    }
+
+    // += or -= -- defer checking of the RHS type
+    if (B->isAdditiveAssignOp()) {
+      RHS = B->getRHS();
+      OperatorName = B->getOpcodeStr();
+      Direction = B->getOpcode() == BO_AddAssign ? 1 : -1;
+    }
+  }
+
+  // If RHS is non-null, it's a += or -=, either built-in or overloaded.
+  // We need to check that the RHS has the correct type.
+  if (RHS) {
+    if (RHS->isTypeDependent())
+      return true;
+
+    if (!RHS->getType()->isIntegralOrEnumerationType()) {
+      S.Diag(Increment->getExprLoc(),
+        diag::err_simd_for_invalid_increment_rhs) << OperatorName;
+      return false;
+    }
+
+    HasConstantIncrement = RHS->EvaluateAsInt(Stride, S.Context);
+    if (Direction == -1)
+      Stride = -Stride;
+
+    RHSLoc = RHS->getExprLoc();
+    return true;
+  }
+
+  // If we reached this point, the basic form is invalid. Issue a diagnostic.
+  S.Diag(Increment->getExprLoc(), diag::err_simd_for_invalid_increment);
+  return false;
+}
+
+static bool CheckSIMDForIncrement(Sema &S, Expr *Increment,
+                                  const VarDecl *ControlVar,
+                                  int CondDirection) {
+  // Check increment. For dependent types since we can't get the actual type,
+  // we default to a 64bit signed type.
+  llvm::APSInt Stride(64, true);
+  bool HasConstantIncrement = false;
+  SourceLocation IncrementRHSLoc;
+
+  if (!CheckSIMDForIncrementCore(S, Increment, HasConstantIncrement, Stride,
+                                 ControlVar, IncrementRHSLoc))
+    return false;
+
+  // Extra checks.
+  if (HasConstantIncrement) {
+    if (!Stride) {
+      S.Diag(IncrementRHSLoc, diag::err_simd_for_increment_zero);
+      return false;
+    }
+
+    if ((CondDirection > 0 && Stride.isNegative()) ||
+        (CondDirection < 0 && Stride.isStrictlyPositive())) {
+      S.Diag(Increment->getExprLoc(), diag::err_simd_for_increment_inconsistent)
+        << (CondDirection > 0);
+      S.Diag(Increment->getExprLoc(), diag::note_constant_stride)
+        << Stride.toString(10, true)
+        << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
+      return false;
+    }
+
+    // Do not check unsigned wrap around here, since OpenMP does not support
+    // operation '!=' for the condition.
+  }
+
+  return true;
 }
 
 StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
@@ -5233,12 +5372,25 @@ StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
   if (!CheckSIMDForInit(*this, First, ControlVar))
     return StmtError();
 
-  if (!CheckSIMDForCond(*this, Second.get(), ControlVar))
+  // Check the loop condition.
+  int CondDirection = 0;
+  if (!CheckSIMDForCond(*this, Second.get(), CondDirection, ControlVar))
+    return StmtError();
+
+  // Check the loop increment.
+  if (!CheckSIMDForIncrement(*this, Third.get(), ControlVar, CondDirection))
     return StmtError();
 
   // Check the loop body.
   if (!CheckSIMDForBody(*this, Body, ForLoc))
     return StmtError();
+
+  DiagnoseUnusedExprResult(First);
+  DiagnoseUnusedExprResult(Third.get());
+  DiagnoseUnusedExprResult(Body);
+
+  if (isa<NullStmt>(Body))
+    getCurCompoundScope().setHasEmptyLoopBodies();
 
   return ActOnForStmt(ForLoc, LParenLoc, First, Second, /*SecondVar=*/0, Third,
                       RParenLoc, Body);

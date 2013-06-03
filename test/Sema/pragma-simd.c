@@ -352,3 +352,119 @@ void test_condition() {
   #pragma simd
   for (int i = 0; j < 10; ++i);
 }
+
+void test_increment() {
+  #pragma simd
+  for (int i = 0; i < 10; ++i); // OK
+  #pragma simd
+  for (int i = 0; i < 10; i++); // OK
+  #pragma simd
+  for (int i = 10; i > 0; --i); // OK
+  #pragma simd
+  for (int i = 10; i > 0; i--); // OK
+  #pragma simd
+  for (int i = 10; i > 0; i -= 2); // OK
+  #pragma simd
+  for (int i = 0; i < 10; i += 2); // OK
+
+  extern int next();
+  #pragma simd
+  for (int i = 0; i < 10; i += next()); // OK
+
+  enum E { a = 0, b = 5 };
+  #pragma simd
+  for (int i = 0; i < 10; i += b); // OK
+
+  // expected-error@+2 {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in simd for}}
+  #pragma simd
+  for (int i = 0; i < 10; !i);
+  // expected-error@+2 {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in simd for}}
+  #pragma simd
+  for (int i = 0; i < 10; i *= 2);
+
+  // expected-error@+2 {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in simd for}}
+  #pragma simd
+  for (int i = 0; i < 10; i <<= 1);
+
+  // expected-error@+2 {{right-hand side of '+=' must have integral or enum type in simd for increment}}
+  #pragma simd
+  for (int i = 0; i < 10; i += 1.2f);
+
+  // expected-error@+2 {{right-hand side of '-=' must have integral or enum type in simd for increment}}
+  #pragma simd
+  for (int i = 10; i > 0; i -= 1.2f);
+
+  // expected-warning@+3 {{expression result unused}}
+  // expected-error@+2 {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in simd for}}
+  #pragma simd
+  for (int i = 0; i < 10; (0, ++i));
+
+  #pragma simd
+  for (int i = 0; i < 10; (i++)); // OK
+  #pragma simd
+  for (int i = 0; i < 10; ((i++))); // OK
+
+  // expected-error@+2 {{loop increment operator must be one of operators '++', '--', '+=', or '-=' in simd for}}
+  #pragma simd
+  for (int i = 0; i < 10; (i *= 2));
+
+  // expected-error@+2 {{right-hand side of '+=' must have integral or enum type in simd for increment}}
+  #pragma simd
+  for (int i = 0; i < 10; (i += 1.2f));
+
+  int j = -1;
+  // expected-error@+2 {{loop increment does not modify control variable 'i' in simd for}}
+  #pragma simd
+  for (int i = 0; i < 10; j++);
+
+  #pragma simd
+  for (int i = 0; i < 10; (++i)); // OK
+  #pragma simd
+  for (int i = 0; i < 10; i -= j); // OK
+  #pragma simd
+  for (int i = 0; i < 10; i -= -1); // OK
+
+  // Tests for inconsistency between loop condition and increment
+  //
+  // expected-note@+3 {{constant stride is -1}}
+  // expected-error@+2 {{loop increment is inconsistent with condition in simd for: expected positive stride}}
+  #pragma simd
+  for (int i = 0; i < 10; i--);
+
+  // expected-note@+3 {{constant stride is -1}}
+  // expected-error@+2 {{loop increment is inconsistent with condition in simd for: expected positive stride}}
+  #pragma simd
+  for (int i = 0; i < 10; i -= 1);
+
+  // expected-note@+3 {{constant stride is 1}}
+  // expected-error@+2 {{loop increment is inconsistent with condition in simd for: expected negative stride}}
+  #pragma simd
+  for (int i = 10; i >= 0; i++);
+
+  // expected-error@+2 {{loop increment must be non-zero in simd for}}
+  #pragma simd
+  for (int i = 10; i >= 0; i += 0);
+}
+
+void empty_body() {
+  // expected-warning@+3 {{for loop has empty body}}
+  // expected-note@+2 {{put the semicolon on a separate line to silence this warning}}
+  #pragma simd
+  for (int i = 0; i < 10; ++i);
+  { }
+
+  #pragma simd
+  for (int i = 0; i < 10; ++i) // OK
+    ;
+  { }
+
+  // expected-warning@+3 {{for loop has empty body}}
+  // expected-note@+2 {{put the semicolon on a separate line to silence this warning}}
+  #pragma simd
+  for (int i = 0; i < 10; ++i);
+    empty_body();
+
+  #pragma simd
+  for (int i = 0; i < 10; ++i); // OK
+  empty_body();
+}

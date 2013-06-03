@@ -6080,6 +6080,8 @@ def warn_empty_for_body : Warning<
   "for loop has empty body">, InGroup<EmptyBody>;
 def warn_empty_cilk_for_body : Warning<
   "Cilk for loop has empty body">, InGroup<EmptyBody>;
+def warn_empty_simd_for_body : Warning<
+  "SIMD for loop has empty body">, InGroup<EmptyBody>;
 def warn_empty_range_based_for_body : Warning<
   "range-based for loop has empty body">, InGroup<EmptyBody>;
 def warn_empty_while_body : Warning<
@@ -6459,7 +6461,7 @@ def note_cilk_for_begin_expr: Note<
   "loop begin expression here">;
 def note_cilk_for_end_expr: Note<
   "loop end expression here">;
-def note_cilk_constant_stride: Note<
+def note_constant_stride: Note<
   "constant stride is %0">;
 def warn_cilk_for_cond_user_defined_conv: Warning<
   "user-defined conversion from %0 to %1 will not be used when calculating the "
@@ -6527,6 +6529,16 @@ def err_simd_for_cond_test_control_var: Error<
   "loop condition does not test control variable %0 in simd for">;
 def note_simd_for_cond_allowed: Note<
   "allowed forms are %0 OP expr, and expr OP %0">;
+def err_simd_for_increment_not_control_var: Error<
+  "loop increment does not modify control variable %0 in simd for">;
+def err_simd_for_invalid_increment : Error<
+  "loop increment operator must be one of operators '++', '--', '+=', or '-=' in simd for">;
+def err_simd_for_invalid_increment_rhs : Error<
+  "right-hand side of '%0' must have integral or enum type in simd for increment">;
+def err_simd_for_increment_zero : Error<
+  "loop increment must be non-zero in simd for">;
+def err_simd_for_increment_inconsistent : Error<
+  "loop increment is inconsistent with condition in simd for: expected %select{negative|positive}0 stride">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

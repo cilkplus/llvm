@@ -6445,7 +6445,7 @@ void Sema::DiagnoseEmptyLoopBody(const Stmt *S,
   assert(!CurrentInstantiationScope); // Ensured by caller
 
   SourceLocation StmtLoc;
-  const Stmt *Body;
+  const Stmt *Body = 0;
   unsigned DiagID;
   if (const ForStmt *FS = dyn_cast<ForStmt>(S)) {
     StmtLoc = FS->getRParenLoc();
@@ -6459,6 +6459,19 @@ void Sema::DiagnoseEmptyLoopBody(const Stmt *S,
     StmtLoc = CFS->getCilkForLoc();
     Body = CFS->getBody()->getCapturedStmt();
     DiagID = diag::warn_empty_cilk_for_body;
+  } else if (const AttributedStmt *AS = dyn_cast<AttributedStmt>(S)) {
+    ArrayRef<const Attr*> Attrs = AS->getAttrs();
+    for (ArrayRef<const Attr*>::iterator I = Attrs.begin(), E = Attrs.end();
+        I != E; ++I) {
+      // A SIMD for loop.
+      if ((*I)->getKind() == attr::SIMD) {
+        const ForStmt *FS = cast<ForStmt>(AS->getSubStmt());
+        StmtLoc = FS->getForLoc();
+        Body = FS->getBody();
+        DiagID = diag::warn_empty_simd_for_body;
+        break;
+      }
+    }
   } else
     return; // Neither `for' nor `while'.
 

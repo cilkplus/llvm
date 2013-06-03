@@ -199,3 +199,38 @@ void test_cond() {
   #pragma simd
   for (int i = 0; i < StructWithCleanups(); i++); // OK
 }
+
+struct NotAnInt { };
+void operator+=(int, NotAnInt);
+
+enum AnEnum { EnumOne = 1 };
+
+struct S {
+  S();
+  ~S();
+  operator int() const;
+};
+
+int operator++(const S&, int);
+
+void test_increment() {
+  #pragma simd
+  for (int i = 0; i < 10; i += EnumOne); // OK
+
+  // expected-error@+2 {{right-hand side of '+=' must have integral or enum type in simd for increment}}
+  #pragma simd
+  for (int i = 0; i < 10; i += NotAnInt());
+
+  // expected-note@+3 {{constant stride is -1}}
+  // expected-error@+2 {{loop increment is inconsistent with condition in simd for: expected positive stride}}
+  #pragma simd
+  for (int i = 0; i < 10; i -= EnumOne);
+
+  #pragma simd
+  for (int i = 0; i < 10; i += S()); // OK
+
+  S Obj;
+  // expected-error@+2 {{loop increment does not modify control variable 'i' in simd for}}
+  #pragma simd
+  for (int i = 0; i < 10; Obj++);
+}
