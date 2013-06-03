@@ -4655,7 +4655,7 @@ void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema *S) {
         continue;
       // One is in conflict. Issue error on i'th usage.
       switch (Use.Attribute->getKind()) {
-      case clang::attr::SIMDLinear:
+      case attr::SIMDLinear:
         if (First.CanConflict == Use.CanConflict)
           // Re-using linear variable in another simd clause
           S->Diag(Use.Usage->getLocation(),
@@ -4685,14 +4685,33 @@ StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
 
   // Collect all used decls in order of usage
   DeclMapTy UsedDecls;
+  const Attr *VectorLengthAttr = 0;
   for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
     if (!Attrs[i])
       continue;
     const Attr *A = Attrs[i];
 
     switch(A->getKind()) {
-    case clang::attr::SIMDLinear:
+    case attr::SIMDLinear:
       HandleSIMDLinearAttr(A, UsedDecls);
+      break;
+    case attr::SIMDLength:
+    case attr::SIMDLengthFor:
+      if (VectorLengthAttr) {
+        attr::Kind ThisKind = A->getKind(),
+                   PrevKind = VectorLengthAttr->getKind();
+
+        if (ThisKind == PrevKind)
+          Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_multiple)
+              << (ThisKind == attr::SIMDLength) << A->getRange();
+        else
+          Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_conflict)
+              << (ThisKind == attr::SIMDLength) << A->getRange();
+        Diag(VectorLengthAttr->getLocation(),
+             diag::note_pragma_simd_specified_here)
+            << (PrevKind == attr::SIMDLength) << VectorLengthAttr->getRange();
+      } else
+        VectorLengthAttr = A;
       break;
     default:
       ;

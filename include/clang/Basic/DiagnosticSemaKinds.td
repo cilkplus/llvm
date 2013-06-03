@@ -6380,6 +6380,12 @@ def note_pragma_simd_used_here : Note<
 def err_pragma_simd_conflict_step : Error<
   "linear %select{variable|step}0 shall not be used"
   " as a linear %select{step|variable}0">;
+def err_pragma_simd_vectorlength_conflict : Error<
+  "cannot specify both vectorlength%select{for|}0 and vectorlength%select{|for}0">;
+def err_pragma_simd_vectorlength_multiple : Error<
+  "cannot specify multiple vectorlength%select{for|}0 clauses">;
+def note_pragma_simd_specified_here : Note<
+  "vectorlength%select{for|}0 first specified here">;
 
 // Cilk Plus warnings and errors
 // cilk_spawn

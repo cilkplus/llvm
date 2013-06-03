@@ -258,4 +258,23 @@ void test_pragma_simd() {
   /* expected-error@+1 {{linear variable shall not be used as a linear step}} */
   #pragma simd linear(e:e)
   for (int i = 0; i < 10; ++i) ;
+
+  /* expected-note@+2 {{vectorlength first specified here}} */
+  /* expected-error@+1 {{cannot specify both vectorlengthfor and vectorlength}} */
+  #pragma simd vectorlength(8) vectorlengthfor(int)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{vectorlengthfor first specified here}} */
+  /* expected-error@+1 {{cannot specify both vectorlength and vectorlengthfor}} */
+  #pragma simd vectorlengthfor(int) vectorlength(8)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+4 {{vectorlengthfor first specified here}} */
+  /* expected-error@+3 {{cannot specify multiple vectorlengthfor clauses}} */
+  /* expected-note@+2 {{vectorlengthfor first specified here}} */
+  /* expected-error@+1 {{cannot specify both vectorlength and vectorlengthfor}} */
+  #pragma simd vectorlengthfor(int) vectorlength(8) vectorlengthfor(int)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{vectorlength first specified here}} */
+  /* expected-error@+1 {{cannot specify multiple vectorlength clauses}} */
+  #pragma simd vectorlength(4) vectorlength(8)
+  for (int i = 0; i < 10; ++i) ;
 }
