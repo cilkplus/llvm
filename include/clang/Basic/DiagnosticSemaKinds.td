@@ -6518,6 +6518,15 @@ def err_simd_for_length_for_incomplete: Error<
   "cannot select vector length for incomplete type %0">;
 def err_simd_for_length_for_void: Error<
   "cannot select vector length for void type">;
+def err_simd_for_invalid_cond_expr: Error<
+  "expected binary comparison operator in simd for loop condition">;
+def err_simd_for_invalid_cond_operator: Error<
+  "loop condition operator must be one of '<', '<=', '>', '>=', or '!=' "
+  "in simd for">;
+def err_simd_for_cond_test_control_var: Error<
+  "loop condition does not test control variable %0 in simd for">;
+def note_simd_for_cond_allowed: Note<
+  "allowed forms are %0 OP expr, and expr OP %0">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

@@ -3882,7 +3882,7 @@ static bool ExtractCilkForCondition(Sema &S,
   return false;
 }
 
-static bool IsCilkForControlVarRef(Expr *E, const VarDecl *ControlVar) {
+static bool IsControlVarRef(Expr *E, const VarDecl *ControlVar) {
   // Only ignore very basic casts and this allows us to distinguish
   //
   // struct Int {
@@ -3903,12 +3903,12 @@ static bool IsCilkForControlVarRef(Expr *E, const VarDecl *ControlVar) {
 
   if (CXXConstructExpr *C = dyn_cast<CXXConstructExpr>(E)) {
     if (C->getConstructor()->isConvertingConstructor(false))
-      return IsCilkForControlVarRef(C->getArg(0), ControlVar);
+      return IsControlVarRef(C->getArg(0), ControlVar);
   } else if (CXXBindTemporaryExpr *BE = dyn_cast<CXXBindTemporaryExpr>(E)) {
-    return IsCilkForControlVarRef(BE->getSubExpr(), ControlVar);
+    return IsControlVarRef(BE->getSubExpr(), ControlVar);
   } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E)) {
     // Apply recursively with the subexpression written in the source.
-    return IsCilkForControlVarRef(ICE->getSubExprAsWritten(), ControlVar);
+    return IsControlVarRef(ICE->getSubExprAsWritten(), ControlVar);
   } else if (DeclRefExpr *DR = dyn_cast<DeclRefExpr>(E))
     if (DR->getDecl() == ControlVar)
       return true;
@@ -3916,28 +3916,28 @@ static bool IsCilkForControlVarRef(Expr *E, const VarDecl *ControlVar) {
   return false;
 }
 
-static bool CanonicalizeCilkForCondOperands(Sema &S, VarDecl *ControlVar,
-                                            Expr *Cond, Expr *&LHS,
-                                            Expr *&RHS, int &Direction) {
+static bool CanonicalizeForCondOperands(Sema &S, const VarDecl *ControlVar,
+                                        Expr *Cond, Expr *&LHS,
+                                        Expr *&RHS, int &Direction,
+                                        unsigned CondDiagError,
+                                        unsigned CondDiagNote) {
 
   // The condition shall have one of the following two forms:
   //   var OP shift-expression
   //   shift-expression OP var
   // where var is the control variable, optionally enclosed in parentheses.
-  if (IsCilkForControlVarRef(LHS, ControlVar))
+  if (IsControlVarRef(LHS, ControlVar))
     return true;
 
-  if (IsCilkForControlVarRef(RHS, ControlVar)) {
+  if (IsControlVarRef(RHS, ControlVar)) {
     std::swap(LHS, RHS);
     Direction = -Direction;
     return true;
   }
 
-  S.Diag(Cond->getLocStart(), diag::err_cilk_for_cond_test_control_var)
-    << ControlVar
+  S.Diag(Cond->getLocStart(), CondDiagError) << ControlVar
     << Cond->getSourceRange();
-  S.Diag(Cond->getLocStart(), diag::note_cilk_for_cond_allowed)
-    << ControlVar;
+  S.Diag(Cond->getLocStart(), CondDiagNote) << ControlVar;
   return false;
 }
 
@@ -3966,8 +3966,10 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
     S.Diag(OpLoc, diag::err_cilk_for_invalid_cond_operator);
     return;
   }
-
-  if (!CanonicalizeCilkForCondOperands(S, ControlVar, Cond, LHS, RHS, Direction))
+  unsigned CondDiagError = diag::err_cilk_for_cond_test_control_var;
+  unsigned CondDiagNote = diag::note_cilk_for_cond_allowed;
+  if (!CanonicalizeForCondOperands(S, ControlVar, Cond, LHS, RHS, Direction,
+                                   CondDiagError, CondDiagNote))
     return;
 
   Limit = RHS;
@@ -3986,7 +3988,7 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
 
   // Simple increment or decrement -- always OK
   if (UnaryOperator *U = dyn_cast<UnaryOperator>(Increment)) {
-    if (!IsCilkForControlVarRef(U->getSubExpr(), ControlVar)) {
+    if (!IsControlVarRef(U->getSubExpr(), ControlVar)) {
       S.Diag(U->getSubExpr()->getExprLoc(),
              diag::err_cilk_for_increment_not_control_var) << ControlVar;
        return false;
@@ -4014,7 +4016,7 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
   if (CXXOperatorCallExpr *C = dyn_cast<CXXOperatorCallExpr>(Increment)) {
     OverloadedOperatorKind Overload = C->getOperator();
 
-    if (!IsCilkForControlVarRef(C->getArg(0), ControlVar)) {
+    if (!IsControlVarRef(C->getArg(0), ControlVar)) {
       S.Diag(C->getArg(0)->getExprLoc(),
              diag::err_cilk_for_increment_not_control_var) << ControlVar;
       return false;
@@ -4040,7 +4042,7 @@ static bool IsValidCilkForIncrement(Sema &S, Expr *Increment,
   }
 
   if (BinaryOperator *B = dyn_cast<CompoundAssignOperator>(Increment)) {
-    if (!IsCilkForControlVarRef(B->getLHS(), ControlVar)) {
+    if (!IsControlVarRef(B->getLHS(), ControlVar)) {
       S.Diag(B->getLHS()->getExprLoc(),
              diag::err_cilk_for_increment_not_control_var) << ControlVar;
       return false;
@@ -5146,6 +5148,76 @@ static bool CheckSIMDForInit(Sema &S, Stmt *Init, VarDecl *&ControlVar) {
   return true;
 }
 
+
+static bool ExtractSIMDForCondition(Sema &S,
+                                    Expr *Cond,
+                                    BinaryOperatorKind &CondOp,
+                                    SourceLocation &OpLoc,
+                                    Expr *&LHS,
+                                    Expr *&RHS) {
+  if (BinaryOperator *BO = dyn_cast<BinaryOperator>(Cond)) {
+    CondOp = BO->getOpcode();
+    OpLoc = BO->getOperatorLoc();
+    LHS = BO->getLHS();
+    RHS = BO->getRHS();
+    return true;
+  } else if (CXXOperatorCallExpr *OO = dyn_cast<CXXOperatorCallExpr>(Cond)) {
+    CondOp = BinaryOperator::getOverloadedOpcode(OO->getOperator());
+    if (OO->getNumArgs() == 2) {
+      OpLoc = OO->getOperatorLoc();
+      LHS = OO->getArg(0);
+      RHS = OO->getArg(1);
+      return true;
+    }
+  } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Cond)) {
+    Cond = ICE->IgnoreImpCastsAsWritten();
+    return ExtractSIMDForCondition(S, Cond, CondOp, OpLoc, LHS, RHS);
+  } else if (CXXMemberCallExpr *MC = dyn_cast<CXXMemberCallExpr>(Cond)) {
+    CXXMethodDecl *MD = MC->getMethodDecl();
+    if (isa<CXXConversionDecl>(MD))
+      return ExtractSIMDForCondition(S, MC->getImplicitObjectArgument(), CondOp,
+                                     OpLoc, LHS, RHS);
+  } else if (CXXBindTemporaryExpr *BT = dyn_cast<CXXBindTemporaryExpr>(Cond)) {
+    return ExtractSIMDForCondition(S, BT->getSubExpr(), CondOp, OpLoc, LHS, RHS);
+  } else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(Cond))
+    return ExtractSIMDForCondition(S, EWC->getSubExpr(), CondOp, OpLoc, LHS, RHS);
+
+  S.Diag(Cond->getExprLoc(), diag::err_simd_for_invalid_cond_expr)
+    << Cond->getSourceRange();
+  return false;
+}
+
+static bool CheckSIMDForCond(Sema &S, Expr *Cond, const VarDecl *ControlVar) {
+  BinaryOperatorKind CondOp;
+  SourceLocation OpLoc;
+  Expr *LHS = 0;
+  Expr *RHS = 0;
+
+  if (!ExtractSIMDForCondition(S, Cond, CondOp, OpLoc, LHS, RHS))
+    return false;
+
+  // The operator denoted OP shall be one of !=, <=, <, >=, or >.
+  switch (CondOp) {
+  case BO_NE:
+  case BO_LE:
+  case BO_LT:
+  case BO_GE:
+  case BO_GT:
+    break;
+  default:
+    S.Diag(OpLoc, diag::err_simd_for_invalid_cond_operator);
+    return false;
+  }
+
+  // Direction is not in use yet for a simd for loop.
+  int Direction = 0;
+  unsigned CondDiagError = diag::err_simd_for_cond_test_control_var;
+  unsigned CondDiagNote = diag::note_simd_for_cond_allowed;
+  return CanonicalizeForCondOperands(S, ControlVar, Cond, LHS, RHS,
+                                     Direction, CondDiagError,
+                                     CondDiagNote);
+}
+
 StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *First, FullExprArg Second,
@@ -5159,6 +5231,9 @@ StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
   // Check the loop init and get the control variable.
   VarDecl *ControlVar = 0;
   if (!CheckSIMDForInit(*this, First, ControlVar))
+    return StmtError();
+
+  if (!CheckSIMDForCond(*this, Second.get(), ControlVar))
     return StmtError();
 
   // Check the loop body.

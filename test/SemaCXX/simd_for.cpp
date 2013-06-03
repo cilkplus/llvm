@@ -156,7 +156,6 @@ void test_vectorlengthfor_template2(T t) {
   for (int i = 0; i < 10; ++i);
 }
 
-
 void test_vectorlengthfor() {
   #pragma simd vectorlengthfor(A)
   for (int i = 0; i < 10; ++i);
@@ -183,4 +182,20 @@ void test_vectorlengthfor() {
 
   // FIXME: the following should cause an error once template support is added.
   test_vectorlengthfor_template<void>();
+}
+
+struct BoolWithCleanups {
+  ~BoolWithCleanups();
+  operator bool();
+};
+
+struct StructWithCleanups {
+  ~StructWithCleanups();
+};
+
+BoolWithCleanups operator<(int, StructWithCleanups);
+
+void test_cond() {
+  #pragma simd
+  for (int i = 0; i < StructWithCleanups(); i++); // OK
 }

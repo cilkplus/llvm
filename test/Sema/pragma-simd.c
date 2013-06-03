@@ -278,3 +278,77 @@ void test_pragma_simd() {
   #pragma simd vectorlength(4) vectorlength(8)
   for (int i = 0; i < 10; ++i) ;
 }
+
+void test_condition() {
+  int j = 1;
+
+  #pragma simd
+  for (int i = 0; i <= 10; ++i); // OK
+
+  #pragma simd
+  for (int i = 0; i != 10; ++i); // OK
+
+  #pragma simd
+  for (int i = 10; i > 0; --i); // OK
+
+  #pragma simd
+  for (int i = 10; i >= 0; --i); // OK
+
+  #pragma simd
+  for (int i = 10; i >= (j << 2); --i); // OK
+
+  #pragma simd
+  for (int i = 0; 10 >= i; ++i); // OK
+
+  #pragma simd
+  for (int i = 0; 10 != i; ++i); // OK
+
+  #pragma simd
+  for (int i = 10; 0 < i; --i); // OK
+
+  #pragma simd
+  for (int i = 10; 0 <= i; --i); // OK
+
+  #pragma simd
+  for (int i = 10; (j << 2) <= i; --i); // OK
+
+  #pragma simd
+  for (char i = 0; i < 10; ++i); // OK
+
+  #pragma simd
+  for (short i = 0; i < 10; ++i); // OK
+
+  #pragma simd
+  for (long i = 0; i < 10; ++i); // OK
+
+  // expected-error@+2 {{expected binary comparison operator in simd for loop condition}}
+  #pragma simd
+  for (int i = 0; i; ++i);
+
+  // expected-error@+2 {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in simd for}}
+  #pragma simd
+  for (int i = 0; i & 0x20; ++i);
+
+  // expected-error@+2 {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in simd for}}
+  #pragma simd
+  for (int i = 0; k >> i; ++i);
+
+  // expected-error@+2 {{loop condition operator must be one of '<', '<=', '>', '>=', or '!=' in simd for}}
+  #pragma simd
+  for (int i = 0; i == 10; ++i);
+
+  // expected-error@+3 {{loop condition does not test control variable 'i' in simd for}}
+  // expected-note@+2 {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+  #pragma simd
+  for (int i = 0; (i << 1) < 10; ++i);
+
+  // expected-error@+3 {{loop condition does not test control variable 'i' in simd for}}
+  // expected-note@+2 {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+  #pragma simd
+  for (int i = 0; 10 > (i << 1); ++i);
+
+  // expected-error@+3 {{loop condition does not test control variable 'i' in simd for}}
+  // expected-note@+2 {{allowed forms are 'i' OP expr, and expr OP 'i'}}
+  #pragma simd
+  for (int i = 0; j < 10; ++i);
+}
