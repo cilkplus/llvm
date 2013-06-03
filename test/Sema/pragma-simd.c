@@ -219,3 +219,43 @@ void test_init() {
   #pragma simd
   for (u = v; u.i < 10; u.i += 1);
 }
+
+void test_pragma_simd() {
+  int j, k, longvar;
+
+  extern int e;
+
+  #pragma simd linear(k) linear(j)
+  for (int i = 0; i < 10; ++i) ;
+  #pragma simd linear(k:j) linear(e:j)
+  for (int i = 0; i < 10; ++i) ;
+
+  /* expected-note@+2 {{first used here}} */
+  /* expected-error@+1 {{linear variable shall not be used as a linear step}} */
+  #pragma simd linear(k:k)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{first used here}} */
+  /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
+  #pragma simd linear(k) linear(k)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{first used here}} */
+  /* expected-error@+1 {{linear variable shall not be used as a linear step}} */
+  #pragma simd linear(j) linear(k:j)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{first used here}} */
+  /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
+  #pragma simd linear(k) linear(k:j)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{first used here}} */
+  /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
+  #pragma simd linear(longvar:j) linear(longvar)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{first used here}} */
+  /* expected-error@+1 {{linear step shall not be used as a linear variable}} */
+  #pragma simd linear(k:j) linear(j)
+  for (int i = 0; i < 10; ++i) ;
+  /* expected-note@+2 {{first used here}} */
+  /* expected-error@+1 {{linear variable shall not be used as a linear step}} */
+  #pragma simd linear(e:e)
+  for (int i = 0; i < 10; ++i) ;
+}

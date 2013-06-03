@@ -6373,6 +6373,14 @@ def err_wrong_sampler_addressspace: Error<
 def err_opencl_global_invalid_addr_space : Error<
   "global variables must have a constant address space qualifier">;
 
+def err_pragma_simd_reuse_linear_var : Error<
+  "linear variable shall not appear in multiple simd clauses">;
+def note_pragma_simd_used_here : Note<
+  "first used here">;
+def err_pragma_simd_conflict_step : Error<
+  "linear %select{variable|step}0 shall not be used"
+  " as a linear %select{step|variable}0">;
+
 // Cilk Plus warnings and errors
 // cilk_spawn
 def err_not_a_call : Error<

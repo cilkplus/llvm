@@ -4610,12 +4610,97 @@ void Sema::ActOnCilkForStmtError() {
   PopFunctionScopeInfo();
 }
 
+namespace {
+struct UsedDecl {
+  // If this is allowed to conflict (eg. a linear step)
+  bool CanConflict;
+  // Attribute using this variable
+  const Attr *Attribute;
+  // Specific usage within that attribute
+  const DeclRefExpr *Usage;
+
+  UsedDecl(bool CanConflict, const Attr *Attribute, const DeclRefExpr *Usage)
+    : CanConflict(CanConflict), Attribute(Attribute), Usage(Usage) {};
+};
+typedef llvm::SmallDenseMap<const ValueDecl *,
+                            llvm::SmallVector<UsedDecl, 4> > DeclMapTy;
+
+void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
+  const SIMDLinearAttr *LA = static_cast<const SIMDLinearAttr *>(A);
+  for (Expr **i = LA->steps_begin(), **e = LA->steps_end(); i < e; i += 2) {
+    const Expr *LE = *i;
+    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(LE)) {
+      const ValueDecl *VD = D->getDecl();
+      UsedDecls[VD].push_back(UsedDecl(false, A, D));
+    }
+    const Expr *SE = *(i+1);
+    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(SE)) {
+      const ValueDecl *VD = D->getDecl();
+      UsedDecls[VD].push_back(UsedDecl(true, LA, D));
+    }
+  }
+}
+
+void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema *S) {
+  for (DeclMapTy::iterator it = UsedDecls.begin(), end = UsedDecls.end();
+       it != end; it++) {
+    llvm::SmallVectorImpl<UsedDecl> &Usages = it->second;
+    if (Usages.size() <= 1)
+      continue;
+
+    UsedDecl &First = Usages[0]; // Legitimate usage of this variable
+    for (unsigned i = 1, e = Usages.size(); i < e; ++i) {
+      UsedDecl &Use = Usages[i];
+      if (First.CanConflict && Use.CanConflict)
+        continue;
+      // One is in conflict. Issue error on i'th usage.
+      switch (Use.Attribute->getKind()) {
+      case clang::attr::SIMDLinear:
+        if (First.CanConflict == Use.CanConflict)
+          // Re-using linear variable in another simd clause
+          S->Diag(Use.Usage->getLocation(),
+                  diag::err_pragma_simd_reuse_linear_var)
+              << Use.Usage->getSourceRange();
+        else
+          S->Diag(Use.Usage->getLocation(), diag::err_pragma_simd_conflict_step)
+              << !Use.CanConflict << Use.Usage->getSourceRange();
+        break;
+      default:
+        ;
+      }
+      S->Diag(First.Usage->getLocation(), diag::note_pragma_simd_used_here)
+        << First.Attribute->getRange()
+        << First.Usage->getSourceRange();
+    }
+  }
+}
+} // namespace
+
 StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
                                  Stmt *SubStmt, ArrayRef<const Attr *> Attrs) {
-  if (isa<ForStmt>(SubStmt))
-    return ActOnAttributedStmt(PragmaLoc, Attrs, SubStmt);
-  Diag(PragmaLoc, diag::err_pragma_simd_expected_for_loop);
-  return SubStmt;
+  if (!isa<ForStmt>(SubStmt)) {
+    Diag(PragmaLoc, diag::err_pragma_simd_expected_for_loop);
+    return SubStmt;
+  }
+
+  // Collect all used decls in order of usage
+  DeclMapTy UsedDecls;
+  for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
+    if (!Attrs[i])
+      continue;
+    const Attr *A = Attrs[i];
+
+    switch(A->getKind()) {
+    case clang::attr::SIMDLinear:
+      HandleSIMDLinearAttr(A, UsedDecls);
+      break;
+    default:
+      ;
+    }
+  }
+
+  EnforcePragmaSIMDConstraints(UsedDecls, this);
+  return ActOnAttributedStmt(PragmaLoc, Attrs, SubStmt);
 }
 
 AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
@@ -4637,8 +4722,6 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
          diag::err_pragma_simd_invalid_vectorlength_expr) << 1;
     return AttrError();
   }
-
-
 
   ExprResult E = Owned(IntegerLiteral::Create(
       Context, Constant, Context.getCanonicalType(VectorLengthExpr->getType()),

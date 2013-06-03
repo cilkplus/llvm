@@ -232,6 +232,7 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
   const Token &Tok = P.getCurToken();
 
   while (Tok.isNot(tok::annot_pragma_simd_end)) {
+    const SourceLocation ILoc = Tok.getLocation();
     const IdentifierInfo *II = Tok.getIdentifierInfo();
     if (!II) {
       return false;
@@ -243,21 +244,21 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
       SIMDVectorLengthItemParser ItemParser;
       if (!ParseSIMDExpression(P, S, ItemParser) || !ItemParser.E)
         return false;
-      A = S.ActOnPragmaSIMDLength(BeginLoc, ItemParser.E);
+      A = S.ActOnPragmaSIMDLength(ILoc, ItemParser.E);
     }
     else if (II->isStr("vectorlengthfor")) {
       P.ConsumeToken();
       SIMDVectorLengthForItemParser ItemParser;
       if (!ParseSIMDExpression(P, S, ItemParser))
         return false;
-      A = S.ActOnPragmaSIMDLengthFor(BeginLoc, ItemParser.Loc, ItemParser.T);
+      A = S.ActOnPragmaSIMDLengthFor(ILoc, ItemParser.Loc, ItemParser.T);
     }
     else if (II->isStr("linear")) {
       P.ConsumeToken();
       SIMDLinearItemParser ItemParser;
       if (!ParseSIMDList(P, S, ItemParser))
         return false;
-      A = S.ActOnPragmaSIMDLinear(BeginLoc, ItemParser.Exprs);
+      A = S.ActOnPragmaSIMDLinear(ILoc, ItemParser.Exprs);
     }
     else if (II->isStr("private")) {
       P.ConsumeToken();
