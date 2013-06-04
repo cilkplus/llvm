@@ -293,3 +293,22 @@ void foo() {
 }
 
 } // namespace
+
+namespace union_variable {
+union u {
+  int a; float b;
+  u(int i) : a(i) {}
+};
+
+bool operator< (u U, int i);
+int operator++(u &U, int i);
+int operator-(int i, u U);
+u operator+=(u &U, int i);
+
+void foo() {
+  _Cilk_for (u x = 1; x < 100; x++); // OK
+  // expected-note@+1 {{allowed forms are 'x' OP expr, and expr OP 'x'}}
+  _Cilk_for (u x = 1; x.a < 100; x++); // expected-error {{loop condition does not test control variable 'x' in '_Cilk_for'}}
+  _Cilk_for (u x = 1; x < 100; x.a++); // expected-error {{loop increment does not modify control variable 'x' in '_Cilk_for'}}
+}
+} // namespace

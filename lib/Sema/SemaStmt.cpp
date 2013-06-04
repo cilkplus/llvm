@@ -3812,7 +3812,8 @@ static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
   if (!VarType->isDependentType()) {
     bool ValidType = false;
     if (S.getLangOpts().CPlusPlus &&
-        (VarTyPtr->isClassType() || VarTyPtr->isStructureType()))
+        (VarTyPtr->isClassType() || VarTyPtr->isStructureType() ||
+         VarTyPtr->isUnionType()))
       ValidType = true;
     else if (VarTyPtr->isIntegralType(S.Context) || VarTyPtr->isPointerType())
       ValidType = true;
