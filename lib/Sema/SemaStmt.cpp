@@ -4242,6 +4242,55 @@ static void CheckForSignedUnsignedWraparounds(const VarDecl *ControlVar,
   }
 }
 
+static bool CheckCilkForIncrement(Sema &S, Expr *Increment, const Expr *Limit,
+                                  const VarDecl *ControlVar,
+                                  const Expr *ControlVarInit,
+                                  int CondDirection, Expr *&StrideExpr) {
+  // Check increment
+  // For dependent types since we can't get the actual type, we default to a
+  // 64bit signed type.
+  llvm::APSInt Stride(64, true);
+  // Otherwise, stride should be the same type as the control var. This only
+  // matters because of the computation we do with the value of the loop limit
+  // later.
+  if (!ControlVar->getType()->isDependentType())
+    Stride = llvm::APSInt(
+        S.Context.getTypeSize(ControlVar->getType()),
+        ControlVar->getType()->isUnsignedIntegerOrEnumerationType());
+
+  bool HasConstantIncrement = false;
+  SourceLocation IncrementRHSLoc;
+  if (!IsValidCilkForIncrement(S, Increment, ControlVar,
+                               HasConstantIncrement, Stride, StrideExpr,
+                               IncrementRHSLoc))
+    return false;
+
+  // Check consistency between loop condition and increment only if the
+  // increment amount is known at compile-time.
+  if (HasConstantIncrement) {
+    if (!Stride) {
+      S.Diag(IncrementRHSLoc, diag::err_cilk_for_increment_zero);
+      return false;
+    }
+
+    if ((CondDirection > 0 && Stride.isNegative()) ||
+        (CondDirection < 0 && Stride.isStrictlyPositive())) {
+      S.Diag(Increment->getExprLoc(), diag::err_cilk_for_increment_inconsistent)
+        << (CondDirection > 0);
+      S.Diag(Increment->getExprLoc(), diag::note_constant_stride)
+        << Stride.toString(10, true)
+        << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
+      return false;
+    }
+
+    CheckForSignedUnsignedWraparounds(ControlVar, ControlVarInit, Limit,
+                                      S, CondDirection, Stride,
+                                      StrideExpr);
+  }
+
+  return true;
+}
+
 StmtResult
 Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                        Stmt *First, FullExprArg Second, FullExprArg Third,
@@ -4269,48 +4318,10 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   if (!Limit)
     return StmtError();
 
-  // Check increment
-  // For dependent types since we can't get the actual type, we default to a
-  // 64bit signed type.
-  llvm::APSInt Stride(64, true);
-  // Otherwise, stride should be the same type as the control var. This only
-  // matters because of the computation we do with the value of the loop limit
-  // later.
-  if (!ControlVar->getType()->isDependentType())
-    Stride = llvm::APSInt(
-        Context.getTypeSize(ControlVar->getType()),
-        ControlVar->getType()->isUnsignedIntegerOrEnumerationType());
-
   Expr *StrideExpr = 0;
-  bool HasConstantIncrement = false;
-  SourceLocation IncrementRHSLoc;
-  if (!IsValidCilkForIncrement(*this, Increment, ControlVar,
-                               HasConstantIncrement, Stride, StrideExpr,
-                               IncrementRHSLoc))
+  if (!CheckCilkForIncrement(*this, Increment, Limit, ControlVar,
+                             ControlVarInit, CondDirection, StrideExpr))
     return StmtError();
-
-  // Check consistency between loop condition and increment only if the
-  // increment amount is known at compile-time.
-  if (HasConstantIncrement) {
-    if (!Stride) {
-      Diag(IncrementRHSLoc, diag::err_cilk_for_increment_zero);
-      return StmtError();
-    }
-
-    if ((CondDirection > 0 && Stride.isNegative()) ||
-        (CondDirection < 0 && Stride.isStrictlyPositive())) {
-      Diag(Increment->getExprLoc(), diag::err_cilk_for_increment_inconsistent)
-        << (CondDirection > 0);
-      Diag(Increment->getExprLoc(), diag::note_constant_stride)
-        << Stride.toString(10, true)
-        << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
-      return StmtError();
-    }
-
-    CheckForSignedUnsignedWraparounds(ControlVar, ControlVarInit, Limit,
-                                      *this, CondDirection, Stride,
-                                      StrideExpr);
-  }
 
   ExprResult LoopCount;
   if (!CurContext->isDependentContext()) {
