@@ -206,7 +206,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   // function's lexical scope.
   if (CGDebugInfo *DI = getDebugInfo()) {
     if (OnlySimpleReturnStmts)
-       DI->EmitLocation(Builder, LastStopPoint);
+      DI->EmitLocation(Builder, LastStopPoint);
     else
       DI->EmitLocation(Builder, EndLoc);
   }

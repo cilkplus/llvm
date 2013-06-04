@@ -1051,10 +1051,10 @@ void CodeGenModule::ConstructAttributeList(const CGFunctionInfo &FI,
   const ABIArgInfo &RetAI = FI.getReturnInfo();
   switch (RetAI.getKind()) {
   case ABIArgInfo::Extend:
-   if (RetTy->hasSignedIntegerRepresentation())
-     RetAttrs.addAttribute(llvm::Attribute::SExt);
-   else if (RetTy->hasUnsignedIntegerRepresentation())
-     RetAttrs.addAttribute(llvm::Attribute::ZExt);
+    if (RetTy->hasSignedIntegerRepresentation())
+      RetAttrs.addAttribute(llvm::Attribute::SExt);
+    else if (RetTy->hasUnsignedIntegerRepresentation())
+      RetAttrs.addAttribute(llvm::Attribute::ZExt);
     break;
   case ABIArgInfo::Direct:
   case ABIArgInfo::Ignore:
@@ -1668,8 +1668,10 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
       // If there is a dominating store to ReturnValue, we can elide
       // the load, zap the store, and usually zap the alloca.
       if (llvm::StoreInst *SI = findDominatingStoreToReturnValue(*this)) {
-        // Reuse the debug location from the store unless we're told not to.
-        if (EmitRetDbgLoc)
+        // Reuse the debug location from the store unless there is
+        // cleanup code to be emitted between the store and return
+        // instruction.
+        if (EmitRetDbgLoc && !AutoreleaseResult)
           RetDbgLoc = SI->getDebugLoc();
         // Get the stored value and nuke the now-dead store.
         RV = SI->getValueOperand();
