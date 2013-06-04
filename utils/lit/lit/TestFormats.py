@@ -54,6 +54,7 @@ class GoogleTest(object):
             else:
                 yield ''.join(nested_tests) + ln
 
+    # Note: path_in_suite should not include the executable name.
     def getTestsInExecutable(self, testSuite, path_in_suite, execpath,
                              litConfig, localConfig):
         if not execpath.endswith(self.test_suffix):
@@ -61,8 +62,8 @@ class GoogleTest(object):
         (dirname, basename) = os.path.split(execpath)
         # Discover the tests in this executable.
         for testname in self.getGTestTests(execpath, litConfig, localConfig):
-            testPath_in_suite = path_in_suite + (basename, testname)
-            yield Test.Test(testSuite, testPath_in_suite, localConfig)
+            testPath = path_in_suite + (basename, testname)
+            yield Test.Test(testSuite, testPath, localConfig)
 
     def getTestsInDirectory(self, testSuite, path_in_suite,
                             litConfig, localConfig):
@@ -73,17 +74,16 @@ class GoogleTest(object):
                 # Iterate over executables in a directory.
                 if not os.path.normcase(filename) in self.test_sub_dir:
                     continue
-                filepath_in_suite = path_in_suite + (filename, )
+                dirpath_in_suite = path_in_suite + (filename, )
                 for subfilename in os.listdir(filepath):
                     execpath = os.path.join(filepath, subfilename)
                     for test in self.getTestsInExecutable(
-                            testSuite, filepath_in_suite, execpath,
+                            testSuite, dirpath_in_suite, execpath,
                             litConfig, localConfig):
                       yield test
             elif ('.' in self.test_sub_dir):
-                filepath_in_suite = path_in_suite + (filename, )
                 for test in self.getTestsInExecutable(
-                        testSuite, filepath_in_suite, filepath,
+                        testSuite, path_in_suite, filepath,
                         litConfig, localConfig):
                     yield test
 

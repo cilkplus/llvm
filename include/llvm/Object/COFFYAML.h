@@ -36,10 +36,32 @@ inline SectionCharacteristics operator|(SectionCharacteristics a,
 // The structure of the yaml files is not an exact 1:1 match to COFF. In order
 // to use yaml::IO, we use these structures which are closer to the source.
 namespace COFFYAML {
+  /// In an object file this is just a binary blob. In an yaml file it is an hex
+  /// string. Using this avoid having to allocate temporary strings.
+  /// FIXME: not COFF specific.
+  class BinaryRef {
+    ArrayRef<uint8_t> Data;
+    bool isBinary;
+  public:
+    BinaryRef(ArrayRef<uint8_t> Data) : Data(Data), isBinary(true) {}
+    BinaryRef(StringRef Data)
+        : Data(reinterpret_cast<const uint8_t *>(Data.data()), Data.size()),
+          isBinary(false) {}
+    BinaryRef() : isBinary(false) {}
+    StringRef getHex() const {
+      assert(!isBinary);
+      return StringRef(reinterpret_cast<const char*>(Data.data()), Data.size());
+    }
+    ArrayRef<uint8_t> getBinary() const {
+      assert(isBinary);
+      return Data;
+    }
+  };
+
   struct Section {
     COFF::section Header;
     unsigned Alignment;
-    StringRef SectionData;
+    BinaryRef SectionData;
     std::vector<COFF::relocation> Relocations;
     StringRef Name;
     Section();
@@ -49,7 +71,7 @@ namespace COFFYAML {
     COFF::symbol Header;
     COFF::SymbolBaseType SimpleType;
     COFF::SymbolComplexType ComplexType;
-    StringRef AuxiliaryData;
+    BinaryRef AuxiliaryData;
     StringRef Name;
     Symbol();
   };
@@ -69,6 +91,12 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(COFF::relocation)
 
 namespace llvm {
 namespace yaml {
+
+template<>
+struct ScalarTraits<COFFYAML::BinaryRef> {
+  static void output(const COFFYAML::BinaryRef &, void*, llvm::raw_ostream &);
+  static StringRef input(StringRef, void*, COFFYAML::BinaryRef &);
+};
 
 template <>
 struct ScalarEnumerationTraits<COFF::MachineTypes> {

@@ -151,6 +151,7 @@ namespace {
     bool mustRelaxBranch(const TerminatorInfo &Terminator, uint64_t Address);
     bool mustRelaxABranch();
     void setWorstCaseAddresses();
+    void splitCompareBranch(MachineInstr *MI, unsigned CompareOpcode);
     void relaxBranch(TerminatorInfo &Terminator);
     void relaxBranches();
 
@@ -211,22 +212,34 @@ TerminatorInfo SystemZLongBranch::describeTerminator(MachineInstr *MI) {
   TerminatorInfo Terminator;
   Terminator.Size = TII->getInstSizeInBytes(MI);
   if (MI->isConditionalBranch() || MI->isUnconditionalBranch()) {
-    Terminator.Branch = MI;
     switch (MI->getOpcode()) {
     case SystemZ::J:
       // Relaxes to JG, which is 2 bytes longer.
-      Terminator.TargetBlock = MI->getOperand(0).getMBB()->getNumber();
       Terminator.ExtraRelaxSize = 2;
       break;
     case SystemZ::BRC:
-      // Relaxes to BRCL, which is 2 bytes longer.  Operand 0 is the
-      // condition code mask.
-      Terminator.TargetBlock = MI->getOperand(1).getMBB()->getNumber();
+      // Relaxes to BRCL, which is 2 bytes longer.
       Terminator.ExtraRelaxSize = 2;
+      break;
+    case SystemZ::CRJ:
+      // Relaxes to a CR/BRCL sequence, which is 2 bytes longer.
+      Terminator.ExtraRelaxSize = 2;
+      break;
+    case SystemZ::CGRJ:
+      // Relaxes to a CGR/BRCL sequence, which is 4 bytes longer.
+      Terminator.ExtraRelaxSize = 4;
+      break;
+    case SystemZ::CIJ:
+    case SystemZ::CGIJ:
+      // Relaxes to a C(G)HI/BRCL sequence, which is 4 bytes longer.
+      Terminator.ExtraRelaxSize = 4;
       break;
     default:
       llvm_unreachable("Unrecognized branch instruction");
     }
+    Terminator.Branch = MI;
+    Terminator.TargetBlock =
+      TII->getBranchInfo(MI).Target->getMBB()->getNumber();
   }
   return Terminator;
 }
@@ -320,6 +333,23 @@ void SystemZLongBranch::setWorstCaseAddresses() {
   }
 }
 
+// Split MI into the comparison given by CompareOpcode followed
+// a BRCL on the result.
+void SystemZLongBranch::splitCompareBranch(MachineInstr *MI,
+                                           unsigned CompareOpcode) {
+  MachineBasicBlock *MBB = MI->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  BuildMI(*MBB, MI, DL, TII->get(CompareOpcode))
+    .addOperand(MI->getOperand(0))
+    .addOperand(MI->getOperand(1));
+  MachineInstr *BRCL = BuildMI(*MBB, MI, DL, TII->get(SystemZ::BRCL))
+    .addOperand(MI->getOperand(2))
+    .addOperand(MI->getOperand(3));
+  // The implicit use of CC is a killing use.
+  BRCL->getOperand(2).setIsKill();
+  MI->eraseFromParent();
+}
+
 // Relax the branch described by Terminator.
 void SystemZLongBranch::relaxBranch(TerminatorInfo &Terminator) {
   MachineInstr *Branch = Terminator.Branch;
@@ -329,6 +359,18 @@ void SystemZLongBranch::relaxBranch(TerminatorInfo &Terminator) {
     break;
   case SystemZ::BRC:
     Branch->setDesc(TII->get(SystemZ::BRCL));
+    break;
+  case SystemZ::CRJ:
+    splitCompareBranch(Branch, SystemZ::CR);
+    break;
+  case SystemZ::CGRJ:
+    splitCompareBranch(Branch, SystemZ::CGR);
+    break;
+  case SystemZ::CIJ:
+    splitCompareBranch(Branch, SystemZ::CHI);
+    break;
+  case SystemZ::CGIJ:
+    splitCompareBranch(Branch, SystemZ::CGHI);
     break;
   default:
     llvm_unreachable("Unrecognized branch");

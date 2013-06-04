@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Object/COFFYaml.h"
+#include "llvm/Object/COFFYAML.h"
 
 #define ECase(X) IO.enumCase(Value, #X, COFF::X);
 namespace llvm {
@@ -227,6 +227,23 @@ struct NType {
   COFF::RelocationTypeX86 Type;
 };
 
+}
+
+void ScalarTraits<COFFYAML::BinaryRef>::output(const COFFYAML::BinaryRef &Val,
+                                               void *, llvm::raw_ostream &Out) {
+  ArrayRef<uint8_t> Data = Val.getBinary();
+  for (ArrayRef<uint8_t>::iterator I = Data.begin(), E = Data.end(); I != E;
+       ++I) {
+    uint8_t Byte = *I;
+    Out << hexdigit(Byte >> 4);
+    Out << hexdigit(Byte & 0xf);
+  }
+}
+
+StringRef ScalarTraits<COFFYAML::BinaryRef>::input(StringRef Scalar, void *,
+                                                   COFFYAML::BinaryRef &Val) {
+  Val = COFFYAML::BinaryRef(Scalar);
+  return StringRef();
 }
 
 void MappingTraits<COFF::relocation>::mapping(IO &IO, COFF::relocation &Rel) {

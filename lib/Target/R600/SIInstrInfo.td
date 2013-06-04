@@ -26,10 +26,6 @@ def HI32 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(N->getZExtValue() >> 32, MVT::i32);
 }]>;
 
-def SIbuffer_store : SDNode<"AMDGPUISD::BUFFER_STORE",
-                           SDTypeProfile<0, 3, [SDTCisPtrTy<1>, SDTCisInt<2>]>,
-                           [SDNPHasChain, SDNPMayStore]>;
-
 def IMM8bitDWORD : ImmLeaf <
   i32, [{
     return (Imm & ~0x3FC) == 0;
@@ -39,9 +35,12 @@ def IMM8bitDWORD : ImmLeaf <
   }]>
 >;
 
-def IMM12bit : ImmLeaf <
-  i16,
-  [{return isUInt<12>(Imm);}]
+def as_i16imm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getSExtValue(), MVT::i16);
+}]>;
+
+def IMM12bit : PatLeaf <(imm),
+  [{return isUInt<12>(N->getZExtValue());}]
 >;
 
 class InlineImm <ValueType vt> : PatLeaf <(vt imm), [{
@@ -327,16 +326,14 @@ multiclass MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> {
 
 class MUBUF_Store_Helper <bits<7> op, string name, RegisterClass vdataClass,
                          ValueType VT> :
-    MUBUF <op, (outs), (ins vdataClass:$vdata, SReg_128:$srsrc, VReg_64:$vaddr),
-          name#" $vdata, $srsrc + $vaddr",
-          [(SIbuffer_store (VT vdataClass:$vdata), (i128 SReg_128:$srsrc),
-                                                    (i64 VReg_64:$vaddr))]> {
+    MUBUF <op, (outs), (ins vdataClass:$vdata, SReg_128:$srsrc, VReg_64:$vaddr, i16imm:$offset),
+          name#" $vdata, $srsrc + $vaddr + $offset",
+         []> {
 
   let mayLoad = 0;
   let mayStore = 1;
 
   // Encoding
-  let offset = 0;
   let offen = 0;
   let idxen = 0;
   let glc = 0;

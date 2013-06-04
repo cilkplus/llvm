@@ -451,9 +451,6 @@ X86InstrInfo::X86InstrInfo(X86TargetMachine &tm)
     { X86::MOVZX32rr16,     X86::MOVZX32rm16,         0 },
     { X86::MOVZX32_NOREXrr8, X86::MOVZX32_NOREXrm8,   0 },
     { X86::MOVZX32rr8,      X86::MOVZX32rm8,          0 },
-    { X86::MOVZX64rr16,     X86::MOVZX64rm16,         0 },
-    { X86::MOVZX64rr32,     X86::MOVZX64rm32,         0 },
-    { X86::MOVZX64rr8,      X86::MOVZX64rm8,          0 },
     { X86::PABSBrr128,      X86::PABSBrm128,          TB_ALIGN_16 },
     { X86::PABSDrr128,      X86::PABSDrm128,          TB_ALIGN_16 },
     { X86::PABSWrr128,      X86::PABSWrm128,          TB_ALIGN_16 },
@@ -1381,7 +1378,6 @@ X86InstrInfo::isCoalescableExtInstr(const MachineInstr &MI,
   case X86::MOVSX32rr8:
   case X86::MOVZX32rr8:
   case X86::MOVSX64rr8:
-  case X86::MOVZX64rr8:
     if (!TM.getSubtarget<X86Subtarget>().is64Bit())
       // It's not always legal to reference the low 8-bit of the larger
       // register in 32-bit mode.
@@ -1389,9 +1385,7 @@ X86InstrInfo::isCoalescableExtInstr(const MachineInstr &MI,
   case X86::MOVSX32rr16:
   case X86::MOVZX32rr16:
   case X86::MOVSX64rr16:
-  case X86::MOVZX64rr16:
-  case X86::MOVSX64rr32:
-  case X86::MOVZX64rr32: {
+  case X86::MOVSX64rr32: {
     if (MI.getOperand(0).getSubReg() || MI.getOperand(1).getSubReg())
       // Be conservative.
       return false;
@@ -1404,17 +1398,14 @@ X86InstrInfo::isCoalescableExtInstr(const MachineInstr &MI,
     case X86::MOVSX32rr8:
     case X86::MOVZX32rr8:
     case X86::MOVSX64rr8:
-    case X86::MOVZX64rr8:
       SubIdx = X86::sub_8bit;
       break;
     case X86::MOVSX32rr16:
     case X86::MOVZX32rr16:
     case X86::MOVSX64rr16:
-    case X86::MOVZX64rr16:
       SubIdx = X86::sub_16bit;
       break;
     case X86::MOVSX64rr32:
-    case X86::MOVZX64rr32:
       SubIdx = X86::sub_32bit;
       break;
     }
@@ -1722,37 +1713,16 @@ void X86InstrInfo::reMaterialize(MachineBasicBlock &MBB,
                                  unsigned DestReg, unsigned SubIdx,
                                  const MachineInstr *Orig,
                                  const TargetRegisterInfo &TRI) const {
-  DebugLoc DL = Orig->getDebugLoc();
-
-  // MOV32r0 etc. are implemented with xor which clobbers condition code.
-  // Re-materialize them as movri instructions to avoid side effects.
-  bool Clone = true;
+  // MOV32r0 is implemented with a xor which clobbers condition code.
+  // Re-materialize it as movri instructions to avoid side effects.
   unsigned Opc = Orig->getOpcode();
-  switch (Opc) {
-  default: break;
-  case X86::MOV8r0:
-  case X86::MOV16r0:
-  case X86::MOV32r0:
-  case X86::MOV64r0: {
-    if (!isSafeToClobberEFLAGS(MBB, I)) {
-      switch (Opc) {
-      default: llvm_unreachable("Unreachable!");
-      case X86::MOV8r0:  Opc = X86::MOV8ri;  break;
-      case X86::MOV16r0: Opc = X86::MOV16ri; break;
-      case X86::MOV32r0: Opc = X86::MOV32ri; break;
-      case X86::MOV64r0: Opc = X86::MOV64ri64i32; break;
-      }
-      Clone = false;
-    }
-    break;
-  }
-  }
-
-  if (Clone) {
+  if (Opc == X86::MOV32r0 && !isSafeToClobberEFLAGS(MBB, I)) {
+    DebugLoc DL = Orig->getDebugLoc();
+    BuildMI(MBB, I, DL, get(X86::MOV32ri)).addOperand(Orig->getOperand(0))
+      .addImm(0);
+  } else {
     MachineInstr *MI = MBB.getParent()->CloneMachineInstr(Orig);
     MBB.insert(I, MI);
-  } else {
-    BuildMI(MBB, I, DL, get(Opc)).addOperand(Orig->getOperand(0)).addImm(0);
   }
 
   MachineInstr *NewMI = prior(I);
@@ -3373,10 +3343,7 @@ optimizeCompareInstr(MachineInstr *CmpInstr, unsigned SrcReg, unsigned SrcReg2,
       // MOV32r0 etc. are implemented with xor which clobbers condition code.
       // They are safe to move up, if the definition to EFLAGS is dead and
       // earlier instructions do not read or write EFLAGS.
-      if (!Movr0Inst && (Instr->getOpcode() == X86::MOV8r0 ||
-           Instr->getOpcode() == X86::MOV16r0 ||
-           Instr->getOpcode() == X86::MOV32r0 ||
-           Instr->getOpcode() == X86::MOV64r0) &&
+      if (!Movr0Inst && Instr->getOpcode() == X86::MOV32r0 &&
           Instr->registerDefIsDead(X86::EFLAGS, TRI)) {
         Movr0Inst = Instr;
         continue;
@@ -3769,18 +3736,11 @@ X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
     OpcodeTablePtr = &RegOp2MemOpTable2Addr;
     isTwoAddrFold = true;
   } else if (i == 0) { // If operand 0
-    unsigned Opc = 0;
-    switch (MI->getOpcode()) {
-    default: break;
-    case X86::MOV64r0: Opc = X86::MOV64mi32; break;
-    case X86::MOV32r0: Opc = X86::MOV32mi;   break;
-    case X86::MOV16r0: Opc = X86::MOV16mi;   break;
-    case X86::MOV8r0:  Opc = X86::MOV8mi;    break;
+    if (MI->getOpcode() == X86::MOV32r0) {
+      NewMI = MakeM0Inst(*this, X86::MOV32mi, MOs, MI);
+      if (NewMI)
+        return NewMI;
     }
-    if (Opc)
-       NewMI = MakeM0Inst(*this, Opc, MOs, MI);
-    if (NewMI)
-      return NewMI;
 
     OpcodeTablePtr = &RegOp2MemOpTable0;
   } else if (i == 1) {
@@ -4166,13 +4126,9 @@ bool X86InstrInfo::canFoldMemoryOperand(const MachineInstr *MI,
   if (isTwoAddr && NumOps >= 2 && OpNum < 2) {
     OpcodeTablePtr = &RegOp2MemOpTable2Addr;
   } else if (OpNum == 0) { // If operand 0
-    switch (Opc) {
-    case X86::MOV8r0:
-    case X86::MOV16r0:
-    case X86::MOV32r0:
-    case X86::MOV64r0: return true;
-    default: break;
-    }
+    if (Opc == X86::MOV32r0)
+      return true;
+
     OpcodeTablePtr = &RegOp2MemOpTable0;
   } else if (OpNum == 1) {
     OpcodeTablePtr = &RegOp2MemOpTable1;

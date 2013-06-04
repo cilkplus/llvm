@@ -32,12 +32,14 @@ CodeGenSubRegIndex::CodeGenSubRegIndex(Record *R, unsigned Enum)
   Name = R->getName();
   if (R->getValue("Namespace"))
     Namespace = R->getValueAsString("Namespace");
+  Size = R->getValueAsInt("Size");
+  Offset = R->getValueAsInt("Offset");
 }
 
 CodeGenSubRegIndex::CodeGenSubRegIndex(StringRef N, StringRef Nspace,
                                        unsigned Enum)
-  : TheDef(0), Name(N), Namespace(Nspace), EnumValue(Enum),
-    LaneMask(0), AllSuperRegsCovered(true) {
+  : TheDef(0), Name(N), Namespace(Nspace), Size(-1), Offset(-1),
+    EnumValue(Enum), LaneMask(0), AllSuperRegsCovered(true) {
 }
 
 std::string CodeGenSubRegIndex::getQualifiedName() const {
@@ -69,7 +71,7 @@ void CodeGenSubRegIndex::updateComponents(CodeGenRegBank &RegBank) {
   if (!Parts.empty()) {
     if (Parts.size() < 2)
       PrintFatalError(TheDef->getLoc(),
-                    "CoveredBySubRegs must have two or more entries");
+                      "CoveredBySubRegs must have two or more entries");
     SmallVector<CodeGenSubRegIndex*, 8> IdxParts;
     for (unsigned i = 0, e = Parts.size(); i != e; ++i)
       IdxParts.push_back(RegBank.getSubRegIdx(Parts[i]));
@@ -524,55 +526,6 @@ CodeGenRegister::addSubRegsPreOrder(SetVector<const CodeGenRegister*> &OSet,
   for (SubRegMap::const_iterator I = SubRegs.begin(), E = SubRegs.end();
        I != E; ++I)
     OSet.insert(I->second);
-}
-
-// Compute overlapping registers.
-//
-// The standard set is all super-registers and all sub-registers, but the
-// target description can add arbitrary overlapping registers via the 'Aliases'
-// field. This complicates things, but we can compute overlapping sets using
-// the following rules:
-//
-// 1. The relation overlap(A, B) is reflexive and symmetric but not transitive.
-//
-// 2. overlap(A, B) implies overlap(A, S) for all S in supers(B).
-//
-// Alternatively:
-//
-//    overlap(A, B) iff there exists:
-//    A' in { A, subregs(A) } and B' in { B, subregs(B) } such that:
-//    A' = B' or A' in aliases(B') or B' in aliases(A').
-//
-// Here subregs(A) is the full flattened sub-register set returned by
-// A.getSubRegs() while aliases(A) is simply the special 'Aliases' field in the
-// description of register A.
-//
-// This also implies that registers with a common sub-register are considered
-// overlapping. This can happen when forming register pairs:
-//
-//    P0 = (R0, R1)
-//    P1 = (R1, R2)
-//    P2 = (R2, R3)
-//
-// In this case, we will infer an overlap between P0 and P1 because of the
-// shared sub-register R1. There is no overlap between P0 and P2.
-//
-void CodeGenRegister::computeOverlaps(CodeGenRegister::Set &Overlaps,
-                                      const CodeGenRegBank &RegBank) const {
-  assert(!RegUnits.empty() && "Compute register units before overlaps.");
-
-  // Register units are assigned such that the overlapping registers are the
-  // super-registers of the root registers of the register units.
-  for (unsigned rui = 0, rue = RegUnits.size(); rui != rue; ++rui) {
-    const RegUnit &RU = RegBank.getRegUnit(RegUnits[rui]);
-    ArrayRef<const CodeGenRegister*> Roots = RU.getRoots();
-    for (unsigned ri = 0, re = Roots.size(); ri != re; ++ri) {
-      const CodeGenRegister *Root = Roots[ri];
-      Overlaps.insert(Root);
-      ArrayRef<const CodeGenRegister*> Supers = Root->getSuperRegs();
-      Overlaps.insert(Supers.begin(), Supers.end());
-    }
-  }
 }
 
 // Get the sum of this register's unit weights.
@@ -1139,11 +1092,24 @@ getConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex*, 8> &Parts) {
 
   // None exists, synthesize one.
   std::string Name = Parts.front()->getName();
+  // Determine whether all parts are contiguous.
+  bool isContinuous = true;
+  unsigned Size = Parts.front()->Size;
+  unsigned LastOffset = Parts.front()->Offset;
+  unsigned LastSize = Parts.front()->Size;
   for (unsigned i = 1, e = Parts.size(); i != e; ++i) {
     Name += '_';
     Name += Parts[i]->getName();
+    Size += Parts[i]->Size;
+    if (Parts[i]->Offset != (LastOffset + LastSize))
+      isContinuous = false;
+    LastOffset = Parts[i]->Offset;
+    LastSize = Parts[i]->Size;
   }
-  return Idx = createSubRegIndex(Name, Parts.front()->getNamespace());
+  Idx = createSubRegIndex(Name, Parts.front()->getNamespace());
+  Idx->Size = Size;
+  Idx->Offset = isContinuous ? Parts.front()->Offset : -1;
+  return Idx;
 }
 
 void CodeGenRegBank::computeComposites() {

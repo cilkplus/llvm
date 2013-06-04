@@ -733,7 +733,9 @@ bool RegisterCoalescer::removeCopyByCommutingDef(const CoalescerPair &CP,
 bool RegisterCoalescer::reMaterializeTrivialDef(CoalescerPair &CP,
                                                 MachineInstr *CopyMI) {
   unsigned SrcReg = CP.isFlipped() ? CP.getDstReg() : CP.getSrcReg();
+  unsigned SrcIdx = CP.isFlipped() ? CP.getDstIdx() : CP.getSrcIdx();
   unsigned DstReg = CP.isFlipped() ? CP.getSrcReg() : CP.getDstReg();
+  unsigned DstIdx = CP.isFlipped() ? CP.getSrcIdx() : CP.getDstIdx();
   if (TargetRegisterInfo::isPhysicalRegister(SrcReg))
     return false;
 
@@ -760,31 +762,41 @@ bool RegisterCoalescer::reMaterializeTrivialDef(CoalescerPair &CP,
     return false;
   // Only support subregister destinations when the def is read-undef.
   MachineOperand &DstOperand = CopyMI->getOperand(0);
+  unsigned CopyDstReg = DstOperand.getReg();
   if (DstOperand.getSubReg() && !DstOperand.isUndef())
     return false;
+
+  const TargetRegisterClass *DefRC = TII->getRegClass(MCID, 0, TRI, *MF);
   if (!DefMI->isImplicitDef()) {
-    // Make sure the copy destination register class fits the instruction
-    // definition register class. The mismatch can happen as a result of earlier
-    // extract_subreg, insert_subreg, subreg_to_reg coalescing.
-    const TargetRegisterClass *RC = TII->getRegClass(MCID, 0, TRI, *MF);
-    if (TargetRegisterInfo::isVirtualRegister(DstReg)) {
-      if (!MRI->constrainRegClass(DstReg, RC))
+    if (TargetRegisterInfo::isPhysicalRegister(DstReg)) {
+      unsigned NewDstReg = DstReg;
+
+      unsigned NewDstIdx = TRI->composeSubRegIndices(CP.getSrcIdx(),
+                                              DefMI->getOperand(0).getSubReg());
+      if (NewDstIdx)
+        NewDstReg = TRI->getSubReg(DstReg, NewDstIdx);
+
+      // Finally, make sure that the physical subregister that will be
+      // constructed later is permitted for the instruction.
+      if (!DefRC->contains(NewDstReg))
         return false;
-    } else if (!RC->contains(DstReg))
-      return false;
+    } else {
+      // Theoretically, some stack frame reference could exist. Just make sure
+      // it hasn't actually happened.
+      assert(TargetRegisterInfo::isVirtualRegister(DstReg) &&
+             "Only expect to deal with virtual or physical registers");
+    }
   }
 
   MachineBasicBlock *MBB = CopyMI->getParent();
   MachineBasicBlock::iterator MII =
     llvm::next(MachineBasicBlock::iterator(CopyMI));
-  TII->reMaterialize(*MBB, MII, DstReg, 0, DefMI, *TRI);
+  TII->reMaterialize(*MBB, MII, DstReg, SrcIdx, DefMI, *TRI);
   MachineInstr *NewMI = prior(MII);
 
-  // The original DefMI may have been a subregister def, but the full register
-  // class of its destination matches the destination of CopyMI, and CopyMI is
-  // either a full register def or is read-undef. Therefore we can clear the
-  // subregister index on the rematerialized instruction.
-  NewMI->getOperand(0).setSubReg(0);
+  LIS->ReplaceMachineInstrInMaps(CopyMI, NewMI);
+  CopyMI->eraseFromParent();
+  ErasedInstrs.insert(CopyMI);
 
   // NewMI may have dead implicit defs (E.g. EFLAGS for MOV<bits>r0 on X86).
   // We need to remember these so we can add intervals once we insert
@@ -800,6 +812,46 @@ bool RegisterCoalescer::reMaterializeTrivialDef(CoalescerPair &CP,
     }
   }
 
+  if (TargetRegisterInfo::isVirtualRegister(DstReg)) {
+    unsigned NewIdx = NewMI->getOperand(0).getSubReg();
+    const TargetRegisterClass *RCForInst;
+    if (NewIdx)
+      RCForInst = TRI->getMatchingSuperRegClass(MRI->getRegClass(DstReg), DefRC,
+                                                NewIdx);
+
+    if (MRI->constrainRegClass(DstReg, DefRC)) {
+      // The materialized instruction is quite capable of setting DstReg
+      // directly, but it may still have a now-trivial subregister index which
+      // we should clear.
+      NewMI->getOperand(0).setSubReg(0);
+    } else if (NewIdx && RCForInst) {
+      // The subreg index on NewMI is essential; we still have to make sure
+      // DstReg:idx is in a class that NewMI can use.
+      MRI->constrainRegClass(DstReg, RCForInst);
+    } else {
+      // DstReg is actually incompatible with NewMI, we have to move to a
+      // super-reg's class. This could come from a sequence like:
+      //     GR32 = MOV32r0
+      //     GR8 = COPY GR32:sub_8
+      MRI->setRegClass(DstReg, CP.getNewRC());
+      updateRegDefsUses(DstReg, DstReg, DstIdx);
+      NewMI->getOperand(0).setSubReg(
+          TRI->composeSubRegIndices(SrcIdx, DefMI->getOperand(0).getSubReg()));
+    }
+  } else if (NewMI->getOperand(0).getReg() != CopyDstReg) {
+    // The New instruction may be defining a sub-register of what's actually
+    // been asked for. If so it must implicitly define the whole thing.
+    assert(TargetRegisterInfo::isPhysicalRegister(DstReg) &&
+           "Only expect virtual or physical registers in remat");
+    NewMI->addOperand(MachineOperand::CreateReg(CopyDstReg,
+                                                true  /*IsDef*/,
+                                                true  /*IsImp*/,
+                                                false /*IsKill*/));
+  }
+
+  if (NewMI->getOperand(0).getSubReg())
+    NewMI->getOperand(0).setIsUndef();
+
   // CopyMI may have implicit operands, transfer them over to the newly
   // rematerialized instruction. And update implicit def interval valnos.
   for (unsigned i = CopyMI->getDesc().getNumOperands(),
@@ -814,8 +866,6 @@ bool RegisterCoalescer::reMaterializeTrivialDef(CoalescerPair &CP,
     }
   }
 
-  LIS->ReplaceMachineInstrInMaps(CopyMI, NewMI);
-
   SlotIndex NewMIIdx = LIS->getInstructionIndex(NewMI);
   for (unsigned i = 0, e = NewMIImplDefs.size(); i != e; ++i) {
     unsigned Reg = NewMIImplDefs[i];
@@ -824,8 +874,6 @@ bool RegisterCoalescer::reMaterializeTrivialDef(CoalescerPair &CP,
         LI->createDeadDef(NewMIIdx.getRegSlot(), LIS->getVNInfoAllocator());
   }
 
-  CopyMI->eraseFromParent();
-  ErasedInstrs.insert(CopyMI);
   DEBUG(dbgs() << "Remat: " << *NewMI);
   ++NumReMats;
 

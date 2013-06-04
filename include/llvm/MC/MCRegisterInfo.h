@@ -99,19 +99,15 @@ public:
   bool isAllocatable() const { return Allocatable; }
 };
 
-/// MCRegisterDesc - This record contains all of the information known about
-/// a particular register.  The Overlaps field contains a pointer to a zero
-/// terminated array of registers that this register aliases, starting with
-/// itself. This is needed for architectures like X86 which have AL alias AX
-/// alias EAX. The SubRegs field is a zero terminated array of registers that
-/// are sub-registers of the specific register, e.g. AL, AH are sub-registers of
-/// AX. The SuperRegs field is a zero terminated array of registers that are
-/// super-registers of the specific register, e.g. RAX, EAX, are super-registers
-/// of AX.
+/// MCRegisterDesc - This record contains information about a particular
+/// register.  The SubRegs field is a zero terminated array of registers that
+/// are sub-registers of the specific register, e.g. AL, AH are sub-registers
+/// of AX. The SuperRegs field is a zero terminated array of registers that are
+/// super-registers of the specific register, e.g. RAX, EAX, are
+/// super-registers of AX.
 ///
 struct MCRegisterDesc {
   uint32_t Name;      // Printable name for the reg (for debugging)
-  uint32_t Overlaps;  // Overlapping registers, described above
   uint32_t SubRegs;   // Sub-register set, described above
   uint32_t SuperRegs; // Super-register set, described above
 
@@ -148,6 +144,13 @@ public:
 
     bool operator<(DwarfLLVMRegPair RHS) const { return FromReg < RHS.FromReg; }
   };
+
+  /// SubRegCoveredBits - Emitted by tablegen: bit range covered by a subreg
+  /// index, -1 in any being invalid.
+  struct SubRegCoveredBits {
+    uint16_t Offset;
+    uint16_t Size;
+  };
 private:
   const MCRegisterDesc *Desc;                 // Pointer to the descriptor array
   unsigned NumRegs;                           // Number of entries in the array
@@ -161,6 +164,8 @@ private:
   const char *RegStrings;                     // Pointer to the string table.
   const uint16_t *SubRegIndices;              // Pointer to the subreg lookup
                                               // array.
+  const SubRegCoveredBits *SubRegIdxRanges;   // Pointer to the subreg covered
+                                              // bit ranges array.
   unsigned NumSubRegIndices;                  // Number of subreg indices.
   const uint16_t *RegEncodingTable;           // Pointer to array of register
                                               // encodings.
@@ -226,7 +231,6 @@ public:
   // internal list pointers.
   friend class MCSubRegIterator;
   friend class MCSuperRegIterator;
-  friend class MCRegAliasIterator;
   friend class MCRegUnitIterator;
   friend class MCRegUnitRootIterator;
 
@@ -241,6 +245,7 @@ public:
                           const char *Strings,
                           const uint16_t *SubIndices,
                           unsigned NumIndices,
+                          const SubRegCoveredBits *SubIdxRanges,
                           const uint16_t *RET) {
     Desc = D;
     NumRegs = NR;
@@ -254,6 +259,7 @@ public:
     NumRegUnits = NRU;
     SubRegIndices = SubIndices;
     NumSubRegIndices = NumIndices;
+    SubRegIdxRanges = SubIdxRanges;
     RegEncodingTable = RET;
   }
 
@@ -331,6 +337,16 @@ public:
   /// if the second register is a sub-register of the first. Return zero
   /// otherwise.
   unsigned getSubRegIndex(unsigned RegNo, unsigned SubRegNo) const;
+
+  /// \brief Get the size of the bit range covered by a sub-register index.
+  /// If the index isn't continuous, return the sum of the sizes of its parts.
+  /// If the index is used to access subregisters of different sizes, return -1.
+  unsigned getSubRegIdxSize(unsigned Idx) const;
+
+  /// \brief Get the offset of the bit range covered by a sub-register index.
+  /// If an Offset doesn't make sense (the index isn't continuous, or is used to
+  /// access sub-registers at different offsets), return -1.
+  unsigned getSubRegIdxOffset(unsigned Idx) const;
 
   /// \brief Return the human-readable symbolic target-specific name for the
   /// specified physical register.
@@ -437,22 +453,10 @@ public:
 /// If IncludeSelf is set, Reg itself is included in the list.
 class MCSuperRegIterator : public MCRegisterInfo::DiffListIterator {
 public:
+  MCSuperRegIterator() {}
   MCSuperRegIterator(unsigned Reg, const MCRegisterInfo *MCRI,
                      bool IncludeSelf = false) {
     init(Reg, MCRI->DiffLists + MCRI->get(Reg).SuperRegs);
-    // Initially, the iterator points to Reg itself.
-    if (!IncludeSelf)
-      ++*this;
-  }
-};
-
-/// MCRegAliasIterator enumerates all registers aliasing Reg.
-/// If IncludeSelf is set, Reg itself is included in the list.
-class MCRegAliasIterator : public MCRegisterInfo::DiffListIterator {
-public:
-  MCRegAliasIterator(unsigned Reg, const MCRegisterInfo *MCRI,
-                     bool IncludeSelf = false) {
-    init(Reg, MCRI->DiffLists + MCRI->get(Reg).Overlaps);
     // Initially, the iterator points to Reg itself.
     if (!IncludeSelf)
       ++*this;
@@ -486,6 +490,7 @@ class MCRegUnitIterator : public MCRegisterInfo::DiffListIterator {
 public:
   /// MCRegUnitIterator - Create an iterator that traverses the register units
   /// in Reg.
+  MCRegUnitIterator() {}
   MCRegUnitIterator(unsigned Reg, const MCRegisterInfo *MCRI) {
     assert(Reg && "Null register has no regunits");
     // Decode the RegUnits MCRegisterDesc field.
@@ -519,6 +524,7 @@ class MCRegUnitRootIterator {
   uint16_t Reg0;
   uint16_t Reg1;
 public:
+  MCRegUnitRootIterator() : Reg0(0), Reg1(0) {}
   MCRegUnitRootIterator(unsigned RegUnit, const MCRegisterInfo *MCRI) {
     assert(RegUnit < MCRI->getNumRegUnits() && "Invalid register unit");
     Reg0 = MCRI->RegUnitRoots[RegUnit][0];
@@ -540,6 +546,68 @@ public:
     assert(isValid() && "Cannot move off the end of the list.");
     Reg0 = Reg1;
     Reg1 = 0;
+  }
+};
+
+/// MCRegAliasIterator enumerates all registers aliasing Reg.  If IncludeSelf is
+/// set, Reg itself is included in the list.  This iterator does not guarantee
+/// any ordering or that entries are unique.
+class MCRegAliasIterator {
+private:
+  unsigned Reg;
+  const MCRegisterInfo *MCRI;
+  bool IncludeSelf;
+  
+  MCRegUnitIterator RI;
+  MCRegUnitRootIterator RRI;
+  MCSuperRegIterator SI;
+public:
+  MCRegAliasIterator(unsigned Reg, const MCRegisterInfo *MCRI,
+                     bool IncludeSelf)
+    : Reg(Reg), MCRI(MCRI), IncludeSelf(IncludeSelf) {
+
+    // Initialize the iterators.
+    for (RI = MCRegUnitIterator(Reg, MCRI); RI.isValid(); ++RI) {
+      for (RRI = MCRegUnitRootIterator(*RI, MCRI); RRI.isValid(); ++RRI) {
+        for (SI = MCSuperRegIterator(*RRI, MCRI, true); SI.isValid(); ++SI) {
+          if (!(!IncludeSelf && Reg == *SI))
+            return;
+        }
+      }
+    }
+  }
+
+  bool isValid() const {
+    return RI.isValid();
+  }
+  
+  unsigned operator*() const {
+    assert (SI.isValid() && "Cannot dereference an invalid iterator.");
+    return *SI;
+  }
+
+  void advance() {
+    // Assuming SI is valid.
+    ++SI;
+    if (SI.isValid()) return;
+
+    ++RRI;
+    if (RRI.isValid()) {
+      SI = MCSuperRegIterator(*RRI, MCRI, true);
+      return;
+    }
+
+    ++RI;
+    if (RI.isValid()) {
+      RRI = MCRegUnitRootIterator(*RI, MCRI);
+      SI = MCSuperRegIterator(*RRI, MCRI, true);
+    }
+  }
+
+  void operator++() {
+    assert(isValid() && "Cannot move off the end of the list.");
+    do advance();
+    while (!IncludeSelf && isValid() && *SI == Reg);
   }
 };
 

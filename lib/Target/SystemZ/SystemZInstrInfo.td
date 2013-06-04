@@ -58,25 +58,59 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, R1 = 15 in {
 // in their raw BRC/BRCL form, with the 4-bit condition-code mask being
 // the first operand.  It seems friendlier to use mnemonic forms like
 // JE and JLH when writing out the assembly though.
-multiclass CondBranches<Operand imm, string short, string long> {
+//
+// Using a custom inserter for BRC gives us a chance to convert the BRC
+// and a preceding compare into a single compare-and-branch instruction.
+// The inserter makes no change in cases where a separate branch really
+// is needed.
+multiclass CondBranches<Operand ccmask, string short, string long> {
   let isBranch = 1, isTerminator = 1, Uses = [CC] in {
-    def "" : InstRI<0xA74, (outs), (ins imm:$R1, brtarget16:$I2), short, []>;
-    def L  : InstRIL<0xC04, (outs), (ins imm:$R1, brtarget32:$I2), long, []>;
+    def "" : InstRI<0xA74, (outs), (ins ccmask:$R1, brtarget16:$I2), short, []>;
+    def L  : InstRIL<0xC04, (outs), (ins ccmask:$R1, brtarget32:$I2), long, []>;
   }
 }
-let isCodeGenOnly = 1 in
+let isCodeGenOnly = 1, usesCustomInserter = 1 in
   defm BRC : CondBranches<cond4, "j$R1\t$I2", "jg$R1\t$I2">;
 defm AsmBRC : CondBranches<uimm8zx4, "brc\t$R1, $I2", "brcl\t$R1, $I2">;
 
 def : Pat<(z_br_ccmask cond4:$cond, bb:$dst), (BRC cond4:$cond, bb:$dst)>;
 
-// Define AsmParser mnemonics for each condition code.
-multiclass CondExtendedMnemonic<bits<4> Cond, string name> {
-  let R1 = Cond in {
+// Fused compare-and-branch instructions.  As for normal branches,
+// we handle these instructions internally in their raw CRJ-like form,
+// but use assembly macros like CRJE when writing them out.
+//
+// These instructions do not use or clobber the condition codes.
+// We nevertheless pretend that they clobber CC, so that we can lower
+// them to separate comparisons and BRCLs if the branch ends up being
+// out of range.
+multiclass CompareBranches<Operand ccmask, string pos1, string pos2> {
+  let isBranch = 1, isTerminator = 1, Defs = [CC] in {
+    def RJ  : InstRIEb<0xEC76, (outs), (ins GR32:$R1, GR32:$R2, ccmask:$M3,
+                                            brtarget16:$RI4),
+                       "crj"##pos1##"\t$R1, $R2, "##pos2##"$RI4", []>;
+    def GRJ : InstRIEb<0xEC64, (outs), (ins GR64:$R1, GR64:$R2, ccmask:$M3,
+                                            brtarget16:$RI4),
+                       "cgrj"##pos1##"\t$R1, $R2, "##pos2##"$RI4", []>;
+    def IJ  : InstRIEc<0xEC7E, (outs), (ins GR32:$R1, imm32sx8:$I2, ccmask:$M3,
+                                            brtarget16:$RI4),
+                       "cij"##pos1##"\t$R1, $I2, "##pos2##"$RI4", []>;
+    def GIJ : InstRIEc<0xEC7C, (outs), (ins GR64:$R1, imm64sx8:$I2, ccmask:$M3,
+                                            brtarget16:$RI4),
+                       "cgij"##pos1##"\t$R1, $I2, "##pos2##"$RI4", []>;
+  }
+}
+let isCodeGenOnly = 1 in
+  defm C : CompareBranches<cond4, "$M3", "">;
+defm AsmC : CompareBranches<uimm8zx4, "", "$M3, ">;
+
+// Define AsmParser mnemonics for each general condition-code mask
+// (integer or floating-point)
+multiclass CondExtendedMnemonic<bits<4> ccmask, string name> {
+  let R1 = ccmask in {
     def "" : InstRI<0xA74, (outs), (ins brtarget16:$I2),
                     "j"##name##"\t$I2", []>;
     def L  : InstRIL<0xC04, (outs), (ins brtarget32:$I2),
-                    "jg"##name##"\t$I2", []>;
+                     "jg"##name##"\t$I2", []>;
   }
 }
 defm AsmJO   : CondExtendedMnemonic<1,  "o">;
@@ -93,6 +127,41 @@ defm AsmJNL  : CondExtendedMnemonic<11, "nl">;
 defm AsmJLE  : CondExtendedMnemonic<12, "le">;
 defm AsmJNH  : CondExtendedMnemonic<13, "nh">;
 defm AsmJNO  : CondExtendedMnemonic<14, "no">;
+
+// Define AsmParser mnemonics for each integer condition-code mask.
+// This is like the list above, except that condition 3 is not possible
+// and that the low bit of the mask is therefore always 0.  This means
+// that each condition has two names.  Conditions "o" and "no" are not used.
+//
+// We don't make one of the two names an alias of the other because
+// we need the custom parsing routines to select the correct register class.
+multiclass IntCondExtendedMnemonicA<bits<4> ccmask, string name> {
+  let M3 = ccmask in {
+    def CR  : InstRIEb<0xEC76, (outs), (ins GR32:$R1, GR32:$R2,
+                                            brtarget16:$RI4),
+                       "crj"##name##"\t$R1, $R2, $RI4", []>;
+    def CGR : InstRIEb<0xEC64, (outs), (ins GR64:$R1, GR64:$R2,
+                                            brtarget16:$RI4),
+                       "cgrj"##name##"\t$R1, $R2, $RI4", []>;
+    def CI  : InstRIEc<0xEC7E, (outs), (ins GR32:$R1, imm32sx8:$I2,
+                                            brtarget16:$RI4),
+                       "cij"##name##"\t$R1, $I2, $RI4", []>;
+    def CGI : InstRIEc<0xEC7C, (outs), (ins GR64:$R1, imm64sx8:$I2,
+                                            brtarget16:$RI4),
+                       "cgij"##name##"\t$R1, $I2, $RI4", []>;
+  }
+}
+multiclass IntCondExtendedMnemonic<bits<4> ccmask, string name1, string name2>
+  : IntCondExtendedMnemonicA<ccmask, name1> {
+  let isAsmParserOnly = 1 in
+    defm Alt : IntCondExtendedMnemonicA<ccmask, name2>;
+}
+defm AsmJH   : IntCondExtendedMnemonic<2,  "h",  "nle">;
+defm AsmJL   : IntCondExtendedMnemonic<4,  "l",  "nhe">;
+defm AsmJLH  : IntCondExtendedMnemonic<6,  "lh", "ne">;
+defm AsmJE   : IntCondExtendedMnemonic<8,  "e",  "nlh">;
+defm AsmJHE  : IntCondExtendedMnemonic<10, "he", "nl">;
+defm AsmJLE  : IntCondExtendedMnemonic<12, "le", "nh">;
 
 def Select32 : SelectWrapper<GR32>;
 def Select64 : SelectWrapper<GR64>;
@@ -313,13 +382,14 @@ let neverHasSideEffects = 1 in {
   def LRVGR : UnaryRRE<"lrvgr", 0xB90F, bswap, GR64, GR64>;
 }
 
-// Byte-swapping loads.
-def LRV  : UnaryRXY<"lrv",  0xE31E, loadu<bswap>, GR32>;
-def LRVG : UnaryRXY<"lrvg", 0xE30F, loadu<bswap>, GR64>;
+// Byte-swapping loads.  Unlike normal loads, these instructions are
+// allowed to access storage more than once.
+def LRV  : UnaryRXY<"lrv",  0xE31E, loadu<bswap, nonvolatile_load>, GR32>;
+def LRVG : UnaryRXY<"lrvg", 0xE30F, loadu<bswap, nonvolatile_load>, GR64>;
 
-// Byte-swapping stores.
-def STRV  : StoreRXY<"strv",  0xE33E, storeu<bswap>, GR32>;
-def STRVG : StoreRXY<"strvg", 0xE32F, storeu<bswap>, GR64>;
+// Likewise byte-swapping stores.
+def STRV  : StoreRXY<"strv",  0xE33E, storeu<bswap, nonvolatile_store>, GR32>;
+def STRVG : StoreRXY<"strvg", 0xE32F, storeu<bswap, nonvolatile_store>, GR64>;
 
 //===----------------------------------------------------------------------===//
 // Load address instructions

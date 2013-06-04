@@ -16,6 +16,7 @@
 #define LLVM_TARGET_SystemZ_ISELLOWERING_H
 
 #include "SystemZ.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
 
@@ -124,6 +125,7 @@ public:
     return true;
   }
   virtual bool isFPImmLegal(const APFloat &Imm, EVT VT) const;
+  virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const;
   virtual const char *getTargetNodeName(unsigned Opcode) const LLVM_OVERRIDE;
   virtual std::pair<unsigned, const TargetRegisterClass *>
     getRegForInlineAsmConstraint(const std::string &Constraint,
@@ -188,6 +190,15 @@ private:
   SDValue lowerATOMIC_CMP_SWAP(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
+
+  // If the last instruction before MBBI in MBB was some form of COMPARE,
+  // try to replace it with a COMPARE AND BRANCH just before MBBI.
+  // CCMask and Target are the BRC-like operands for the branch.
+  // Return true if the change was made.
+  bool convertPrevCompareToBranch(MachineBasicBlock *MBB,
+                                  MachineBasicBlock::iterator MBBI,
+                                  unsigned CCMask,
+                                  MachineBasicBlock *Target) const;
 
   // Implement EmitInstrWithCustomInserter for individual operation types.
   MachineBasicBlock *emitSelect(MachineInstr *MI,
