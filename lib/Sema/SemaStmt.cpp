@@ -3434,18 +3434,6 @@ static void GetReceiverType(ASTContext &Context, Stmt *S,
   }
 }
 
-static FieldDecl *CreateReceiverField(ASTContext& Context, RecordDecl *RD,
-                                      QualType ReceiverType) {
-  FieldDecl *Field = FieldDecl::Create(
-      Context, RD, SourceLocation(), SourceLocation(), 0, ReceiverType,
-      Context.getTrivialTypeSourceInfo(ReceiverType, SourceLocation()),
-      0, false, ICIS_NoInit);
-
-  Field->setImplicit(true);
-  Field->setAccess(AS_private);
-  return Field;
-}
-
 StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
   CapturedRegionScopeInfo *RSI = getCurCapturedRegion();
 
@@ -3455,30 +3443,6 @@ StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
 
   CapturedDecl *CD = RSI->TheCapturedDecl;
   RecordDecl *RD = RSI->TheRecordDecl;
-
-  // If the captured statement is a DeclStmt, then implicitly capture the
-  // receiver (and possibly receiver temporary).
-  if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(S)) {
-    VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
-    QualType ReceiverType;
-    QualType ReceiverTmpType;
-    GetReceiverType(Context, S, ReceiverType, ReceiverTmpType);
-    ReceiverType = Context.getPointerType(ReceiverType);
-
-    Captures.push_back(CapturedStmt::Capture(VD->getLocation(),
-                                             CapturedStmt::VCK_Receiver, VD));
-    CaptureInits.push_back(0); // Init created in codegen.
-    RD->addDecl(CreateReceiverField(Context, RD, ReceiverType));
-
-    if (!ReceiverTmpType.isNull()) {
-      ReceiverTmpType = Context.getPointerType(ReceiverTmpType);
-      Captures.push_back(CapturedStmt::Capture(VD->getLocation(),
-                                               CapturedStmt::VCK_ReceiverTmp,
-                                               VD));
-      CaptureInits.push_back(0); // Init created in codegen.
-      RD->addDecl(CreateReceiverField(Context, RD, ReceiverTmpType));
-    }
-  }
 
   CapturedStmt *Res = CapturedStmt::Create(getASTContext(), S,
                                            RSI->CapRegionKind, Captures,
@@ -3556,6 +3520,28 @@ public:
 
 } // anonymous namespace
 
+static void addReceiverParams(Sema &SemaRef, CapturedDecl *CD,
+                              QualType ReceiverType,
+                              QualType ReceiverTmpType) {
+  if (!ReceiverType.isNull()) {
+    DeclContext *DC = CapturedDecl::castToDeclContext(CD);
+    assert(CD->getNumParams() >= 2);
+    ImplicitParamDecl *Receiver
+      = ImplicitParamDecl::Create(SemaRef.getASTContext(), DC, SourceLocation(),
+                                  /*IdInfo*/0, ReceiverType);
+    DC->addDecl(Receiver);
+    CD->setParam(1, Receiver);
+    if (!ReceiverTmpType.isNull()) {
+      assert(CD->getNumParams() == 3);
+      ImplicitParamDecl *ReceiverTmp
+        = ImplicitParamDecl::Create(SemaRef.getASTContext(), DC,
+                                    SourceLocation(), /*IdInfo*/0, ReceiverTmpType);
+      DC->addDecl(ReceiverTmp);
+      CD->setParam(2, ReceiverTmp);
+    }
+  }
+}
+
 static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   if (!S)
     return S;
@@ -3565,8 +3551,26 @@ static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   if (!Helper.hasSpawn())
     return S;
 
+  unsigned NumParams = 1;
+  // If the captured statement is a DeclStmt, then pass the receiver (and
+  // possibly receiver temporary) to the captured statement.
+  VarDecl *Receiver = 0;
+  QualType ReceiverType;
+  QualType ReceiverTmpType;
+  if (DeclStmt *DS = dyn_cast_or_null<DeclStmt>(S)) {
+    NumParams = 2;
+    Receiver = cast<VarDecl>(DS->getSingleDecl());
+    ASTContext &Context = SemaRef.getASTContext();
+    GetReceiverType(Context, S, ReceiverType, ReceiverTmpType);
+    ReceiverType = Context.getPointerType(ReceiverType);
+    if (!ReceiverTmpType.isNull()) {
+      NumParams = 3;
+      ReceiverTmpType = Context.getPointerType(ReceiverTmpType);
+    }
+  }
+
   SemaRef.ActOnCapturedRegionStart(S->getLocStart(), /*Scope*/0, CR_CilkSpawn,
-                                   /*NumArgs*/1);
+                                   NumParams);
   CaptureBuilder Builder(SemaRef);
   Builder.TraverseStmt(S);
   StmtResult CS = SemaRef.ActOnCapturedRegionEnd(S);
@@ -3574,6 +3578,11 @@ static Stmt *tryCreateCilkSpawnStmt(Sema &SemaRef, Stmt *S) {
   CilkSpawnStmt *R = new (SemaRef.Context)
     CilkSpawnStmt(cast<CapturedStmt>(CS.release()));
 
+  if (Receiver) {
+    R->setReceiverDecl(Receiver);
+    addReceiverParams(SemaRef, R->getCapturedStmt()->getCapturedDecl(),
+                      ReceiverType, ReceiverTmpType);
+  }
   return R;
 }
 

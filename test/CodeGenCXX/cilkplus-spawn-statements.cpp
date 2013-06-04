@@ -444,7 +444,7 @@ void test() {
   // CHECK-CILK15:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK15: define internal void @[[Helper]]
-  // CHECK-CILK15-NOT: alloca float
+  // CHECK-CILK15-NOT: alloca float, align
   // CHECK-CILK15:   call float @
   // CHECK-CILK15-NEXT: store float %
   // CHECK-CILK15-NEXT: store float* %
@@ -456,7 +456,7 @@ void test() {
   // CHECK-CILK16:   call void @[[Helper:.*__cilk_spawn_helper[^)]*]](
   //
   // CHECK-CILK16: define internal void @[[Helper]]
-  // CHECK-CILK16-NOT: alloca float
+  // CHECK-CILK16-NOT: alloca float, align
   // CHECK-CILK16:   call float @
   // CHECK-CILK16-NEXT: store float %
   // CHECK-CILK16-NEXT: store float* %
@@ -642,7 +642,7 @@ void test_diamond_bind_temp() {
   // CHECK-CILK31:   call void @[[Destructor:.*spawn_variable_initialization.DiamondCD1Ev]](%{{.*}}* [[Tmp]])
   //
   // CHECK-CILK31: define internal void @[[Helper]]
-  // CHECK-CILK31-NOT: alloca %"struct.spawn_variable_initialization::Diamond
+  // CHECK-CILK31-NOT: alloca %"struct.spawn_variable_initialization::Diamond, align
   // CHECK-CILK31-NOT: call void @[[Destructor]]
   // CHECK-CILK31:   ret
 }

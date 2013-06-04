@@ -1927,9 +1927,7 @@ public:
   enum VariableCaptureKind {
     VCK_This,       // Capture 'this'
     VCK_ByRef,      // Capture by reference
-    VCK_ByCopy,     // Capture by copy
-    VCK_Receiver,   // Result of a Cilk spawn, when used as a DeclStmt
-    VCK_ReceiverTmp // Temporary for receiver when binding reference
+    VCK_ByCopy      // Capture by copy
   };
 
   /// \brief Describes the capture of either a variable or 'this'.
@@ -1956,10 +1954,6 @@ public:
       case VCK_ByRef:
       case VCK_ByCopy:
         assert(Var && "capturing by reference / copy must have a variable!");
-        break;
-      case VCK_Receiver:
-      case VCK_ReceiverTmp:
-        assert(Var && "receiver must have a variable!");
         break;
       }
     }
@@ -2146,15 +2140,19 @@ public:
 /// \brief Represents a _Cilk_spawn statement.
 class CilkSpawnStmt : public Stmt {
   CapturedStmt *TheCapturedStmt;
+  VarDecl *ReceiverDecl;
 public:
   explicit CilkSpawnStmt(CapturedStmt *S)
-    : Stmt(CilkSpawnStmtClass), TheCapturedStmt(S) { }
+    : Stmt(CilkSpawnStmtClass), TheCapturedStmt(S), ReceiverDecl(0) { }
 
   explicit CilkSpawnStmt(EmptyShell Empty)
     : Stmt(CilkSpawnStmtClass, Empty) { }
 
   CapturedStmt *getCapturedStmt() const { return TheCapturedStmt; }
   Stmt *getSubStmt() const { return TheCapturedStmt->getCapturedStmt(); }
+
+  VarDecl *getReceiverDecl() const { return ReceiverDecl; }
+  void setReceiverDecl(VarDecl *VD) { ReceiverDecl = VD; }
 
   SourceLocation getLocStart() const LLVM_READONLY {
     return TheCapturedStmt->getLocStart();

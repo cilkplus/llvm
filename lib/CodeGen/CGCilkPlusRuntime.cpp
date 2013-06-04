@@ -1124,28 +1124,26 @@ namespace clang {
 namespace CodeGen {
 
 /// \brief Emit code for a CilkSpawnStmt.
-void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
-                                      const CilkSpawnStmt &S) {
+void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
   // Get the __cilkrts_stack_frame
-  Value *SF = LookupStackFrame(CGF);
+  Value *SF = LookupStackFrame(*this);
   assert(SF && "null stack frame unexpected");
 
-  BasicBlock *Entry = CGF.createBasicBlock("cilk.spawn.savestate"),
-             *Body = CGF.createBasicBlock("cilk.spawn.helpercall"),
-             *Exit  = CGF.createBasicBlock("cilk.spawn.continuation");
+  BasicBlock *Entry = createBasicBlock("cilk.spawn.savestate"),
+             *Body  = createBasicBlock("cilk.spawn.helpercall"),
+             *Exit  = createBasicBlock("cilk.spawn.continuation");
 
-  CGF.EmitBlock(Entry);
-
+  EmitBlock(Entry);
   {
     CGBuilderTy B(Entry);
 
     // Need to save state before spawning
-    Value *C = EmitCilkSetJmp(B, SF, CGF);
+    Value *C = EmitCilkSetJmp(B, SF, *this);
     C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
     B.CreateCondBr(C, Body, Exit);
   }
 
-  CGF.EmitBlock(Body);
+  EmitBlock(Body);
   {
     // If this spawn initializes a variable, alloc this variable and
     // set it as the current receiver.
@@ -1157,24 +1155,87 @@ void CGCilkPlusRuntime::EmitCilkSpawn(CodeGenFunction &CGF,
       case SC_None:
       case SC_Auto:
       case SC_Register:
-        CGF.EmitCaptureReceiverDecl(*VD);
+        EmitCaptureReceiverDecl(*VD);
         break;
       default:
-        CGF.CGM.ErrorUnsupported(VD, "unexpected stroage class for a receiver");
+        CGM.ErrorUnsupported(VD, "unexpected stroage class for a receiver");
       }
     }
 
     // Emit call to the helper function
-    Function *Helper = CGF.EmitCapturedStmt(*S.getCapturedStmt(), CR_CilkSpawn);
+    Function *Helper = EmitSpawnCapturedStmt(*S.getCapturedStmt(), S.getReceiverDecl());
 
     // Register the spawn helper function.
-    registerSpawnFunction(CGF, Helper);
+    registerSpawnFunction(*this, Helper);
 
     // Set other attributes.
-    setHelperAttributes(CGF, S, Helper);
+    setHelperAttributes(*this, S, Helper);
   }
-  CGF.EmitBlock(Exit);
+  EmitBlock(Exit);
 }
+
+static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
+                                       llvm::Value *ReceiverTmp,
+                                       QualType InitTy) {
+  const RecordType *RT = InitTy->getBaseElementTypeUnsafe()->getAs<RecordType>();
+  if (!RT)
+    return;
+
+  CXXRecordDecl *ClassDecl = cast<CXXRecordDecl>(RT->getDecl());
+  if (ClassDecl->hasTrivialDestructor())
+    return;
+
+  // If required, push a cleanup to destroy the temporary.
+  const CXXDestructorDecl *Dtor = ClassDecl->getDestructor();
+  if (InitTy->isArrayType())
+    CGF.pushDestroy(NormalAndEHCleanup, ReceiverTmp,
+                    InitTy, &CodeGenFunction::destroyCXXObject,
+                    CGF.getLangOpts().Exceptions);
+  else
+    CGF.PushDestructorCleanup(Dtor, ReceiverTmp);
+}
+
+/// Generate an outlined function for the body of a CapturedStmt, store any
+/// captured variables into the captured struct, and call the outlined function.
+llvm::Function *
+CodeGenFunction::EmitSpawnCapturedStmt(const CapturedStmt &S, VarDecl *ReceiverDecl) {
+  const CapturedDecl *CD = S.getCapturedDecl();
+  const RecordDecl *RD = S.getCapturedRecordDecl();
+  assert(CD->hasBody() && "missing CapturedDecl body");
+
+  LValue CapStruct = InitCapturedStruct(S);
+  SmallVector<Value *, 3> Args;
+  Args.push_back(CapStruct.getAddress());
+
+  QualType ReceiverTmpType;
+  llvm::Value *ReceiverTmp = 0;
+  if (ReceiverDecl) {
+    assert(CD->getNumParams() >= 2 && "receiver parameter expected");
+    Args.push_back(GetAddrOfLocalVar(ReceiverDecl));
+    if (CD->getNumParams() == 3) {
+      ReceiverTmpType = CD->getParam(2)->getType()->getPointeeType();
+      ReceiverTmp = CreateMemTemp(ReceiverTmpType);
+      Args.push_back(ReceiverTmp);
+    }
+  }
+
+  // Emit the CapturedDecl
+  CodeGenFunction CGF(CGM, true);
+  CGF.CapturedStmtInfo = new CGCilkSpawnStmtInfo(S, ReceiverDecl);
+  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
+  delete CGF.CapturedStmtInfo;
+
+  // Emit call to the helper function.
+  EmitCallOrInvoke(F, Args);
+
+  // If this statement binds a temporary to a reference, then destroy the
+  // temporary at the end of the reference's lifetime.
+  if (ReceiverTmp)
+    maybeCleanupBoundTemporary(*this, ReceiverTmp, ReceiverTmpType);
+
+  return F;
+}
+
 
 /// \brief Emit a call to the __cilk_sync function.
 void CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF) {

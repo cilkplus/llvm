@@ -1798,55 +1798,21 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
   }
 }
 
-static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
-                                       llvm::Value *ReceiverTmp,
-                                       QualType InitTy) {
-  const RecordType *RT = InitTy->getBaseElementTypeUnsafe()->getAs<RecordType>();
-  if (!RT)
-    return;
-
-  CXXRecordDecl *ClassDecl = cast<CXXRecordDecl>(RT->getDecl());
-  if (ClassDecl->hasTrivialDestructor())
-    return;
-
-  // If required, push a cleanup to destroy the temporary.
-  const CXXDestructorDecl *Dtor = ClassDecl->getDestructor();
-  if (InitTy->isArrayType())
-    CGF.pushDestroy(NormalAndEHCleanup, ReceiverTmp,
-                    InitTy, &CodeGenFunction::destroyCXXObject,
-                    CGF.getLangOpts().Exceptions);
-  else
-    CGF.PushDestructorCleanup(Dtor, ReceiverTmp);
-}
-
-static LValue InitCapturedStruct(CodeGenFunction &CGF, const CapturedStmt &S,
-                                 llvm::Value *&ReceiverTmp, QualType &InitTy) {
+LValue CodeGenFunction::InitCapturedStruct(const CapturedStmt &S) {
   const RecordDecl *RD = S.getCapturedRecordDecl();
-  QualType RecordTy = CGF.getContext().getRecordType(RD);
+  QualType RecordTy = getContext().getRecordType(RD);
 
   // Initialize the captured struct.
-  LValue SlotLV = CGF.MakeNaturalAlignAddrLValue(
-                    CGF.CreateMemTemp(RecordTy, "agg.captured"), RecordTy);
+  LValue SlotLV = MakeNaturalAlignAddrLValue(
+                    CreateMemTemp(RecordTy, "agg.captured"), RecordTy);
 
   RecordDecl::field_iterator CurField = RD->field_begin();
   CapturedStmt::const_capture_iterator C = S.capture_begin();
   for (CapturedStmt::capture_init_iterator I = S.capture_init_begin(),
                                            E = S.capture_init_end();
        I != E; ++I, ++C, ++CurField) {
-    LValue LV = CGF.EmitLValueForFieldInitialization(SlotLV, *CurField);
-    switch (C->getCaptureKind()) {
-    case CapturedStmt::VCK_Receiver:
-      CGF.EmitStoreOfScalar(CGF.GetAddrOfLocalVar(C->getCapturedVar()), LV, true);
-      break;
-    case CapturedStmt::VCK_ReceiverTmp: {
-      InitTy = CurField->getType()->getPointeeType();
-      ReceiverTmp = CGF.CreateMemTemp(InitTy);
-      CGF.EmitStoreOfScalar(ReceiverTmp, LV, true);
-    } break;
-    default:
-      CGF.EmitInitializerForField(*CurField, LV, *I, ArrayRef<VarDecl *>());
-      break;
-    }
+    LValue LV = EmitLValueForFieldInitialization(SlotLV, *CurField);
+    EmitInitializerForField(*CurField, LV, *I, ArrayRef<VarDecl *>());
   }
 
   return SlotLV;
@@ -1860,31 +1826,16 @@ CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K) {
   const RecordDecl *RD = S.getCapturedRecordDecl();
   assert(CD->hasBody() && "missing CapturedDecl body");
 
-  QualType ReceiverTmpType;
-  llvm::Value *ReceiverTmp = 0;
-  LValue CapStruct = InitCapturedStruct(*this, S, ReceiverTmp, ReceiverTmpType);
+  LValue CapStruct = InitCapturedStruct(S);
 
   // Emit the CapturedDecl
   CodeGenFunction CGF(CGM, true);
-  switch (K) {
-  case CR_CilkSpawn:
-    CGF.CapturedStmtInfo = new CGCilkSpawnStmtInfo(S);
-    break;
-  case CR_CilkFor:
-    llvm_unreachable("should have gone through EmitCilkForStmt");
-  default:
-    CGF.CapturedStmtInfo = new CGCapturedStmtInfo(S);
-  }
+  CGF.CapturedStmtInfo = new CGCapturedStmtInfo(S);
   llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
   delete CGF.CapturedStmtInfo;
 
   // Emit call to the helper function.
   EmitCallOrInvoke(F, CapStruct.getAddress());
-
-  // If this statement binds a temporary to a reference, then destroy the
-  // temporary at the end of the reference's lifetime.
-  if (ReceiverTmp)
-    maybeCleanupBoundTemporary(*this, ReceiverTmp, ReceiverTmpType);
 
   return F;
 }
@@ -1924,23 +1875,6 @@ CodeGenFunction::GenerateCapturedStmtFunction(const CapturedDecl *CD,
   assert(DeclPtr && "missing context parameter for CapturedStmt");
   CapturedStmtInfo->setContextValue(Builder.CreateLoad(DeclPtr));
 
-  // If there is a receiver, it is stored in a field of the captured record.
-  if (FieldDecl *RecFD = CapturedStmtInfo->getReceiverFieldDecl()) {
-    assert(RecFD->getParent() == RD && "incorrect record decl for receiver");
-    QualType TagType = getContext().getTagDeclType(RD);
-
-    LValue LV = MakeNaturalAlignAddrLValue(
-      CapturedStmtInfo->getContextValue(), TagType);
-    CapturedStmtInfo->setReceiverAddr(
-      Builder.CreateLoad(EmitLValueForField(LV, RecFD).getAddress()));
-
-    // Similarly for the receiver temporary.
-    if (FieldDecl *RecTmpFD = CapturedStmtInfo->getReceiverTmpFieldDecl()) {
-      CapturedStmtInfo->setReceiverTmp(
-        Builder.CreateLoad(EmitLValueForField(LV, RecTmpFD).getAddress()));
-    }
-  }
-
   // If 'this' is captured, load it into CXXThisValue.
   if (CapturedStmtInfo->isCXXThisExprCaptured()) {
     FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
@@ -1955,11 +1889,6 @@ CodeGenFunction::GenerateCapturedStmtFunction(const CapturedDecl *CD,
   FinishFunction(CD->getBodyRBrace());
 
   return F;
-}
-
-void
-CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
-  CGM.getCilkPlusRuntime().EmitCilkSpawn(*this, S);
 }
 
 void
@@ -2009,10 +1938,7 @@ CodeGenFunction::EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize) {
     llvm::Value *LoopCount = EmitAnyExpr(LoopCountExpr).getScalarVal();
 
     // Initialize the captured struct.
-    QualType Ty;
-    llvm::Value *ReceiverTmp = 0;
-    LValue CapStruct = InitCapturedStruct(*this, *S.getBody(), ReceiverTmp, Ty);
-    assert(ReceiverTmp == 0 && Ty.isNull() && "_Cilk_for cannot have receiver");
+    LValue CapStruct = InitCapturedStruct(*S.getBody());
 
     llvm::LLVMContext &Ctx = CGM.getLLVMContext();
 
@@ -2209,6 +2135,18 @@ void CodeGenFunction::EmitCilkForHelperBody(const Stmt *S) {
 
 void
 CodeGenFunction::CGCilkSpawnStmtInfo::EmitBody(CodeGenFunction &CGF, Stmt *S) {
+  // If there is a receiver, save its address.
+  CGCilkSpawnStmtInfo *Info = cast<CGCilkSpawnStmtInfo>(CGF.CapturedStmtInfo);
+  if (Info->getReceiverDecl()) {
+    assert(CGF.CurFn->arg_size() >= 2);
+    llvm::Function::arg_iterator A = CGF.CurFn->arg_begin();
+    Info->setReceiverAddr(++A);
+
+    // Similarly, save the receiver temporary address if it exists.
+    if (++A != CGF.CurFn->arg_end())
+      Info->setReceiverTmp(A);
+  }
+
   CGF.CGM.getCilkPlusRuntime().EmitCilkHelperStackFrame(CGF);
   CGCapturedStmtInfo::EmitBody(CGF, S);
 }

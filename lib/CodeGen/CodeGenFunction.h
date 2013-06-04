@@ -622,31 +622,17 @@ public:
   public:
     explicit CGCapturedStmtInfo(const CapturedStmt &S,
                                 CapturedRegionKind K = CR_Default)
-      : Kind(K), ThisValue(0), CXXThisFieldDecl(0),
-        ReceiverDecl(0), ReceiverFieldDecl(0), ReceiverTmpFieldDecl(0),
-        ReceiverAddr(0), ReceiverTmp(0) { 
+      : Kind(K), ThisValue(0), CXXThisFieldDecl(0) {
 
       RecordDecl::field_iterator Field =
         S.getCapturedRecordDecl()->field_begin();
       for (CapturedStmt::const_capture_iterator I = S.capture_begin(),
                                                 E = S.capture_end();
            I != E; ++I, ++Field) {
-        switch (I->getCaptureKind()) {
-        case CapturedStmt::VCK_This:
+        if (I->capturesThis())
           CXXThisFieldDecl = *Field;
-          break;
-        case CapturedStmt::VCK_Receiver:
-          ReceiverDecl = I->getCapturedVar();
-          ReceiverFieldDecl = *Field;
-          break;
-        case CapturedStmt::VCK_ReceiverTmp:
-          assert(ReceiverDecl == I->getCapturedVar());
-          ReceiverTmpFieldDecl = *Field;
-          break;
-        default:
+        else
           CaptureFields[I->getCapturedVar()] = *Field;
-          break;
-        }
       }
     }
 
@@ -665,18 +651,6 @@ public:
 
     bool isCXXThisExprCaptured() const { return CXXThisFieldDecl != 0; }
     FieldDecl *getThisFieldDecl() const { return CXXThisFieldDecl; }
-    FieldDecl *getReceiverFieldDecl() const { return ReceiverFieldDecl; }
-    FieldDecl *getReceiverTmpFieldDecl() const { return ReceiverTmpFieldDecl; }
-
-    bool isReceiverDecl(const NamedDecl *V) const {
-      return V && V == ReceiverDecl;
-    }
-
-    llvm::Value *getReceiverAddr() const { return ReceiverAddr; }
-    void setReceiverAddr(llvm::Value *val) { ReceiverAddr = val; }
-
-    llvm::Value *getReceiverTmp() const { return ReceiverTmp; }
-    void setReceiverTmp(llvm::Value *val) { ReceiverTmp = val; }
 
     /// \brief Emit the captured statement body.
     virtual void EmitBody(CodeGenFunction &CGF, Stmt *S) {
@@ -685,6 +659,8 @@ public:
 
     /// \brief Get the name of the capture helper.
     virtual StringRef getHelperName() const { return "__captured_stmt"; }
+
+    static bool classof(const CGCapturedStmtInfo *) { return true; }
 
   private:
     /// \brief The kind of captured statement being generated.
@@ -699,21 +675,6 @@ public:
 
     /// \brief Captured 'this' type.
     FieldDecl *CXXThisFieldDecl;
-
-    /// \brief The receiver declariation.
-    VarDecl *ReceiverDecl;
-
-    /// \brief Captured field for the receiver.
-    FieldDecl *ReceiverFieldDecl;
-
-    /// \brief Captured field for the receiver temporary.
-    FieldDecl *ReceiverTmpFieldDecl;
-
-    /// \brief The address of the receiver.
-    llvm::Value *ReceiverAddr;
-
-    /// \brief The address of the receiver temporary.
-    llvm::Value *ReceiverTmp;
   };
   CGCapturedStmtInfo *CapturedStmtInfo;
 
@@ -739,6 +700,10 @@ public:
       return InnerLoopControlVarAddr;
     }
 
+    static bool classof(const CGCilkForStmtInfo *) { return true; }
+    static bool classof(const CGCapturedStmtInfo *I) {
+      return I->getKind() == CR_CilkFor;
+    }
   private:
     /// \brief
     const CilkForStmt &TheCilkFor;
@@ -750,11 +715,36 @@ public:
 
   class CGCilkSpawnStmtInfo : public CGCapturedStmtInfo {
   public:
-    explicit CGCilkSpawnStmtInfo(const CapturedStmt &S)
-      : CGCapturedStmtInfo(S, CR_CilkSpawn) { }
+    explicit CGCilkSpawnStmtInfo(const CapturedStmt &S, VarDecl *VD)
+      : CGCapturedStmtInfo(S, CR_CilkSpawn), ReceiverDecl(VD) { }
 
     virtual void EmitBody(CodeGenFunction &CGF, Stmt *S);
     virtual StringRef getHelperName() const { return "__cilk_spawn_helper"; }
+
+    VarDecl *getReceiverDecl() const { return ReceiverDecl; }
+    bool isReceiverDecl(const NamedDecl *V) const {
+      return V && V == ReceiverDecl;
+    }
+
+    llvm::Value *getReceiverAddr() const { return ReceiverAddr; }
+    void setReceiverAddr(llvm::Value *val) { ReceiverAddr = val; }
+
+    llvm::Value *getReceiverTmp() const { return ReceiverTmp; }
+    void setReceiverTmp(llvm::Value *val) { ReceiverTmp = val; }
+
+    static bool classof(const CGCilkSpawnStmtInfo *) { return true; }
+    static bool classof(const CGCapturedStmtInfo *I) {
+      return I->getKind() == CR_CilkSpawn;
+    }
+  private:
+    /// \brief The receiver declariation.
+    VarDecl *ReceiverDecl;
+
+    /// \brief The address of the receiver.
+    llvm::Value *ReceiverAddr;
+
+    /// \brief The address of the receiver temporary.
+    llvm::Value *ReceiverTmp;
   };
 
   /// \brief Information about implicit syncs used during code generation.
@@ -2357,11 +2347,13 @@ public:
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
 
+  LValue InitCapturedStruct(const CapturedStmt &S);
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedDecl *CD,
                                                const RecordDecl *RD);
 
   void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
+  llvm::Function *EmitSpawnCapturedStmt(const CapturedStmt &S, VarDecl *VD);
   void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);
   void EmitCilkForHelperBody(const Stmt *S);

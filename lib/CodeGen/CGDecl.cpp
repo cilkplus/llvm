@@ -823,12 +823,13 @@ void CodeGenFunction::EmitCaptureReceiverDecl(const VarDecl &D) {
 /// variable declaration with auto, register, or no storage class specifier.
 /// These turn into simple stack objects, or GlobalValues depending on target.
 void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
-  if (CapturedStmtInfo) {
+  if (CGCilkSpawnStmtInfo *Info =
+        dyn_cast_or_null<CGCilkSpawnStmtInfo>(CapturedStmtInfo)) {
     // Do initialization if this decl is inside the helper function.
-    if (CapturedStmtInfo->isReceiverDecl(&D)) {
+    if (Info->isReceiverDecl(&D)) {
       AutoVarEmission Emission(D);
       Emission.Alignment = getContext().getDeclAlign(&D);
-      Emission.Address = CapturedStmtInfo->getReceiverAddr();
+      Emission.Address = Info->getReceiverAddr();
       EmitAutoVarInit(Emission);
       return;
     }
