@@ -128,18 +128,19 @@ struct SIMDLinearItemParser {
     SourceLocation TemplateKWLoc;
     UnqualifiedId Name;
     if (P.getLangOpts().CPlusPlus &&
-        P.ParseOptionalCXXScopeSpecifier(SS, ParsedType(), false)) {
+        P.ParseOptionalCXXScopeSpecifier(SS, ParsedType(), false))
       return false;
-    }
-    else if (P.ParseUnqualifiedId(SS,
+
+    if (P.ParseUnqualifiedId(SS,
                              false, // EnteringContext
                              false, // AllowDestructorName
                              false, // AllowConstructorName,
-                             ParsedType(), TemplateKWLoc, Name)) {
+                             ParsedType(), TemplateKWLoc, Name))
       return false;
-    }
 
-    ExprResult D = S.ActOnPragmaSIMDLinearVariable(SS, S.GetNameFromUnqualifiedId(Name));
+    ExprResult D =
+      S.ActOnPragmaSIMDLinearVariable(SS, S.GetNameFromUnqualifiedId(Name));
+
     if (D.isInvalid())
       return false;
     Expr *DRExpr = D.get();
@@ -161,17 +162,32 @@ struct SIMDLinearItemParser {
 
 // Helper to parse an item of the [first, last]private clauses.
 struct SIMDPrivateItemParser {
+  SmallVector<Expr *, 2> Exprs;
+  Sema::SIMDPrivateKind Kind;
+  explicit SIMDPrivateItemParser(Sema::SIMDPrivateKind Kind) : Kind(Kind) { }
+
   bool Parse(Parser &P, Sema &S) {
     CXXScopeSpec SS;
     SourceLocation TemplateKWLoc;
     UnqualifiedId Name;
+    if (P.getLangOpts().CPlusPlus &&
+        P.ParseOptionalCXXScopeSpecifier(SS, ParsedType(), false))
+      return false;
+
     if (P.ParseUnqualifiedId(SS,
                              false, // EnteringContext
                              false, // AllowDestructorName
                              false, // AllowConstructorName,
-                             ParsedType(), TemplateKWLoc, Name)) {
+                             ParsedType(), TemplateKWLoc, Name))
       return false;
-    }
+
+    DeclarationNameInfo NameInfo = S.GetNameFromUnqualifiedId(Name);
+    ExprResult D = S.ActOnPragmaSIMDPrivateVariable(SS, NameInfo, Kind);
+
+    if (D.isInvalid())
+      return false;
+
+    Exprs.push_back(D.get());
     return true;
   }
 };
@@ -262,21 +278,27 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
     }
     else if (II->isStr("private")) {
       P.ConsumeToken();
-      SIMDPrivateItemParser ItemParser;
+      Sema::SIMDPrivateKind Kind = Sema::SIMD_Private;
+      SIMDPrivateItemParser ItemParser(Kind);
       if (!ParseSIMDList(P, S, ItemParser))
         return false;
+      A = S.ActOnPragmaSIMDPrivate(ILoc, ItemParser.Exprs, Kind);
     }
     else if (II->isStr("firstprivate")) {
       P.ConsumeToken();
-      SIMDPrivateItemParser ItemParser;
+      Sema::SIMDPrivateKind Kind = Sema::SIMD_FirstPrivate;
+      SIMDPrivateItemParser ItemParser(Kind);
       if (!ParseSIMDList(P, S, ItemParser))
         return false;
+      A = S.ActOnPragmaSIMDPrivate(ILoc, ItemParser.Exprs, Kind);
     }
     else if (II->isStr("lastprivate")) {
       P.ConsumeToken();
-      SIMDPrivateItemParser ItemParser;
+      Sema::SIMDPrivateKind Kind = Sema::SIMD_LastPrivate;
+      SIMDPrivateItemParser ItemParser(Kind);
       if (!ParseSIMDList(P, S, ItemParser))
         return false;
+      A = S.ActOnPragmaSIMDPrivate(ILoc, ItemParser.Exprs, Kind);
     }
     else if (II->isStr("reduction")) {
       P.ConsumeToken();

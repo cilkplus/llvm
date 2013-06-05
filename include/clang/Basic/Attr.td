@@ -1028,3 +1028,18 @@ def SIMDLinear : Attr {
   let Spellings = [Keyword<"linear">];
   let Args = [VariadicExprArgument<"Steps">];
 }
+
+def SIMDPrivate : Attr {
+  let Spellings = [Keyword<"private">];
+  let Args = [VariadicExprArgument<"Variables">];
+}
+
+def SIMDLastPrivate : Attr {
+  let Spellings = [Keyword<"lastprivate">];
+  let Args = [VariadicExprArgument<"Variables">];
+}
+
+def SIMDFirstPrivate : Attr {
+  let Spellings = [Keyword<"firstprivate">];
+  let Args = [VariadicExprArgument<"Variables">];
+}

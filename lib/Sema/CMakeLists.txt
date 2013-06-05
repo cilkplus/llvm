@@ -22,6 +22,7 @@ add_clang_library(clangSema
   SemaCXXScopeSpec.cpp
   SemaCast.cpp
   SemaChecking.cpp
+  SemaCilk.cpp
   SemaCodeComplete.cpp
   SemaConsumer.cpp
   SemaDecl.cpp

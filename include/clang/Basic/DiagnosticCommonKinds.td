@@ -88,17 +88,6 @@ def err_attribute_not_type_attr : Error<
 def err_enum_template : Error<"enumeration cannot be a template">;
 def err_pragma_simd_expected_for_loop : Error<
   "expected for statement following '#pragma simd'">;
-def err_pragma_simd_invalid_vectorlength_expr : Error<
-  "invalid vectorlength expression: "
-  "must be a%select{n integer constant| power of two}0">;
-def err_pragma_simd_invalid_linear_step : Error<
-  "invalid linear step: expected integral constant or variable reference">;
-def err_pragma_simd_invalid_linear_var : Error<
-  "invalid linear variable">;
-def warn_pragma_simd_linear_expr_zero : Warning<
-  "linear step is zero">, InGroup<SourceUsesCilkPlus>, DefaultIgnore;
-def err_pragma_simd_ambiguous_linear_var : Error<
-  "ambiguous linear clause, cannot be resolved.">;
 }
 
 // Sema && Lex

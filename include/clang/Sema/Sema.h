@@ -6774,6 +6774,19 @@ public:
                               FullExprArg Third,
                               SourceLocation RParenLoc,
                               Stmt *Body);
+  enum SIMDPrivateKind {
+    SIMD_Private,
+    SIMD_FirstPrivate,
+    SIMD_LastPrivate
+  };
+
+  ExprResult ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
+                                            DeclarationNameInfo Name,
+                                            SIMDPrivateKind Kind);
+
+  AttrResult ActOnPragmaSIMDPrivate(SourceLocation PrivateLoc,
+                                    llvm::MutableArrayRef<Expr *> Exprs,
+                                    SIMDPrivateKind Kind);
 
   /// AddAlignmentAttributesForRecord - Adds any needed alignment attributes to
   /// a the record decl, to handle '\#pragma pack' and '\#pragma options align'.

@@ -6405,6 +6405,36 @@ def err_pragma_simd_vectorlength_multiple : Error<
   "cannot specify multiple vectorlength%select{for|}0 clauses">;
 def note_pragma_simd_specified_here : Note<
   "vectorlength%select{for|}0 first specified here">;
+def err_pragma_simd_invalid_vectorlength_expr : Error<
+  "invalid vectorlength expression: "
+  "must be a%select{n integer constant| power of two}0">;
+def err_pragma_simd_invalid_linear_step : Error<
+  "invalid linear step: expected integral constant or variable reference">;
+def err_pragma_simd_invalid_linear_var : Error<
+  "invalid linear variable">;
+def warn_pragma_simd_linear_expr_zero : Warning<
+  "linear step is zero">, InGroup<SourceUsesCilkPlus>, DefaultIgnore;
+def err_pragma_simd_ambiguous_linear_var : Error<
+  "ambiguous linear clause, cannot be resolved.">;
+def err_pragma_simd_ambiguous_private_var : Error<
+  "ambiguous variable in %0 clause, cannot be resolved.">;
+def err_pragma_simd_invalid_private_var : Error<
+  "invalid variable in %0 clause">;
+def err_pragma_simd_var_incomplete : Error<
+  "variable in %0 clause shall not be incomplete: %1">;
+def err_pragma_simd_var_reference : Error<
+  "variable in %0 clause shall not be a reference: %1">;
+def err_pragma_simd_var_const: Error<
+  "variable in %0 clause shall not be const-qualified">;
+def note_pragma_simd_var: Note<
+  "variable declared here">;
+def err_pragma_simd_var_no_member: Error<
+  "variable in %0 clause has no "
+  "%select{default constructor|default copy constructor|copy assignment operator}1 "
+  "or it is deleted: %2">;
+def err_pragma_simd_var_ambiguous_member: Error<
+  "variable in %0 clause has ambiguous "
+  "%select{default constructors|default copy constructors|copy assignment operators}1: %2">;
 
 // Cilk Plus warnings and errors
 // cilk_spawn

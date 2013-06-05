@@ -183,6 +183,8 @@ void test_private()
   /* expected-error@+1 {{expected identifier}} */
   #pragma simd private(0)
   for (i = 0; i < 16; ++i) ;
+
+  int x, y, z;
   #pragma simd private(x)
   for (i = 0; i < 16; ++i) ;
   #pragma simd private(x, y)
@@ -214,6 +216,8 @@ void test_firstprivate()
   /* expected-error@+1 {{expected identifier}} */
   #pragma simd firstprivate(0)
   for (i = 0; i < 16; ++i) ;
+
+  int x, y, z;
   #pragma simd firstprivate(x)
   for (i = 0; i < 16; ++i) ;
   #pragma simd firstprivate(x, y)
@@ -245,6 +249,8 @@ void test_lastprivate()
   /* expected-error@+1 {{expected identifier}} */
   #pragma simd lastprivate(0)
   for (i = 0; i < 16; ++i) ;
+
+  int x, y, z;
   #pragma simd lastprivate(x)
   for (i = 0; i < 16; ++i) ;
   #pragma simd lastprivate(x, y)
