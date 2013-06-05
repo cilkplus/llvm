@@ -112,6 +112,9 @@ void condition() {
                           // expected-note {{loop end expression here}}
       10.2f < i;          // expected-note {{loop begin expression here}}
       i--);
+
+  unsigned int a = 1;
+  _Cilk_for (int i =0; i != 100; i+=a); // OK
 }
 
 extern int next();

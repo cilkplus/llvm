@@ -4136,26 +4136,30 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
 
   ExprResult LoopCount;
   if (Opcode == BO_NE) {
-    // Build "stride<0"
-    Expr *StrideLessThanZero =
-      BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
-                 ActOnIntegerConstant(CilkForLoc, 0).get()).get();
-    // Build "(stride<0)?-stride:stride"
-    ExprResult StrideCondExpr = ActOnConditionalOp(CilkForLoc, CilkForLoc,
-                                                   StrideLessThanZero,
-                                                   NegativeStride, StrideExpr);
+    if (StrideExpr->getType()->isSignedIntegerOrEnumerationType()) {
+      // Build "stride<0"
+      Expr *StrideLessThanZero =
+          BuildBinOp(getCurScope(), CilkForLoc, BO_LT, StrideExpr,
+                     ActOnIntegerConstant(CilkForLoc, 0).get()).get();
+      // Build "(stride<0)?-stride:stride"
+      ExprResult StrideCondExpr =
+          ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
+                             NegativeStride, StrideExpr);
+      // Build "-span"
+      Expr *NegativeSpan =
+          BuildUnaryOp(getCurScope(), CilkForLoc, UO_Minus, Span).get();
 
-    // Build "-span"
-    Expr *NegativeSpan =
-      BuildUnaryOp(getCurScope(), CilkForLoc, UO_Minus, Span).get();
+      // Updating span to be "(stride<0)?-span:span"
+      Span = ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
+                                NegativeSpan, Span).get();
+      // Build "span/(stride<0)?-stride:stride"
+      LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span,
+                             StrideCondExpr.get());
+    } else
+      // Unsigned, no need to compare - Build "span/stride"
+      LoopCount =
+          BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span, StrideExpr);
 
-    // Updating span to be "(stride<0)?-span:span"
-    Span = ActOnConditionalOp(CilkForLoc, CilkForLoc, StrideLessThanZero,
-                              NegativeSpan, Span).get();
-
-    // Build "span/(stride<0)?-stride:stride"
-    LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span,
-                           StrideCondExpr.get());
   } else {
     // Updating span to be "span+(stride-1)"
     Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span,
