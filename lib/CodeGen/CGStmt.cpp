@@ -2104,30 +2104,10 @@ void CodeGenFunction::EmitCilkForHelperBody(const Stmt *S) {
 
   // Emit the loop body.
   {
-    if (const CompoundStmt *CS = dyn_cast<CompoundStmt>(S)) {
-      // Inline EmitCompoundStmt so we can look into its cleanup scope.
-      PrettyStackTraceLoc CrashInfo(getContext().getSourceManager(),CS->getLBracLoc(),
-                                 "LLVM IR generation of compound statement ('{}')");
-
-      // Keep track of the current cleanup stack depth, including debug scopes.
-      LexicalScope Scope(*this, CS->getSourceRange());
-      EmitCompoundStmtWithoutScope(*CS, /*GetLast*/false, AggValueSlot::ignored());
-
-      // If there are cleanups, sync in each iteration. Unsafely cast to
-      // 'RunCleanupScope' to work around protected inheritance.
-      if (CD->isSpawning() &&
-          reinterpret_cast<RunCleanupsScope&>(Scope).requiresCleanups())
-        CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
-    } else {
-      // Create a separate cleanup scope for the body, in case it is not
-      // a compound statement.
-      RunCleanupsScope BodyScope(*this);
-      EmitStmt(S);
-
-      // If there are cleanups, sync in each iteration.
-      if (CD->isSpawning() && BodyScope.requiresCleanups())
-        CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
-    }
+    // Create a separate cleanup scope for the body, in case it is not
+    // a compound statement.
+    RunCleanupsScope BodyScope(*this);
+    EmitStmt(S);
   }
 
   // Emit the loop increment.
