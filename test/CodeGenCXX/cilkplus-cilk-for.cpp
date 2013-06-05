@@ -7,6 +7,7 @@
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK6 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK7 %s
 // RUN: FileCheck -input-file=%t -check-prefix=CHECK8 %s
+// RUN: FileCheck -input-file=%t -check-prefix=CHECK9 %s
 //
 struct Bool {
   ~Bool();
@@ -351,6 +352,32 @@ void test2() {
   // CHECK8: call void @__cilk_sync
   // CHECK8-NEXT: call void @__cilk_parent_epilogue
   // CHECK8-NEXT: ret void
+}
+
+void foo();
+struct A { A(); ~A(); };
+void test_sync_per_iter() {
+  anchor(14);
+  // If there is a destructor, we may need to sync in each iteration.
+  _Cilk_for (int i = 0; i < 100; ++i) {
+    A a;
+    _Cilk_spawn foo();
+  }
+  // CHECK9: call void @_ZN19cilk_for_exceptions6anchorEi(i32 14)
+  // CHECK9: call void @__cilkrts_cilk_for_32({{.*}} @[[Helper:__cilk_for_helper[0-9]*]]
+  //
+  // CHECK9: define internal void @[[Helper]](
+  //
+  //  Sync in the loop body
+  //
+  // CHECK9: call void @__cilk_sync
+  // CHECK9-NEXT: call {{.*}}@{{.*}}AD1Ev
+  // CHECK9-NEXT: br
+  //
+  //  Sync at the end of the helper
+  //
+  // CHECK9: call void @__cilk_sync
+  // CHECK9-NEXT: call void @__cilk_parent_epilogue
 }
 
 } // namespace
