@@ -81,8 +81,9 @@ void test_cilk_for_loop_count() {
   // CHECK1: call void @{{.*}}IntC1Ei
   // CHECK1: invoke i32 @{{.*}}IntcviEv
   // CHECK1: sub nsw i32
-  // CHECK1: add nsw i32
+  // CHECK1: sub nsw i32
   // CHECK1: sdiv i32
+  // CHECK1: add nsw i32
   // CHECK1: call void @{{.*}}IntD1Ev
   //
   // CHECK1: landingpad
@@ -105,8 +106,9 @@ void test_cilk_for_loop_count() {
   // CHECK1: call void @{{.*}}IntC1Ei
   // CHECK1: invoke i32 @{{.*}}IntcviEv
   // CHECK1: sub nsw i32
-  // CHECK1: add nsw i32
+  // CHECK1: sub nsw i32
   // CHECK1: sdiv i32
+  // CHECK1: add nsw i32
   // CHECK1: call void @{{.*}}IntD1Ev
   //
   // CHECK1: landingpad
@@ -121,20 +123,15 @@ void test_cilk_for_loop_count() {
   _Cilk_for (int i = 0; i < 10000; i += 1 + Int(2012)) { }
   // Loop count:
   // CHECK1: sub nsw i32
+  // CHECK1: sub nsw i32
   // CHECK1: call void @{{.*}}IntC1Ei
   // CHECK1: invoke i32 @{{.*}}IntcviEv
   // CHECK1: add nsw i32
-  // CHECK1: sub nsw i32
-  // CHECK1: add nsw i32
-  // CHECK1: invoke void @{{.*}}IntC1Ei
-  // CHECK1: invoke i32 @{{.*}}IntcviEv
-  // CHECK1: add nsw i32
   // CHECK1: sdiv i32
-  //
-  // CHECK1: landingpad
-  // CHECK1: landingpad
+  // CHECK1: add nsw i32
   // CHECK1: call void @{{.*}}IntD1Ev
   //
+  // CHECK1: landingpad
   // CHECK1: call void @{{.*}}IntD1Ev
 
   anchor(4);
@@ -150,8 +147,9 @@ void test_cilk_for_loop_count() {
   // Loop count:
   // CHECK1: call void @{{.*}}LongC1Ev
   // CHECK1: call i32 @{{.*}}mi4Longi
-  // CHECK1: add nsw i32
+  // CHECK1: sub nsw i32
   // CHECK1: sdiv i32
+  // CHECK1: add nsw i32
   // CHECK1: call void @{{.*}}LongD1Ev
 
   anchor(5);
@@ -169,8 +167,9 @@ void test_cilk_for_loop_count() {
   // Loop count:
   // CHECK1: invoke void @{{.*}}LongC1ERKS
   // CHECK1: call i32 @{{.*}}mi4Longi
-  // CHECK1: add nsw i32
+  // CHECK1: sub nsw i32
   // CHECK1: sdiv i32
+  // CHECK1: add nsw i32
   // CHECK1: call void @{{.*}}LongD1Ev
 }
 

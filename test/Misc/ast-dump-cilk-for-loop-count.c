@@ -43,12 +43,13 @@ void test_loop_count() {
   // CHECK-NEXT:   BinaryOperator
   // CHECK-NEXT:     BinaryOperator
   // CHECK-NEXT:       BinaryOperator
-  // CHECK-NEXT:         IntegerLiteral
-  // CHECK-NEXT:         ImplicitCastExpr
-  // CHECK-NEXT:           DeclRefExpr
-  // CHECK-NEXT:       ImplicitCastExpr
   // CHECK-NEXT:         BinaryOperator
   // CHECK-NEXT:           IntegerLiteral
+  // CHECK-NEXT:           ImplicitCastExpr
+  // CHECK-NEXT:             DeclRefExpr
+  // CHECK-NEXT:         ImplicitCastExpr
+  // CHECK-NEXT:           IntegerLiteral
+  // CHECK-NEXT:       ImplicitCastExpr
   // CHECK-NEXT:           IntegerLiteral
   // CHECK-NEXT:     ImplicitCastExpr
   // CHECK-NEXT:       IntegerLiteral
@@ -62,15 +63,9 @@ void test_loop_count() {
   // CHECK-NEXT:   BinaryOperator
   // CHECK-NEXT:     BinaryOperator
   // CHECK-NEXT:       BinaryOperator
-  // CHECK-NEXT:         BinaryOperator
-  // CHECK-NEXT:           IntegerLiteral
-  // CHECK-NEXT:           ImplicitCastExpr
-  // CHECK-NEXT:             DeclRefExpr
-  // CHECK-NEXT:         BinaryOperator
-  // CHECK-NEXT:           ImplicitCastExpr
-  // CHECK-NEXT:             IntegerLiteral
-  // CHECK-NEXT:           ImplicitCastExpr
-  // CHECK-NEXT:             IntegerLiteral
+  // CHECK-NEXT:         IntegerLiteral
+  // CHECK-NEXT:         ImplicitCastExpr
+  // CHECK-NEXT:           DeclRefExpr
   // CHECK-NEXT:       ImplicitCastExpr
   // CHECK-NEXT:         IntegerLiteral
   // CHECK-NEXT:     ImplicitCastExpr

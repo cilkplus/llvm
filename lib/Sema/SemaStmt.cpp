@@ -4109,13 +4109,13 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
   // ===========================================================================
   // |     Condition syntax             |       Loop count                     |
   // ===========================================================================
-  // | if var < limit or limit > var    | (span+(stride-1))/stride             |
+  // | if var < limit or limit > var    | (span-1)/stride + 1                  |
   // ---------------------------------------------------------------------------
-  // | if var > limit or limit < var    | (span+(stride-1))/-stride            |
+  // | if var > limit or limit < var    | (span-1)/-stride + 1                 |
   // ---------------------------------------------------------------------------
-  // | if var <= limit or limit >= var  | ((span+1)+(stride-1))/stride         |
+  // | if var <= limit or limit >= var  | span/stride + 1                      |
   // ---------------------------------------------------------------------------
-  // | if var >= limit or limit <= var  | ((span+1)+(stride-1))/-stride        |
+  // | if var >= limit or limit <= var  | span/-stride + 1                     |
   // ---------------------------------------------------------------------------
   // | if var != limit or limit != var  | if stride is positive,               |
   // |                                  |            span/stride               |
@@ -4128,11 +4128,6 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
   // Build "-stride"
   Expr *NegativeStride = BuildUnaryOp(getCurScope(), Increment->getExprLoc(),
                                       UO_Minus, StrideExpr).get();
-  // Build "stride-1"
-  Expr *StrideMinusOne =
-    BuildBinOp(getCurScope(), Increment->getExprLoc(), BO_Sub,
-               (Dir == 1) ? StrideExpr : NegativeStride,
-               ActOnIntegerConstant(CilkForLoc, 1).get()).get();
 
   ExprResult LoopCount;
   if (Opcode == BO_NE) {
@@ -4161,18 +4156,20 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
           BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span, StrideExpr);
 
   } else {
-    // Updating span to be "span+(stride-1)"
-    Span = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, Span,
-                      StrideMinusOne).get();
-    if (Opcode == BO_LE || Opcode == BO_GE)
-      // Updating span to be "span+1"
-      Span = CreateBuiltinBinOp(CilkForLoc, BO_Add, Span,
-                                ActOnIntegerConstant(CilkForLoc, 1).get()).get();
+    if (Opcode == BO_LT || Opcode == BO_GT)
+      // Updating span to be "span-1"
+      Span =
+          CreateBuiltinBinOp(CilkForLoc, BO_Sub, Span,
+                             ActOnIntegerConstant(CilkForLoc, 1).get()).get();
 
     // Build "span/stride" if Dir==1, otherwise "span/-stride"
     LoopCount =
       BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span,
                  (Dir == 1) ? StrideExpr : NegativeStride);
+
+    // Build "span/stride + 1"
+    LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, LoopCount.get(),
+                           ActOnIntegerConstant(CilkForLoc, 1).get());
   }
 
   QualType LoopCountExprType = LoopCount.get()->getType();
