@@ -168,6 +168,14 @@ void ops() {
     operator int() const;
   };
   _Cilk_for (int i = 0; i < 10; i += S()); // OK
+
+  struct A {
+    bool operator<(int);
+    A& operator+=(int);
+    A& operator+=(float);
+  };
+  int operator-(int, const A&);
+  _Cilk_for (A a; a < 100; a += 1); // OK
 }
 
 struct Bool {

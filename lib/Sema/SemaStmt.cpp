@@ -4495,9 +4495,14 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
       // if necessary.
       //
       Stride = Stride->IgnoreImpCastsAsWritten();
-      ExprResult StepExpr
-        = BuildBinOp(CurScope, VarLoc, BO_Mul, LowExpr.get(), Stride);
+
+      ExprResult StepExpr =
+          BuildBinOp(CurScope, VarLoc, BO_Mul, LowExpr.get(), Stride);
       assert(!StepExpr.isInvalid() && "invalid expression");
+      Expr *Step = StepExpr.get();
+      if (Stride->getType()->isIntegralType(Context))
+        Step = ImplicitCastExpr::Create(Context, Stride->getType(),
+                                        CK_IntegralCast, Step, 0, VK_LValue);
 
       VarDecl *InnerVar = FSI->InnerLoopControlVar;
       ExprResult InnerVarExpr
@@ -4507,9 +4512,9 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
       // The '+=' operation could fail if the loop control variable is of
       // class type and this may introduce cleanups.
       AdjustExpr = BuildBinOp(CurScope, VarLoc, BO_AddAssign,
-                              InnerVarExpr.get(), StepExpr.get());
+                              InnerVarExpr.get(), Step);
       if (!AdjustExpr.isInvalid()) {
-        ExprNeedsCleanups |= StepExpr.get()->hasNonTrivialCall(Context);
+        ExprNeedsCleanups |= Step->hasNonTrivialCall(Context);
         AdjustExpr = MaybeCreateExprWithCleanups(AdjustExpr);
       }
       // FIXME: Should mark the CilkForDecl as invalid?
