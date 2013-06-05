@@ -6768,6 +6768,11 @@ public:
   AttrResult ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
                                    ArrayRef<Expr *> Exprs);
 
+  AttrResult
+      ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
+                               SIMDReductionAttr::SIMDReductionKind Operator,
+                               llvm::MutableArrayRef<Expr *> VarList);
+
   StmtResult ActOnSIMDForStmt(SourceLocation ForLoc,
                               SourceLocation LParenLoc,
                               Stmt *First, FullExprArg Second,

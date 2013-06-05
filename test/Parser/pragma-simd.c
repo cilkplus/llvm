@@ -261,7 +261,7 @@ void test_lastprivate()
 
 void test_reduction()
 {
-  int i;
+  int i, x, y;
   /* expected-error@+1 {{expected reduction operator}} */
   #pragma simd reduction(
   for (i = 0; i < 16; ++i) ;
@@ -275,7 +275,7 @@ void test_reduction()
   #pragma simd reduction(:x)
   for (i = 0; i < 16; ++i) ;
   /* expected-error@+2 {{expected reduction operator}} */
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd reduction(,
   for (i = 0; i < 16; ++i) ;
   /* expected-error@+1 {{expected ':'}} */
@@ -284,16 +284,16 @@ void test_reduction()
   /* expected-error@+1 {{expected ':'}} */
   #pragma simd reduction(+)
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd reduction(+:
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd reduction(+:)
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd reduction(+:,y)
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd reduction(+:x,+:y)
   for (i = 0; i < 16; ++i) ;
   /* expected-error@+1 {{expected reduction operator}} */
@@ -315,6 +315,23 @@ void test_reduction()
   #pragma simd reduction(&&:x)
   for (i = 0; i < 16; ++i) ;
   #pragma simd reduction(||:x)
+  for (i = 0; i < 16; ++i) ;
+  #pragma simd reduction(max:x)
+  for (i = 0; i < 16; ++i) ;
+  #pragma simd reduction(min:x)
+  for (i = 0; i < 16; ++i) ;
+  /* expected-error@+1 {{expected reduction operator}} */
+  #pragma simd reduction(maxB:x)
+  for (i = 0; i < 16; ++i) ;
+  /* expected-error@+1 {{expected reduction operator}} */
+  #pragma simd reduction(minB:x)
+  for (i = 0; i < 16; ++i) ;
+  struct X { int x; };
+  struct X X;
+  #pragma simd reduction(+:X.x)
+  for (i = 0; i < 16; ++i) ;
+  /* expected-error@+1 {{invalid reduction variable}} */
+  #pragma simd reduction(+:x+x)
   for (i = 0; i < 16; ++i) ;
 }
 

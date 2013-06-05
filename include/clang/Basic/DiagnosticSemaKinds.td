@@ -6394,6 +6394,10 @@ def err_opencl_global_invalid_addr_space : Error<
 
 def err_pragma_simd_reuse_linear_var : Error<
   "linear variable shall not appear in multiple simd clauses">;
+def err_pragma_simd_reuse_reduction : Error<
+  "reduction variable shall not appear in multiple simd clauses">;
+def err_pragma_simd_reduction_maxmin : Error<
+  "reduction operator %select{min|max}0 requires arithmetic type">;
 def note_pragma_simd_used_here : Note<
   "first used here">;
 def err_pragma_simd_conflict_step : Error<
@@ -6426,6 +6430,8 @@ def err_pragma_simd_var_reference : Error<
   "variable in %0 clause shall not be a reference: %1">;
 def err_pragma_simd_var_const: Error<
   "variable in %0 clause shall not be const-qualified">;
+def err_pragma_simd_var_array: Error<
+  "variable in %0 clause shall not be of array type">;
 def note_pragma_simd_var: Note<
   "variable declared here">;
 def err_pragma_simd_var_no_member: Error<
@@ -6435,6 +6441,8 @@ def err_pragma_simd_var_no_member: Error<
 def err_pragma_simd_var_ambiguous_member: Error<
   "variable in %0 clause has ambiguous "
   "%select{default constructors|default copy constructors|copy assignment operators}1: %2">;
+def err_pragma_simd_reduction_invalid_var : Error<
+  "invalid reduction variable">;
 
 // Cilk Plus warnings and errors
 // cilk_spawn

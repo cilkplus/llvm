@@ -1043,3 +1043,23 @@ def SIMDFirstPrivate : Attr {
   let Spellings = [Keyword<"firstprivate">];
   let Args = [VariadicExprArgument<"Variables">];
 }
+
+def SIMDReduction : Attr {
+  let Spellings = [Keyword<"reduction">];
+  let Args = [VariadicExprArgument<"VarList">];
+  let AdditionalMembers = [{
+    enum SIMDReductionKind {
+      plus = tok::plus,
+      star = tok::star,
+      minus = tok::minus,
+      amp = tok::amp,
+      pipe = tok::pipe,
+      caret = tok::caret,
+      ampamp = tok::ampamp,
+      pipepipe = tok::pipepipe,
+      max,
+      min
+    };
+    SIMDReductionKind Operator;
+  }];
+}

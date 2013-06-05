@@ -314,3 +314,68 @@ AttrResult Sema::ActOnPragmaSIMDPrivate(SourceLocation ClauseLoc,
 
   return AttrResult(Clause);
 }
+
+AttrResult
+Sema::ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
+                               SIMDReductionAttr::SIMDReductionKind Operator,
+                               llvm::MutableArrayRef<Expr *> VarList) {
+  for (unsigned i = 0, e = VarList.size(); i < e; ++i) {
+    Expr *E = VarList[i];
+    const ValueDecl *VD = 0;
+    if (const DeclRefExpr *D = dyn_cast<DeclRefExpr>(E)) {
+      VD = D->getDecl();
+    } else if (const MemberExpr *M = dyn_cast<MemberExpr>(E)) {
+      VD = M->getMemberDecl();
+    } else {
+      Diag(E->getLocStart(), diag::err_pragma_simd_reduction_invalid_var);
+      return AttrError();
+    }
+
+    if (!VD)
+      return AttrError();
+
+    QualType QT = VD->getType().getCanonicalType();
+
+    // Arrays may not appear in a reduction clause
+    if (QT->isArrayType()) {
+      Diag(E->getLocStart(), diag::err_pragma_simd_var_array) << "reduction";
+      Diag(VD->getLocation(), diag::note_declared_at);
+      return AttrError();
+    }
+
+    // An item that appears in a reduction clause must not be const-qualified.
+    if (QT.isConstQualified()) {
+      Diag(E->getLocStart(), diag::err_pragma_simd_var_const) << "reduction";
+      Diag(VD->getLocation(), diag::note_declared_at);
+      return AttrError();
+    }
+
+    switch (Operator) {
+    case SIMDReductionAttr::max:
+    case SIMDReductionAttr::min:
+      // For a max or min reduction in C/C++, the type of the list item must
+      // be an allowed arithmetic data type
+      if (!QT->isArithmeticType()) {
+        Diag(E->getLocStart(), diag::err_pragma_simd_reduction_maxmin)
+            << (Operator == SIMDReductionAttr::max);
+        return AttrError();
+      }
+      break;
+    case SIMDReductionAttr::plus:
+    case SIMDReductionAttr::star:
+    case SIMDReductionAttr::minus:
+    case SIMDReductionAttr::amp:
+    case SIMDReductionAttr::pipe:
+    case SIMDReductionAttr::caret:
+    case SIMDReductionAttr::ampamp:
+    case SIMDReductionAttr::pipepipe:
+      break;
+    }
+  }
+
+  SIMDReductionAttr *ReductionAttr = ::new SIMDReductionAttr(
+      ReductionLoc, Context, VarList.data(), VarList.size());
+  ReductionAttr->Operator = Operator;
+
+  return AttrResult(ReductionAttr);
+}

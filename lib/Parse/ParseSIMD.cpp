@@ -139,8 +139,7 @@ struct SIMDLinearItemParser {
       return false;
 
     ExprResult D =
-      S.ActOnPragmaSIMDLinearVariable(SS, S.GetNameFromUnqualifiedId(Name));
-
+        S.ActOnPragmaSIMDLinearVariable(SS, S.GetNameFromUnqualifiedId(Name));
     if (D.isInvalid())
       return false;
     Expr *DRExpr = D.get();
@@ -195,6 +194,8 @@ struct SIMDPrivateItemParser {
 // Helper to parse an item of the reduction clause.
 struct SIMDReductionItemParser {
   bool ParsedOperator;
+  SIMDReductionAttr::SIMDReductionKind Operator;
+  SmallVector<Expr *, 8> VarExprs;
 
   SIMDReductionItemParser()
   : ParsedOperator(false) {
@@ -213,8 +214,22 @@ struct SIMDReductionItemParser {
       case tok::caret:
       case tok::ampamp:
       case tok::pipepipe:
+        Operator =
+            static_cast<SIMDReductionAttr::SIMDReductionKind>(Tok.getKind());
         P.ConsumeToken();
         break;
+      case tok::identifier: {
+        IdentifierInfo *II = Tok.getIdentifierInfo();
+        if (II->isStr("max"))
+          Operator = SIMDReductionAttr::max;
+        else if (II->isStr("min"))
+          Operator = SIMDReductionAttr::min;
+        else {
+          P.Diag(Tok, diag::err_simd_expected_reduction_operator);
+          return false;
+        }
+        P.ConsumeToken();
+      } break;
       default:
         P.Diag(Tok, diag::err_simd_expected_reduction_operator);
         return false;
@@ -227,16 +242,11 @@ struct SIMDReductionItemParser {
         return false;
       }
     }
-    CXXScopeSpec SS;
-    SourceLocation TemplateKWLoc;
-    UnqualifiedId Name;
-    if (P.ParseUnqualifiedId(SS,
-                             false, // EnteringContext
-                             false, // AllowDestructorName
-                             false, // AllowConstructorName,
-                             ParsedType(), TemplateKWLoc, Name)) {
+    ExprResult V = P.ParseConstantExpression();
+    if (V.isInvalid())
       return false;
-    }
+    VarExprs.push_back(V.release());
+
     return true;
   }
 };
@@ -305,15 +315,16 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
       SIMDReductionItemParser ItemParser;
       if (!ParseSIMDList(P, S, ItemParser))
         return false;
+      A = S.ActOnPragmaSIMDReduction(ILoc, ItemParser.Operator,
+                                     ItemParser.VarExprs);
     }
     else {
       P.Diag(Tok, diag::err_simd_invalid_clause);
       return false;
     }
 
-    if (A.isInvalid()) {
+    if (A.isInvalid())
       return false;
-    }
     AttrList.push_back(A.get());
   }
 

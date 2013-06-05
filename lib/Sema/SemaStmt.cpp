@@ -4872,10 +4872,10 @@ struct UsedDecl {
   // Attribute using this variable
   const Attr *Attribute;
   // Specific usage within that attribute
-  const DeclRefExpr *Usage;
+  const Expr *Usage;
 
-  UsedDecl(bool CanConflict, const Attr *Attribute, const DeclRefExpr *Usage)
-    : CanConflict(CanConflict), Attribute(Attribute), Usage(Usage) {};
+  UsedDecl(bool CanConflict, const Attr *Attribute, const Expr *Usage)
+      : CanConflict(CanConflict), Attribute(Attribute), Usage(Usage) {}
 };
 typedef llvm::SmallDenseMap<const ValueDecl *,
                             llvm::SmallVector<UsedDecl, 4> > DeclMapTy;
@@ -4892,6 +4892,20 @@ void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
     if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(SE)) {
       const ValueDecl *VD = D->getDecl();
       UsedDecls[VD].push_back(UsedDecl(true, LA, D));
+    }
+  }
+}
+
+void HandleSIMDReductionAttr(const Attr *A, DeclMapTy &UsedDecls) {
+  const SIMDReductionAttr *RA = static_cast<const SIMDReductionAttr *>(A);
+  for (Expr **i = RA->varList_begin(), **e = RA->varList_end(); i < e; ++i) {
+    const Expr *RE = *i;
+    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(RE)) {
+      const ValueDecl *VD = D->getDecl();
+      UsedDecls[VD].push_back(UsedDecl(false, A, D));
+    } else if (const MemberExpr *M = dyn_cast_or_null<MemberExpr>(RE)) {
+      const ValueDecl *VD = M->getMemberDecl();
+      UsedDecls[VD].push_back(UsedDecl(false, A, M));
     }
   }
 }
@@ -4913,19 +4927,25 @@ void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema *S) {
       case attr::SIMDLinear:
         if (First.CanConflict == Use.CanConflict)
           // Re-using linear variable in another simd clause
-          S->Diag(Use.Usage->getLocation(),
+          S->Diag(Use.Usage->getLocStart(),
                   diag::err_pragma_simd_reuse_linear_var)
               << Use.Usage->getSourceRange();
         else
-          S->Diag(Use.Usage->getLocation(), diag::err_pragma_simd_conflict_step)
+          S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_conflict_step)
               << !Use.CanConflict << Use.Usage->getSourceRange();
+        break;
+      case attr::SIMDReduction:
+        // Any number of reduction clauses can be specified on the directive,
+        // but a list item can appear only once in the reduction clauses for
+        // that directive.
+        S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_reduction)
+            << Use.Usage->getSourceRange();
         break;
       default:
         ;
       }
-      S->Diag(First.Usage->getLocation(), diag::note_pragma_simd_used_here)
-        << First.Attribute->getRange()
-        << First.Usage->getSourceRange();
+      S->Diag(First.Usage->getLocStart(), diag::note_pragma_simd_used_here)
+          << First.Attribute->getRange() << First.Usage->getSourceRange();
     }
   }
 }
@@ -4967,6 +4987,9 @@ StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
             << (PrevKind == attr::SIMDLength) << VectorLengthAttr->getRange();
       } else
         VectorLengthAttr = A;
+      break;
+    case attr::SIMDReduction:
+      HandleSIMDReductionAttr(A, UsedDecls);
       break;
     default:
       ;

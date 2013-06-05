@@ -73,7 +73,6 @@ void test_vectorlengthfor() {
   #pragma simd vectorlengthfor(void(int, int))
   for (i = 0; i < 10; ++i);
 
-
   struct Incomplete;
   #pragma simd vectorlengthfor(struct Incomplete) // expected-error {{cannot select vector length for incomplete type 'struct Incomplete'}}
   for (i = 0; i < 10; ++i);
@@ -85,6 +84,27 @@ void test_vectorlengthfor() {
 }
 
 struct A { int a; };
+
+void test_reduction() {
+  struct A A;
+  int a, i;
+  #pragma simd reduction(max:a)
+  for (i = 0; i < 10; ++i);
+  /* expected-error@+1 {{reduction operator max requires arithmetic type}} */
+  #pragma simd reduction(max:A)
+  for (i = 0; i < 10; ++i);
+  /* expected-error@+1 {{reduction operator min requires arithmetic type}} */
+  #pragma simd reduction(min:A)
+  for (i = 0; i < 10; ++i);
+  int arr[100]; // expected-note {{declared here}}
+  /* expected-error@+1 {{variable in reduction clause shall not be of array type}} */
+  #pragma simd reduction(+:arr)
+  for (i = 0; i < 10; ++i);
+  const int c = 10; // expected-note {{declared here}}
+  /* expected-error@+1 {{variable in reduction clause shall not be const-qualified}} */
+  #pragma simd reduction(+:c)
+  for (i = 0; i < 10; ++i);
+}
 
 void test_linear(int arr[]) {
   int i, j, k = 1;
@@ -277,6 +297,23 @@ void test_pragma_simd() {
   /* expected-error@+1 {{cannot specify multiple vectorlength clauses}} */
   #pragma simd vectorlength(4) vectorlength(8)
   for (int i = 0; i < 10; ++i) ;
+
+  struct A A;
+  /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
+  #pragma simd reduction(max:k) reduction(min:k) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
+  #pragma simd reduction(+:A.a) reduction(-:A.a) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
+  #pragma simd reduction(min:k) linear(k) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
+  #pragma simd linear(k) reduction(min:k) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
+  #pragma simd reduction(max:k,k) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
 }
 
 void test_condition() {
