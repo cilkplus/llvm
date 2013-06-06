@@ -559,8 +559,8 @@ private:
     // Constructor
     ControlVarUsageVisitor(Sema &S, DeclRefExpr *LCV, const ParentMap &P,
                            bool AddressOf)
-        : Error(false), Sema(S), CurLCV(LCV), LCVDecl(CurLCV->getDecl()),
-          PMap(P), AddressOf(AddressOf) {}
+        : Error(false), S(S), CurLCV(LCV), LCVDecl(CurLCV->getDecl()), PMap(P),
+          AddressOf(AddressOf) {}
 
     // Check if the type is a pointer/reference to const data. If not, emit
     // diagnostic
@@ -569,11 +569,11 @@ private:
       if ((Ty->isReferenceType() || (Ty->isPointerType() && AddressOf)) &&
           !Ty->getPointeeType().isConstQualified()) {
         if (!Param.empty())
-          Sema.Diag(Loc, DiagID) << Param;
+          S.Diag(Loc, DiagID) << Param;
         else
-          Sema.Diag(Loc, DiagID);
-        Sema.Diag(LCVDecl->getLocation(),
-                  diag::note_cilk_for_loop_control_var_declared_here);
+          S.Diag(Loc, DiagID);
+        S.Diag(LCVDecl->getLocation(),
+               diag::note_cilk_for_loop_control_var_declared_here);
       }
     }
 
@@ -581,13 +581,13 @@ private:
     // created
     bool VisitBinaryOperator(BinaryOperator *BO) {
       Expr *LHS =
-          BO->getLHS()->IgnoreImpCasts()->IgnoreParenNoopCasts(Sema.Context);
+          BO->getLHS()->IgnoreImpCasts()->IgnoreParenNoopCasts(S.Context);
       if (BO->isAssignmentOp()) {
         if (CurLCV == LHS) {
-          Sema.Diag(BO->getLocStart(),
-                    diag::err_cilk_for_loop_modifies_control_var);
-          Sema.Diag(LCVDecl->getLocation(),
-                    diag::note_cilk_for_loop_control_var_declared_here);
+          S.Diag(BO->getLocStart(),
+                 diag::err_cilk_for_loop_modifies_control_var);
+          S.Diag(LCVDecl->getLocation(),
+                 diag::note_cilk_for_loop_control_var_declared_here);
           Error = true;
         } else {
           CheckTypeAndDiagnose(BO->getType(), BO->getLocStart(),
@@ -633,10 +633,10 @@ private:
         if (Kind != CK_LValueToRValue &&
             !((Kind == CK_NoOp || Kind == CK_BitCast) &&
               PtrOrRefConstQualified)) {
-          Sema.Diag(CurLCV->getLocation(),
-                    diag::warn_cilk_for_loop_control_var_func);
-          Sema.Diag(LCVDecl->getLocation(),
-                    diag::note_cilk_for_loop_control_var_declared_here);
+          S.Diag(CurLCV->getLocation(),
+                 diag::warn_cilk_for_loop_control_var_func);
+          S.Diag(LCVDecl->getLocation(),
+                 diag::note_cilk_for_loop_control_var_declared_here);
         }
       } else {
         // If its not a cast expression, we need to check which parameter(s)
@@ -646,7 +646,7 @@ private:
         // will generate a false positive in the 'func(0)' function call
         for (unsigned i = 0, len = Call->getNumArgs(); i != len; ++i) {
           Expr *Arg = Call->getArg(i)->IgnoreImpCasts()
-              ->IgnoreParenNoopCasts(Sema.Context);
+              ->IgnoreParenNoopCasts(S.Context);
 
           // Remove the & from the argument so that we can compare the argument
           // with the LCV to see if they are the same
@@ -655,10 +655,10 @@ private:
               Arg = UO->getSubExpr();
           }
           if (Arg == CurLCV) {
-            Sema.Diag(CurLCV->getLocation(),
-                      diag::warn_cilk_for_loop_control_var_func);
-            Sema.Diag(LCVDecl->getLocation(),
-                      diag::note_cilk_for_loop_control_var_declared_here);
+            S.Diag(CurLCV->getLocation(),
+                   diag::warn_cilk_for_loop_control_var_func);
+            S.Diag(LCVDecl->getLocation(),
+                   diag::note_cilk_for_loop_control_var_declared_here);
           }
         }
       }
@@ -669,10 +669,9 @@ private:
     // Detect cases of ++/--.
     bool VisitUnaryOperator(UnaryOperator *UO) {
       if (UO->isIncrementDecrementOp()) {
-        Sema.Diag(UO->getLocStart(),
-                  diag::err_cilk_for_loop_modifies_control_var);
-        Sema.Diag(LCVDecl->getLocation(),
-                  diag::note_cilk_for_loop_control_var_declared_here);
+        S.Diag(UO->getLocStart(), diag::err_cilk_for_loop_modifies_control_var);
+        S.Diag(LCVDecl->getLocation(),
+               diag::note_cilk_for_loop_control_var_declared_here);
         Error = true;
       }
 
@@ -680,8 +679,8 @@ private:
     }
 
   private:
-    Sema &Sema;
-    DeclRefExpr *CurLCV;  // Reference to the current loop control var
+    Sema &S;
+    DeclRefExpr *CurLCV;      // Reference to the current loop control var
     const ValueDecl *LCVDecl; // The declaration of the current loop control var
     const ParentMap &PMap;
     bool AddressOf;
@@ -692,7 +691,7 @@ public:
 
   // Constructor
   CilkForControlVarVisitor(Sema &S, const ParentMap &PM, const VarDeclVec &LCVs)
-      : Error(false), Sema(S), PMap(PM), LoopControlVarsInScope(LCVs) {}
+      : Error(false), S(S), PMap(PM), LoopControlVarsInScope(LCVs) {}
 
   // Checks if the given DeclRefExpr is a reference to a loop control variable
   // in scope
@@ -728,7 +727,7 @@ public:
 
       // Use the usage visitor to analyze if the parent tries to modify the
       // loop control variable
-      ControlVarUsageVisitor V(Sema, DeclRef, PMap, AddressOf);
+      ControlVarUsageVisitor V(S, DeclRef, PMap, AddressOf);
       V.TraverseStmt(P);
       Error |= V.Error;
     }
@@ -736,7 +735,7 @@ public:
   }
 
 private:
-  Sema &Sema;
+  Sema &S;
   const ParentMap &PMap;
   const VarDeclVec &LoopControlVarsInScope;
 };
