@@ -167,7 +167,12 @@ static Function *createConditionalFunc(Function *Orig, bool &New,
   // Call
   {
     IRBuilder<> B(Call);
-    B.CreateCall(Orig, SF);
+    SmallVector<Value *, 2> Args;
+    for (Function::arg_iterator A = F->arg_begin(), E = F->arg_end();
+         A != E; ++A)
+      Args.push_back(&*A);
+
+    B.CreateCall(Orig, Args);
     B.CreateBr(Exit);
   }
 
@@ -252,7 +257,15 @@ bool CilkStackFrameLateInit::runOnFunction(Function &F) {
     Function *CondSync = createConditionalFunc(Callee, New);
     if (New)
       addSyncMD(CondSync);
-    B.CreateCall(CondSync, SF);
+
+    CallSite CS(*I);
+    SmallVector<Value *, 3> Args(CS.arg_begin(), CS.arg_end());
+    if (InvokeInst *Invoke = dyn_cast<InvokeInst>(CS.getInstruction()))
+      B.CreateInvoke(CondSync, Invoke->getNormalDest(),
+                     Invoke->getUnwindDest(), Args);
+    else
+      B.CreateCall(CondSync, Args);
+
     (*I)->eraseFromParent();
   }
 

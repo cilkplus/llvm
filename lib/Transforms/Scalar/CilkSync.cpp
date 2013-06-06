@@ -19,6 +19,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/PassSupport.h"
@@ -137,7 +138,7 @@ namespace {
     bool insertOrUpdateCilkCFG(Value *V, const Value *SF,
                                CilkCFGNode *Parent, CilkCFGNode *&NewNode);
 
-    const Value *getStackFrame(const CallInst *CilkFn) const;
+    const Value *getStackFrame(const CallSite &CilkFn) const;
     bool setStackFrame(const Function *F);
   };
 } // namespace
@@ -185,6 +186,14 @@ bool ElideCilkSync::runOnFunction(Function &F) {
     if (isSync(I) && (*SI)->SFInfo.In == StackFrame) {
       NumSyncsRemoved++;
       MadeChange = true;
+
+      // If we remove an invoke, replace the terminator instruction.
+      if (InvokeInst *Invoke = dyn_cast<InvokeInst>(I)) {
+        IRBuilder<> B(Invoke);
+        Instruction *Br = B.CreateBr(Invoke->getNormalDest());
+        I->replaceAllUsesWith(Br);
+      }
+
       I->eraseFromParent();
     }
     // Destroy Cilk-only CFG
@@ -372,10 +381,10 @@ bool ElideCilkSync::setStackFrame(const Function *F) {
     StackFrame = 0;
     for (Value::const_use_iterator UI = (*I)->use_begin(), UE = (*I)->use_end();
                                    UI != UE; ++UI) {
-      assert(isa<CallInst>(*UI) && "sync use not a call instruction");
-      const CallInst *CI = cast<CallInst>(*UI);
-      if (CI->getParent()->getParent() == F) {
-        const Value *CurStackFrame = getStackFrame(CI);
+      CallSite CS(const_cast<Value *>(cast<Value>(*UI)));
+      assert(CS && "sync use not a call or invoke instruction");
+      if (CS->getParent()->getParent() == F) {
+        const Value *CurStackFrame = getStackFrame(CS);
         assert((StackFrame == 0 || StackFrame == CurStackFrame) &&
                "More than one stack frame in the function");
         // Do not return immediately, continue to check if there are multiple
@@ -392,8 +401,7 @@ bool ElideCilkSync::setStackFrame(const Function *F) {
 }
 
 /// \brief Returns the stack frame argument passed to the call to CilkFn.
-const Value *ElideCilkSync::getStackFrame(const CallInst *CilkFn) const {
-  assert(CilkFn->getNumArgOperands() > 0 &&
-         "Cilk function must at least 1 argument");
-  return CilkFn->getArgOperand(0);
+const Value *ElideCilkSync::getStackFrame(const CallSite &CilkFn) const {
+  assert(CilkFn.arg_size() > 0 && "Cilk function must at least 1 argument");
+  return CilkFn.getArgument(0);
 }
