@@ -211,27 +211,6 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
       DI->EmitLocation(Builder, EndLoc);
   }
 
-  // Pop a Cilk spawn helper's catch scope.
-  if (getLangOpts().Exceptions && getLangOpts().CilkPlus) {
-    if (CapturedStmtInfo && CapturedStmtInfo->getKind() == CR_CilkSpawn) {
-      EHScopeStack::iterator Catch = EHStack.begin();
-      for (EHScopeStack::iterator End = EHStack.end(); Catch != End; ++Catch)
-        if (isa<EHCatchScope>(*Catch)) break;
-
-      assert(Catch != EHStack.end() && "missing catch scope");
-      PopCleanupBlocks(EHStack.stabilize(Catch));
-
-      // There should be exactly one catch scope on top of the stack from the
-      // spawn-helper function.
-      EHCatchScope &CatchScope = cast<EHCatchScope>(*Catch);
-      llvm::BasicBlock *CatchBB = CatchScope.getHandler(0).Block;
-      popCatchScope();
-      if (CatchScope.hasEHBranches())
-        CGM.getCilkPlusRuntime().EmitCilkHelperCatch(
-          CatchBB, *this);
-    }
-  }
-
   // Pop any cleanups that might have been associated with the
   // parameters.  Do this in whatever block we're currently in; it's
   // important to do this before we enter the return block or return
@@ -609,12 +588,9 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
   // be allocated and partially initialized before processing any parameters.
   if (getLangOpts().CilkPlus && D && D->isSpawning()) {
     CurCGCilkImplicitSyncInfo = CreateCilkImplicitSyncInfo(*this);
-    CGCilkPlusRuntime::CilkCleanupKind Kind
-      = CurCGCilkImplicitSyncInfo->needsImplicitSync() ?
-        CGCilkPlusRuntime::ImpSyncAndRelFrameCleanup :
-        CGCilkPlusRuntime::ReleaseFrameCleanup;
-
-    CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this, Kind);
+    CGM.getCilkPlusRuntime().EmitCilkParentStackFrame(*this);
+    if (CurCGCilkImplicitSyncInfo->needsImplicitSync())
+      CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
   }
 
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);

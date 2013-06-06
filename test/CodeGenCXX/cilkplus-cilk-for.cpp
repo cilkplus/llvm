@@ -214,16 +214,16 @@ void test_cilk_for_try_cilk_spawn() {
   // CHECK3: call void @__cilk_parent_prologue
   //
   // First implicit sync before entering the try-block
-  // CHECK3: call void @__cilk_sync
+  // CHECK3: invoke void @__cilk_sync
   //
   // CHECK3: invoke void @__cilk_spawn_helper
   //
   // Second implicit sync before existing the try-block, normal path
-  // CHECK3: call void @__cilk_sync
+  // CHECK3: invoke void @__cilk_sync
   //
   // Thrid implicit sync before existing the try-block, exception path
   // CHECK3: @__gxx_personality_v
-  // CHECK3: call void @__cilk_sync
+  // CHECK3: invoke void @__cilk_sync
   //
   // No implicit sync until the end of the cilk for helper function, normal or exception path
   // CHECK3: call void @__cilk_parent_epilogue
@@ -252,13 +252,12 @@ void test_cilk_for_catch_cilk_spawn() {
   //
   // An implicit sync is needed for the cilk for helper function, normal or exception path.
   //
-  // CHECK4: call void @__cilk_sync
-  // CHECK4-NEXT: call void @__cilk_parent_epilogue
+  // CHECK4: invoke void @__cilk_sync
+  // CHECK4: call void @__cilk_parent_epilogue
   // CHECK4-NEXT: ret void
   //
-  // CHECK4: call void @__cilk_sync
-  // CHECK4-NEXT: call void @__cilk_parent_epilogue
-  // CHECK4-NEXT: br
+  // CHECK4: invoke void @__cilk_sync
+  // CHECK4: call void @__cilk_parent_epilogue
 }
 
 template <typename T>
@@ -341,14 +340,8 @@ void test2() {
   // CHECK8: define internal void @[[Helper]](
   // CHECK8: call void @__cilk_parent_prologue
   //
-  // CHECK8: call void @__cilk_sync
-  // CHECK8-NEXT: call void @__cilk_parent_epilogue
-  // CHECK8-NEXT: br
-  //
-  // CHECK8-NOT: ret
-  //
-  // CHECK8: call void @__cilk_sync
-  // CHECK8-NEXT: call void @__cilk_parent_epilogue
+  // CHECK8: invoke void @__cilk_sync
+  // CHECK8: call void @__cilk_parent_epilogue
   // CHECK8-NEXT: ret void
 }
 

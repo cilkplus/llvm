@@ -422,13 +422,6 @@ llvm::Value *CodeGenFunction::getSelectorFromSlot() {
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E,
                                        bool KeepInsertionPoint) {
-  // Emit an implicit sync if necessary for a spawning function. This must occur
-  // before __cxa_allocate_exception, since the runtime requires
-  // std::uncaught_exception() to be false.
-  if (CurCGCilkImplicitSyncInfo &&
-      CurCGCilkImplicitSyncInfo->needsImplicitSync(E))
-    CGM.getCilkPlusRuntime().EmitCilkSync(*this);
-
   if (!E->getSubExpr()) {
     EmitNoreturnRuntimeCallOrInvoke(getReThrowFn(CGM),
                                     ArrayRef<llvm::Value*>());
@@ -585,21 +578,6 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 }
 
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
-  // Entering a new scope before we emit the try and catch blocks. An implicit
-  // sync will be emitted on exit, if necessary.
-  //
-  // try {
-  //   try-block;
-  // }  catch-blocks...
-  // } finally {
-  //   _Cilk_sync;
-  // }
-  //
-  RunCleanupsScope Scope(*this);
-  if (CurCGCilkImplicitSyncInfo &&
-      CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
-    CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
-
   EnterCXXTryStmt(S);
   {
     if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo) {
@@ -611,6 +589,12 @@ void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
       CGM.getCilkPlusRuntime().EmitCilkSync(*this);
     }
 
+    // Entering a new scope before we emit the try body. An implicit sync will
+    // be emitted on exiting the try (and before any catch blocks).
+    RunCleanupsScope Scope(*this);
+    if (CurCGCilkImplicitSyncInfo &&
+        CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
+      CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
     EmitStmt(S.getTryBlock());
   }
   ExitCXXTryStmt(S);
@@ -1326,10 +1310,6 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
 
     // Initialize the catch variable and set up the cleanups.
     BeginCatch(*this, C);
-
-    // Insert a special sync before the catch statement is processed.
-    if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo)
-      CGM.getCilkPlusRuntime().EmitCilkExceptingSync(*this);
 
     // Perform the body of the catch.
     EmitStmt(C->getHandlerBlock());

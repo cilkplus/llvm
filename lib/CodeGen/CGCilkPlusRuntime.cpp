@@ -480,32 +480,34 @@ static Function *Get__cilkrts_detach(CodeGenFunction &CGF) {
 ///
 /// It is equivalent to the following C code
 ///
-/// void __cilk_excepting_sync(struct __cilkrts_stack_frame *sf, void *Exn) {
+/// void __cilk_excepting_sync(struct __cilkrts_stack_frame *sf, void **ExnSlot) {
 ///   if (sf->flags & CILK_FRAME_UNSYNCHED) {
 ///     if (!CILK_SETJMP(sf->ctx)) {
+///       sf->except_data = *ExnSlot;
+///       sf->flags |= CILK_FRAME_EXCEPTING;
 ///       __cilkrts_sync(sf);
-///       sf->except_data = Exn /* Exception_Handler_Pointer */;
-///       sf->flags = sf.flags | CILK_FRAME_EXCEPTING;
-///     } else
-///       sf.flags = sf.flags & ~CILK_FRAME_EXCEPTING;
+///     }
+///     sf->flags &= ~CILK_FRAME_EXCEPTING;
+///     *ExnSlot = sf->except_data;
 ///   }
+///   ++sf->worker->pedigree.rank;
 /// }
 static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  typedef void (cilk_func_1)(__cilkrts_stack_frame *, void *);
+  typedef void (cilk_func_1)(__cilkrts_stack_frame *, void **);
   if (GetOrCreateFunction<cilk_func_1>("__cilk_excepting_sync", CGF, Fn))
     return Fn;
 
   LLVMContext &Ctx = CGF.getLLVMContext();
   assert((Fn->arg_size() == 2) && "unexpected function type");
   Value *SF = Fn->arg_begin();
-  Value *Exn = ++Fn->arg_begin();
+  Value *ExnSlot = ++Fn->arg_begin();
 
   BasicBlock *Entry = BasicBlock::Create(Ctx, "entry", Fn),
              *JumpTest = BasicBlock::Create(Ctx, "setjmp.test", Fn),
              *JumpIf = BasicBlock::Create(Ctx, "setjmp.if", Fn),
-             *JumpElse = BasicBlock::Create(Ctx, "setjmp.else", Fn),
+             *JumpCont = BasicBlock::Create(Ctx, "setjmp.cont", Fn),
              *Exit = BasicBlock::Create(Ctx, "exit", Fn);
 
   // Entry
@@ -529,46 +531,60 @@ static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
     // if (!CILK_SETJMP(sf.ctx))
     Value *C = EmitCilkSetJmp(B, SF, CGF);
     C = B.CreateICmpEQ(C, Constant::getNullValue(C->getType()));
-    B.CreateCondBr(C, JumpIf, JumpElse);
+    B.CreateCondBr(C, JumpIf, JumpCont);
   }
 
   // JumpIf
   {
     CGBuilderTy B(JumpIf);
 
-    // __cilkrts_sync(&sf);
-    B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
+    // sf->except_data = *ExnSlot;
+    StoreField(B, B.CreateLoad(ExnSlot), SF, StackFrameBuilder::except_data);
 
-    // sf->except_data = Exception_Handler_Pointer;
-    StoreField(B, Exn, SF, StackFrameBuilder::except_data);
-
-    // sf->flags = sf.flags | CILK_FRAME_EXCEPTING;
+    // sf->flags |= CILK_FRAME_EXCEPTING;
     Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
     Flags = B.CreateOr(Flags, ConstantInt::get(Flags->getType(),
                                                CILK_FRAME_EXCEPTING));
     StoreField(B, Flags, SF, StackFrameBuilder::flags);
-    B.CreateBr(Exit);
+
+    // __cilkrts_sync(&sf);
+    B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
+    B.CreateBr(JumpCont);
   }
 
-  // JumpElse
+  // JumpCont
   {
-    CGBuilderTy B(JumpElse);
+    CGBuilderTy B(JumpCont);
 
-    // sf->flags = sf.flags & ~CILK_FRAME_EXCEPTING;
+    // sf->flags &= ~CILK_FRAME_EXCEPTING;
     Value *Flags = LoadField(B, SF, StackFrameBuilder::flags);
     Flags = B.CreateAnd(Flags, ConstantInt::get(Flags->getType(),
                                                 ~CILK_FRAME_EXCEPTING));
     StoreField(B, Flags, SF, StackFrameBuilder::flags);
+
+    // Exn = sf->except_data;
+    B.CreateStore(LoadField(B, SF, StackFrameBuilder::except_data), ExnSlot);
     B.CreateBr(Exit);
   }
 
   // Exit
   {
     CGBuilderTy B(Exit);
+
+    // ++sf.worker->pedigree.rank;
+    Value *Rank = LoadField(B, SF, StackFrameBuilder::worker);
+    Rank = GEP(B, Rank, WorkerBuilder::pedigree);
+    Rank = GEP(B, Rank, PedigreeBuilder::rank);
+    B.CreateStore(B.CreateAdd(B.CreateLoad(Rank),
+                  ConstantInt::get(Rank->getType()->getPointerElementType(),
+                                   1)),
+                  Rank);
     B.CreateRetVoid();
   }
 
   Fn->addFnAttr(Attribute::AlwaysInline);
+  Fn->addFnAttr(Attribute::ReturnsTwice);
+  registerSyncFunction(CGF, Fn);
 
   return Fn;
 }
@@ -587,7 +603,7 @@ static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
 ///     SAVE_FLOAT_STATE(*sf);
 ///     if (!CILK_SETJMP(sf->ctx))
 ///       __cilkrts_sync(sf);
-///     if (sf->flags & CILK_FRAME_EXCEPTING)
+///     else if (sf->flags & CILK_FRAME_EXCEPTING)
 ///       __cilkrts_rethrow(sf);
 ///   }
 ///   ++sf->worker->pedigree.rank;
@@ -598,7 +614,9 @@ static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
 static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
   Function *Fn = 0;
 
-  if (GetOrCreateFunction<cilk_func>("__cilk_sync", CGF, Fn))
+  if (GetOrCreateFunction<cilk_func>("__cilk_sync", CGF, Fn,
+                                     Function::InternalLinkage,
+                                     /*doesNotThrow*/false))
     return Fn;
 
   // If we get here we need to add the function body
@@ -650,7 +668,7 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
 
     // __cilkrts_sync(&sf);
     B.CreateCall(CILKRTS_FUNC(sync, CGF), SF);
-    B.CreateBr(Excepting);
+    B.CreateBr(Exit);
   }
 
   // Excepting
@@ -1242,72 +1260,70 @@ void CGCilkPlusRuntime::EmitCilkSync(CodeGenFunction &CGF) {
   // Elide the sync if there is no stack frame initialized for this function.
   // This will happen if function only contains _Cilk_sync but no _Cilk_spawn.
   if (llvm::Value *SF = LookupStackFrame(CGF))
-    CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
-}
-
-/// \brief Emit a call to __cilk_excepting_sync function.
-void CGCilkPlusRuntime::EmitCilkExceptingSync(CodeGenFunction &CGF) {
-  if (llvm::Value *SF = LookupStackFrame(CGF)) {
-    llvm::Value *Exn = CGF.getExceptionFromSlot();
-    assert(Exn && "null exception handler pointer");
-    CGF.Builder.CreateCall2(GetCilkExceptingSyncFn(CGF), SF, Exn);
-  }
+    CGF.EmitCallOrInvoke(GetCilkSyncFn(CGF), SF);
 }
 
 namespace {
-  struct CallFunctionCleanup : EHScopeStack::Cleanup {
-    llvm::Value *F;
+/// \brief Cleanup for a spawn helper stack frame.
+/// #if exception
+///   sf.flags = sf.flags | CILK_FRAME_EXCEPTING;
+///   sf.except_data = Exn;
+/// #endif
+///   __cilk_helper_epilogue(sf);
+class SpawnHelperStackFrameCleanup : public EHScopeStack::Cleanup {
+  llvm::Value *SF;
+public:
+  SpawnHelperStackFrameCleanup(llvm::Value *SF) : SF(SF) { }
+  void Emit(CodeGenFunction &CGF, Flags F) {
+    if (F.isForEHCleanup()) {
+      llvm::Value *Exn = CGF.getExceptionFromSlot();
 
-    explicit CallFunctionCleanup(llvm::Value *F)
-      : F(F) {}
-
-    void Emit(CodeGenFunction &CGF, Flags flags) {
-      CGF.Builder.CreateCall(F);
+      // sf->flags |=CILK_FRAME_EXCEPTING;
+      llvm::Value *Flags = LoadField(CGF.Builder, SF, StackFrameBuilder::flags);
+      Flags = CGF.Builder.CreateOr(Flags, ConstantInt::get(Flags->getType(),
+                                                           CILK_FRAME_EXCEPTING));
+      StoreField(CGF.Builder, Flags, SF, StackFrameBuilder::flags);
+      // sf->except_data = Exn;
+      StoreField(CGF.Builder, Exn, SF, StackFrameBuilder::except_data);
     }
-  };
 
-  struct CilkSpawnParentCleanup : EHScopeStack::Cleanup {
-    llvm::Value *SF;
-    unsigned CleanupKind;
+    // __cilk_helper_epilogue(sf);
+    CGF.Builder.CreateCall(GetCilkHelperEpilogue(CGF), SF);
+  }
+};
 
-    CilkSpawnParentCleanup(llvm::Value *SF, unsigned K)
-      : SF(SF), CleanupKind(K) {}
+/// \brief Cleanup for a spawn parent stack frame.
+///   __cilk_parent_epilogue(sf);
+class SpawnParentStackFrameCleanup : public EHScopeStack::Cleanup {
+  llvm::Value *SF;
+public:
+  SpawnParentStackFrameCleanup(llvm::Value *SF) : SF(SF) { }
+  void Emit(CodeGenFunction &CGF, Flags F) {
+    CGF.Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
+  }
+};
 
-    void Emit(CodeGenFunction &CGF, Flags flags) {
-      if (CleanupKind & CGCilkPlusRuntime::ImplicitSyncCleanup)
-        CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
+/// \brief Cleanup to ensure parent stack frame is synced.
+struct ImplicitSyncCleanup : public EHScopeStack::Cleanup {
+  llvm::Value *SF;
+public:
+  ImplicitSyncCleanup(llvm::Value *SF) : SF(SF) { }
+  void Emit(CodeGenFunction &CGF, Flags F) {
+    if (F.isForEHCleanup()) {
+      llvm::Value *ExnSlot = CGF.getExceptionSlot();
+      assert(ExnSlot && "null exception handler slot");
+      CGF.Builder.CreateCall2(GetCilkExceptingSyncFn(CGF), SF, ExnSlot);
+    } else
+      CGF.EmitCallOrInvoke(GetCilkSyncFn(CGF), SF);
+  }
+};
 
-      if (CleanupKind & CGCilkPlusRuntime::ReleaseFrameCleanup)
-        CGF.Builder.CreateCall(GetCilkParentEpilogue(CGF), SF);
-    }
-  };
-
-  struct CilkSpawnHelperCleanup : EHScopeStack::Cleanup {
-    llvm::Value *SF;
-
-    explicit CilkSpawnHelperCleanup(llvm::Value *SF) : SF(SF) {}
-
-    void Emit(CodeGenFunction &CGF, Flags flags) {
-      CGF.Builder.CreateCall(GetCilkHelperEpilogue(CGF), SF);
-    }
-  };
-
-  struct CilkImplicitSyncCleanup : EHScopeStack::Cleanup {
-    llvm::Value *SF;
-
-    explicit CilkImplicitSyncCleanup(llvm::Value *SF) : SF(SF) {}
-
-    void Emit(CodeGenFunction &CGF, Flags flags) {
-      CGF.Builder.CreateCall(GetCilkSyncFn(CGF), SF);
-    }
-  };
-}
+} // anonymous namespace
 
 /// \brief Emit code to create a Cilk stack frame for the parent function and
 /// release it in the end. This function should be only called once prior to
 /// processing function parameters.
-void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF,
-                                                 CilkCleanupKind K) {
+void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF) {
   llvm::Value *SF = CreateStackFrame(CGF);
 
   // Need to initialize it by adding the prologue
@@ -1319,64 +1335,7 @@ void CGCilkPlusRuntime::EmitCilkParentStackFrame(CodeGenFunction &CGF,
   }
 
   // Push cleanups associated to this stack frame initialization.
-  unsigned Kind = K;
-  CGF.EHStack.pushCleanup<CilkSpawnParentCleanup>(NormalAndEHCleanup, SF, Kind);
-}
-
-/// \brief Emit code to set the exception flags in the spawn helper.
-/// It is equivalent to the following pseudo code:
-///
-/// try {
-///   sf->flags = sf.flags | CILK_FRAME_EXCEPTING;
-///   sf->except_data = Exn /* Exception_Handler_Pointer */;
-///   __cxa_begin_catch(Exn);
-///   __cxa_rethrow();
-///   __cilk_helper_epilogue(sf);
-/// } finally {
-///   __cxa_end_catch();
-/// }
-void CGCilkPlusRuntime::EmitCilkHelperCatch(llvm::BasicBlock *Catch,
-                                            CodeGenFunction &CGF) {
-  CGBuilderTy::InsertPoint SavedIP = CGF.Builder.saveAndClearIP();
-
-  llvm::Value *SF = LookupStackFrame(CGF);
-
-  Function *BeginCatch = 0, *EndCatch = 0, *Rethrow = 0;
-  Function::LinkageTypes Linkage = Function::ExternalLinkage;
-  GetOrCreateFunction<void*(void*)>("__cxa_begin_catch", CGF, BeginCatch,
-                                    Linkage, false);
-  GetOrCreateFunction<void()>("__cxa_end_catch", CGF, EndCatch, Linkage, false);
-  GetOrCreateFunction<void()>("__cxa_rethrow", CGF, Rethrow, Linkage, false);
-
-  CGF.EmitBlock(Catch);
-  {
-    llvm::Value *Exn = CGF.getExceptionFromSlot();
-    // sf.flags = sf.flags | CILK_FRAME_EXCEPTING;
-    llvm::Value *Flags = LoadField(CGF.Builder, SF, StackFrameBuilder::flags);
-    Flags = CGF.Builder.CreateOr(Flags, ConstantInt::get(Flags->getType(),
-                                                         CILK_FRAME_EXCEPTING));
-    StoreField(CGF.Builder, Flags, SF, StackFrameBuilder::flags);
-    // sf.except_data = Exn;
-    StoreField(CGF.Builder, Exn, SF, StackFrameBuilder::except_data);
-
-    // __cxa_begin_catch(Exn)
-    CGF.Builder.CreateCall(BeginCatch, Exn);
-
-    // finally { __cxa_end_catch() }
-    CodeGenFunction::RunCleanupsScope Cleanups(CGF);
-    CGF.EHStack.pushCleanup<CallFunctionCleanup>(NormalAndEHCleanup, EndCatch);
-
-    // __cxa_rethrow()
-    CGF.EmitCallOrInvoke(Rethrow);
-
-    // __cilk_helper_epilogue(sf);
-    CGF.Builder.CreateCall(GetCilkHelperEpilogue(CGF), SF);
-
-    Cleanups.ForceCleanup();
-    CGF.EmitBranchThroughCleanup(CGF.ReturnBlock);
-  }
-
-  CGF.Builder.restoreIP(SavedIP);
+  CGF.EHStack.pushCleanup<SpawnParentStackFrameCleanup>(NormalAndEHCleanup, SF);
 }
 
 /// \brief Emit code to create a Cilk stack frame for the helper function and
@@ -1390,12 +1349,7 @@ void CGCilkPlusRuntime::EmitCilkHelperStackFrame(CodeGenFunction &CGF) {
   CGF.Builder.CreateCall(GetCilkResetWorkerFn(CGF), SF);
 
   // Push cleanups associated to this stack frame initialization.
-  //
-  CGF.EHStack.pushCleanup<CilkSpawnHelperCleanup>(NormalAndEHCleanup, SF);
-  if (CGF.getLangOpts().Exceptions) {
-    EHCatchScope *CatchScope = CGF.EHStack.pushCatch(1);
-    CatchScope->setCatchAllHandler(0, CGF.createBasicBlock("cilk.spawn.catch"));
-  }
+  CGF.EHStack.pushCleanup<SpawnHelperStackFrameCleanup>(NormalAndEHCleanup, SF);
 }
 
 /// \brief Push an implicit sync to the EHStack. A call to __cilk_sync will be
@@ -1405,7 +1359,7 @@ void CGCilkPlusRuntime::pushCilkImplicitSyncCleanup(CodeGenFunction &CGF) {
   Value *SF = LookupStackFrame(CGF);
   assert(SF && "null stack frame unexpected");
 
-  CGF.EHStack.pushCleanup<CilkImplicitSyncCleanup>(NormalAndEHCleanup, SF);
+  CGF.EHStack.pushCleanup<ImplicitSyncCleanup>(NormalAndEHCleanup, SF);
 }
 
 /// \brief Emit necessary cilk runtime calls prior to call the spawned function.

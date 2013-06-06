@@ -45,24 +45,13 @@ class CodeGenModule;
 /// \brief Implements Cilk Plus runtime specific code generation functions.
 class CGCilkPlusRuntime {
 public:
-  enum CilkCleanupKind {
-    ImplicitSyncCleanup = 0x01,
-    ReleaseFrameCleanup = 0x02,
-    ImpSyncAndRelFrameCleanup = ImplicitSyncCleanup | ReleaseFrameCleanup
-  };
-
   void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &S);
 
   void EmitCilkSync(CodeGenFunction &CGF);
 
-  void EmitCilkExceptingSync(CodeGenFunction &CGF);
-
-  void EmitCilkParentStackFrame(CodeGenFunction &CGF,
-                                CilkCleanupKind K = ImpSyncAndRelFrameCleanup);
+  void EmitCilkParentStackFrame(CodeGenFunction &CGF);
 
   void EmitCilkHelperStackFrame(CodeGenFunction &CGF);
-
-  void EmitCilkHelperCatch(llvm::BasicBlock *Catch, CodeGenFunction &CGF);
 
   void EmitCilkHelperPrologue(CodeGenFunction &CGF);
 

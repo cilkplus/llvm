@@ -48,13 +48,17 @@ void test1() {
   // CHECK: call i32 @llvm.eh.sjlj.setjmp
   // CHECK: br i1 {{%[0-9]+}}, label %{{.*}}, label %{{.*}}
 
-  // CHECK: call void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
+  // CHECK: invoke void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
   //
-  // CHECk: call void @__cilkrts_rethrow
+  // CHECk: invoke void @__cilkrts_rethrow
   //
   // Make sure Cilk exits the function properly
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
-  // CHECK-NEXT: ret
+  // CHECK-NEXT: ret 
+  //
+  // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
+  // CHECK-NEXT: br
+  // CHECK: resume
 }
 
 // Should still have the implicit sync, even though we have
@@ -81,17 +85,20 @@ void test2() {
   // CHECK: call i32 @llvm.eh.sjlj.setjmp
   // CHECK: br i1 {{%[0-9]+}}, label %{{.*}}, label %{{.*}}
 
-  // CHECK: call void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
+  // CHECK: invoke void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
   _Cilk_sync;
 
   // Make sure implicit sync is still added
-  // CHECK: call void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
+  // CHECK: invoke void @__cilkrts_sync(%__cilkrts_stack_frame* %__cilkrts_sf)
   //
-  // CHECk: call void @__cilkrts_rethrow
+  // CHECK: invoke void @__cilkrts_rethrow
   //
   // Make sure Cilk exits the function properly
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
-  // CHECK-NEXT: ret void
+  // CHECK-NEXT: ret 
+  //
+  // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
+  // CHECK: resume
 }
 
 
@@ -147,41 +154,16 @@ void test6() {
     global = _Cilk_spawn ThrowingFib(BIG_NUM * BIG_NUM);
     // normal and exception handling implicit sync
   } catch (int except) {
-    // CHECK: call void @__cilkrts_sync
+    // CHECK: invoke void @__cilkrts_sync
     return;
   } catch (float except) {
-    // CHECK: call void @__cilkrts_sync
+    // CHECK: invoke void @__cilkrts_sync
   }
 
   test6_anchor();
   // Elide the function implicit sync
   //
   // CHECK: call void @_Z12test6_anchorv()
-  // CHECK-NOT:  call void @__cilkrts_sync
+  // CHECK-NOT:  void @__cilkrts_sync
   // CHECK: ret
-
-  // finally {
-  //   CHECK: call void @__cilkrts_sync
-  // }
-}
-
-
-// Should have sync before throw, right before the exception object
-// has been created
-void test7() throw (int) {
-  try {
-    global = _Cilk_spawn Fib(BIG_NUM);
-    throw BIG_NUM;
-  } catch (...) { }
-
-  // CHECK: define void @_Z5test7v()
-  //
-  // * Implicit sync while entering the try block
-  // CHECK: call void @__cilkrts_sync
-  //
-  // implicit sync before throwing
-  // CHECK: call void @__cilkrts_sync
-  // CHECK: call i8* @__cxa_allocate_exception
-  // CHECK: store i32 30
-  // CHECK: invoke void @__cxa_throw
 }
