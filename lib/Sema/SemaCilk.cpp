@@ -70,26 +70,22 @@ ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
   // linear-variable must be a variable with scalar type
   LookupResult Lookup(*this, Name, LookupOrdinaryName);
   LookupParsedName(Lookup, CurScope, &SS, /*AllowBuiltinCreation*/false);
-  if (Lookup.isAmbiguous()) {
-    Diag(Name.getLoc(), diag::err_pragma_simd_ambiguous_linear_var);
+  if (Lookup.isAmbiguous())
+    return ExprError();
+
+  if (Lookup.empty()) {
+    Diag(Name.getLoc(), diag::err_undeclared_var_use) << Name.getName();
     return ExprError();
   }
+
   VarDecl *VD = 0;
-  if (!Lookup.isSingleResult()) {
-    if (Lookup.empty())
-      Diag(Name.getLoc(), diag::err_undeclared_var_use) << Name.getName();
+  if (!(VD = Lookup.getAsSingle<VarDecl>())) {
+    Diag(Name.getLoc(), diag::err_pragma_simd_invalid_linear_var);
     return ExprError();
-  } else {
-    if (!(VD = Lookup.getAsSingle<VarDecl>())) {
-      Diag(Name.getLoc(), diag::err_pragma_simd_invalid_linear_var);
-      return ExprError();
-    }
   }
-  QualType VDQT = VD->getType();
-  const Type *VDT = 0;
-  if (!VDQT.isNull())
-    VDT = VDQT.getTypePtrOrNull();
-  if (!VDT || !VDT->isScalarType()) {
+
+  QualType VarType = VD->getType();
+  if (!VarType->isScalarType()) {
     Diag(Name.getLoc(), diag::err_pragma_simd_invalid_linear_var);
     return ExprError();
   }
@@ -118,10 +114,7 @@ AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
           return AttrError();
         }
         QualType SQT = Step->getType();
-        const Type *ST = 0;
-        if (!SQT.isNull())
-          ST = SQT.getTypePtrOrNull();
-        if (!ST || !ST->isIntegralType(Context)) {
+        if (!SQT->isIntegralType(Context)) {
           Diag(Step->getLocStart(), diag::err_pragma_simd_invalid_linear_step);
           return AttrError();
         }
@@ -326,13 +319,12 @@ Sema::ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
       VD = D->getDecl();
     } else if (const MemberExpr *M = dyn_cast<MemberExpr>(E)) {
       VD = M->getMemberDecl();
-    } else {
+    }
+
+    if (!VD || VD->isFunctionOrFunctionTemplate()) {
       Diag(E->getLocStart(), diag::err_pragma_simd_reduction_invalid_var);
       return AttrError();
     }
-
-    if (!VD)
-      return AttrError();
 
     QualType QT = VD->getType().getCanonicalType();
 

@@ -1,10 +1,10 @@
 // RUN: %clang_cc1 -std=c++11 -fsyntax-only -verify %s
 
 namespace A {
-  // expected-note@+1 3{{candidate found by name lookup is 'A::a'}}
+  // expected-note@+1 4{{candidate found by name lookup is 'A::a'}}
   int a;
   namespace AA {
-    // expected-note@+1 3{{candidate found by name lookup is 'A::AA::a'}}
+    // expected-note@+1 4{{candidate found by name lookup is 'A::AA::a'}}
     int a;
   }
 
@@ -27,6 +27,12 @@ namespace A {
     // expected-error@+2 {{use of undeclared identifier 'b'}}
     // expected-error@+1 {{reference to 'a' is ambiguous}}
     #pragma simd firstprivate(a, b, test)
+    for(int i = 0; i < 10; ++i);
+
+    // expected-error@+3 {{invalid linear variable}}
+    // expected-error@+2 {{use of undeclared identifier 'b'}}
+    // expected-error@+1 {{reference to 'a' is ambiguous}}
+    #pragma simd linear(a, b, test)
     for(int i = 0; i < 10; ++i);
   }
 }
@@ -139,4 +145,20 @@ void test_copy_assignment() {
   for (int i = 0; i < 10; ++i);
 }
 
+} // namespace
+
+namespace ConstExprCheck {
+  constexpr int ce(const int i) { return 1 << i; }
+  constexpr int ce_bad(const int i) { return 3 << i; }
+  void test() {
+    #pragma simd vectorlength(ce(2))
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+1 {{invalid vectorlength expression: must be a power of two}} */
+    #pragma simd vectorlength(ce_bad(4))
+    for (int i = 0; i < 10; ++i) ;
+
+    int a;
+    #pragma simd linear(a:ce(4))
+    for (int i = 0; i < 10; ++i) ;
+  }
 } // namespace

@@ -4896,16 +4896,17 @@ void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
   }
 }
 
-void HandleSIMDReductionAttr(const Attr *A, DeclMapTy &UsedDecls) {
+void HandleGenericSIMDAttr(const Attr *A, DeclMapTy &UsedDecls,
+                           bool CanConflict = false) {
   const SIMDReductionAttr *RA = static_cast<const SIMDReductionAttr *>(A);
   for (Expr **i = RA->varList_begin(), **e = RA->varList_end(); i < e; ++i) {
     const Expr *RE = *i;
     if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(RE)) {
       const ValueDecl *VD = D->getDecl();
-      UsedDecls[VD].push_back(UsedDecl(false, A, D));
+      UsedDecls[VD].push_back(UsedDecl(CanConflict, A, D));
     } else if (const MemberExpr *M = dyn_cast_or_null<MemberExpr>(RE)) {
       const ValueDecl *VD = M->getMemberDecl();
-      UsedDecls[VD].push_back(UsedDecl(false, A, M));
+      UsedDecls[VD].push_back(UsedDecl(CanConflict, A, M));
     }
   }
 }
@@ -4925,21 +4926,29 @@ void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema *S) {
       // One is in conflict. Issue error on i'th usage.
       switch (Use.Attribute->getKind()) {
       case attr::SIMDLinear:
-        if (First.CanConflict == Use.CanConflict)
-          // Re-using linear variable in another simd clause
-          S->Diag(Use.Usage->getLocStart(),
-                  diag::err_pragma_simd_reuse_linear_var)
-              << Use.Usage->getSourceRange();
-        else
+        if (Use.CanConflict || (First.CanConflict &&
+                                First.Attribute->getKind() == attr::SIMDLinear))
+          // This is a linear step, or in conflict with a linear step
           S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_conflict_step)
               << !Use.CanConflict << Use.Usage->getSourceRange();
+        else
+          // Re-using linear variable in another simd clause
+          S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
+              << 0 << Use.Usage->getSourceRange();
+        break;
+      case attr::SIMDPrivate:
+      case attr::SIMDFirstPrivate:
+      case attr::SIMDLastPrivate:
+        S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
+            << (First.Attribute->getKind() == attr::SIMDReduction)
+            << Use.Usage->getSourceRange();
         break;
       case attr::SIMDReduction:
         // Any number of reduction clauses can be specified on the directive,
         // but a list item can appear only once in the reduction clauses for
         // that directive.
-        S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_reduction)
-            << Use.Usage->getSourceRange();
+        S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
+            << 1 << Use.Usage->getSourceRange();
         break;
       default:
         ;
@@ -4988,8 +4997,13 @@ StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
       } else
         VectorLengthAttr = A;
       break;
+    case attr::SIMDFirstPrivate:
+    case attr::SIMDLastPrivate:
+    case attr::SIMDPrivate:
+      HandleGenericSIMDAttr(A, UsedDecls, true);
+      break;
     case attr::SIMDReduction:
-      HandleSIMDReductionAttr(A, UsedDecls);
+      HandleGenericSIMDAttr(A, UsedDecls);
       break;
     default:
       ;

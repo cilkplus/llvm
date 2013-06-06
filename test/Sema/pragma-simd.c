@@ -104,6 +104,9 @@ void test_reduction() {
   /* expected-error@+1 {{variable in reduction clause shall not be const-qualified}} */
   #pragma simd reduction(+:c)
   for (i = 0; i < 10; ++i);
+  /* expected-error@+1 {{invalid reduction variable}} */
+  #pragma simd reduction(+:test_reduction)
+  for (i = 0; i < 10; ++i);
 }
 
 void test_linear(int arr[]) {
@@ -314,6 +317,23 @@ void test_pragma_simd() {
   /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
   #pragma simd reduction(max:k,k) // expected-note {{first used here}}
   for (int i = 0; i < 10; ++i);
+
+  int x;
+  #pragma simd firstprivate(x) lastprivate(x) private(x)
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
+  #pragma simd linear(x) private(x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
+  #pragma simd private(x) linear(x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
+  #pragma simd reduction(+:x) private(x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
+  #pragma simd private(x) reduction(+:x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+
 }
 
 void test_condition() {

@@ -6392,10 +6392,8 @@ def err_wrong_sampler_addressspace: Error<
 def err_opencl_global_invalid_addr_space : Error<
   "global variables must have a constant address space qualifier">;
 
-def err_pragma_simd_reuse_linear_var : Error<
-  "linear variable shall not appear in multiple simd clauses">;
-def err_pragma_simd_reuse_reduction : Error<
-  "reduction variable shall not appear in multiple simd clauses">;
+def err_pragma_simd_reuse_var : Error<
+  "%select{linear|reduction}0 variable shall not appear in multiple simd clauses">;
 def err_pragma_simd_reduction_maxmin : Error<
   "reduction operator %select{min|max}0 requires arithmetic type">;
 def note_pragma_simd_used_here : Note<
