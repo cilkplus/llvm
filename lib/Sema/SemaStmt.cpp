@@ -668,7 +668,7 @@ private:
 
     // Detect cases of ++/--.
     bool VisitUnaryOperator(UnaryOperator *UO) {
-      if (UO->isIncrementDecrementOp()) {
+      if (UO->isIncrementDecrementOp() && UO->getSubExpr() == CurLCV) {
         S.Diag(UO->getLocStart(), diag::err_cilk_for_loop_modifies_control_var);
         S.Diag(LCVDecl->getLocation(),
                diag::note_cilk_for_loop_control_var_declared_here);

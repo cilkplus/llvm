@@ -124,6 +124,15 @@ void test_control_var_modification_in_body() {
       }
     }
 
+    _Cilk_for (int x = 0; x < 10; ++x) {
+      _Cilk_for (int y = 0; y < 10; ++y) {
+        _Cilk_for (int z = 0; z < x + 10; ++z) { // OK
+        }
+        _Cilk_for (int z = 0; z < x + 10; z += 2) { // OK
+        }
+      }
+    }
+
     typedef void (*FuncPtrIntPtr)(int*);
     FuncPtrIntPtr f = &func2;
     f(&i); //expected-warning{{Modifying the loop control variable inside a '_Cilk_for' using a function call has undefined behavior}} \
