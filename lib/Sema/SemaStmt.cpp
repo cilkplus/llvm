@@ -4560,6 +4560,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                              ControlVarInit, CondDirection, StrideExpr))
     return StmtError();
 
+  ExprResult Span;
   ExprResult LoopCount;
   if (!CurContext->isDependentContext()) {
     // Push an evaluation context in case span needs cleanups.
@@ -4574,7 +4575,7 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     if (CondDirection < 0)
       std::swap(Begin, End);
 
-    ExprResult Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
+    Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
 
     if (Span.isInvalid()) {
       // error getting operator-()
@@ -4623,14 +4624,15 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
 
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
                           Third.get(), RParenLoc, Body, LoopCount.get(),
-                          StrideExpr);
+                          StrideExpr, Span.get()->getType());
 }
 
 StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *Init, Expr *Cond, Expr *Inc,
                                   SourceLocation RParenLoc, Stmt *Body,
-                                  Expr *LoopCount, Expr *Stride) {
+                                  Expr *LoopCount, Expr *Stride,
+                                  QualType SpanType) {
   CilkForScopeInfo *FSI = getCurCilkFor();
   assert(FSI && "CilkForScopeInfo is out of sync");
   CapturedDecl *CD = FSI->TheCapturedDecl;
@@ -4726,8 +4728,8 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
       assert(!StepExpr.isInvalid() && "invalid expression");
       Expr *Step = StepExpr.get();
       if (Stride->getType()->isIntegralType(Context))
-        Step = ImplicitCastExpr::Create(Context, Stride->getType(),
-                                        CK_IntegralCast, Step, 0, VK_LValue);
+        Step = ImplicitCastExpr::Create(Context, SpanType, CK_IntegralCast,
+                                        Step, 0, VK_LValue);
 
       VarDecl *InnerVar = FSI->InnerLoopControlVar;
       ExprResult InnerVarExpr

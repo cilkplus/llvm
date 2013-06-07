@@ -2894,7 +2894,8 @@ public:
                               SourceLocation LParenLoc,
                               Stmt *Init, Expr *Cond, Expr *Inc,
                               SourceLocation RParenLoc, Stmt *Body,
-                              Expr *LoopCount, Expr *Stride);
+                              Expr *LoopCount, Expr *Stride,
+                              QualType SpanType);
 
   void ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
                                StmtResult FirstPart);
