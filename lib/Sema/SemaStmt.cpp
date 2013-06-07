@@ -4624,7 +4624,8 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
 
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
                           Third.get(), RParenLoc, Body, LoopCount.get(),
-                          StrideExpr, Span.get()->getType());
+                          StrideExpr, Span.isUsable() ? Span.get()->getType()
+                                                      : QualType());
 }
 
 StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
@@ -4727,9 +4728,8 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
           BuildBinOp(CurScope, VarLoc, BO_Mul, LowExpr.get(), Stride);
       assert(!StepExpr.isInvalid() && "invalid expression");
       Expr *Step = StepExpr.get();
-      if (Stride->getType()->isIntegralType(Context))
-        Step = ImplicitCastExpr::Create(Context, SpanType, CK_IntegralCast,
-                                        Step, 0, VK_LValue);
+      Step = ImplicitCastExpr::Create(Context, SpanType, CK_IntegralCast, Step,
+                                      0, VK_LValue);
 
       VarDecl *InnerVar = FSI->InnerLoopControlVar;
       ExprResult InnerVarExpr
