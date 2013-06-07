@@ -2507,6 +2507,25 @@ Expr *Expr::IgnoreImpCastsAsWritten() {
   return E;
 }
 
+Expr *Expr::getSubExprAsWritten() {
+  Expr *E = this;
+  while (true) {
+    if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E))
+      E = ICE->getSubExprAsWritten();
+    else if (MaterializeTemporaryExpr *MTE
+                                        = dyn_cast<MaterializeTemporaryExpr>(E))
+      E = MTE->GetTemporaryExpr();
+    else if (CXXBindTemporaryExpr *BTE = dyn_cast<CXXBindTemporaryExpr>(E))
+      E = BTE->getSubExpr();
+    else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
+      E = EWC->getSubExpr();
+    else
+      break;
+  }
+
+  return E;
+}
+
 bool Expr::isDefaultArgument() const {
   const Expr *E = this;
   if (const MaterializeTemporaryExpr *M = dyn_cast<MaterializeTemporaryExpr>(E))

@@ -666,8 +666,16 @@ public:
   /// by semantic analysis.
   Expr *IgnoreImpCastsAsWritten() LLVM_READONLY;
 
-  const Expr *IgnoreImpCastsAsWritten(const Expr *E) const LLVM_READONLY {
+  const Expr *IgnoreImpCastsAsWritten() const LLVM_READONLY {
     return const_cast<Expr*>(this)->IgnoreImpCastsAsWritten();
+  }
+
+  /// \brief Skip past any implicit AST node and other intermediate nodes
+  /// introduced by semantic analysis.
+  Expr *getSubExprAsWritten() LLVM_READONLY;
+
+  const Expr *getSubExprAsWritten() const LLVM_READONLY {
+    return const_cast<Expr*>(this)->getSubExprAsWritten();
   }
 
   /// IgnoreImplicit - Skip past any implicit AST nodes which might

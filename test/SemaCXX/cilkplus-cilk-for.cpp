@@ -320,3 +320,28 @@ void foo() {
   _Cilk_for (u x = 1; x < 100; x.a++); // expected-error {{loop increment does not modify control variable 'x' in '_Cilk_for'}}
 }
 } // namespace
+
+namespace ns_syntax_limit {
+
+struct T { T(); ~T(); };
+struct R { R(); ~R(); };
+
+struct S {
+  S(const S&);
+  S(T);
+  S(R, T t = T());
+  ~S();
+  void operator++();
+  void operator+=(int);
+};
+
+bool operator<(S, S);
+int operator-(T, S);
+int operator-(R, S);
+
+void loop(S begin, T end1, R end2) {
+  _Cilk_for (S i = begin; i < end1; ++i); // OK
+  _Cilk_for (S i = begin; i < end2; ++i); // OK
+}
+
+} // namespace

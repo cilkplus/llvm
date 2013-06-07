@@ -4580,6 +4580,8 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
                         Limit, CondDirection, Opcode);
   if (!Limit)
     return StmtError();
+  // Remove any implicit AST node introduced by semantic analysis.
+  Limit = Limit->getSubExprAsWritten();
 
   Expr *StrideExpr = 0;
   if (!CheckCilkForIncrement(*this, Increment, Limit, ControlVar,
@@ -4589,6 +4591,8 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   ExprResult Span;
   ExprResult LoopCount;
   if (!CurContext->isDependentContext()) {
+    StrideExpr = StrideExpr->getSubExprAsWritten();
+
     // Push an evaluation context in case span needs cleanups.
     EnterExpressionEvaluationContext EvalContext(*this, PotentiallyEvaluated);
 

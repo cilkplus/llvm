@@ -64,7 +64,7 @@ void test_loop_count() {
 
   char buf[100] = {0};
   // LOOP_COUNT: getelementptr inbounds [100 x i8]* %buf
-  _Cilk_for(void *i = &buf[0]; i != &buf[99]; ++i);
+  _Cilk_for(char *i = &buf[0]; i != &buf[99]; ++i);
   // LOOP_COUNT: call void @__cilkrts_cilk_for_[[BIT_WIDTH:[32|64]+]]({{.*}}, i[[BIT_WIDTH]] 99,
 
 }
