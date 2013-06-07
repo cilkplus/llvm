@@ -76,6 +76,10 @@ void condition() {
 
   _Cilk_for (int i = 10; 0 <= i; --i); // OK
 
+  _Cilk_for (int i = 0; i < 10U; ++i); // OK
+  _Cilk_for (int i = 0; i < 10L; ++i); // OK
+  _Cilk_for (int i = 0; i < 10UL; ++i); // OK
+
   _Cilk_for (int i = 10; (j << 2) <= i; --i); // OK
 
   _Cilk_for (int i = 1.2f; i < 10; ++i); // expected-warning {{implicit conversion from 'float' to 'int' changes value from 1.2 to 1}}
@@ -127,6 +131,10 @@ void increment() {
   _Cilk_for (int i = 10; i > 0; i -= 2); // OK
   _Cilk_for (int i = 0; i < 10; i += 2); // OK
   _Cilk_for (int i = 0; i < 10; i += next()); // OK
+
+  _Cilk_for (int i = 0; i != 10; i += 1U); // OK
+  _Cilk_for (int i = 0; i != 10; i += 1UL); // OK
+  _Cilk_for (int i = 10; i != 0; i += -1L); // OK
 
   enum E { a = 0, b = 5 };
   _Cilk_for (int i = 0; i < 10; i += b); // OK

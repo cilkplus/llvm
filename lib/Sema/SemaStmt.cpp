@@ -4424,7 +4424,7 @@ static void CheckForSignedUnsignedWraparounds(const VarDecl *ControlVar,
                                               const Expr *ControlVarInit,
                                               const Expr *Limit, Sema &S,
                                               int CondDirection,
-                                              const llvm::APSInt &Stride,
+                                              llvm::APSInt Stride,
                                               const Expr *StrideExpr) {
   llvm::APSInt InitVal;
   llvm::APSInt LimitVal;
@@ -4434,6 +4434,18 @@ static void CheckForSignedUnsignedWraparounds(const VarDecl *ControlVar,
     if (ControlVarInit->isIntegerConstantExpr(InitVal, S.Context) &&
         Limit->isIntegerConstantExpr(LimitVal, S.Context) &&
         CondDirection == 0) {
+      // Make InitVal, LimitVal, and Stride have the same width
+      // so that they can be compared.
+      unsigned MaxBitWidth = std::max(std::max(InitVal.getMinSignedBits(),
+                                               LimitVal.getMinSignedBits()),
+                                      Stride.getMinSignedBits());
+      InitVal = InitVal.sextOrTrunc(MaxBitWidth);
+      LimitVal = LimitVal.sextOrTrunc(MaxBitWidth);
+      Stride = Stride.sextOrTrunc(MaxBitWidth);
+      InitVal.setIsSigned(true);
+      LimitVal.setIsSigned(true);
+      Stride.setIsSigned(true);
+
       const char *StrideSign = (Stride.isNegative() ? "negative" : "positive");
       const char *SignedUnsigned =
           (ControlVar->getType()->isUnsignedIntegerOrEnumerationType()
