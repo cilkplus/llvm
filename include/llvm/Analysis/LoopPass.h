@@ -28,7 +28,9 @@ class PMStack;
 
 class LoopPass : public Pass {
 public:
-  explicit LoopPass(char &pid) : Pass(PT_Loop, pid) {}
+  explicit LoopPass(char &pid) : Pass(PT_Loop, pid),
+                                 PreserveLoopMetadata(false)
+  {}
 
   /// getPrinterPass - Get a pass to print the function corresponding
   /// to a Loop.
@@ -81,6 +83,16 @@ public:
 
   /// deleteAnalysisValue - Delete analysis info associated with value V.
   virtual void deleteAnalysisValue(Value *V, Loop *L) {}
+
+  /// Enable preserving of loop metadata. After this pass runs any loop
+  /// metadata that existed before the pass will still exist. That is, any
+  /// branch instructions within the loop that branch to the loop header will
+  /// contain valid llvm.loop metadata.
+  void setPreserveLoopMetadata() { PreserveLoopMetadata = true; }
+  /// Return true if loop metadata should be preserved after this pass runs.
+  bool getPreserveLoopMetadata() const { return PreserveLoopMetadata; }
+private:
+  bool PreserveLoopMetadata;
 };
 
 class LPPassManager : public FunctionPass, public PMDataManager {

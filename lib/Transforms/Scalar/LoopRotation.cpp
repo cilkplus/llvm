@@ -40,6 +40,7 @@ namespace {
     static char ID; // Pass ID, replacement for typeid
     LoopRotate() : LoopPass(ID) {
       initializeLoopRotatePass(*PassRegistry::getPassRegistry());
+      setPreserveLoopMetadata();
     }
 
     // LCSSA form makes instruction renaming easier.
