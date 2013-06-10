@@ -1179,3 +1179,47 @@ CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
   SubExprs[BODY] = Body;
   SubExprs[LOOP_COUNT] = LoopCount;
 }
+
+SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> Attrs,
+                         Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
+                         SourceLocation FL, SourceLocation LP,
+                         SourceLocation RP)
+  : Stmt(SIMDForStmtClass), PragmaLoc(PragmaLoc), ForLoc(FL), LParenLoc(LP),
+    RParenLoc(RP), NumAttrs(Attrs.size()) {
+
+  assert(Init && Cond && Inc && Body && "null argument unexpected");
+  SubExprs[INIT] = Init;
+  SubExprs[COND] = Cond;
+  SubExprs[INC] = Inc;
+  SubExprs[BODY] = Body;
+
+  // Initialize the SIMD clauses.
+  memcpy(this->Attrs, Attrs.data(), NumAttrs * sizeof(Attr *));
+}
+
+SIMDForStmt *SIMDForStmt::Create(ASTContext &C, SourceLocation PragmaLoc,
+                                 ArrayRef<Attr *> Attrs, Stmt *Init,
+                                 Expr *Cond, Expr *Inc, CapturedStmt *Body,
+                                 SourceLocation FL, SourceLocation LP,
+                                 SourceLocation RP) {
+  void *Mem = C.Allocate(sizeof(SIMDForStmt) + sizeof(Attr *) *
+                         (Attrs.size() - 1), llvm::alignOf<SIMDForStmt>());
+  return new (Mem) SIMDForStmt(PragmaLoc, Attrs, Init, Cond, Inc, Body,
+                               FL, LP, RP);
+}
+
+SIMDForStmt::SIMDForStmt(EmptyShell Empty, unsigned NumAttrs)
+  : Stmt(SIMDForStmtClass, Empty), NumAttrs(NumAttrs) {
+  SubExprs[INIT] = 0;
+  SubExprs[COND] = 0;
+  SubExprs[INC] = 0;
+  SubExprs[BODY] = 0;
+  memset(this->Attrs, 0, NumAttrs * sizeof(Attr *));
+}
+
+SIMDForStmt *SIMDForStmt::CreateEmpty(ASTContext &C, unsigned NumAttrs) {
+  assert(NumAttrs > 0 && "NumAttrs should be greater than zero");
+  void *Mem = C.Allocate(sizeof(SIMDForStmt) + sizeof(Attr *) * (NumAttrs - 1),
+                         llvm::alignOf<SIMDForStmt>());
+  return new (Mem) SIMDForStmt(EmptyShell(), NumAttrs);
+}

@@ -9611,6 +9611,79 @@ TreeTransform<Derived>::TransformCilkSpawnStmt(CilkSpawnStmt *S) {
   return Owned(S);
 }
 
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {
+  // FIXME: Process SIMD clauses.
+  ArrayRef<Attr *> Attrs = S->getAttrs();
+  SourceLocation PragmaLoc = S->getPragmaLoc();
+
+  getSema().ActOnStartOfSIMDForStmt(PragmaLoc, /*Scope*/0, Attrs);
+
+  // Transform loop initialization.
+  StmtResult Init = getDerived().TransformStmt(S->getInit());
+  if (Init.isInvalid()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+
+  // Transform loop condition.
+  ExprResult Cond = getDerived().TransformExpr(S->getCond());
+  if (Cond.isInvalid()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+
+  assert(S->getCond() && "unexpected empty condition in Cilk for");
+  SourceLocation ForLoc = S->getForLoc();
+  ExprResult CondExpr
+    = getSema().ActOnBooleanCondition(/*Scope*/0, ForLoc, Cond.get());
+
+  if (CondExpr.isInvalid()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+  Cond = CondExpr.get();
+
+  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+  if (!FullCond.get()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+
+  // Transform loop increment.
+  ExprResult Inc = getDerived().TransformExpr(S->getInc());
+  if (Inc.isInvalid()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+
+  Sema::FullExprArg FullInc(getSema().MakeFullExpr(Inc.get()));
+  if (!FullInc.get()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+
+  // Transform loop body.
+  StmtResult Body = getDerived().TransformStmt(S->getBody()->getCapturedStmt());
+  if (Body.isInvalid()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+
+  StmtResult Result = getSema().ActOnSIMDForStmt(PragmaLoc, Attrs, ForLoc,
+                                                 S->getLParenLoc(),
+                                                 Init.take(), FullCond,
+                                                 FullInc, S->getRParenLoc(),
+                                                 Body.take());
+  if (Result.isInvalid()) {
+    getSema().ActOnSIMDForStmtError();
+    return StmtError();
+  }
+
+  return Result;
+}
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_SEMA_TREETRANSFORM_H

@@ -254,7 +254,7 @@ struct SIMDReductionItemParser {
 } // namespace
 
 static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
-                             SmallVectorImpl<const Attr *> &AttrList) {
+                             SmallVectorImpl<Attr *> &AttrList) {
   const Token &Tok = P.getCurToken();
 
   while (Tok.isNot(tok::annot_pragma_simd_end)) {
@@ -396,7 +396,7 @@ StmtResult Parser::ParseSIMDDirective() {
   SourceLocation HashLoc = PP.getDirectiveHashLoc();
   ConsumeToken();
 
-  SmallVector<const Attr *, 4> SIMDAttrList;
+  SmallVector<Attr *, 4> SIMDAttrList;
   SIMDAttrList.push_back(::new SIMDAttr(Loc, Actions.Context));
 
   if (!ParseSIMDClauses(*this, Actions, Loc, SIMDAttrList)) {
@@ -449,6 +449,9 @@ StmtResult Parser::ParseSIMDDirective() {
 
   ParsedAttributesWithRange attrs(AttrFactory);
   MaybeParseCXX11Attributes(attrs);
+
+  ParseScope CapturedRegionScope(this, Scope::FnScope | Scope::DeclScope);
+  Actions.ActOnStartOfSIMDForStmt(Loc, getCurScope(), SIMDAttrList);
 
   // 'for' '(' for-init-stmt
   // 'for' '(' assignment-expr;
@@ -557,15 +560,21 @@ StmtResult Parser::ParseSIMDDirective() {
   ForScope.Exit();
 
   if (!FirstPart.isUsable() || !SecondPart.get() || !ThirdPart.get() ||
-      !Body.isUsable())
+      !Body.isUsable()) {
+    Actions.ActOnSIMDForStmtError();
     return StmtError();
+  }
 
-  StmtResult R = Actions.ActOnSIMDForStmt(ForLoc, T.getOpenLocation(),
-                                          FirstPart.take(), SecondPart,
-                                          ThirdPart, T.getCloseLocation(),
-                                          Body.take());
-  if (R.isInvalid())
+  StmtResult Result = Actions.ActOnSIMDForStmt(HashLoc, SIMDAttrList, ForLoc,
+                                               T.getOpenLocation(),
+                                               FirstPart.take(), SecondPart,
+                                               ThirdPart, T.getCloseLocation(),
+                                               Body.take());
+
+  if (Result.isInvalid()) {
+    Actions.ActOnSIMDForStmtError();
     return StmtError();
+  }
 
-  return Actions.ActOnPragmaSIMD(HashLoc, R.get(), SIMDAttrList);
+  return Result;
 }

@@ -396,3 +396,219 @@ Sema::ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
 
   return AttrResult(ReductionAttr);
 }
+
+namespace {
+struct UsedDecl {
+  // If this is allowed to conflict (eg. a linear step)
+  bool CanConflict;
+  // Attribute using this variable
+  const Attr *Attribute;
+  // Specific usage within that attribute
+  const Expr *Usage;
+
+  UsedDecl(bool CanConflict, const Attr *Attribute, const Expr *Usage)
+      : CanConflict(CanConflict), Attribute(Attribute), Usage(Usage) {}
+};
+typedef llvm::SmallDenseMap<const ValueDecl *,
+                            llvm::SmallVector<UsedDecl, 4> > DeclMapTy;
+
+void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
+  const SIMDLinearAttr *LA = static_cast<const SIMDLinearAttr *>(A);
+  for (Expr **i = LA->steps_begin(), **e = LA->steps_end(); i < e; i += 2) {
+    const Expr *LE = *i;
+    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(LE)) {
+      const ValueDecl *VD = D->getDecl();
+      UsedDecls[VD].push_back(UsedDecl(false, A, D));
+    }
+    const Expr *SE = *(i+1);
+    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(SE)) {
+      const ValueDecl *VD = D->getDecl();
+      UsedDecls[VD].push_back(UsedDecl(true, LA, D));
+    }
+  }
+}
+
+void HandleGenericSIMDAttr(const Attr *A, DeclMapTy &UsedDecls,
+                           bool CanConflict = false) {
+  const SIMDReductionAttr *RA = static_cast<const SIMDReductionAttr *>(A);
+  for (Expr **i = RA->varList_begin(), **e = RA->varList_end(); i < e; ++i) {
+    const Expr *RE = *i;
+    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(RE)) {
+      const ValueDecl *VD = D->getDecl();
+      UsedDecls[VD].push_back(UsedDecl(CanConflict, A, D));
+    } else if (const MemberExpr *M = dyn_cast_or_null<MemberExpr>(RE)) {
+      const ValueDecl *VD = M->getMemberDecl();
+      UsedDecls[VD].push_back(UsedDecl(CanConflict, A, M));
+    }
+  }
+}
+
+void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema &S) {
+  for (DeclMapTy::iterator it = UsedDecls.begin(), end = UsedDecls.end();
+       it != end; it++) {
+    llvm::SmallVectorImpl<UsedDecl> &Usages = it->second;
+    if (Usages.size() <= 1)
+      continue;
+
+    UsedDecl &First = Usages[0]; // Legitimate usage of this variable
+    for (unsigned i = 1, e = Usages.size(); i < e; ++i) {
+      UsedDecl &Use = Usages[i];
+      if (First.CanConflict && Use.CanConflict)
+        continue;
+      // One is in conflict. Issue error on i'th usage.
+      switch (Use.Attribute->getKind()) {
+      case attr::SIMDLinear:
+        if (Use.CanConflict || (First.CanConflict &&
+                                First.Attribute->getKind() == attr::SIMDLinear))
+          // This is a linear step, or in conflict with a linear step
+          S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_conflict_step)
+            << !Use.CanConflict << Use.Usage->getSourceRange();
+        else
+          // Re-using linear variable in another simd clause
+          S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
+            << 0 << Use.Usage->getSourceRange();
+        break;
+      case attr::SIMDPrivate:
+      case attr::SIMDFirstPrivate:
+      case attr::SIMDLastPrivate:
+        S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
+          << (First.Attribute->getKind() == attr::SIMDReduction)
+          << Use.Usage->getSourceRange();
+        break;
+      case attr::SIMDReduction:
+        // Any number of reduction clauses can be specified on the directive,
+        // but a list item can appear only once in the reduction clauses for
+        // that directive.
+        S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
+          << 1 << Use.Usage->getSourceRange();
+        break;
+      default:
+        ;
+      }
+      S.Diag(First.Usage->getLocStart(), diag::note_pragma_simd_used_here)
+        << First.Attribute->getRange() << First.Usage->getSourceRange();
+    }
+  }
+}
+} // namespace
+
+void Sema::CheckSIMDPragmaClauses(SourceLocation PragmaLoc,
+                                  ArrayRef<Attr *> Attrs) {
+  // Collect all used decls in order of usage
+  DeclMapTy UsedDecls;
+  const Attr *VectorLengthAttr = 0;
+  for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
+    if (!Attrs[i])
+      continue;
+    const Attr *A = Attrs[i];
+
+    switch(A->getKind()) {
+    case attr::SIMDLinear:
+      HandleSIMDLinearAttr(A, UsedDecls);
+      break;
+    case attr::SIMDLength:
+    case attr::SIMDLengthFor:
+      if (VectorLengthAttr) {
+        attr::Kind ThisKind = A->getKind(),
+                   PrevKind = VectorLengthAttr->getKind();
+
+        if (ThisKind == PrevKind)
+          Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_multiple)
+            << (ThisKind == attr::SIMDLength) << A->getRange();
+        else
+          Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_conflict)
+              << (ThisKind == attr::SIMDLength) << A->getRange();
+        Diag(VectorLengthAttr->getLocation(),
+             diag::note_pragma_simd_specified_here)
+            << (PrevKind == attr::SIMDLength) << VectorLengthAttr->getRange();
+      } else
+        VectorLengthAttr = A;
+      break;
+    case attr::SIMDFirstPrivate:
+    case attr::SIMDLastPrivate:
+    case attr::SIMDPrivate:
+      HandleGenericSIMDAttr(A, UsedDecls, true);
+      break;
+    case attr::SIMDReduction:
+      HandleGenericSIMDAttr(A, UsedDecls);
+      break;
+    default:
+      ;
+    }
+  }
+  EnforcePragmaSIMDConstraints(UsedDecls, *this);
+}
+
+#define ADD_PRIVATE_VARS(ATTR, FUNC)                                           \
+do {                                                                           \
+  const ATTR *PA = static_cast<const ATTR *>(A);                               \
+  for (Expr **I = PA->variables_begin(), **E = PA->variables_end();            \
+    I != E; ++I) {                                                             \
+    Expr *DE = *I;                                                             \
+    assert (DE && isa<DeclRefExpr>(DE) && "reference to a variable expected"); \
+    VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());             \
+    getCurSIMDFor()->FUNC(VD);                                                 \
+  }                                                                            \
+} while (0)
+
+void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
+                                   ArrayRef<Attr *> SIMDAttrList) {
+  CheckSIMDPragmaClauses(PragmaLoc, SIMDAttrList);
+
+  CapturedDecl *CD = 0;
+  RecordDecl *RD = CreateCapturedStmtRecordDecl(CD, PragmaLoc, /*NumArgs*/1);
+
+  PushSIMDForScope(CurScope, CD, RD, PragmaLoc);
+
+  // Process all variables in the clauses.
+  for (unsigned I = 0, N = SIMDAttrList.size(); I < N; ++I) {
+    const Attr *A = SIMDAttrList[I];
+    if (!A)
+      continue;
+    switch(A->getKind()) {
+    case attr::SIMDPrivate:
+      ADD_PRIVATE_VARS(SIMDPrivateAttr, addPrivateVar);
+      break;
+    case attr::SIMDLastPrivate:
+      ADD_PRIVATE_VARS(SIMDLastPrivateAttr, addLastPrivateVar);
+      break;
+    case attr::SIMDFirstPrivate:
+      ADD_PRIVATE_VARS(SIMDFirstPrivateAttr, addFirstPrivateVar);
+      break;
+    default:
+      ;
+    }
+  }
+
+  // Push a compound scope for the body.
+  PushCompoundScope();
+
+  if (CurScope)
+    PushDeclContext(CurScope, CD);
+  else
+    CurContext = CD;
+
+  PushExpressionEvaluationContext(PotentiallyEvaluated);
+}
+
+void Sema::ActOnSIMDForStmtError() {
+  DiscardCleanupsInEvaluationContext();
+  PopExpressionEvaluationContext();
+
+  PopDeclContext();
+
+  SIMDForScopeInfo *FSI = getCurSIMDFor();
+  RecordDecl *Record = FSI->TheRecordDecl;
+  Record->setInvalidDecl();
+
+  SmallVector<Decl*, 4> Fields;
+  for (RecordDecl::field_iterator I = Record->field_begin(),
+                                  E = Record->field_end(); I != E; ++I)
+    Fields.push_back(*I);
+  ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
+              SourceLocation(), SourceLocation(), /*AttributeList=*/0);
+
+  // Pop the compound scope we inserted implicitly.
+  PopCompoundScope();
+  PopFunctionScopeInfo();
+}

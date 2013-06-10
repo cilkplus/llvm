@@ -6470,19 +6470,10 @@ void Sema::DiagnoseEmptyLoopBody(const Stmt *S,
     StmtLoc = CFS->getCilkForLoc();
     Body = CFS->getBody()->getCapturedStmt();
     DiagID = diag::warn_empty_cilk_for_body;
-  } else if (const AttributedStmt *AS = dyn_cast<AttributedStmt>(S)) {
-    ArrayRef<const Attr*> Attrs = AS->getAttrs();
-    for (ArrayRef<const Attr*>::iterator I = Attrs.begin(), E = Attrs.end();
-        I != E; ++I) {
-      // A SIMD for loop.
-      if ((*I)->getKind() == attr::SIMD) {
-        const ForStmt *FS = cast<ForStmt>(AS->getSubStmt());
-        StmtLoc = FS->getForLoc();
-        Body = FS->getBody();
-        DiagID = diag::warn_empty_simd_for_body;
-        break;
-      }
-    }
+  } else if (const SIMDForStmt *FS = dyn_cast<SIMDForStmt>(S)) {
+    StmtLoc = FS->getForLoc();
+    Body = FS->getBody()->getCapturedStmt();
+    DiagID = diag::warn_empty_simd_for_body;
   } else
     return; // Neither `for' nor `while'.
 

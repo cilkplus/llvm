@@ -1937,6 +1937,37 @@ void StmtPrinter::VisitCilkForStmt(CilkForStmt *Node) {
   }
 }
 
+void StmtPrinter::VisitSIMDForStmt(SIMDForStmt *Node) {
+  OS << "#pragma simd";
+  for (ArrayRef<Attr*>::iterator I = Node->getAttrs().begin(),
+                                 E = Node->getAttrs().end();
+                                 I != E; ++I) {
+    OS << " ";
+    (*I)->printPretty(OS, Policy);
+  }
+  OS << "\n";
+
+  Indent() << "for (";
+  if (Node->getInit()) {
+    if (DeclStmt *DS = dyn_cast<DeclStmt>(Node->getInit()))
+      PrintRawDeclStmt(DS);
+    else
+      PrintExpr(cast<Expr>(Node->getInit()));
+  }
+  OS << ";";
+  if (Node->getCond()) {
+    OS << " ";
+    PrintExpr(Node->getCond());
+  }
+  OS << ";";
+  if (Node->getInc()) {
+    OS << " ";
+    PrintExpr(Node->getInc());
+  }
+  OS << ") \n";
+  PrintStmt(Node->getBody());
+}
+
 //===----------------------------------------------------------------------===//
 // Stmt method implementations
 //===----------------------------------------------------------------------===//

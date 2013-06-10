@@ -187,6 +187,7 @@ namespace sema {
   class FunctionScopeInfo;
   class LambdaScopeInfo;
   class PossiblyUnreachableDiag;
+  class SIMDForScopeInfo;
   class TemplateDeductionInfo;
 }
 
@@ -954,6 +955,8 @@ public:
   void PushCilkForScope(Scope *S, CapturedDecl *FD, RecordDecl *RD,
                         const VarDecl *LoopControlVariable,
                         SourceLocation CilkForLoc);
+  void PushSIMDForScope(Scope *S, CapturedDecl *FD, RecordDecl *RD,
+                        SourceLocation PragmaLoc);
   void PopFunctionScopeInfo(const sema::AnalysisBasedWarnings::Policy *WP =0,
                             const Decl *D = 0, const BlockExpr *blkExpr = 0);
 
@@ -984,6 +987,8 @@ public:
   /// \endcode
   sema::CompoundScopeInfo &getCurCompoundScopeSkipCilkFor() const;
 
+  sema::CompoundScopeInfo &getCurCompoundScopeSkipSIMDFor() const;
+
   bool hasAnyUnrecoverableErrorsInThisFunction() const;
 
   /// \brief Retrieve the current block, if any.
@@ -997,6 +1002,9 @@ public:
 
   /// \brief Retrieve the current cilk for region, if any.
   sema::CilkForScopeInfo *getCurCilkFor();
+
+  /// \brief Retrieve the current SIMD for region, if any.
+  sema::SIMDForScopeInfo *getCurSIMDFor();
 
   /// WeakTopLevelDeclDecls - access to \#pragma weak-generated Decls
   SmallVector<Decl*,2> &WeakTopLevelDecls() { return WeakTopLevelDecl; }
@@ -6752,10 +6760,6 @@ public:
   /// \#pragma {STDC,OPENCL} FP_CONTRACT
   void ActOnPragmaFPContract(tok::OnOffSwitch OOS);
 
-  /// ActOnPragmaSIMD - Called on well formed \#pragma simd
-  StmtResult ActOnPragmaSIMD(SourceLocation PragmaLoc, Stmt *S,
-                             ArrayRef<const Attr *> Attrs);
-
   AttrResult ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
                                    Expr *VectorLengthExpr);
 
@@ -6774,12 +6778,26 @@ public:
                                SIMDReductionAttr::SIMDReductionKind Operator,
                                llvm::MutableArrayRef<Expr *> VarList);
 
-  StmtResult ActOnSIMDForStmt(SourceLocation ForLoc,
+  StmtResult ActOnSIMDForStmt(SourceLocation PragmaLoc,
+                              ArrayRef<Attr *> Attrs,
+                              SourceLocation ForLoc,
                               SourceLocation LParenLoc,
                               Stmt *First, FullExprArg Second,
                               FullExprArg Third,
                               SourceLocation RParenLoc,
                               Stmt *Body);
+  StmtResult BuildSIMDForStmt(SourceLocation PragmaLoc,
+                              ArrayRef<Attr *> Attrs,
+                              SourceLocation ForLoc,
+                              SourceLocation LParenLoc,
+                              Stmt *Init, Expr *Cond, Expr *Inc,
+                              SourceLocation RParenLoc, Stmt *Body);
+  void CheckSIMDPragmaClauses(SourceLocation PragmaLoc,
+                              ArrayRef<Attr *> Attrs);
+  void ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
+                               ArrayRef<Attr *> SIMDAttrList);
+  void ActOnSIMDForStmtError();
+
   enum SIMDPrivateKind {
     SIMD_Private,
     SIMD_FirstPrivate,

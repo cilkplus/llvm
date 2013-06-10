@@ -678,6 +678,29 @@ public:
   };
   CGCapturedStmtInfo *CapturedStmtInfo;
 
+  /// \brief ABI for SIMD for statement code generation.
+  class CGSIMDForStmtInfo : public CGCapturedStmtInfo {
+  public:
+    explicit CGSIMDForStmtInfo(const SIMDForStmt &S)
+      : CGCapturedStmtInfo(*S.getBody(), CR_SIMDFor),
+        TheSIMDFor(S) { }
+
+    virtual StringRef getHelperName() const { return "__simd_for_helper"; }
+
+    virtual void EmitBody(CodeGenFunction &CGF, Stmt *S) {
+      CGF.EmitSIMDForHelperBody(S);
+    }
+
+    const SIMDForStmt &getSIMDForStmt() const { return TheSIMDFor; }
+
+    static bool classof(const CGSIMDForStmtInfo *) { return true; }
+    static bool classof(const CGCapturedStmtInfo *I) {
+      return I->getKind() == CR_SIMDFor;
+    }
+  private:
+    const SIMDForStmt &TheSIMDFor;
+  };
+
   /// \brief API for Cilk for statement code generation.
   class CGCilkForStmtInfo : public CGCapturedStmtInfo {
   public:
@@ -2357,6 +2380,8 @@ public:
   void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);
   void EmitCilkForHelperBody(const Stmt *S);
+  void EmitSIMDForStmt(const SIMDForStmt &S);
+  void EmitSIMDForHelperBody(const Stmt *S);
 
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission

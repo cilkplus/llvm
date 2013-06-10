@@ -2322,6 +2322,110 @@ public:
   }
 };
 
+/// \brief This represents a pragma SIMD for statement.
+/// \code
+/// #pragma simd ...
+/// for (int i = 0; i < n; ++i) {
+///   // ...
+/// }
+/// \endcode
+class SIMDForStmt : public Stmt {
+private:
+  /// \brief An enumeration for accessing stored statements in a SIMD for
+  /// statement.
+  enum { INIT, COND, INC, BODY, LAST };
+
+  Stmt *SubExprs[LAST]; // SubExprs[INIT] is an expression or declstmt.
+                        // SubExprs[BODY] is a CapturedStmt.
+
+  /// \brief The source location of '#pragma'.
+  SourceLocation PragmaLoc;
+
+  /// \brief The source location of 'for'.
+  SourceLocation ForLoc;
+
+  /// \brief The source location of opening parenthesis.
+  SourceLocation LParenLoc;
+
+  /// \brief The source location of closing parenthesis.
+  SourceLocation RParenLoc;
+
+  /// \brief The number of SIMD clauses.
+  unsigned NumAttrs;
+
+  /// \brief The SIMD clauses represented as attributes.
+  // This field must be the last member of this class.
+  Attr *Attrs[1];
+
+  SIMDForStmt(EmptyShell Empty, unsigned NumAttrs);
+
+  SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> Attrs,
+              Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
+              SourceLocation FL, SourceLocation LP, SourceLocation RP);
+
+public:
+  /// \brief Construct a SIMD for statement.
+  static SIMDForStmt *Create(ASTContext &C, SourceLocation PragmaLoc,
+                             ArrayRef<Attr *> Attrs, Stmt *Init,
+                             Expr *Cond, Expr *Inc, CapturedStmt *Body,
+                             SourceLocation FL, SourceLocation LP,
+                             SourceLocation RP);
+
+  /// \brief Construct an empty SIMD for statement.
+  static SIMDForStmt *CreateEmpty(ASTContext &C, unsigned NumAttrs);
+
+  ArrayRef<Attr *> getAttrs() const {
+    return ArrayRef<Attr *>(Attrs, NumAttrs);
+  }
+
+  /// \brief Retrieve the initialization expression or declaration statement.
+  Stmt *getInit() { return SubExprs[INIT]; }
+  const Stmt *getInit() const { return SubExprs[INIT]; }
+
+  /// \brief Retrieve the loop condition expression.
+  Expr *getCond() { return reinterpret_cast<Expr *>(SubExprs[COND]); }
+  const Expr *getCond() const {
+    return reinterpret_cast<Expr *>(SubExprs[COND]);
+  }
+
+  /// \brief Retrieve the loop increment expression.
+  Expr *getInc() { return reinterpret_cast<Expr *>(SubExprs[INC]); }
+  const Expr *getInc()  const {
+    return reinterpret_cast<Expr *>(SubExprs[INC]);
+  }
+
+  /// \brief Retrieve the loop body.
+  CapturedStmt *getBody() {
+    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]);
+  }
+  const CapturedStmt *getBody() const {
+    return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]);
+  }
+
+  SourceLocation getPragmaLoc() const LLVM_READONLY { return PragmaLoc; }
+  SourceLocation getForLoc() const LLVM_READONLY { return ForLoc; }
+  SourceLocation getLParenLoc() const LLVM_READONLY { return LParenLoc; }
+  SourceLocation getRParenLoc() const LLVM_READONLY { return RParenLoc; }
+
+  void setPragmaLoc(SourceLocation L) { PragmaLoc = L; }
+  void setForLoc(SourceLocation L) { ForLoc = L; }
+  void setLParenLoc(SourceLocation L) { LParenLoc = L; }
+  void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+
+  SourceLocation getLocStart() const LLVM_READONLY { return PragmaLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY {
+    return SubExprs[BODY]->getLocEnd();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == SIMDForStmtClass;
+  }
+
+  child_range children() {
+    return child_range(SubExprs, SubExprs + LAST);
+  }
+};
+
 }  // end namespace clang
 
 #endif

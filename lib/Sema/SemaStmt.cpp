@@ -295,6 +295,14 @@ sema::CompoundScopeInfo &Sema::getCurCompoundScope() const {
   return getCurFunction()->CompoundScopes.back();
 }
 
+sema::CompoundScopeInfo &Sema::getCurCompoundScopeSkipSIMDFor() const {
+  unsigned I = FunctionScopes.size() - 1;
+  while (isa<SIMDForScopeInfo>(FunctionScopes[I]))
+    --I;
+  assert((I < FunctionScopes.size()) && "unwrap unexpected");
+  return FunctionScopes[I]->CompoundScopes.back();
+}
+
 sema::CompoundScopeInfo &Sema::getCurCompoundScopeSkipCilkFor() const {
   if (getLangOpts().CilkPlus) {
     unsigned I = FunctionScopes.size() - 1;
@@ -2690,6 +2698,9 @@ Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
     if (isa<CilkForScopeInfo>(getCurFunction())) {
       Diag(BreakLoc, diag::err_cilk_for_cannot_break);
       return StmtError();
+    } else if (isa<SIMDForScopeInfo>(getCurFunction())) {
+      Diag(BreakLoc, diag::err_simd_for_cannot_break);
+      return StmtError();
     }
 
     // C99 6.8.6.3p1: A break shall appear only in or as a switch/loop body.
@@ -2859,6 +2870,9 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   // It is not allowed to return from a Cilk for statement.
   if (isa<CilkForScopeInfo>(CurCap)) {
     Diag(ReturnLoc, diag::err_cilk_for_cannot_return);
+    return StmtError();
+  } else if (isa<SIMDForScopeInfo>(CurCap)) {
+    Diag(ReturnLoc, diag::err_simd_for_cannot_return);
     return StmtError();
   }
 
@@ -4880,155 +4894,6 @@ void Sema::ActOnCilkForStmtError() {
 }
 
 namespace {
-struct UsedDecl {
-  // If this is allowed to conflict (eg. a linear step)
-  bool CanConflict;
-  // Attribute using this variable
-  const Attr *Attribute;
-  // Specific usage within that attribute
-  const Expr *Usage;
-
-  UsedDecl(bool CanConflict, const Attr *Attribute, const Expr *Usage)
-      : CanConflict(CanConflict), Attribute(Attribute), Usage(Usage) {}
-};
-typedef llvm::SmallDenseMap<const ValueDecl *,
-                            llvm::SmallVector<UsedDecl, 4> > DeclMapTy;
-
-void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
-  const SIMDLinearAttr *LA = static_cast<const SIMDLinearAttr *>(A);
-  for (Expr **i = LA->steps_begin(), **e = LA->steps_end(); i < e; i += 2) {
-    const Expr *LE = *i;
-    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(LE)) {
-      const ValueDecl *VD = D->getDecl();
-      UsedDecls[VD].push_back(UsedDecl(false, A, D));
-    }
-    const Expr *SE = *(i+1);
-    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(SE)) {
-      const ValueDecl *VD = D->getDecl();
-      UsedDecls[VD].push_back(UsedDecl(true, LA, D));
-    }
-  }
-}
-
-void HandleGenericSIMDAttr(const Attr *A, DeclMapTy &UsedDecls,
-                           bool CanConflict = false) {
-  const SIMDReductionAttr *RA = static_cast<const SIMDReductionAttr *>(A);
-  for (Expr **i = RA->varList_begin(), **e = RA->varList_end(); i < e; ++i) {
-    const Expr *RE = *i;
-    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(RE)) {
-      const ValueDecl *VD = D->getDecl();
-      UsedDecls[VD].push_back(UsedDecl(CanConflict, A, D));
-    } else if (const MemberExpr *M = dyn_cast_or_null<MemberExpr>(RE)) {
-      const ValueDecl *VD = M->getMemberDecl();
-      UsedDecls[VD].push_back(UsedDecl(CanConflict, A, M));
-    }
-  }
-}
-
-void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema *S) {
-  for (DeclMapTy::iterator it = UsedDecls.begin(), end = UsedDecls.end();
-       it != end; it++) {
-    llvm::SmallVectorImpl<UsedDecl> &Usages = it->second;
-    if (Usages.size() <= 1)
-      continue;
-
-    UsedDecl &First = Usages[0]; // Legitimate usage of this variable
-    for (unsigned i = 1, e = Usages.size(); i < e; ++i) {
-      UsedDecl &Use = Usages[i];
-      if (First.CanConflict && Use.CanConflict)
-        continue;
-      // One is in conflict. Issue error on i'th usage.
-      switch (Use.Attribute->getKind()) {
-      case attr::SIMDLinear:
-        if (Use.CanConflict || (First.CanConflict &&
-                                First.Attribute->getKind() == attr::SIMDLinear))
-          // This is a linear step, or in conflict with a linear step
-          S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_conflict_step)
-              << !Use.CanConflict << Use.Usage->getSourceRange();
-        else
-          // Re-using linear variable in another simd clause
-          S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-              << 0 << Use.Usage->getSourceRange();
-        break;
-      case attr::SIMDPrivate:
-      case attr::SIMDFirstPrivate:
-      case attr::SIMDLastPrivate:
-        S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-            << (First.Attribute->getKind() == attr::SIMDReduction)
-            << Use.Usage->getSourceRange();
-        break;
-      case attr::SIMDReduction:
-        // Any number of reduction clauses can be specified on the directive,
-        // but a list item can appear only once in the reduction clauses for
-        // that directive.
-        S->Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-            << 1 << Use.Usage->getSourceRange();
-        break;
-      default:
-        ;
-      }
-      S->Diag(First.Usage->getLocStart(), diag::note_pragma_simd_used_here)
-          << First.Attribute->getRange() << First.Usage->getSourceRange();
-    }
-  }
-}
-} // namespace
-
-StmtResult Sema::ActOnPragmaSIMD(SourceLocation PragmaLoc,
-                                 Stmt *SubStmt, ArrayRef<const Attr *> Attrs) {
-  if (!isa<ForStmt>(SubStmt)) {
-    Diag(PragmaLoc, diag::err_pragma_simd_expected_for_loop);
-    return SubStmt;
-  }
-
-  // Collect all used decls in order of usage
-  DeclMapTy UsedDecls;
-  const Attr *VectorLengthAttr = 0;
-  for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
-    if (!Attrs[i])
-      continue;
-    const Attr *A = Attrs[i];
-
-    switch(A->getKind()) {
-    case attr::SIMDLinear:
-      HandleSIMDLinearAttr(A, UsedDecls);
-      break;
-    case attr::SIMDLength:
-    case attr::SIMDLengthFor:
-      if (VectorLengthAttr) {
-        attr::Kind ThisKind = A->getKind(),
-                   PrevKind = VectorLengthAttr->getKind();
-
-        if (ThisKind == PrevKind)
-          Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_multiple)
-              << (ThisKind == attr::SIMDLength) << A->getRange();
-        else
-          Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_conflict)
-              << (ThisKind == attr::SIMDLength) << A->getRange();
-        Diag(VectorLengthAttr->getLocation(),
-             diag::note_pragma_simd_specified_here)
-            << (PrevKind == attr::SIMDLength) << VectorLengthAttr->getRange();
-      } else
-        VectorLengthAttr = A;
-      break;
-    case attr::SIMDFirstPrivate:
-    case attr::SIMDLastPrivate:
-    case attr::SIMDPrivate:
-      HandleGenericSIMDAttr(A, UsedDecls, true);
-      break;
-    case attr::SIMDReduction:
-      HandleGenericSIMDAttr(A, UsedDecls);
-      break;
-    default:
-      ;
-    }
-  }
-
-  EnforcePragmaSIMDConstraints(UsedDecls, this);
-  return ActOnAttributedStmt(PragmaLoc, Attrs, SubStmt);
-}
-
-namespace {
 /// \brief Helper class to diagnose a SIMD for loop body.
 //
 /// FIXME: Check OpenMP directive and construct.
@@ -5143,22 +5008,10 @@ public:
     return true;
   }
 
-  bool VisitAttributedStmt(AttributedStmt *S) {
-    if (!S->getSubStmt())
-      return true;
-
-    ArrayRef<const Attr*> Attrs = S->getAttrs();
-    for (ArrayRef<const Attr*>::iterator I = Attrs.begin(), E = Attrs.end();
-        I != E; ++I) {
-      // This is a SIMD for loop.
-      if ((*I)->getKind() == attr::SIMD) {
-        SemaRef.Diag(S->getSubStmt()->getLocStart(),
-            SemaRef.PDiag(diag::err_simd_for_nested));
-        SemaRef.Diag(LoopLoc, SemaRef.PDiag(diag::note_simd_for_nested));
-        IsValid = false;
-        break;
-      }
-    }
+  bool VisitSIMDForStmt(SIMDForStmt *S) {
+    SemaRef.Diag(S->getForLoc(), SemaRef.PDiag(diag::err_simd_for_nested));
+    SemaRef.Diag(LoopLoc, SemaRef.PDiag(diag::note_simd_for_nested));
+    IsValid = false;
     return true;
   }
 };
@@ -5543,7 +5396,9 @@ static bool CheckSIMDForIncrement(Sema &S, Expr *Increment,
   return true;
 }
 
-StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
+StmtResult Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
+                                  ArrayRef<Attr *> Attrs,
+                                  SourceLocation ForLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *First, FullExprArg Second,
                                   FullExprArg Third,
@@ -5576,8 +5431,46 @@ StmtResult Sema::ActOnSIMDForStmt(SourceLocation ForLoc,
   DiagnoseUnusedExprResult(Body);
 
   if (isa<NullStmt>(Body))
-    getCurCompoundScope().setHasEmptyLoopBodies();
+    getCurCompoundScopeSkipSIMDFor().setHasEmptyLoopBodies();
 
-  return ActOnForStmt(ForLoc, LParenLoc, First, Second, /*SecondVar=*/0, Third,
-                      RParenLoc, Body);
+  return BuildSIMDForStmt(PragmaLoc, Attrs, ForLoc, LParenLoc, First,
+                          Second.get(), Third.get(), RParenLoc, Body);
+}
+
+
+StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
+                                  ArrayRef<Attr *> Attrs,
+                                  SourceLocation ForLoc,
+                                  SourceLocation LParenLoc,
+                                  Stmt *Init, Expr *Cond, Expr *Inc,
+                                  SourceLocation RParenLoc, Stmt *Body) {
+  SIMDForScopeInfo *FSI = getCurSIMDFor();
+  assert(FSI && "SIMDForScopeInfo is out of sync");
+  CapturedDecl *CD = FSI->TheCapturedDecl;
+  RecordDecl *RD = FSI->TheRecordDecl;
+
+  SmallVector<CapturedStmt::Capture, 4> Captures;
+  SmallVector<Expr *, 4> CaptureInits;
+  buildCapturedStmtCaptureList(Captures, CaptureInits, FSI->Captures);
+
+  CapturedStmt *CapturedBody = CapturedStmt::Create(getASTContext(), Body,
+                                                    FSI->CapRegionKind,
+                                                    Captures, CaptureInits,
+                                                    CD, RD);
+
+  CD->setBody(Body);
+  RD->completeDefinition();
+
+  SIMDForStmt *Result = SIMDForStmt::Create(Context, PragmaLoc, Attrs, Init,
+                                            Cond, Inc, CapturedBody,
+                                            ForLoc, LParenLoc, RParenLoc);
+
+  ExprNeedsCleanups = FSI->ExprNeedsCleanups;
+  PopExpressionEvaluationContext();
+  PopDeclContext();
+  // Pop the compound scope we inserted implicitly.
+  PopCompoundScope();
+  PopFunctionScopeInfo();
+
+  return Owned(Result);
 }

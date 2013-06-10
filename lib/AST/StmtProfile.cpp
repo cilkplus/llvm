@@ -740,6 +740,10 @@ void StmtProfiler::VisitCilkForStmt(const CilkForStmt *S) {
   VisitStmt(S);
 }
 
+void StmtProfiler::VisitSIMDForStmt(const SIMDForStmt *S) {
+  VisitStmt(S);
+}
+
 void StmtProfiler::VisitCXXNamedCastExpr(const CXXNamedCastExpr *S) {
   VisitExplicitCastExpr(S);
 }

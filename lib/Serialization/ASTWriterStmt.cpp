@@ -1628,6 +1628,11 @@ void ASTStmtWriter::VisitCilkForStmt(CilkForStmt *S) {
   llvm_unreachable("not implemented yet");
 }
 
+void ASTStmtWriter::VisitSIMDForStmt(SIMDForStmt *S) {
+  Code = serialization::STMT_SIMD_FOR;
+  llvm_unreachable("not implemented yet");
+}
+
 //===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements.
 //===----------------------------------------------------------------------===//

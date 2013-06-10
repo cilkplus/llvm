@@ -1025,6 +1025,16 @@ void Sema::PushCilkForScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
   FunctionScopes.push_back(CSI);
 }
 
+void Sema::PushSIMDForScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
+                            SourceLocation PragmaLoc) {
+  CapturingScopeInfo *CSI =
+      new SIMDForScopeInfo(getDiagnostics(), S, CD, RD, CD->getContextParam(),
+                           PragmaLoc);
+
+  CSI->ReturnType = Context.VoidTy;
+  FunctionScopes.push_back(CSI);
+}
+
 void Sema::PushLambdaScope(CXXRecordDecl *Lambda,
                            CXXMethodDecl *CallOperator) {
   FunctionScopes.push_back(new LambdaScopeInfo(getDiagnostics(), Lambda,
@@ -1083,6 +1093,13 @@ CilkForScopeInfo *Sema::getCurCilkFor() {
     return 0;
 
   return dyn_cast<CilkForScopeInfo>(FunctionScopes.back());
+}
+
+SIMDForScopeInfo *Sema::getCurSIMDFor() {
+  if (FunctionScopes.empty())
+    return 0;
+
+  return dyn_cast<SIMDForScopeInfo>(FunctionScopes.back());
 }
 
 LambdaScopeInfo *Sema::getCurLambda() {

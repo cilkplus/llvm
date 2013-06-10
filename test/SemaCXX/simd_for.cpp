@@ -26,6 +26,25 @@ void test_simd_for_body1() {
        goto L3; // expected-error {{goto is not allowed within simd for}}
     }();
   }
+
+  #pragma simd
+  for (int i = 0; i < 10; i++) {
+  L4:
+    if (foo()) break; // expected-error {{cannot break from a simd for loop}}
+    if (foo()) return; // expected-error {{cannot return from within a simd for loop}}
+  }
+  goto L4; // expected-error {{use of undeclared label 'L4'}}
+
+  #pragma simd
+  for (int i = 0; i < 10; i++) {
+    for (int j = 0; j < 10; ++j) {
+      if (foo()) break; // OK
+      if (foo()) return; // expected-error {{cannot return from within a simd for loop}}
+      []() {
+        if (foo()) return; // OK
+      }();
+    }
+  }
 }
 
 void test_simd_for_body2() {

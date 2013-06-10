@@ -1668,6 +1668,10 @@ void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
   llvm_unreachable("not implemented yet");
 }
 
+void ASTStmtReader::VisitSIMDForStmt(SIMDForStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
 //===----------------------------------------------------------------------===//
 // ASTReader Implementation
 //===----------------------------------------------------------------------===//
@@ -2371,6 +2375,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case STMT_CILK_FOR:
+      llvm_unreachable("not implemented yet");
+      break;
+
+    case STMT_SIMD_FOR:
       llvm_unreachable("not implemented yet");
       break;
     }

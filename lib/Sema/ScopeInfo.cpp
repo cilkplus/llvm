@@ -189,3 +189,4 @@ BlockScopeInfo::~BlockScopeInfo() { }
 LambdaScopeInfo::~LambdaScopeInfo() { }
 CapturedRegionScopeInfo::~CapturedRegionScopeInfo() { }
 CilkForScopeInfo::~CilkForScopeInfo() { }
+SIMDForScopeInfo::~SIMDForScopeInfo() { }

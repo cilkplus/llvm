@@ -6600,6 +6600,10 @@ def err_simd_for_increment_zero : Error<
   "loop increment must be non-zero in simd for">;
 def err_simd_for_increment_inconsistent : Error<
   "loop increment is inconsistent with condition in simd for: expected %select{negative|positive}0 stride">;
+def err_simd_for_cannot_return: Error<
+  "cannot return from within a simd for loop">;
+def err_simd_for_cannot_break: Error<
+  "cannot break from a simd for loop">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

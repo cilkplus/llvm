@@ -1,11 +1,15 @@
-// RUN: %clang_cc1 -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -std=c++11 -emit-llvm %s -o - | FileCheck %s
+
+void anchor(int);
 
 void test() {
   #pragma simd
   for (int i = 0; i < 10; ++i) ;
-// CHECK: llvm.mem.parallel_loop_access !0
+// CHECK: define void @_Z4testv(
 // CHECK: llvm.mem.parallel_loop_access !0
 // CHECK: llvm.loop !0
+  anchor(50);
+// CHECK: call void @_Z6anchori(i32 50)
 }
 
 void test2(int *A, int N) {
@@ -13,9 +17,12 @@ void test2(int *A, int N) {
   #pragma simd
   for (int *I = A; I != IE; ++I)
     *I *= 2;
-// CHECK: llvm.mem.parallel_loop_access !1
+// CHECK: define void @_Z5test2Pii
 // CHECK: llvm.mem.parallel_loop_access !1
 // CHECK: llvm.loop !1
+
+  anchor(60);
+// CHECK: call void @_Z6anchori(i32 60)
 }
 
 constexpr int width(int i) { return 1 << i; }
@@ -23,25 +30,29 @@ constexpr int width(int i) { return 1 << i; }
 void test_vectorlength() {
   #pragma simd vectorlength(4)
   for (int i = 0; i < 10; ++i) ;
-// CHECK: llvm.mem.parallel_loop_access !2
+// CHECK: define void @_Z17test_vectorlengthv
 // CHECK: llvm.mem.parallel_loop_access !2
 // CHECK: llvm.loop !2
+
+  anchor(101);
+// CHECK: call void @_Z6anchori(i32 101)
 
   const int W = 1 << 3;
   #pragma simd vectorlength(W)
   for (int i = 0; i < 10; ++i) ;
 // CHECK: llvm.mem.parallel_loop_access !4
-// CHECK: llvm.mem.parallel_loop_access !4
 // CHECK: llvm.loop !4
+
+  anchor(102);
+// CHECK: call void @_Z6anchori(i32 102)
 
   #pragma simd vectorlength(width(4))
   for (int i = 0; i < 10; ++i) ;
 // CHECK: llvm.mem.parallel_loop_access !6
-// CHECK: llvm.mem.parallel_loop_access !6
 // CHECK: llvm.loop !6
-}
 
-void test_linear() {
+  anchor(103);
+// CHECK: call void @_Z6anchori(i32 103)
 }
 
 // test()

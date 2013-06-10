@@ -183,6 +183,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::CilkForStmtClass:
     EmitCilkForStmt(cast<CilkForStmt>(*S));
     break;
+  case Stmt::SIMDForStmtClass:
+    EmitSIMDForStmt(cast<SIMDForStmt>(*S));
+    break;
   }
 }
 
@@ -393,28 +396,6 @@ void CodeGenFunction::EmitLabelStmt(const LabelStmt &S) {
 }
 
 void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
-  const ArrayRef<const Attr*> &Attrs = S.getAttrs();
-  for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
-    switch (Attrs[i]->getKind()) {
-    case clang::attr::SIMD:
-      LoopStack.SetParallel();
-      break;
-    case clang::attr::SIMDLength: {
-      const SIMDLengthAttr *SIMDLength = 0;
-      SIMDLength = static_cast<const SIMDLengthAttr*>(Attrs[i]);
-      RValue Width = EmitAnyExpr(SIMDLength->getValueExpr(),
-                                 AggValueSlot::ignored(), true);
-      llvm::ConstantInt *C = dyn_cast<llvm::ConstantInt>(Width.getScalarVal());
-      assert(C);
-      LoopStack.SetVectorizerWidth(C->getZExtValue());
-    } break;
-    case clang::attr::SIMDLengthFor:
-      break;
-    default:
-      // Not yet handled
-      ;
-    }
-  }
   EmitStmt(S.getSubStmt());
 }
 
@@ -2149,4 +2130,139 @@ CodeGenFunction::CGCilkSpawnStmtInfo::EmitBody(CodeGenFunction &CGF, Stmt *S) {
 
   CGF.CGM.getCilkPlusRuntime().EmitCilkHelperStackFrame(CGF);
   CGCapturedStmtInfo::EmitBody(CGF, S);
+}
+
+void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
+  RunCleanupsScope SIMDForScope(*this);
+  CGDebugInfo *DI = getDebugInfo();
+  if (DI)
+    DI->EmitLexicalBlockStart(Builder, S.getSourceRange().getBegin());
+
+  const CapturedStmt &CS = *S.getBody();
+  CapturedDecl *CD = const_cast<CapturedDecl *>(CS.getCapturedDecl());
+  const RecordDecl *RD = CS.getCapturedRecordDecl();
+
+  CGSIMDForStmtInfo CSInfo(S);
+  CodeGenFunction CGF(CGM, true);
+  CGF.CapturedStmtInfo = &CSInfo;
+
+  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
+
+  // Always inline this function back to the call site.
+  F->addFnAttr(llvm::Attribute::AlwaysInline);
+
+  // Initialize the captured struct.
+  LValue CapStruct = InitCapturedStruct(CS);
+
+  // Emit call to the helper function.
+  EmitCallOrInvoke(F, CapStruct.getAddress());
+}
+
+void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
+  CGSIMDForStmtInfo *Info = cast<CGSIMDForStmtInfo>(CapturedStmtInfo);
+  const SIMDForStmt &SIMDFor = Info->getSIMDForStmt();
+
+  // Emit all SIMD clauses.
+  const ArrayRef<Attr *> &Attrs = SIMDFor.getAttrs();
+  for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
+    switch (Attrs[i]->getKind()) {
+    case clang::attr::SIMD:
+      LoopStack.SetParallel();
+      break;
+    case clang::attr::SIMDLength: {
+      const SIMDLengthAttr *SIMDLength = 0;
+      SIMDLength = static_cast<const SIMDLengthAttr*>(Attrs[i]);
+      RValue Width = EmitAnyExpr(SIMDLength->getValueExpr(),
+                                 AggValueSlot::ignored(), true);
+      llvm::ConstantInt *C = dyn_cast<llvm::ConstantInt>(Width.getScalarVal());
+      assert(C);
+      LoopStack.SetVectorizerWidth(C->getZExtValue());
+    } break;
+    case clang::attr::SIMDLengthFor:
+      break;
+    default:
+      // Not yet handled
+      ;
+    }
+  }
+
+  // Emit the for statement and data clauses.
+  JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
+  RunCleanupsScope ForScope(*this);
+
+  CGDebugInfo *DI = getDebugInfo();
+  if (DI)
+    DI->EmitLexicalBlockStart(Builder, SIMDFor.getForLoc());
+
+  // Evaluate the first part before the loop.
+  EmitStmt(SIMDFor.getInit());
+
+  // Start the loop with a block that tests the condition.
+  // If there's an increment, the continue scope will be overwritten
+  // later.
+  JumpDest Continue = getJumpDestInCurrentScope("for.cond");
+  llvm::BasicBlock *CondBlock = Continue.getBlock();
+  EmitBlock(CondBlock);
+  LoopStack.Push(CondBlock);
+
+  // Create a cleanup scope for the condition variable cleanups.
+  RunCleanupsScope ConditionScope(*this);
+
+  llvm::Value *BoolCondVal = 0;
+  {
+    // If the for statement has a condition scope, emit the local variable
+    // declaration.
+    llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
+
+    // If there are any cleanups between here and the loop-exit scope,
+    // create a block to stage a loop exit along.
+    if (ForScope.requiresCleanups())
+      ExitBlock = createBasicBlock("for.cond.cleanup");
+
+    // As long as the condition is true, iterate the loop.
+    llvm::BasicBlock *ForBody = createBasicBlock("for.body");
+
+    // C99 6.8.5p2/p4: The first substatement is executed if the expression
+    // compares unequal to 0.  The condition must be a scalar type.
+    BoolCondVal = EvaluateExprAsBool(SIMDFor.getCond());
+    Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock);
+
+    if (ExitBlock != LoopExit.getBlock()) {
+      EmitBlock(ExitBlock);
+      EmitBranchThroughCleanup(LoopExit);
+    }
+
+    EmitBlock(ForBody);
+  }
+
+  Continue = getJumpDestInCurrentScope("for.inc");
+
+  // Store the blocks to use for break and continue.
+  BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
+
+  // FIXME: Should emit OpenMP clauses with the loop body.
+  {
+    // Create a separate cleanup scope for the body, in case it is not
+    // a compound statement.
+    RunCleanupsScope BodyScope(*this);
+    EmitStmt(SIMDFor.getBody()->getCapturedStmt());
+  }
+
+  EmitBlock(Continue.getBlock());
+  EmitStmt(SIMDFor.getInc());
+
+  BreakContinueStack.pop_back();
+
+  ConditionScope.ForceCleanup();
+  EmitBranch(CondBlock);
+
+  ForScope.ForceCleanup();
+
+  if (DI)
+    DI->EmitLexicalBlockEnd(Builder, SIMDFor.getSourceRange().getEnd());
+
+  LoopStack.Pop();
+
+  // Emit the fall-through block.
+  EmitBlock(LoopExit.getBlock(), true);
 }

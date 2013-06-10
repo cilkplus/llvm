@@ -248,6 +248,7 @@ namespace  {
     void VisitLabelStmt(const LabelStmt *Node);
     void VisitGotoStmt(const GotoStmt *Node);
     void VisitCapturedStmt(const CapturedStmt *Node);
+    void VisitSIMDForStmt(const SIMDForStmt *Node);
 
     // Exprs
     void VisitExpr(const Expr *Node);
@@ -1391,6 +1392,17 @@ void ASTDumper::VisitAttributedStmt(const AttributedStmt *Node) {
   VisitStmt(Node);
   for (ArrayRef<const Attr *>::iterator I = Node->getAttrs().begin(),
                                         E = Node->getAttrs().end();
+       I != E; ++I) {
+    if (I + 1 == E)
+      lastChild();
+    dumpAttr(*I);
+  }
+}
+
+void ASTDumper::VisitSIMDForStmt(const SIMDForStmt *Node) {
+  VisitStmt(Node);
+  for (ArrayRef<Attr *>::iterator I = Node->getAttrs().begin(),
+                                  E = Node->getAttrs().end();
        I != E; ++I) {
     if (I + 1 == E)
       lastChild();

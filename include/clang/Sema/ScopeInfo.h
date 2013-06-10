@@ -86,7 +86,8 @@ protected:
     SK_Block,
     SK_Lambda,
     SK_CapturedRegion,
-    SK_CilkFor
+    SK_CilkFor,
+    SK_SIMDFor
   };
   
 public:
@@ -514,7 +515,8 @@ public:
   static bool classof(const FunctionScopeInfo *FSI) { 
     return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda
                                  || FSI->Kind == SK_CapturedRegion
-                                 || FSI->Kind == SK_CilkFor;
+                                 || FSI->Kind == SK_CilkFor
+                                 || FSI->Kind == SK_SIMDFor;
   }
 };
 
@@ -583,12 +585,15 @@ public:
       return "_Cilk_spawn";
     case CR_CilkFor:
       return "_Cilk_for";
+    case CR_SIMDFor:
+      return "simd for";
     }
     llvm_unreachable("Invalid captured region kind!");
   }
 
   static bool classof(const FunctionScopeInfo *FSI) {
-    return FSI->Kind == SK_CapturedRegion || FSI->Kind == SK_CilkFor;
+    return FSI->Kind == SK_CapturedRegion || FSI->Kind == SK_CilkFor
+                                          || FSI->Kind == SK_SIMDFor;
   }
 };
 
@@ -620,6 +625,90 @@ public:
 
   static bool classof(const FunctionScopeInfo *FSI) {
     return FSI->Kind == SK_CilkFor;
+  }
+};
+
+/// \brief Retains information about a Cilk for capturing region.
+class SIMDForScopeInfo : public CapturedRegionScopeInfo {
+  enum SIMDVariableKind {
+    VK_Unknown      = 0x00,
+    VK_Private      = 0x01,
+    VK_LastPrivate  = 0x02,
+    VK_FirstPrivate = 0x04,
+    VK_Linear       = 0x08,
+    VK_Reduction    = 0x10
+  };
+
+  typedef llvm::DenseMap<VarDecl *, unsigned>::const_iterator const_iterator;
+  typedef llvm::DenseMap<VarDecl *, unsigned>::iterator iterator;
+
+  void addVar(VarDecl *V, SIMDVariableKind K) {
+    unsigned Kind = K;
+    iterator I = SIMDVariables.find(V);
+    if (I != SIMDVariables.end())
+      I->second |= Kind;
+    else
+      SIMDVariables.insert(std::make_pair(V, Kind));
+  }
+
+  bool isVarKind(VarDecl *V, SIMDVariableKind Kind) const {
+    bool Result = false;
+    const_iterator I = SIMDVariables.find(V);
+    if (I != SIMDVariables.end())
+      return I->second & Kind;
+    return Result;
+  }
+
+  /// \brief The pragma SIMD location.
+  SourceLocation PragmaLoc;
+
+  /// \brief The list of SIMD special variables.
+  llvm::DenseMap<VarDecl *, unsigned> SIMDVariables;
+
+public:
+  SIMDForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CapturedDecl *CD,
+                   RecordDecl *RD, ImplicitParamDecl *Context,
+                   SourceLocation PragmaLoc)
+      : CapturedRegionScopeInfo(Diag, S, CD, RD, Context, CR_SIMDFor),
+        PragmaLoc(PragmaLoc) {
+    Kind = SK_SIMDFor;
+  }
+
+  virtual ~SIMDForScopeInfo();
+
+  void addPrivateVar(VarDecl *V)       { addVar(V, VK_Private); }
+  void addLastPrivateVar(VarDecl *V)   { addVar(V, VK_LastPrivate); }
+  void addFirstPrivateVar(VarDecl *V)  { addVar(V, VK_FirstPrivate); }
+  void addLastLinearVar(VarDecl *V)    { addVar(V, VK_Linear); }
+  void addLastReductionVar(VarDecl *V) { addVar(V, VK_Reduction); }
+
+  bool isPrivate(VarDecl *V) const {
+    assert(V && "null variable unexpected");
+    return isVarKind(V, VK_Private);
+  }
+
+  bool isLastPrivate(VarDecl *V) const {
+    assert(V && "null variable unexpected");
+    return isVarKind(V, VK_LastPrivate);
+  }
+
+  bool isFirstPrivate(VarDecl *V) const {
+    assert(V && "null variable unexpected");
+    return isVarKind(V, VK_FirstPrivate);
+  }
+
+  bool isLinear(VarDecl *V) const {
+    assert(V && "null variable unexpected");
+    return isVarKind(V, VK_Linear);
+  }
+
+  bool isReduction(VarDecl *V) const {
+    assert(V && "null variable unexpected");
+    return isVarKind(V, VK_Reduction);
+  }
+
+  static bool classof(const FunctionScopeInfo *FSI) {
+    return FSI->Kind == SK_SIMDFor;
   }
 };
 

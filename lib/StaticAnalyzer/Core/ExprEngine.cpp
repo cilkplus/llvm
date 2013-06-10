@@ -662,6 +662,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::CilkSpawnStmtClass:
     case Stmt::CilkForGrainsizeStmtClass:
     case Stmt::CilkForStmtClass:
+    case Stmt::SIMDForStmtClass:
       llvm_unreachable("Stmt should not be in analyzer evaluation loop");
 
     case Stmt::ObjCSubscriptRefExprClass:
