@@ -342,6 +342,7 @@ Sema::ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
       return AttrError();
     }
 
+    BinaryOperatorKind ReductionOp;
     switch (Operator) {
     case SIMDReductionAttr::max:
     case SIMDReductionAttr::min:
@@ -354,14 +355,38 @@ Sema::ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
       }
       break;
     case SIMDReductionAttr::plus:
-    case SIMDReductionAttr::star:
-    case SIMDReductionAttr::minus:
-    case SIMDReductionAttr::amp:
-    case SIMDReductionAttr::pipe:
-    case SIMDReductionAttr::caret:
-    case SIMDReductionAttr::ampamp:
-    case SIMDReductionAttr::pipepipe:
+      ReductionOp = BO_AddAssign;
       break;
+    case SIMDReductionAttr::star:
+      ReductionOp = BO_MulAssign;
+      break;
+    case SIMDReductionAttr::minus:
+      ReductionOp = BO_SubAssign;
+      break;
+    case SIMDReductionAttr::amp:
+      ReductionOp = BO_AndAssign;
+      break;
+    case SIMDReductionAttr::pipe:
+      ReductionOp = BO_OrAssign;
+      break;
+    case SIMDReductionAttr::caret:
+      ReductionOp = BO_XorAssign;
+      break;
+    case SIMDReductionAttr::ampamp:
+      ReductionOp = BO_LAnd;
+      break;
+    case SIMDReductionAttr::pipepipe:
+      ReductionOp = BO_LAnd;
+      break;
+    }
+    if (Operator != SIMDReductionAttr::max &&
+        Operator != SIMDReductionAttr::min && getLangOpts().CPlusPlus &&
+        QT->isRecordType()) {
+      // Test that the given operator is overloaded for this type
+      if (BuildBinOp(getCurScope(), E->getLocStart(), ReductionOp, E, E)
+              .isInvalid()) {
+        return AttrError();
+      }
     }
   }
 

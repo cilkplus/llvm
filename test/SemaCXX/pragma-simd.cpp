@@ -162,3 +162,77 @@ namespace ConstExprCheck {
     for (int i = 0; i < 10; ++i) ;
   }
 } // namespace
+
+namespace TypeOpCheck1 {
+  struct A {
+    A operator+=(A);
+    A operator-=(A);
+    A operator*=(A);
+    A operator|=(A);
+    A operator&=(A);
+    A operator^=(A);
+    bool operator&&(A);
+  };
+  void test1() {
+    A a;
+    #pragma simd reduction(+:a)
+    for (int i = 0; i < 10; ++i) ;
+    #pragma simd reduction(-:a)
+    for (int i = 0; i < 10; ++i) ;
+    #pragma simd reduction(*:a)
+    for (int i = 0; i < 10; ++i) ;
+    #pragma simd reduction(|:a)
+    for (int i = 0; i < 10; ++i) ;
+    #pragma simd reduction(&:a)
+    for (int i = 0; i < 10; ++i) ;
+    #pragma simd reduction(^:a)
+    for (int i = 0; i < 10; ++i) ;
+    #pragma simd reduction(&&:a)
+    for (int i = 0; i < 10; ++i) ;
+    #pragma simd reduction(||:a)
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+1 {{reduction operator max requires arithmetic type}} */
+    #pragma simd reduction(max:a)
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+1 {{reduction operator min requires arithmetic type}} */
+    #pragma simd reduction(min:a)
+    for (int i = 0; i < 10; ++i) ;
+  }
+  struct B {
+    B operator+(B);
+    B operator-(B);
+  };
+  B operator^=(B, B);
+  bool operator||(B, A);
+  void test2() {
+    B b;
+    /* expected-error@+1 {{no viable overloaded '+='}} */
+    #pragma simd reduction(+:b)
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+1 {{no viable overloaded '-='}} */
+    #pragma simd reduction(-:b)
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+1 {{no viable overloaded '*='}} */
+    #pragma simd reduction(*:b)
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+1 {{no viable overloaded '|='}} */
+    #pragma simd reduction(|:b)
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+2 {{not contextually convertible to 'bool'}} */
+    /* expected-error@+1 {{invalid operand}} */
+    #pragma simd reduction(&&:b)
+    for (int i = 0; i < 10; ++i) ;
+  }
+} // namespace
+
+namespace TypeOpCheck2 {
+  TypeOpCheck1::B b;
+  void test() {
+    #pragma simd reduction(^:b)
+    for (int i = 0; i < 10; ++i) ;
+    /* expected-error@+2 {{not contextually convertible to 'bool'}} */
+    /* expected-error@+1 {{invalid operand}} */
+    #pragma simd reduction(||:b)
+    for (int i = 0; i < 10; ++i) ;
+  }
+} // namespace
