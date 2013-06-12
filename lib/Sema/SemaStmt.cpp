@@ -336,6 +336,53 @@ public:
     return true;
   }
 };
+
+static void CleanupAndDiagnoseInitOrAssignmentWithCilkSpawn(
+    Expr *InitOrAssignment, Sema &SemaRef, DiagnoseCilkSpawnHelper &D) {
+  // The assignment or initializer may be wrapped in casts and/or involve
+  // object constructors
+  while (true) {
+    if (ImplicitCastExpr *E = dyn_cast<ImplicitCastExpr>(InitOrAssignment))
+      InitOrAssignment = E->getSubExprAsWritten();
+    else if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(InitOrAssignment))
+      InitOrAssignment = E->getSubExpr();
+    else if (MaterializeTemporaryExpr *E =
+                 dyn_cast<MaterializeTemporaryExpr>(InitOrAssignment))
+      InitOrAssignment = E->GetTemporaryExpr();
+    else if (CXXBindTemporaryExpr *E =
+                 dyn_cast<CXXBindTemporaryExpr>(InitOrAssignment))
+      InitOrAssignment = E->getSubExpr();
+    else if (CXXConstructExpr *E =
+                 dyn_cast<CXXConstructExpr>(InitOrAssignment)) {
+      // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
+      // so handle it the same way as CXXFunctionalCastExpr
+      if (isa<CXXTemporaryObjectExpr>(E))
+        break;
+      if (E->getNumArgs() >= 1)
+        InitOrAssignment = E->getArg(0);
+      else
+        break;
+    } else
+      break;
+  }
+
+  CallExpr *E = dyn_cast<CallExpr>(InitOrAssignment);
+  if (E && E->isCilkSpawnCall()) {
+    if (E->isBuiltinCall())
+      SemaRef.Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_builtin)
+          << E->getSourceRange();
+
+    if (isa<UserDefinedLiteral>(E) || isa<CUDAKernelCallExpr>(E))
+      SemaRef.Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_function)
+          << E->getSourceRange();
+
+    for (CallExpr::arg_iterator I = E->arg_begin(), End = E->arg_end();
+         I != End; ++I) {
+      D.TraverseStmt(*I);
+    }
+  } else
+    D.TraverseStmt(InitOrAssignment);
+}
 } // anonymous namespace
 
 
@@ -398,8 +445,23 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
         LHS = VD;
         RHS = VD->getInit();
       }
-    } else
-      D.TraverseStmt(DS);
+    } else {
+      // For multiple declarations, just serialize the _Cilk_spawn calls
+      for (DeclStmt::decl_iterator it = DS->decl_begin(), end = DS->decl_end();
+          it != end; ++it) {
+        if (VarDecl *VD = dyn_cast<VarDecl>(*it)) {
+          if (VD->hasInit()) {
+            Expr *Init = VD->getInit();
+            CleanupAndDiagnoseInitOrAssignmentWithCilkSpawn(Init, *this, D);
+            if (CallExpr *CE = dyn_cast<CallExpr>(Init)) {
+              if (CE->isCilkSpawnCall())
+                CE->setCilkSpawnLoc(SourceLocation());
+            }
+          }
+        } else
+          D.TraverseDecl(*it);
+      }
+    }
     break;
   }
   case Stmt::BinaryOperatorClass: {
@@ -508,44 +570,7 @@ void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
     }
   }
 
-  // assignment or initializer
-  // - the RHS may be wrapped in casts and/or involve object constructors
-  while (true) {
-    if (ImplicitCastExpr *E = dyn_cast<ImplicitCastExpr>(RHS))
-      RHS = E->getSubExprAsWritten();
-    else if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(RHS))
-      RHS = E->getSubExpr();
-    else if (MaterializeTemporaryExpr *E = dyn_cast<MaterializeTemporaryExpr>(RHS))
-      RHS = E->GetTemporaryExpr();
-    else if (CXXBindTemporaryExpr *E = dyn_cast<CXXBindTemporaryExpr>(RHS))
-      RHS = E->getSubExpr();
-    else if (CXXConstructExpr *E = dyn_cast<CXXConstructExpr>(RHS)) {
-      // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
-      // so handle it the same way as CXXFunctionalCastExpr
-      if (isa<CXXTemporaryObjectExpr>(E)) break;
-      if (E->getNumArgs() >= 1)
-        RHS = E->getArg(0);
-      else break;
-    } else
-      break;
-  }
-
-  CallExpr *E = dyn_cast<CallExpr>(RHS);
-  if (E && E->isCilkSpawnCall()) {
-    if (E->isBuiltinCall())
-      Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_builtin)
-           << E->getSourceRange();
-
-    if (isa<UserDefinedLiteral>(E) || isa<CUDAKernelCallExpr>(E))
-      Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_function)
-           << E->getSourceRange();
-
-    for (CallExpr::arg_iterator I = E->arg_begin(),
-         End = E->arg_end(); I != End; ++I) {
-      D.TraverseStmt(*I);
-    }
-  } else
-    D.TraverseStmt(RHS);
+  CleanupAndDiagnoseInitOrAssignmentWithCilkSpawn(RHS, *this, D);
 }
 
 namespace {

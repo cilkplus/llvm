@@ -483,3 +483,9 @@ void test_wrap_around() {
                                          // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
 }
 
+void test_cilk_spawn_in_cilk_for() {
+  _Cilk_for (int i = 0; i < 10; ++i) {
+    int j = _Cilk_spawn bar(), k = _Cilk_spawn baz(j), x = 0; // OK
+  }
+}
+

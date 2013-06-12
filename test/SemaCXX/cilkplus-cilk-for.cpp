@@ -345,3 +345,10 @@ void loop(S begin, T end1, R end2) {
 }
 
 } // namespace
+
+void test_cilk_spawn_in_cilk_for() {
+  extern int foo();
+  extern int bar(int);
+  _Cilk_for (int i = 0; i < 10; ++i)
+    int j = _Cilk_spawn foo(), k = j, x = _Cilk_spawn bar(k); // OK
+}
