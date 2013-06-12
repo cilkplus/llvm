@@ -450,9 +450,6 @@ StmtResult Parser::ParseSIMDDirective() {
   ParsedAttributesWithRange attrs(AttrFactory);
   MaybeParseCXX11Attributes(attrs);
 
-  ParseScope CapturedRegionScope(this, Scope::FnScope | Scope::DeclScope);
-  Actions.ActOnStartOfSIMDForStmt(Loc, getCurScope(), SIMDAttrList);
-
   // 'for' '(' for-init-stmt
   // 'for' '(' assignment-expr;
   StmtResult FirstPart;
@@ -547,8 +544,12 @@ StmtResult Parser::ParseSIMDDirective() {
   // Match the ')'.
   T.consumeClose();
 
-  ParseScope InnerScope(this, Scope::DeclScope,
-                        C99orCXXorObjC && Tok.isNot(tok::l_brace));
+  // Start capturing variables inside the loop body.
+  Actions.ActOnStartOfSIMDForStmt(Loc, getCurScope(), SIMDAttrList);
+
+  ParseScope InnerScope(this, Scope::BlockScope | Scope::FnScope |
+                              Scope::DeclScope | Scope::ContinueScope);
+
 
   // Read the body statement.
   StmtResult Body(ParseStatement());

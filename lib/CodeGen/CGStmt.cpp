@@ -2134,36 +2134,9 @@ CodeGenFunction::CGCilkSpawnStmtInfo::EmitBody(CodeGenFunction &CGF, Stmt *S) {
 
 void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   RunCleanupsScope SIMDForScope(*this);
-  CGDebugInfo *DI = getDebugInfo();
-  if (DI)
-    DI->EmitLexicalBlockStart(Builder, S.getSourceRange().getBegin());
-
-  const CapturedStmt &CS = *S.getBody();
-  CapturedDecl *CD = const_cast<CapturedDecl *>(CS.getCapturedDecl());
-  const RecordDecl *RD = CS.getCapturedRecordDecl();
-
-  CGSIMDForStmtInfo CSInfo(S);
-  CodeGenFunction CGF(CGM, true);
-  CGF.CapturedStmtInfo = &CSInfo;
-
-  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
-
-  // Always inline this function back to the call site.
-  F->addFnAttr(llvm::Attribute::AlwaysInline);
-
-  // Initialize the captured struct.
-  LValue CapStruct = InitCapturedStruct(CS);
-
-  // Emit call to the helper function.
-  EmitCallOrInvoke(F, CapStruct.getAddress());
-}
-
-void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
-  CGSIMDForStmtInfo *Info = cast<CGSIMDForStmtInfo>(CapturedStmtInfo);
-  const SIMDForStmt &SIMDFor = Info->getSIMDForStmt();
 
   // Emit all SIMD clauses.
-  const ArrayRef<Attr *> &Attrs = SIMDFor.getAttrs();
+  const ArrayRef<Attr *> &Attrs = S.getAttrs();
   for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
     switch (Attrs[i]->getKind()) {
     case clang::attr::SIMD:
@@ -2186,16 +2159,16 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
     }
   }
 
-  // Emit the for statement and data clauses.
+  // Emit the for loop.
   JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
   RunCleanupsScope ForScope(*this);
 
   CGDebugInfo *DI = getDebugInfo();
   if (DI)
-    DI->EmitLexicalBlockStart(Builder, SIMDFor.getForLoc());
+    DI->EmitLexicalBlockStart(Builder, S.getForLoc());
 
   // Evaluate the first part before the loop.
-  EmitStmt(SIMDFor.getInit());
+  EmitStmt(S.getInit());
 
   // Start the loop with a block that tests the condition.
   // If there's an increment, the continue scope will be overwritten
@@ -2224,7 +2197,7 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
 
     // C99 6.8.5p2/p4: The first substatement is executed if the expression
     // compares unequal to 0.  The condition must be a scalar type.
-    BoolCondVal = EvaluateExprAsBool(SIMDFor.getCond());
+    BoolCondVal = EvaluateExprAsBool(S.getCond());
     Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock);
 
     if (ExitBlock != LoopExit.getBlock()) {
@@ -2240,16 +2213,32 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
   // Store the blocks to use for break and continue.
   BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
 
-  // FIXME: Should emit OpenMP clauses with the loop body.
   {
-    // Create a separate cleanup scope for the body, in case it is not
-    // a compound statement.
     RunCleanupsScope BodyScope(*this);
-    EmitStmt(SIMDFor.getBody()->getCapturedStmt());
+
+    // Emit the call to the loop body.
+    const CapturedStmt &CS = *S.getBody();
+    CapturedDecl *CD = const_cast<CapturedDecl *>(CS.getCapturedDecl());
+    const RecordDecl *RD = CS.getCapturedRecordDecl();
+
+    CGSIMDForStmtInfo CSInfo(S, LoopStack.GetCurLoopID());
+    CodeGenFunction CGF(CGM, true);
+    CGF.CapturedStmtInfo = &CSInfo;
+
+    llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
+
+    // Always inline this function back to the call site.
+    F->addFnAttr(llvm::Attribute::AlwaysInline);
+
+    // Initialize the captured struct.
+    LValue CapStruct = InitCapturedStruct(CS);
+
+    // Emit call to the helper function.
+    EmitCallOrInvoke(F, CapStruct.getAddress());
   }
 
   EmitBlock(Continue.getBlock());
-  EmitStmt(SIMDFor.getInc());
+  EmitStmt(S.getInc());
 
   BreakContinueStack.pop_back();
 
@@ -2259,10 +2248,24 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
   ForScope.ForceCleanup();
 
   if (DI)
-    DI->EmitLexicalBlockEnd(Builder, SIMDFor.getSourceRange().getEnd());
+    DI->EmitLexicalBlockEnd(Builder, S.getSourceRange().getEnd());
 
   LoopStack.Pop();
 
   // Emit the fall-through block.
   EmitBlock(LoopExit.getBlock(), true);
+}
+
+void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
+  assert(CapturedStmtInfo && "Should be only called inside a CapturedStmt");
+  CGSIMDForStmtInfo *Info = cast<CGSIMDForStmtInfo>(CapturedStmtInfo);
+
+  // Mark the loop body as an extended region of this SIMD loop.
+  LoopStack.Push(Info->getLoopID());
+  {
+    RunCleanupsScope Scope(*this);
+    EmitStmt(S);
+  }
+  // Leave the loop body.
+  LoopStack.Pop();
 }

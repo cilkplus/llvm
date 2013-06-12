@@ -29,7 +29,7 @@ namespace CodeGen {
 
 /// LoopAttributes - Per loop attributes.
 struct LoopAttributes {
-  LoopAttributes();
+  explicit LoopAttributes(bool IsParallel = false);
   void Clear();
 
   /// Toggle llvm.loop.parallel metadata generation.
@@ -43,6 +43,9 @@ class LoopInfo {
 public:
   /// Construct a new LoopInfo for the loop with entry Header.
   LoopInfo(llvm::BasicBlock *Header, const LoopAttributes &Attrs);
+
+  /// Construct a new LoopInfo with a given loop id metadata.
+  LoopInfo(llvm::MDNode *LoopID, const LoopAttributes &Attrs);
 
   /// Get the loop id metadata for this loop.
   llvm::MDNode *GetLoopID() const { return LoopID; }
@@ -74,8 +77,16 @@ public:
   /// Begin a new structured loop. The set of applied attributes will be applied
   /// to the loop and the attributes will be cleared.
   void Push(llvm::BasicBlock *Header);
+
+  /// Extend the code region as part of a parallel loop which might be inside
+  /// another llvm function.
+  void Push(llvm::MDNode *LoopID);
+
   /// End the current loop.
   void Pop();
+
+  /// Return the top loop id metadata.
+  llvm::MDNode *GetCurLoopID() const { return GetInfo().GetLoopID(); }
 
   /// Function called by the CodeGenFunction when an instruction is created.
   void InsertHelper(llvm::Instruction *I) const;

@@ -47,8 +47,8 @@ static llvm::MDNode *CreateMetadata(llvm::LLVMContext &Ctx,
   return LoopID;
 }
 
-LoopAttributes::LoopAttributes() : IsParallel(false), VectorizerWidth(0) {
-}
+LoopAttributes::LoopAttributes(bool IsParallel)
+  : IsParallel(IsParallel), VectorizerWidth(0) { }
 
 void LoopAttributes::Clear() {
   IsParallel = false;
@@ -59,6 +59,9 @@ LoopInfo::LoopInfo(llvm::BasicBlock *Header, const LoopAttributes &Attrs)
   : LoopID(0), Header(Header), Attrs(Attrs) {
   LoopID = CreateMetadata(Header->getContext(), Attrs);
 }
+
+LoopInfo::LoopInfo(llvm::MDNode *LoopID, const LoopAttributes &Attrs)
+  : LoopID(LoopID), Header(0), Attrs(Attrs) { }
 
 void LoopInfoStack::Push(llvm::BasicBlock *Header) {
   Active.push_back(LoopInfo(Header, StagedAttrs));
@@ -95,4 +98,10 @@ void LoopInfoStack::InsertHelper(llvm::Instruction *I) const {
     else if (llvm::LoadInst *LI = llvm::dyn_cast<llvm::LoadInst>(I))
       LI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
   }
+}
+
+void LoopInfoStack::Push(llvm::MDNode *LoopID) {
+  assert(Active.empty() && "cannot have an active loop");
+  Active.push_back(LoopInfo(LoopID, LoopAttributes(true)));
+  StagedAttrs.Clear();
 }

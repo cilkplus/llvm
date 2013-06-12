@@ -681,9 +681,9 @@ public:
   /// \brief ABI for SIMD for statement code generation.
   class CGSIMDForStmtInfo : public CGCapturedStmtInfo {
   public:
-    explicit CGSIMDForStmtInfo(const SIMDForStmt &S)
+    CGSIMDForStmtInfo(const SIMDForStmt &S, llvm::MDNode *LoopID)
       : CGCapturedStmtInfo(*S.getBody(), CR_SIMDFor),
-        TheSIMDFor(S) { }
+        TheSIMDFor(S), LoopID(LoopID) { }
 
     virtual StringRef getHelperName() const { return "__simd_for_helper"; }
 
@@ -693,12 +693,16 @@ public:
 
     const SIMDForStmt &getSIMDForStmt() const { return TheSIMDFor; }
 
+    llvm::MDNode *getLoopID() const { return LoopID; }
+
     static bool classof(const CGSIMDForStmtInfo *) { return true; }
     static bool classof(const CGCapturedStmtInfo *I) {
       return I->getKind() == CR_SIMDFor;
     }
   private:
     const SIMDForStmt &TheSIMDFor;
+    /// \brief The loop id metadata.
+    llvm::MDNode *LoopID;
   };
 
   /// \brief API for Cilk for statement code generation.

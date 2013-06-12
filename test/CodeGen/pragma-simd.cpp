@@ -55,6 +55,24 @@ void test_vectorlength() {
 // CHECK: call void @_Z6anchori(i32 103)
 }
 
+void touch(int);
+
+void test_access_metadata() {
+  #pragma simd
+  for (int i = 0; i < 10; ++i) {
+    anchor(201);
+    touch(i);
+    anchor(202);
+  }
+  anchor(203);
+  // CHECK: define void @_Z20test_access_metadatav
+  // CHECK: call void @_Z6anchori(i32 201)
+  // CHECK: llvm.mem.parallel_loop_access !8
+  // CHECK: call void @_Z6anchori(i32 202)
+  // CHECK: !llvm.loop !8
+  // CHECK: call void @_Z6anchori(i32 203)
+}
+
 // test()
 // CHECK: !0 = metadata !{metadata !0}
 // test1()
@@ -66,3 +84,4 @@ void test_vectorlength() {
 // CHECK: !5 = metadata !{metadata !"llvm.vectorizer.width", i32 8}
 // CHECK: !6 = metadata !{metadata !6, metadata !7}
 // CHECK: !7 = metadata !{metadata !"llvm.vectorizer.width", i32 16}
+// CHECK: !8 = metadata !{metadata !8}
