@@ -431,7 +431,7 @@ void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
 void HandleGenericSIMDAttr(const Attr *A, DeclMapTy &UsedDecls,
                            bool CanConflict = false) {
   const SIMDReductionAttr *RA = static_cast<const SIMDReductionAttr *>(A);
-  for (Expr **i = RA->varList_begin(), **e = RA->varList_end(); i < e; ++i) {
+  for (Expr **i = RA->variables_begin(), **e = RA->variables_end(); i < e; ++i) {
     const Expr *RE = *i;
     if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(RE)) {
       const ValueDecl *VD = D->getDecl();
@@ -539,7 +539,7 @@ void Sema::CheckSIMDPragmaClauses(SourceLocation PragmaLoc,
   EnforcePragmaSIMDConstraints(UsedDecls, *this);
 }
 
-#define ADD_PRIVATE_VARS(ATTR, FUNC)                                           \
+#define ADD_SIMD_VAR_LIST(ATTR, FUNC)                                          \
 do {                                                                           \
   const ATTR *PA = static_cast<const ATTR *>(A);                               \
   for (Expr **I = PA->variables_begin(), **E = PA->variables_end();            \
@@ -567,14 +567,32 @@ void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
       continue;
     switch(A->getKind()) {
     case attr::SIMDPrivate:
-      ADD_PRIVATE_VARS(SIMDPrivateAttr, addPrivateVar);
+      ADD_SIMD_VAR_LIST(SIMDPrivateAttr, addPrivateVar);
       break;
     case attr::SIMDLastPrivate:
-      ADD_PRIVATE_VARS(SIMDLastPrivateAttr, addLastPrivateVar);
+      ADD_SIMD_VAR_LIST(SIMDLastPrivateAttr, addLastPrivateVar);
       break;
     case attr::SIMDFirstPrivate:
-      ADD_PRIVATE_VARS(SIMDFirstPrivateAttr, addFirstPrivateVar);
+      ADD_SIMD_VAR_LIST(SIMDFirstPrivateAttr, addFirstPrivateVar);
       break;
+    case attr::SIMDReduction:
+#if 0
+      // TODO: Need to properly handle Reductions, in case of MemberExpr
+      // rather than a DeclRefExpr
+      ADD_SIMD_VAR_LIST(SIMDReductionAttr, addReductionVar);
+#endif
+      break;
+    case attr::SIMDLinear: {
+      const SIMDLinearAttr *LA = static_cast<const SIMDLinearAttr *>(A);
+      for (Expr **I = LA->steps_begin(), **E = LA->steps_end();
+           I != E; I += 2) {
+        Expr *DE = *I;
+        assert (DE && isa<DeclRefExpr>(DE) && "reference to a variable expected");
+        VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());
+        getCurSIMDFor()->addLinearVar(VD);
+      }
+      break;
+    }
     default:
       ;
     }

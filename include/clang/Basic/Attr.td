@@ -1046,7 +1046,7 @@ def SIMDFirstPrivate : Attr {
 
 def SIMDReduction : Attr {
   let Spellings = [Keyword<"reduction">];
-  let Args = [VariadicExprArgument<"VarList">];
+  let Args = [VariadicExprArgument<"Variables">];
   let AdditionalMembers = [{
     enum SIMDReductionKind {
       plus = tok::plus,

@@ -630,6 +630,9 @@ public:
 
 /// \brief Retains information about a Cilk for capturing region.
 class SIMDForScopeInfo : public CapturedRegionScopeInfo {
+
+  // In SIMD loops, variables can be marked as one of 5 types:
+  //    Private, LastPrivate, FirstPrivae, Linear, and Reduction.
   enum SIMDVariableKind {
     VK_Unknown      = 0x00,
     VK_Private      = 0x01,
@@ -639,31 +642,66 @@ class SIMDForScopeInfo : public CapturedRegionScopeInfo {
     VK_Reduction    = 0x10
   };
 
+  class SIMDVariable {
+    /// \brief Bitfield specifying kinds of this variable.
+    unsigned Kind;
+
+    /// \brief The local declaration of this variable.
+    VarDecl *LocalDecl;
+
+    /// \brief The original/outer variable declaration.
+    VarDecl *OuterDecl;
+
+    /// \brief Constructed expression to update the outer variable.
+    Expr *UpdateExpr;
+
+  public:
+    SIMDVariable(VarDecl *Var, SIMDVariableKind K)
+        : Kind(K), LocalDecl(NULL), OuterDecl(Var), UpdateExpr(NULL) {}
+
+    void AddKind(SIMDVariableKind K) { Kind |= K; }
+
+    bool IsKind(SIMDVariableKind K) const { return Kind & K; }
+
+    void SetLocal(VarDecl *L) { LocalDecl = L; }
+
+    void SetUpdateExpr(Expr *E) { UpdateExpr = E; }
+
+    VarDecl *GetLocal() { return LocalDecl; }
+
+    VarDecl *GetOuter() { return OuterDecl; }
+
+    Expr *GetUpdateExpr() { return UpdateExpr; }
+
+  };
+
   typedef llvm::DenseMap<VarDecl *, unsigned>::const_iterator const_iterator;
   typedef llvm::DenseMap<VarDecl *, unsigned>::iterator iterator;
 
   void addVar(VarDecl *V, SIMDVariableKind K) {
-    unsigned Kind = K;
     iterator I = SIMDVariables.find(V);
     if (I != SIMDVariables.end())
-      I->second |= Kind;
-    else
-      SIMDVariables.insert(std::make_pair(V, Kind));
+      LocalVariables[I->second].AddKind(K);
+    else {
+      SIMDVariables.insert(std::make_pair(V, LocalVariables.size()));
+      LocalVariables.push_back(SIMDVariable(V, K));
+    }
   }
 
   bool isVarKind(VarDecl *V, SIMDVariableKind Kind) const {
     bool Result = false;
     const_iterator I = SIMDVariables.find(V);
     if (I != SIMDVariables.end())
-      return I->second & Kind;
+      Result = LocalVariables[I->second].IsKind(Kind);
     return Result;
   }
 
   /// \brief The pragma SIMD location.
   SourceLocation PragmaLoc;
 
-  /// \brief The list of SIMD special variables.
+  /// \brief A map of SIMDLocalVariable to index into LocalVariables.
   llvm::DenseMap<VarDecl *, unsigned> SIMDVariables;
+  llvm::SmallVector<SIMDVariable, 4> LocalVariables;
 
 public:
   SIMDForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CapturedDecl *CD,
@@ -679,8 +717,8 @@ public:
   void addPrivateVar(VarDecl *V)       { addVar(V, VK_Private); }
   void addLastPrivateVar(VarDecl *V)   { addVar(V, VK_LastPrivate); }
   void addFirstPrivateVar(VarDecl *V)  { addVar(V, VK_FirstPrivate); }
-  void addLastLinearVar(VarDecl *V)    { addVar(V, VK_Linear); }
-  void addLastReductionVar(VarDecl *V) { addVar(V, VK_Reduction); }
+  void addLinearVar(VarDecl *V)        { addVar(V, VK_Linear); }
+  void addReductionVar(VarDecl *V)     { addVar(V, VK_Reduction); }
 
   bool isPrivate(VarDecl *V) const {
     assert(V && "null variable unexpected");
@@ -705,6 +743,28 @@ public:
   bool isReduction(VarDecl *V) const {
     assert(V && "null variable unexpected");
     return isVarKind(V, VK_Reduction);
+  }
+
+  /// \brief Returns true if the given variable is in a clause, and should be
+  /// captured.
+  bool IsSIMDVariable(VarDecl *V) const {
+    assert(V && "null variable unexpected");
+    return SIMDVariables.count(V);
+  }
+
+  void SetLocal(VarDecl *V, VarDecl *L) {
+    assert(V && "null variable unexpected");
+    assert(L && "null variable unexpected");
+    const_iterator I = SIMDVariables.find(V);
+    if (I != SIMDVariables.end())
+      LocalVariables[I->second].SetLocal(L);
+  }
+
+  void SetUpdateExpr(VarDecl *V, Expr *E) {
+    assert(V && "null variable unexpected");
+    const_iterator I = SIMDVariables.find(V);
+    if (I != SIMDVariables.end())
+      LocalVariables[I->second].SetUpdateExpr(E);
   }
 
   static bool classof(const FunctionScopeInfo *FSI) {
