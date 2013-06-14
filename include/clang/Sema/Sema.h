@@ -2818,6 +2818,8 @@ public:
                                  SourceLocation CondLParen, Expr *Cond,
                                  SourceLocation CondRParen);
 
+  void CheckForLoopConditionalStatement(Expr *Second, Expr *Third, Stmt *Body);
+
   StmtResult ActOnForStmt(SourceLocation ForLoc,
                           SourceLocation LParenLoc,
                           Stmt *First, FullExprArg Second,
