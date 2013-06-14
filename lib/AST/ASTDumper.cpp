@@ -1401,8 +1401,8 @@ void ASTDumper::VisitAttributedStmt(const AttributedStmt *Node) {
 
 void ASTDumper::VisitSIMDForStmt(const SIMDForStmt *Node) {
   VisitStmt(Node);
-  for (ArrayRef<Attr *>::iterator I = Node->getAttrs().begin(),
-                                  E = Node->getAttrs().end();
+  for (ArrayRef<Attr *>::iterator I = Node->getSIMDAttrs().begin(),
+                                  E = Node->getSIMDAttrs().end();
        I != E; ++I) {
     if (I + 1 == E)
       lastChild();

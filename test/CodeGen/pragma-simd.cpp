@@ -73,6 +73,21 @@ void test_access_metadata() {
   // CHECK: call void @_Z6anchori(i32 203)
 }
 
+void test_private_variables(int n) {
+  float a = 1.0f;
+  #pragma simd private(a)
+  for (int i = 0; i < n; ++i) {
+    anchor(301);
+    touch(a);
+    anchor(302);
+  }
+  // CHECK: call void @_Z6anchori(i32 301)
+  // CHECK: load float*
+  // CHECK-NOT: getelementptr
+  // CHECK: call void @_Z5touchi
+  // CHECK: call void @_Z6anchori(i32 302)
+}
+
 // test()
 // CHECK: !0 = metadata !{metadata !0}
 // test1()

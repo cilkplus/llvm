@@ -654,6 +654,8 @@ public:
 
     void AddKind(SIMDVariableKind K) { Kind |= K; }
 
+    unsigned GetKind() const { return Kind; }
+
     bool IsKind(SIMDVariableKind K) const { return Kind & K; }
 
     void SetLocal(VarDecl *L) { LocalDecl = L; }
@@ -661,6 +663,10 @@ public:
     void SetUpdateExpr(Expr *E) { UpdateExpr = E; }
 
     void SetInvalid() { Kind = SIMD_VK_Unknown; }
+
+    bool IsUsable() const {
+      return (Kind != SIMD_VK_Unknown) && LocalDecl;
+    }
 
     VarDecl *GetLocal() const { return LocalDecl; }
 
@@ -782,6 +788,10 @@ public:
     const_iterator I = SimdVariableMap.find(V);
     if (I != SimdVariableMap.end())
       SIMDVariables[I->second].SetInvalid();
+  }
+
+  ArrayRef<SIMDVariable> getSIMDVars() const {
+    return SIMDVariables;
   }
 
   static bool classof(const FunctionScopeInfo *FSI) {

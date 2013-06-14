@@ -678,7 +678,7 @@ public:
   };
   CGCapturedStmtInfo *CapturedStmtInfo;
 
-  /// \brief ABI for SIMD for statement code generation.
+  /// \brief API for SIMD for statement code generation.
   class CGSIMDForStmtInfo : public CGCapturedStmtInfo {
   public:
     CGSIMDForStmtInfo(const SIMDForStmt &S, llvm::MDNode *LoopID)
@@ -695,6 +695,23 @@ public:
 
     llvm::MDNode *getLoopID() const { return LoopID; }
 
+    /// \brief Update the address of a SIMD variable's local copy, such
+    /// that the captured body can use this local variable instead.
+    void updateLocalAddr(const VarDecl *VD, llvm::Value *Addr) {
+      assert(VD && Addr && "null values unexpected");
+      assert(!SIMDVars.count(VD) && "already exists");
+      SIMDVars[VD] = Addr;
+    }
+
+    llvm::Value *lookupLocalAddr(const VarDecl *VD) const {
+      llvm::SmallDenseMap<const VarDecl *, llvm::Value *>::const_iterator
+        I = SIMDVars.find(VD);
+      if (I != SIMDVars.end())
+        return I->second;
+
+      return 0;
+    }
+
     static bool classof(const CGSIMDForStmtInfo *) { return true; }
     static bool classof(const CGCapturedStmtInfo *I) {
       return I->getKind() == CR_SIMDFor;
@@ -703,6 +720,9 @@ public:
     const SIMDForStmt &TheSIMDFor;
     /// \brief The loop id metadata.
     llvm::MDNode *LoopID;
+    /// \brief Keep the map between a SIMD variable and its local variable
+    /// address.
+    llvm::SmallDenseMap<const VarDecl *, llvm::Value *> SIMDVars;
   };
 
   /// \brief API for Cilk for statement code generation.

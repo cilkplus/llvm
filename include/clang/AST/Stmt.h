@@ -2366,8 +2366,8 @@ public:
     Expr *UpdateExpr;
 
   public:
-    SIMDVariable(SIMDVariableKind Kind, VarDecl *SIMDVar, VarDecl *LocalVar,
-                 Expr *UpdateExpr = 0)
+    SIMDVariable(unsigned Kind, VarDecl *SIMDVar, VarDecl *LocalVar,
+                 Expr *UpdateExpr)
       : Kind(Kind), SIMDVar(SIMDVar), LocalVar(LocalVar),
         UpdateExpr(UpdateExpr) { }
 
@@ -2407,31 +2407,50 @@ private:
   SourceLocation RParenLoc;
 
   /// \brief The number of SIMD clauses.
-  unsigned NumAttrs;
+  unsigned NumSIMDAttrs;
 
-  /// \brief The SIMD clauses represented as attributes.
-  // This field must be the last member of this class.
-  Attr *Attrs[1];
+  /// \brief The number of data-privatization variables effectively used
+  /// in the SIMD for loop.
+  unsigned NumSIMDVars;
 
-  SIMDForStmt(EmptyShell Empty, unsigned NumAttrs);
+  SIMDForStmt(EmptyShell Empty, unsigned NumSIMDAttrs, unsigned NumSIMDVars);
 
-  SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> Attrs,
-              Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
-              SourceLocation FL, SourceLocation LP, SourceLocation RP);
+  SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
+              ArrayRef<SIMDVariable> SIMDVars, Stmt *Init, Expr *Cond,
+              Expr *Inc, CapturedStmt *Body, SourceLocation FL,
+              SourceLocation LP, SourceLocation RP);
+
+  Attr **getStoredSIMDAttrs() const {
+    return reinterpret_cast<Attr **>(const_cast<SIMDForStmt *>(this) + 1);
+  }
+
+  SIMDVariable *getStoredSIMDVars() const;
 
 public:
   /// \brief Construct a SIMD for statement.
   static SIMDForStmt *Create(ASTContext &C, SourceLocation PragmaLoc,
-                             ArrayRef<Attr *> Attrs, Stmt *Init,
+                             ArrayRef<Attr *> SIMDAttrs,
+                             ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                              Expr *Cond, Expr *Inc, CapturedStmt *Body,
                              SourceLocation FL, SourceLocation LP,
                              SourceLocation RP);
 
   /// \brief Construct an empty SIMD for statement.
-  static SIMDForStmt *CreateEmpty(ASTContext &C, unsigned NumAttrs);
+  static SIMDForStmt *CreateEmpty(ASTContext &C, unsigned NumSIMDAttrs,
+                                  unsigned NumSIMDVars);
 
-  ArrayRef<Attr *> getAttrs() const {
-    return ArrayRef<Attr *>(Attrs, NumAttrs);
+  ArrayRef<Attr *> getSIMDAttrs() const {
+    return ArrayRef<Attr *>(getStoredSIMDAttrs(), NumSIMDAttrs);
+  }
+
+  /// \brief An iterator that walks over the SIMD data-privatization variables.
+  typedef SIMDVariable *simd_var_iterator;
+
+  simd_var_iterator simd_var_begin() const {
+    return getStoredSIMDVars();
+  }
+  simd_var_iterator simd_var_end() const {
+    return getStoredSIMDVars() + NumSIMDVars;
   }
 
   /// \brief Retrieve the initialization expression or declaration statement.

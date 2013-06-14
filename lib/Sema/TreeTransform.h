@@ -9615,7 +9615,7 @@ template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {
   // FIXME: Process SIMD clauses.
-  ArrayRef<Attr *> Attrs = S->getAttrs();
+  ArrayRef<Attr *> Attrs = S->getSIMDAttrs();
   SourceLocation PragmaLoc = S->getPragmaLoc();
 
   getSema().ActOnStartOfSIMDForStmt(PragmaLoc, /*Scope*/0, Attrs);

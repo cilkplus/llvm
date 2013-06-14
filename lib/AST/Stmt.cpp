@@ -1180,12 +1180,26 @@ CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
   SubExprs[LOOP_COUNT] = LoopCount;
 }
 
-SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> Attrs,
-                         Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
+SIMDForStmt::SIMDVariable *SIMDForStmt::getStoredSIMDVars() const {
+  unsigned Size = sizeof(SIMDForStmt) + sizeof(Attr *) * NumSIMDAttrs;
+
+  // Offset of the first SIMDVariable object.
+  unsigned FirstSIMDVariableOffset =
+    llvm::RoundUpToAlignment(Size, llvm::alignOf<SIMDVariable>());
+
+  return reinterpret_cast<SIMDVariable *>(
+      reinterpret_cast<char *>(const_cast<SIMDForStmt *>(this))
+      + FirstSIMDVariableOffset);
+}
+
+SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
+                         ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
+                         Expr *Cond, Expr *Inc, CapturedStmt *Body,
                          SourceLocation FL, SourceLocation LP,
                          SourceLocation RP)
   : Stmt(SIMDForStmtClass), PragmaLoc(PragmaLoc), ForLoc(FL), LParenLoc(LP),
-    RParenLoc(RP), NumAttrs(Attrs.size()) {
+    RParenLoc(RP), NumSIMDAttrs(SIMDAttrs.size()),
+    NumSIMDVars(SIMDVars.size()) {
 
   assert(Init && Cond && Inc && Body && "null argument unexpected");
   SubExprs[INIT] = Init;
@@ -1194,32 +1208,50 @@ SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> Attrs,
   SubExprs[BODY] = Body;
 
   // Initialize the SIMD clauses.
-  memcpy(this->Attrs, Attrs.data(), NumAttrs * sizeof(Attr *));
+  std::copy(SIMDAttrs.begin(), SIMDAttrs.end(), getStoredSIMDAttrs());
+
+  // Copy all SIMDVariable objects.
+  std::copy(SIMDVars.begin(), SIMDVars.end(), getStoredSIMDVars());
 }
 
 SIMDForStmt *SIMDForStmt::Create(ASTContext &C, SourceLocation PragmaLoc,
-                                 ArrayRef<Attr *> Attrs, Stmt *Init,
+                                 ArrayRef<Attr *> SIMDAttrs,
+                                 ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                                  Expr *Cond, Expr *Inc, CapturedStmt *Body,
                                  SourceLocation FL, SourceLocation LP,
                                  SourceLocation RP) {
-  void *Mem = C.Allocate(sizeof(SIMDForStmt) + sizeof(Attr *) *
-                         (Attrs.size() - 1), llvm::alignOf<SIMDForStmt>());
-  return new (Mem) SIMDForStmt(PragmaLoc, Attrs, Init, Cond, Inc, Body,
-                               FL, LP, RP);
+  unsigned Size = sizeof(SIMDForStmt) + sizeof(Attr *) * SIMDAttrs.size();
+  if (!SIMDVars.empty()) {
+    // Realign for the following SIMDVariable array.
+    Size = llvm::RoundUpToAlignment(Size, llvm::alignOf<SIMDVariable>());
+    Size += sizeof(SIMDVariable) * SIMDVars.size();
+  }
+
+  void *Mem = C.Allocate(Size);
+  return new (Mem) SIMDForStmt(PragmaLoc, SIMDAttrs, SIMDVars, Init, Cond, Inc,
+                               Body, FL, LP, RP);
 }
 
-SIMDForStmt::SIMDForStmt(EmptyShell Empty, unsigned NumAttrs)
-  : Stmt(SIMDForStmtClass, Empty), NumAttrs(NumAttrs) {
+SIMDForStmt::SIMDForStmt(EmptyShell Empty, unsigned NumSIMDAttrs,
+                         unsigned NumSIMDVars)
+  : Stmt(SIMDForStmtClass, Empty), NumSIMDAttrs(NumSIMDAttrs),
+    NumSIMDVars(NumSIMDVars) {
   SubExprs[INIT] = 0;
   SubExprs[COND] = 0;
   SubExprs[INC] = 0;
   SubExprs[BODY] = 0;
-  memset(this->Attrs, 0, NumAttrs * sizeof(Attr *));
 }
 
-SIMDForStmt *SIMDForStmt::CreateEmpty(ASTContext &C, unsigned NumAttrs) {
-  assert(NumAttrs > 0 && "NumAttrs should be greater than zero");
-  void *Mem = C.Allocate(sizeof(SIMDForStmt) + sizeof(Attr *) * (NumAttrs - 1),
-                         llvm::alignOf<SIMDForStmt>());
-  return new (Mem) SIMDForStmt(EmptyShell(), NumAttrs);
+SIMDForStmt *SIMDForStmt::CreateEmpty(ASTContext &C, unsigned NumSIMDAttrs,
+                                      unsigned NumSIMDVars) {
+  assert(NumSIMDAttrs > 0 && "NumSIMDAttrs should be greater than zero");
+  unsigned Size = sizeof(SIMDForStmt) + sizeof(Attr *) * NumSIMDAttrs;
+  if (NumSIMDVars > 0) {
+    // Realign for the following SIMDVariable array.
+    Size = llvm::RoundUpToAlignment(Size, llvm::alignOf<SIMDVariable>());
+    Size += sizeof(SIMDVariable) * NumSIMDVars;
+  }
+
+  void *Mem = C.Allocate(Size);
+  return new (Mem) SIMDForStmt(EmptyShell(), NumSIMDAttrs, NumSIMDVars);
 }

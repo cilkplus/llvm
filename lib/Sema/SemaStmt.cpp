@@ -3879,7 +3879,23 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
   CD->setBody(Body);
   RD->completeDefinition();
 
-  SIMDForStmt *Result = SIMDForStmt::Create(Context, PragmaLoc, Attrs, Init,
+  // Process all the data privatization clauses and store necessary
+  // nodes into the AST which are essential for codegen.
+  SmallVector<SIMDForStmt::SIMDVariable, 4> SIMDVars;
+  typedef SmallVectorImpl<SIMDForScopeInfo::SIMDVariable>::const_iterator Iter;
+  for (Iter I = FSI->getSIMDVars().begin(),
+            E = FSI->getSIMDVars().end(); I != E; ++I) {
+    if (!I->IsUsable())
+      continue;
+
+    assert(I->GetLocal() && "null local variable");
+    SIMDVars.push_back(SIMDForStmt::SIMDVariable(I->GetKind(),
+                                                 I->GetOuter(),
+                                                 I->GetLocal(),
+                                                 I->GetUpdateExpr()));
+  }
+  SIMDForStmt *Result = SIMDForStmt::Create(Context, PragmaLoc, Attrs,
+                                            SIMDVars, Init,
                                             Cond, Inc, CapturedBody,
                                             ForLoc, LParenLoc, RParenLoc);
 

@@ -1880,6 +1880,14 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
               assert(Addr && "missing inner loop control variable address");
               return MakeAddrLValue(Addr, T, Alignment);
             }
+          } else if (CapturedStmtInfo->getKind() == CR_SIMDFor) {
+            // If this variable is a SIMD data-privatization variable, then
+            // load its corresponding local copy.
+            CGSIMDForStmtInfo *FSI = cast<CGSIMDForStmtInfo>(CapturedStmtInfo);
+            if (llvm::Value *Addr = FSI->lookupLocalAddr(VD)) {
+              assert(Addr && "missing local variable address");
+              return MakeAddrLValue(Addr, T, Alignment);
+            }
           }
 
           // Otherwise load it from the captured struct.

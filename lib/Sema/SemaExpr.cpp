@@ -11000,7 +11000,10 @@ static IdentifierInfo *getLocalVarName(Sema &S, StringRef Name) {
 }
 
 static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
-                                   VarDecl *Var, FieldDecl *FD) {
+                                   VarDecl *Var) {
+  if (!FSI->IsSIMDVariable(Var))
+    return;
+
   CapturedDecl *SIMDForDecl = FSI->TheCapturedDecl;
   DeclContext *DC = CapturedDecl::castToDeclContext(SIMDForDecl);
 
@@ -11118,7 +11121,7 @@ static ExprResult captureInCapturedRegion(Sema &S, CapturedRegionScopeInfo *RSI,
 
   // Build local variables from SIMD for clauses.
   if (SIMDForScopeInfo *FSI = dyn_cast<SIMDForScopeInfo>(RSI))
-    buildSIMDLocalVariable(S, FSI, Var, Field);
+    buildSIMDLocalVariable(S, FSI, Var);
 
   return Result;
 }

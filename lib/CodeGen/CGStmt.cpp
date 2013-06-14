@@ -2136,7 +2136,7 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   RunCleanupsScope SIMDForScope(*this);
 
   // Emit all SIMD clauses.
-  const ArrayRef<Attr *> &Attrs = S.getAttrs();
+  const ArrayRef<Attr *> &Attrs = S.getSIMDAttrs();
   for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
     switch (Attrs[i]->getKind()) {
     case clang::attr::SIMD:
@@ -2264,8 +2264,31 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
   LoopStack.Push(Info->getLoopID());
   {
     RunCleanupsScope Scope(*this);
-    EmitStmt(S);
+
+    // Emit all SIMD local variables and update the codegen info.
+    const SIMDForStmt &SS = Info->getSIMDForStmt();
+    for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
+                                        E = SS.simd_var_end(); I != E; ++I) {
+      VarDecl *SIMDVar = I->getSIMDVar();
+      VarDecl *LocalVar = I->getLocalVar();
+
+      AutoVarEmission Emission = EmitAutoVarAlloca(*LocalVar);
+      EmitAutoVarInit(Emission);
+      EmitAutoVarCleanups(Emission);
+
+      llvm::Value *Addr = Emission.getAllocatedAddress();
+      assert(Addr && "null address");
+      Info->updateLocalAddr(SIMDVar, Addr);
+    }
+
+    // Emit the SIMD for loop body.
+    {
+      // FIXME: Handle continue statements.
+      RunCleanupsScope BodyScope(*this);
+      EmitStmt(S);
+    }
   }
+
   // Leave the loop body.
   LoopStack.Pop();
 }
