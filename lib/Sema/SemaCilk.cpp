@@ -505,14 +505,18 @@ static bool CanonicalizeForCondOperands(Sema &S, const VarDecl *ControlVar,
   return false;
 }
 
-static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
-                                  VarDecl *ControlVar, Expr *Cond, Expr *&Limit,
-                                  int &Direction, BinaryOperatorKind &Opcode) {
+static void CheckForCondition(Sema &S,
+                              VarDecl *ControlVar,
+                              Expr *Cond,
+                              Expr *&Limit,
+                              int &Direction,
+                              BinaryOperatorKind &Opcode,
+                              bool IsCilkFor) {
   SourceLocation OpLoc;
   Expr *LHS = 0;
   Expr *RHS = 0;
 
-  if (!ExtractForCondition(S, Cond, Opcode, OpLoc, LHS, RHS, true))
+  if (!ExtractForCondition(S, Cond, Opcode, OpLoc, LHS, RHS, IsCilkFor))
     return;
 
   // The operator denoted OP shall be one of !=, <=, <, >=, or >.
@@ -520,18 +524,23 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   case BO_NE:
     Direction = 0;
     break;
-  case BO_LT: case BO_LE:
+  case BO_LT:
+  case BO_LE:
     Direction = 1;
     break;
-  case BO_GT: case BO_GE:
+  case BO_GT:
+  case BO_GE:
     Direction = -1;
     break;
   default:
-    S.Diag(OpLoc, diag::err_cilk_for_invalid_cond_operator);
+    S.Diag(OpLoc, IsCilkFor ? diag::err_cilk_for_invalid_cond_operator
+                            : diag::err_simd_for_invalid_cond_operator);
     return;
   }
-  unsigned CondDiagError = diag::err_cilk_for_cond_test_control_var;
-  unsigned CondDiagNote = diag::note_cilk_for_cond_allowed;
+  unsigned CondDiagError = IsCilkFor ? diag::err_cilk_for_cond_test_control_var
+                                     : diag::err_simd_for_cond_test_control_var;
+  unsigned CondDiagNote = IsCilkFor ? diag::note_cilk_for_cond_allowed
+                                    : diag::note_simd_for_cond_allowed;
   if (!CanonicalizeForCondOperands(S, ControlVar, Cond, LHS, RHS, Direction,
                                    CondDiagError, CondDiagNote))
     return;
@@ -1299,41 +1308,6 @@ static bool CheckSIMDForInit(Sema &S, Stmt *Init, VarDecl *&ControlVar) {
   return true;
 }
 
-static bool CheckSIMDForCond(Sema &S, Expr *Cond, int &Direction,
-                             const VarDecl *ControlVar) {
-  BinaryOperatorKind CondOp;
-  SourceLocation OpLoc;
-  Expr *LHS = 0;
-  Expr *RHS = 0;
-
-  if (!ExtractForCondition(S, Cond, CondOp, OpLoc, LHS, RHS, false))
-    return false;
-
-  // The operator denoted OP shall be one of !=, <=, <, >=, or >.
-  switch (CondOp) {
-  case BO_NE:
-    Direction = 0;
-    break;
-  case BO_LE:
-  case BO_LT:
-    Direction = 1;
-    break;
-  case BO_GE:
-  case BO_GT:
-    Direction = -1;
-    break;
-  default:
-    S.Diag(OpLoc, diag::err_simd_for_invalid_cond_operator);
-    return false;
-  }
-
-  unsigned CondDiagError = diag::err_simd_for_cond_test_control_var;
-  unsigned CondDiagNote = diag::note_simd_for_cond_allowed;
-  return CanonicalizeForCondOperands(S, ControlVar, Cond, LHS, RHS,
-                                     Direction, CondDiagError,
-                                     CondDiagNote);
-}
-
 StmtResult Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
                                   ArrayRef<Attr *> Attrs,
                                   SourceLocation ForLoc,
@@ -1352,8 +1326,12 @@ StmtResult Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
     return StmtError();
 
   // Check the loop condition.
+  Expr *Limit = 0;
   int CondDirection = 0;
-  if (!CheckSIMDForCond(*this, Second.get(), CondDirection, ControlVar))
+  BinaryOperatorKind Opcode;
+  CheckForCondition(*this, ControlVar, Second.get(), Limit, CondDirection,
+                    Opcode, /* IsCilkFor */ false);
+  if (!Limit)
     return StmtError();
 
   // Check the loop increment.
@@ -1402,8 +1380,8 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
   Expr *Limit = 0;
   int CondDirection = 0;
   BinaryOperatorKind Opcode;
-  CheckCilkForCondition(*this, CilkForLoc, ControlVar, Second.get(),
-                        Limit, CondDirection, Opcode);
+  CheckForCondition(*this, ControlVar, Second.get(), Limit, CondDirection,
+                    Opcode, /* IsCilkFor */ true);
   if (!Limit)
     return StmtError();
   // Remove any implicit AST node introduced by semantic analysis.
