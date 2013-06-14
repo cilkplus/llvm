@@ -19,6 +19,7 @@
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/PragmaSIMD.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -2330,6 +2331,61 @@ public:
 /// }
 /// \endcode
 class SIMDForStmt : public Stmt {
+public:
+  /// \brief Represent SIMD data-privatization variables associated with
+  /// necessary expressions for code generation.
+  ///
+  /// If a variable is private, then the local copy is default-initialized.
+  ///
+  /// If a variable is firstprivate, then the local copy is copy-initialized.
+  ///
+  /// If a variable is lastprivate, then the local copy is default-initialized
+  /// and an update expression is needed for the final iteration.
+  ///
+  /// If a variable is linear, then the local copy is initialized as
+  /// \code
+  ///  __local_x = x + __loop_index * step
+  /// \endcode
+  /// and an update expression is need for the final iteration.
+  ///
+  /// If a variable is reduction, then the local copy is initialized as
+  /// specified by the reduction identifier. An update expression is need for
+  /// the final iteration.
+  class SIMDVariable {
+    /// \brief The variable kind.
+    unsigned Kind;
+
+    /// \brief The variable in the clause.
+    VarDecl *SIMDVar;
+
+    /// \brief The local copy of this variable.
+    VarDecl *LocalVar;
+
+    /// \brief The update expression. This expression is only created for
+    /// lastprivate variables.
+    Expr *UpdateExpr;
+
+  public:
+    SIMDVariable(SIMDVariableKind Kind, VarDecl *SIMDVar, VarDecl *LocalVar,
+                 Expr *UpdateExpr = 0)
+      : Kind(Kind), SIMDVar(SIMDVar), LocalVar(LocalVar),
+        UpdateExpr(UpdateExpr) { }
+
+    bool isPrivate() const { return Kind & SIMD_VK_Private; }
+    bool isLastPrivate() const { return Kind & SIMD_VK_LastPrivate; }
+    bool isFirstPrivate() const { return Kind & SIMD_VK_FirstPrivate; }
+    bool isLinear() const { return Kind & SIMD_VK_Linear; }
+    bool isReduction() const { return Kind & SIMD_VK_Reduction; }
+
+    VarDecl *getSIMDVar() const { return SIMDVar; }
+    VarDecl *getLocalVar() const { return LocalVar; }
+
+    Expr *getUpdateExpr() const {
+      assert(isLastPrivate() && "only for lastprivate variables");
+      return UpdateExpr;
+    }
+  };
+
 private:
   /// \brief An enumeration for accessing stored statements in a SIMD for
   /// statement.

@@ -10992,6 +10992,45 @@ static void buildInnerLoopControlVar(Sema &S, CilkForScopeInfo *FSI,
   FSI->InnerLoopControlVar = InnerVar;
 }
 
+static IdentifierInfo *getLocalVarName(Sema &S, StringRef Name) {
+  SmallString<8> Str;
+  llvm::raw_svector_ostream OS(Str);
+  OS << "__local_" << Name;
+  return &S.Context.Idents.get(OS.str());
+}
+
+static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
+                                   VarDecl *Var, FieldDecl *FD) {
+  CapturedDecl *SIMDForDecl = FSI->TheCapturedDecl;
+  DeclContext *DC = CapturedDecl::castToDeclContext(SIMDForDecl);
+
+  // 2.14.3 A list item that specifies a given variable may not appear in more
+  // than one clauses on the same directive, except that a variable may be
+  // specified in both firstprivate and lastprivate.
+
+  // Handle private variables, for which local copies are uninitialized or
+  // initialized by its default constructor. 
+  if (FSI->isPrivate(Var)) {
+    assert(!FSI->isLastPrivate(Var) && !FSI->isFirstPrivate(Var)
+        && !FSI->isLinear(Var) && !FSI->isReduction(Var)
+        && "a private variable cannot appear in multiple clauses");
+
+    IdentifierInfo *VarName = getLocalVarName(S, Var->getName());
+    QualType VarType = Var->getType().getNonReferenceType();
+    // FIXME: Use the clause location.
+    SourceLocation Loc = FD->getLocation();
+    VarDecl *LocalVar = VarDecl::Create(S.Context, DC, Loc, Loc, VarName,
+        VarType, S.Context.getTrivialTypeSourceInfo(VarType, Loc), SC_None);
+
+    // Perform default initialization.
+    S.ActOnUninitializedDecl(LocalVar, /*TypeMayContainAuto*/false);
+    if (!LocalVar->isInvalidDecl()) {
+      LocalVar->setImplicit();
+      DC->addDecl(LocalVar);
+    }
+  }
+}
+
 /// \brief Capture the given variable in the captured region.
 static ExprResult captureInCapturedRegion(Sema &S, CapturedRegionScopeInfo *RSI,
                                           VarDecl *Var, QualType FieldType,
@@ -11048,6 +11087,10 @@ static ExprResult captureInCapturedRegion(Sema &S, CapturedRegionScopeInfo *RSI,
   // Only build for a Cilk for.
   if (CilkForScopeInfo *CFSI = dyn_cast<CilkForScopeInfo>(RSI))
     buildInnerLoopControlVar(S, CFSI, Var, Field);
+
+  // Build local variables from SIMD for clauses.
+  if (SIMDForScopeInfo *FSI = dyn_cast<SIMDForScopeInfo>(RSI))
+    buildSIMDLocalVariable(S, FSI, Var, Field);
 
   return Result;
 }
