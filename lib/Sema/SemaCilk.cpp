@@ -383,12 +383,13 @@ static bool CheckCilkForInitStmt(Sema &S, Stmt *InitStmt,
   return true;
 }
 
-static bool ExtractCilkForCondition(Sema &S,
-                                    Expr *Cond,
-                                    BinaryOperatorKind &CondOp,
-                                    SourceLocation &OpLoc,
-                                    Expr *&LHS,
-                                    Expr *&RHS) {
+static bool ExtractForCondition(Sema &S,
+                                Expr *Cond,
+                                BinaryOperatorKind &CondOp,
+                                SourceLocation &OpLoc,
+                                Expr *&LHS,
+                                Expr *&RHS,
+                                bool IsCilkFor) {
   if (BinaryOperator *BO = dyn_cast<BinaryOperator>(Cond)) {
     CondOp = BO->getOpcode();
     OpLoc = BO->getOperatorLoc();
@@ -404,36 +405,43 @@ static bool ExtractCilkForCondition(Sema &S,
       return true;
     }
   } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Cond)) {
-    if (ICE->getCastKind() == CK_UserDefinedConversion) {
-      Expr *From = ICE->getSubExprAsWritten();
-      // Note: flags copied from TryContextuallyConvertToBool
-      ImplicitConversionSequence ICS =
-          S.TryImplicitConversion(From, ICE->getType(),
-                                  /*SuppressUserConversions=*/false,
-                                  /*AllowExplicit=*/true,
-                                  /*InOverloadResolution=*/false,
-                                  /*CStyle=*/false,
-                                  /*AllowObjCWritebackConversion=*/false);
-      assert(!ICS.isBad() && ICS.getKind() ==
+    if (IsCilkFor) {
+      if (ICE->getCastKind() == CK_UserDefinedConversion) {
+        Expr *From = ICE->getSubExprAsWritten();
+        // Note: flags copied from TryContextuallyConvertToBool
+        ImplicitConversionSequence ICS =
+            S.TryImplicitConversion(From, ICE->getType(),
+                                    /*SuppressUserConversions=*/false,
+                                    /*AllowExplicit=*/true,
+                                    /*InOverloadResolution=*/false,
+                                    /*CStyle=*/false,
+                                    /*AllowObjCWritebackConversion=*/false);
+        assert(!ICS.isBad() && ICS.getKind() ==
                              ImplicitConversionSequence::UserDefinedConversion);
-      S.Diag(Cond->getExprLoc(), diag::warn_cilk_for_cond_user_defined_conv)
-        << From->getType() << ICE->getType() << Cond->getSourceRange();
-      FunctionDecl *FD = ICS.UserDefined.ConversionFunction->getCanonicalDecl();
-      S.Diag(FD->getLocation(), diag::note_cilk_for_conversion_here)
-        << ICE->getType();
-    }
-    return ExtractCilkForCondition(S, ICE->getSubExpr(), CondOp, OpLoc, LHS, RHS);
+        S.Diag(Cond->getExprLoc(), diag::warn_cilk_for_cond_user_defined_conv)
+          << From->getType() << ICE->getType() << Cond->getSourceRange();
+        FunctionDecl *FD = ICS.UserDefined.ConversionFunction->getCanonicalDecl();
+        S.Diag(FD->getLocation(), diag::note_cilk_for_conversion_here)
+          << ICE->getType();
+      }
+      Cond = ICE->getSubExpr();
+    } else
+      Cond = ICE->IgnoreImpCastsAsWritten();
+    return ExtractForCondition(S, Cond, CondOp, OpLoc, LHS, RHS, IsCilkFor);
   } else if (CXXMemberCallExpr *MC = dyn_cast<CXXMemberCallExpr>(Cond)) {
     CXXMethodDecl *MD = MC->getMethodDecl();
     if (isa<CXXConversionDecl>(MD))
-      return ExtractCilkForCondition(S, MC->getImplicitObjectArgument(), CondOp,
-                                     OpLoc, LHS, RHS);
+      return ExtractForCondition(S, MC->getImplicitObjectArgument(), CondOp,
+                                 OpLoc, LHS, RHS, IsCilkFor);
   } else if (CXXBindTemporaryExpr *BT = dyn_cast<CXXBindTemporaryExpr>(Cond)) {
-    return ExtractCilkForCondition(S, BT->getSubExpr(), CondOp, OpLoc, LHS, RHS);
+    return ExtractForCondition(S, BT->getSubExpr(), CondOp, OpLoc, LHS, RHS,
+                               IsCilkFor);
   } else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(Cond))
-    return ExtractCilkForCondition(S, EWC->getSubExpr(), CondOp, OpLoc, LHS, RHS);
+    return ExtractForCondition(S, EWC->getSubExpr(), CondOp, OpLoc, LHS, RHS,
+                               IsCilkFor);
 
-  S.Diag(Cond->getExprLoc(), diag::err_cilk_for_invalid_cond_expr)
+  S.Diag(Cond->getExprLoc(), IsCilkFor ? diag::err_cilk_for_invalid_cond_expr
+                                       : diag::err_simd_for_invalid_cond_expr)
     << Cond->getSourceRange();
   return false;
 }
@@ -504,7 +512,7 @@ static void CheckCilkForCondition(Sema &S, SourceLocation CilkForLoc,
   Expr *LHS = 0;
   Expr *RHS = 0;
 
-  if (!ExtractCilkForCondition(S, Cond, Opcode, OpLoc, LHS, RHS))
+  if (!ExtractForCondition(S, Cond, Opcode, OpLoc, LHS, RHS, true))
     return;
 
   // The operator denoted OP shall be one of !=, <=, <, >=, or >.
@@ -1291,45 +1299,6 @@ static bool CheckSIMDForInit(Sema &S, Stmt *Init, VarDecl *&ControlVar) {
   return true;
 }
 
-
-static bool ExtractSIMDForCondition(Sema &S,
-                                    Expr *Cond,
-                                    BinaryOperatorKind &CondOp,
-                                    SourceLocation &OpLoc,
-                                    Expr *&LHS,
-                                    Expr *&RHS) {
-  if (BinaryOperator *BO = dyn_cast<BinaryOperator>(Cond)) {
-    CondOp = BO->getOpcode();
-    OpLoc = BO->getOperatorLoc();
-    LHS = BO->getLHS();
-    RHS = BO->getRHS();
-    return true;
-  } else if (CXXOperatorCallExpr *OO = dyn_cast<CXXOperatorCallExpr>(Cond)) {
-    CondOp = BinaryOperator::getOverloadedOpcode(OO->getOperator());
-    if (OO->getNumArgs() == 2) {
-      OpLoc = OO->getOperatorLoc();
-      LHS = OO->getArg(0);
-      RHS = OO->getArg(1);
-      return true;
-    }
-  } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Cond)) {
-    Cond = ICE->IgnoreImpCastsAsWritten();
-    return ExtractSIMDForCondition(S, Cond, CondOp, OpLoc, LHS, RHS);
-  } else if (CXXMemberCallExpr *MC = dyn_cast<CXXMemberCallExpr>(Cond)) {
-    CXXMethodDecl *MD = MC->getMethodDecl();
-    if (isa<CXXConversionDecl>(MD))
-      return ExtractSIMDForCondition(S, MC->getImplicitObjectArgument(), CondOp,
-                                     OpLoc, LHS, RHS);
-  } else if (CXXBindTemporaryExpr *BT = dyn_cast<CXXBindTemporaryExpr>(Cond)) {
-    return ExtractSIMDForCondition(S, BT->getSubExpr(), CondOp, OpLoc, LHS, RHS);
-  } else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(Cond))
-    return ExtractSIMDForCondition(S, EWC->getSubExpr(), CondOp, OpLoc, LHS, RHS);
-
-  S.Diag(Cond->getExprLoc(), diag::err_simd_for_invalid_cond_expr)
-    << Cond->getSourceRange();
-  return false;
-}
-
 static bool CheckSIMDForCond(Sema &S, Expr *Cond, int &Direction,
                              const VarDecl *ControlVar) {
   BinaryOperatorKind CondOp;
@@ -1337,7 +1306,7 @@ static bool CheckSIMDForCond(Sema &S, Expr *Cond, int &Direction,
   Expr *LHS = 0;
   Expr *RHS = 0;
 
-  if (!ExtractSIMDForCondition(S, Cond, CondOp, OpLoc, LHS, RHS))
+  if (!ExtractForCondition(S, Cond, CondOp, OpLoc, LHS, RHS, false))
     return false;
 
   // The operator denoted OP shall be one of !=, <=, <, >=, or >.
