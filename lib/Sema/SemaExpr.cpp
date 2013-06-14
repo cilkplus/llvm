@@ -11008,27 +11008,55 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
   // than one clauses on the same directive, except that a variable may be
   // specified in both firstprivate and lastprivate.
 
+  IdentifierInfo *VarName = getLocalVarName(S, Var->getName());
+  QualType VarType = Var->getType().getNonReferenceType();
+  SourceLocation Loc = FSI->GetLocation(Var);
+  VarDecl *LocalVar = VarDecl::Create(
+      S.Context, DC, Loc, Loc, VarName, VarType,
+      S.Context.getTrivialTypeSourceInfo(VarType, Loc), SC_None);
+  Expr *UpdateExpr = 0;
+
   // Handle private variables, for which local copies are uninitialized or
-  // initialized by its default constructor. 
-  if (FSI->isPrivate(Var)) {
-    assert(!FSI->isLastPrivate(Var) && !FSI->isFirstPrivate(Var)
-        && !FSI->isLinear(Var) && !FSI->isReduction(Var)
-        && "a private variable cannot appear in multiple clauses");
-
-    IdentifierInfo *VarName = getLocalVarName(S, Var->getName());
-    QualType VarType = Var->getType().getNonReferenceType();
-    // FIXME: Use the clause location.
-    SourceLocation Loc = FD->getLocation();
-    VarDecl *LocalVar = VarDecl::Create(S.Context, DC, Loc, Loc, VarName,
-        VarType, S.Context.getTrivialTypeSourceInfo(VarType, Loc), SC_None);
-
+  // initialized by its default constructor.
+  if (FSI->isPrivate(Var) || FSI->isLinear(Var) || FSI->isReduction(Var))
     // Perform default initialization.
-    S.ActOnUninitializedDecl(LocalVar, /*TypeMayContainAuto*/false);
-    if (!LocalVar->isInvalidDecl()) {
-      LocalVar->setImplicit();
-      DC->addDecl(LocalVar);
+    S.ActOnUninitializedDecl(LocalVar, /*TypeMayContainAuto*/ false);
+  else {
+    // Do not use BuildDeclRefExpr() on Var. It will create an infinite
+    // recursion calling buildSIMDLocalVariable(), since Var is captured.
+    DeclRefExpr *VarDRE = DeclRefExpr::Create(
+        S.Context, /*QualifierLoc*/ NestedNameSpecifierLoc(),
+        /*TemplateKWLoc*/ SourceLocation(), Var, /*IsEnclosingLocal*/ false,
+        Loc, VarType, VK_LValue);
+
+    // Initializer
+    if (FSI->isFirstPrivate(Var))
+      // First Private: Perform initialization by copy assignment.
+      S.AddInitializerToDecl(LocalVar, VarDRE, /*Direct*/ true, /*Auto*/ false);
+    else
+      // Last Private : Perform initialization by default constructor
+      S.ActOnUninitializedDecl(LocalVar, /*TypeMayContainAuto*/ false);
+
+    // Update Expression
+    if (FSI->isLastPrivate(Var)) {
+      ExprResult RHS = S.BuildDeclRefExpr(LocalVar, VarType, VK_LValue, Loc);
+      ExprResult E = S.BuildBinOp(S.getCurScope(), /*OpLoc*/ SourceLocation(),
+                                  BO_Assign, VarDRE, RHS.get());
+      if (!E.isInvalid())
+        UpdateExpr = E.get();
+      else
+        FSI->SetInvalid(Var);
     }
   }
+
+  // Add the newly created local variable
+  if (!LocalVar->isInvalidDecl()) {
+    LocalVar->setImplicit();
+    LocalVar->isUsed();
+    DC->addDecl(LocalVar);
+    FSI->UpdateVar(Var, LocalVar, UpdateExpr);
+  } else
+    FSI->SetInvalid(Var);
 }
 
 /// \brief Capture the given variable in the captured region.
@@ -11461,6 +11489,8 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
 
         if (!Result.isInvalid())
           CopyExpr = Result.take();
+        else
+          llvm::errs() << "Invalid\n";
       }
 
       // Compute the type of a reference to this captured variable.

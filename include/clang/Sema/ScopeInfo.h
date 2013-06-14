@@ -20,6 +20,7 @@
 #include "clang/Basic/PartialDiagnostic.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "clang/Basic/PragmaSIMD.h"
 
 namespace clang {
 
@@ -630,18 +631,7 @@ public:
 
 /// \brief Retains information about a Cilk for capturing region.
 class SIMDForScopeInfo : public CapturedRegionScopeInfo {
-
-  // In SIMD loops, variables can be marked as one of 5 types:
-  //    Private, LastPrivate, FirstPrivae, Linear, and Reduction.
-  enum SIMDVariableKind {
-    VK_Unknown      = 0x00,
-    VK_Private      = 0x01,
-    VK_LastPrivate  = 0x02,
-    VK_FirstPrivate = 0x04,
-    VK_Linear       = 0x08,
-    VK_Reduction    = 0x10
-  };
-
+public:
   class SIMDVariable {
     /// \brief Bitfield specifying kinds of this variable.
     unsigned Kind;
@@ -652,12 +642,15 @@ class SIMDForScopeInfo : public CapturedRegionScopeInfo {
     /// \brief The original/outer variable declaration.
     VarDecl *OuterDecl;
 
+    /// \brief The source location of the variable usage in the simd clause
+    SourceLocation Location;
+
     /// \brief Constructed expression to update the outer variable.
     Expr *UpdateExpr;
 
   public:
-    SIMDVariable(VarDecl *Var, SIMDVariableKind K)
-        : Kind(K), LocalDecl(NULL), OuterDecl(Var), UpdateExpr(NULL) {}
+    SIMDVariable(VarDecl *Var, SIMDVariableKind K, SourceLocation Loc)
+        : Kind(K), LocalDecl(0), OuterDecl(Var), Location(Loc), UpdateExpr(0) {}
 
     void AddKind(SIMDVariableKind K) { Kind |= K; }
 
@@ -667,41 +660,46 @@ class SIMDForScopeInfo : public CapturedRegionScopeInfo {
 
     void SetUpdateExpr(Expr *E) { UpdateExpr = E; }
 
-    VarDecl *GetLocal() { return LocalDecl; }
+    void SetInvalid() { Kind = SIMD_VK_Unknown; }
 
-    VarDecl *GetOuter() { return OuterDecl; }
+    VarDecl *GetLocal() const { return LocalDecl; }
 
-    Expr *GetUpdateExpr() { return UpdateExpr; }
+    VarDecl *GetOuter() const { return OuterDecl; }
+
+    SourceLocation GetLocation() const { return Location; }
+
+    Expr *GetUpdateExpr() const { return UpdateExpr; }
 
   };
 
+private:
   typedef llvm::DenseMap<VarDecl *, unsigned>::const_iterator const_iterator;
   typedef llvm::DenseMap<VarDecl *, unsigned>::iterator iterator;
 
-  void addVar(VarDecl *V, SIMDVariableKind K) {
-    iterator I = SIMDVariables.find(V);
-    if (I != SIMDVariables.end())
-      LocalVariables[I->second].AddKind(K);
+  void addVar(VarDecl *V, SIMDVariableKind K, SourceLocation Loc) {
+    iterator I = SimdVariableMap.find(V);
+    if (I != SimdVariableMap.end())
+      SIMDVariables[I->second].AddKind(K);
     else {
-      SIMDVariables.insert(std::make_pair(V, LocalVariables.size()));
-      LocalVariables.push_back(SIMDVariable(V, K));
+      SimdVariableMap.insert(std::make_pair(V, SIMDVariables.size()));
+      SIMDVariables.push_back(SIMDVariable(V, K, Loc));
     }
   }
 
   bool isVarKind(VarDecl *V, SIMDVariableKind Kind) const {
     bool Result = false;
-    const_iterator I = SIMDVariables.find(V);
-    if (I != SIMDVariables.end())
-      Result = LocalVariables[I->second].IsKind(Kind);
+    const_iterator I = SimdVariableMap.find(V);
+    if (I != SimdVariableMap.end())
+      Result = SIMDVariables[I->second].IsKind(Kind);
     return Result;
   }
 
   /// \brief The pragma SIMD location.
   SourceLocation PragmaLoc;
 
-  /// \brief A map of SIMDLocalVariable to index into LocalVariables.
-  llvm::DenseMap<VarDecl *, unsigned> SIMDVariables;
-  llvm::SmallVector<SIMDVariable, 4> LocalVariables;
+  /// \brief A map of VarDecls to index into SIMDVariables.
+  llvm::DenseMap<VarDecl *, unsigned> SimdVariableMap;
+  llvm::SmallVector<SIMDVariable, 4> SIMDVariables;
 
 public:
   SIMDForScopeInfo(DiagnosticsEngine &Diag, Scope *S, CapturedDecl *CD,
@@ -714,57 +712,76 @@ public:
 
   virtual ~SIMDForScopeInfo();
 
-  void addPrivateVar(VarDecl *V)       { addVar(V, VK_Private); }
-  void addLastPrivateVar(VarDecl *V)   { addVar(V, VK_LastPrivate); }
-  void addFirstPrivateVar(VarDecl *V)  { addVar(V, VK_FirstPrivate); }
-  void addLinearVar(VarDecl *V)        { addVar(V, VK_Linear); }
-  void addReductionVar(VarDecl *V)     { addVar(V, VK_Reduction); }
+  void addPrivateVar(VarDecl *V, SourceLocation Loc) {
+    addVar(V, SIMD_VK_Private, Loc);
+  }
+  void addLastPrivateVar(VarDecl *V, SourceLocation Loc) {
+    addVar(V, SIMD_VK_LastPrivate, Loc);
+  }
+  void addFirstPrivateVar(VarDecl *V, SourceLocation Loc) {
+    addVar(V, SIMD_VK_FirstPrivate, Loc);
+  }
+  void addLinearVar(VarDecl *V, SourceLocation Loc) {
+    addVar(V, SIMD_VK_Linear, Loc);
+  }
+  void addReductionVar(VarDecl *V, SourceLocation Loc) {
+    addVar(V, SIMD_VK_Reduction, Loc);
+  }
 
   bool isPrivate(VarDecl *V) const {
     assert(V && "null variable unexpected");
-    return isVarKind(V, VK_Private);
+    return isVarKind(V, SIMD_VK_Private);
   }
 
   bool isLastPrivate(VarDecl *V) const {
     assert(V && "null variable unexpected");
-    return isVarKind(V, VK_LastPrivate);
+    return isVarKind(V, SIMD_VK_LastPrivate);
   }
 
   bool isFirstPrivate(VarDecl *V) const {
     assert(V && "null variable unexpected");
-    return isVarKind(V, VK_FirstPrivate);
+    return isVarKind(V, SIMD_VK_FirstPrivate);
   }
 
   bool isLinear(VarDecl *V) const {
     assert(V && "null variable unexpected");
-    return isVarKind(V, VK_Linear);
+    return isVarKind(V, SIMD_VK_Linear);
   }
 
   bool isReduction(VarDecl *V) const {
     assert(V && "null variable unexpected");
-    return isVarKind(V, VK_Reduction);
+    return isVarKind(V, SIMD_VK_Reduction);
   }
 
   /// \brief Returns true if the given variable is in a clause, and should be
   /// captured.
   bool IsSIMDVariable(VarDecl *V) const {
     assert(V && "null variable unexpected");
-    return SIMDVariables.count(V);
+    return SimdVariableMap.count(V);
   }
 
-  void SetLocal(VarDecl *V, VarDecl *L) {
+  SourceLocation GetLocation(VarDecl *V) const {
     assert(V && "null variable unexpected");
-    assert(L && "null variable unexpected");
-    const_iterator I = SIMDVariables.find(V);
-    if (I != SIMDVariables.end())
-      LocalVariables[I->second].SetLocal(L);
+    const_iterator I = SimdVariableMap.find(V);
+    if (I != SimdVariableMap.end())
+      return SIMDVariables[I->second].GetLocation();
+    return SourceLocation();
   }
 
-  void SetUpdateExpr(VarDecl *V, Expr *E) {
+  void UpdateVar(VarDecl *V, VarDecl *Local, Expr *Update) {
     assert(V && "null variable unexpected");
-    const_iterator I = SIMDVariables.find(V);
-    if (I != SIMDVariables.end())
-      LocalVariables[I->second].SetUpdateExpr(E);
+    const_iterator I = SimdVariableMap.find(V);
+    if (I != SimdVariableMap.end()) {
+      SIMDVariables[I->second].SetLocal(Local);
+      SIMDVariables[I->second].SetUpdateExpr(Update);
+    }
+  }
+
+  void SetInvalid(VarDecl *V) {
+    assert(V && "null variable unexpected");
+    const_iterator I = SimdVariableMap.find(V);
+    if (I != SimdVariableMap.end())
+      SIMDVariables[I->second].SetInvalid();
   }
 
   static bool classof(const FunctionScopeInfo *FSI) {

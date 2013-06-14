@@ -1882,7 +1882,7 @@ do {                                                                           \
     Expr *DE = *I;                                                             \
     assert (DE && isa<DeclRefExpr>(DE) && "reference to a variable expected"); \
     VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());             \
-    getCurSIMDFor()->FUNC(VD);                                                 \
+    getCurSIMDFor()->FUNC(VD, A->getLocation());                               \
   }                                                                            \
 } while (0)
 
@@ -1924,7 +1924,7 @@ void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
         Expr *DE = *I;
         assert (DE && isa<DeclRefExpr>(DE) && "reference to a variable expected");
         VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());
-        getCurSIMDFor()->addLinearVar(VD);
+        getCurSIMDFor()->addLinearVar(VD, A->getLocation());
       }
       break;
     }
