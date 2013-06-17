@@ -1029,28 +1029,6 @@ void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
   PushExpressionEvaluationContext(PotentiallyEvaluated);
 }
 
-void Sema::ActOnCilkForStmtError() {
-  DiscardCleanupsInEvaluationContext();
-  PopExpressionEvaluationContext();
-
-  PopDeclContext();
-
-  CilkForScopeInfo *FSI = getCurCilkFor();
-  RecordDecl *Record = FSI->TheRecordDecl;
-  Record->setInvalidDecl();
-
-  SmallVector<Decl*, 4> Fields;
-  for (RecordDecl::field_iterator I = Record->field_begin(),
-                                  E = Record->field_end(); I != E; ++I)
-    Fields.push_back(*I);
-  ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
-              SourceLocation(), SourceLocation(), /*AttributeList=*/0);
-
-  // Pop the compound scope we inserted implicitly.
-  PopCompoundScope();
-  PopFunctionScopeInfo();
-}
-
 namespace {
 /// \brief Helper class to diagnose a SIMD for loop body.
 //
@@ -1193,137 +1171,91 @@ static bool CheckSIMDForBody(Sema &S, Stmt *Body, SourceLocation ForLoc) {
   return IsValid;
 }
 
-StmtResult Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
-                                  ArrayRef<Attr *> Attrs,
-                                  SourceLocation ForLoc,
-                                  SourceLocation LParenLoc,
-                                  Stmt *First, FullExprArg Second,
-                                  FullExprArg Third,
-                                  SourceLocation RParenLoc,
-                                  Stmt *Body) {
-  assert(First && "expected loop init");
-  assert(Second.get() && "expected loop condition");
-  assert(Third.get() && "expected loop increment");
-
-  // Check the loop init and get the control variable.
-  VarDecl *ControlVar = 0;
-  Expr *ControlVarInit = 0;
-  if (!CheckForInit(*this, First, ControlVar, ControlVarInit,
-                    /* IsCilkFor */ false))
-    return StmtError();
-
-  // Check the loop condition.
-  Expr *Limit = 0;
-  int CondDirection = 0;
-  BinaryOperatorKind Opcode;
-  CheckForCondition(*this, ControlVar, Second.get(), Limit, CondDirection,
-                    Opcode, /* IsCilkFor */ false);
-  if (!Limit)
-    return StmtError();
-
-  // Check the loop increment.
-  Expr *StrideExpr = 0;
-  if (!CheckForIncrement(*this, Third.get(), /* Limit */ 0,
-                         ControlVar, /* ControlVarInit */ 0,
-                         CondDirection, StrideExpr,
-                         /* IsCilkFor */ false))
-    return StmtError();
-
-  // Check the loop body.
-  if (!CheckSIMDForBody(*this, Body, ForLoc))
-    return StmtError();
-
-  DiagnoseUnusedExprResult(First);
-  DiagnoseUnusedExprResult(Third.get());
-  DiagnoseUnusedExprResult(Body);
-
-  if (isa<NullStmt>(Body))
-    getCurCompoundScopeSkipSIMDFor().setHasEmptyLoopBodies();
-
-  return BuildSIMDForStmt(PragmaLoc, Attrs, ForLoc, LParenLoc, First,
-                          Second.get(), Third.get(), RParenLoc, Body);
-}
-
-
-StmtResult
-Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
-                       Stmt *First, FullExprArg Second, FullExprArg Third,
-                       SourceLocation RParenLoc, Stmt *Body) {
+static
+bool CommonActOnForStmt(Sema &S,
+                        SourceLocation ForLoc,
+                        SourceLocation LParenLoc,
+                        Stmt *First, Expr *Cond, Expr *Increment,
+                        SourceLocation RParenLoc,
+                        Stmt *Body,
+                        ExprResult &LoopCount,
+                        Expr *&StrideExpr,
+                        ExprResult &Span,
+                        bool IsCilkFor) {
   assert(First && "expected init");
-  assert(Second.get() && "expected cond");
-  assert(Third.get() && "expected increment");
-
-  Expr *Increment = Third.release().takeAs<Expr>();
+  assert(Cond && "expected cond");
+  assert(Increment && "expected increment");
 
   // Check loop initializer and get control variable and its initialization
   VarDecl *ControlVar = 0;
   Expr *ControlVarInit = 0;
-  if (!CheckForInit(*this, First, ControlVar, ControlVarInit,
-                    /* IsCilkFor */ true))
-    return StmtError();
+  if (!CheckForInit(S, First, ControlVar, ControlVarInit, IsCilkFor))
+    return false;
 
   // Check loop condition
-  CheckForLoopConditionalStatement(Second.get(), Increment, Body);
+  if (IsCilkFor)
+    S.CheckForLoopConditionalStatement(Cond, Increment, Body);
 
   Expr *Limit = 0;
   int CondDirection = 0;
   BinaryOperatorKind Opcode;
-  CheckForCondition(*this, ControlVar, Second.get(), Limit, CondDirection,
-                    Opcode, /* IsCilkFor */ true);
+  CheckForCondition(S, ControlVar, Cond, Limit, CondDirection, Opcode,
+                    IsCilkFor);
   if (!Limit)
-    return StmtError();
+    return false;
+
   // Remove any implicit AST node introduced by semantic analysis.
   Limit = Limit->getSubExprAsWritten();
 
-  Expr *StrideExpr = 0;
-  if (!CheckForIncrement(*this, Increment, Limit, ControlVar,
+  if (!CheckForIncrement(S, Increment, Limit, ControlVar,
                          ControlVarInit, CondDirection, StrideExpr,
-                         /* IsCilkFor */ true))
-    return StmtError();
+                         IsCilkFor))
+    return false;
 
-  ExprResult Span;
-  ExprResult LoopCount;
-  if (!CurContext->isDependentContext()) {
+  if (!IsCilkFor && !CheckSIMDForBody(S, Body, ForLoc))
+    return false;
+
+  if (IsCilkFor && !S.CurContext->isDependentContext()) {
     StrideExpr = StrideExpr->getSubExprAsWritten();
 
     // Push an evaluation context in case span needs cleanups.
-    EnterExpressionEvaluationContext EvalContext(*this, PotentiallyEvaluated);
+    EnterExpressionEvaluationContext EvalContext(S, S.PotentiallyEvaluated);
 
     // Build end - begin
-    Expr *Begin = BuildDeclRefExpr(ControlVar,
-                                   ControlVar->getType().getNonReferenceType(),
-                                   VK_LValue,
-                                   ControlVar->getLocation()).release();
+    Expr *Begin = S.BuildDeclRefExpr(ControlVar,
+                                     ControlVar->getType().getNonReferenceType(),
+                                     VK_LValue,
+                                     ControlVar->getLocation()).release();
     Expr *End = Limit;
     if (CondDirection < 0)
       std::swap(Begin, End);
 
-    Span = BuildBinOp(CurScope, CilkForLoc, BO_Sub, End, Begin);
+    Span = S.BuildBinOp(S.getCurScope(), ForLoc, BO_Sub, End, Begin);
 
     if (Span.isInvalid()) {
       // error getting operator-()
-      Diag(CilkForLoc, diag::err_cilk_for_difference_ill_formed);
-      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+      S.Diag(ForLoc, diag::err_cilk_for_difference_ill_formed);
+      S.Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
         << Begin->getSourceRange();
-      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+      S.Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
         << End->getSourceRange();
-      return StmtError();
+      return false;
     }
 
     if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
       // non-integral type
-      Diag(CilkForLoc, diag::err_non_integral_cilk_for_difference_type)
+      S.Diag(ForLoc, diag::err_non_integral_cilk_for_difference_type)
         << Span.get()->getType();
-      Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
+      S.Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
         << Begin->getSourceRange();
-      Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
+      S.Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
         << End->getSourceRange();
-      return StmtError();
+      return false;
     }
 
     assert(Span.get() && "missing span for cilk for loop count");
-    LoopCount = CalculateCilkForLoopCount(CilkForLoc, Span.get(), Increment,
-                                          StrideExpr, CondDirection, Opcode);
+    LoopCount = S.CalculateCilkForLoopCount(ForLoc, Span.get(), Increment,
+                                            StrideExpr, CondDirection, Opcode);
 
     // The loop count calculation may require cleanups in three cases:
     // a) building the binary operator- requires a cleanup
@@ -1333,23 +1265,63 @@ Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
     // The case (a) is handled above in BuildBinOp, but (b,c) must be checked
     // explicitly, since Limit and Stride were built in a different evaluation
     // context.
-    ExprNeedsCleanups |= Limit->hasNonTrivialCall(Context);
-    ExprNeedsCleanups |= StrideExpr->hasNonTrivialCall(Context);
+    S.ExprNeedsCleanups |= Limit->hasNonTrivialCall(S.Context);
+    S.ExprNeedsCleanups |= StrideExpr->hasNonTrivialCall(S.Context);
 
-    LoopCount = MakeFullExpr(LoopCount.get()).release();
+    LoopCount = S.MakeFullExpr(LoopCount.get()).release();
   }
 
-  DiagnoseUnusedExprResult(First);
-  DiagnoseUnusedExprResult(Increment);
-  DiagnoseUnusedExprResult(Body);
-  if (isa<NullStmt>(Body))
-    getCurCompoundScopeSkipCilkFor().setHasEmptyLoopBodies();
+  S.DiagnoseUnusedExprResult(First);
+  S.DiagnoseUnusedExprResult(Increment);
+  S.DiagnoseUnusedExprResult(Body);
+  if (isa<NullStmt>(Body)) {
+    if (IsCilkFor)
+      S.getCurCompoundScopeSkipCilkFor().setHasEmptyLoopBodies();
+    else
+      S.getCurCompoundScopeSkipSIMDFor().setHasEmptyLoopBodies();
+  }
 
+  return true;
+}
+
+StmtResult
+Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
+                       Stmt *First, FullExprArg Second, FullExprArg Third,
+                       SourceLocation RParenLoc, Stmt *Body) {
+  ExprResult LoopCount, Span;
+  Expr *StrideExpr = 0;
+  if (!CommonActOnForStmt(*this, CilkForLoc, LParenLoc,
+                          First, Second.get(), Third.get(),
+                          RParenLoc, Body,
+                          LoopCount, StrideExpr, Span,
+                          /* IsCilkFor */ true))
+    return StmtError();
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
                           Third.get(), RParenLoc, Body, LoopCount.get(),
                           StrideExpr, Span.isUsable() ? Span.get()->getType()
                                                       : QualType());
 }
+
+StmtResult
+Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
+                       ArrayRef<Attr *> Attrs,
+                       SourceLocation ForLoc,
+                       SourceLocation LParenLoc,
+                       Stmt *First, FullExprArg Second, FullExprArg Third,
+                       SourceLocation RParenLoc,
+                       Stmt *Body) {
+  ExprResult LoopCount, Span;
+  Expr *StrideExpr = 0;
+  if (!CommonActOnForStmt(*this, ForLoc, LParenLoc,
+                          First, Second.get(), Third.get(),
+                          RParenLoc, Body,
+                          LoopCount, StrideExpr, Span,
+                          /* IsCilkFor */ false))
+    return StmtError();
+  return BuildSIMDForStmt(PragmaLoc, Attrs, ForLoc, LParenLoc, First,
+                          Second.get(), Third.get(), RParenLoc, Body);
+}
+
 
 AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
                                        Expr *VectorLengthExpr) {
@@ -1944,24 +1916,30 @@ void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
   PushExpressionEvaluationContext(PotentiallyEvaluated);
 }
 
-void Sema::ActOnSIMDForStmtError() {
-  DiscardCleanupsInEvaluationContext();
-  PopExpressionEvaluationContext();
+static void ActOnForStmtError(Sema &S, RecordDecl *Record) {
+  S.DiscardCleanupsInEvaluationContext();
+  S.PopExpressionEvaluationContext();
 
-  PopDeclContext();
+  S.PopDeclContext();
 
-  SIMDForScopeInfo *FSI = getCurSIMDFor();
-  RecordDecl *Record = FSI->TheRecordDecl;
   Record->setInvalidDecl();
 
   SmallVector<Decl*, 4> Fields;
   for (RecordDecl::field_iterator I = Record->field_begin(),
                                   E = Record->field_end(); I != E; ++I)
     Fields.push_back(*I);
-  ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
-              SourceLocation(), SourceLocation(), /*AttributeList=*/0);
+  S.ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
+                SourceLocation(), SourceLocation(), /*AttributeList=*/0);
 
   // Pop the compound scope we inserted implicitly.
-  PopCompoundScope();
-  PopFunctionScopeInfo();
+  S.PopCompoundScope();
+  S.PopFunctionScopeInfo();
+}
+
+void Sema::ActOnCilkForStmtError() {
+  ActOnForStmtError(*this, getCurCilkFor()->TheRecordDecl);
+}
+
+void Sema::ActOnSIMDForStmtError() {
+  ActOnForStmtError(*this, getCurSIMDFor()->TheRecordDecl);
 }
