@@ -11492,8 +11492,6 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
 
         if (!Result.isInvalid())
           CopyExpr = Result.take();
-        else
-          llvm::errs() << "Invalid\n";
       }
 
       // Compute the type of a reference to this captured variable.
