@@ -1,8 +1,8 @@
-// RUN: %clang_cc1 -std=c++11 -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -emit-llvm %s -o - | FileCheck %s
 
-void anchor(int);
-void touch(float);
-void touch(float*);
+void anchor(int) throw();
+void touch(float) throw();
+void touch(float*) throw();
 
 // Scalar types
 void test_private_variables1() {
@@ -158,4 +158,40 @@ void test_firstprivate_variables2() {
   // CHECK-NEXT: call void @_Z6anchori(i32 607)
   // CHECK: call void @_ZN1ED1Ev
   // CHECK: call void @_Z6anchori(i32 608)
+}
+
+namespace ns_noinvoke {
+
+struct S { S(); ~S(); };
+S createS();
+S useS(S);
+
+void test1() {
+  S s;
+  #pragma simd
+  for (int i = 0; i < 10; i++) {
+    s = useS(createS());
+  }
+  // CHECK: test1
+  // CHECK-NOT: invoke void
+  // CHECK: ret void
+}
+
+} //namespace
+
+void extern1();
+void extern2();
+
+void test2() {
+  try {
+    #pragma simd
+    for (int i = 0; i < 10; i++) {
+      extern1();
+    }
+    extern2();
+  } catch (...) {}
+
+  // CHECK: test2
+  // CHECK: call void @_Z7extern1v()
+  // CHECK: invoke void @_Z7extern2v()
 }

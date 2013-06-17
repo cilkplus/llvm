@@ -695,7 +695,7 @@ llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
   assert(EHStack.requiresLandingPad());
   assert(!EHStack.empty());
 
-  if (!CGM.getLangOpts().Exceptions)
+  if (!CGM.getLangOpts().Exceptions || ExceptionsDisabled)
     return 0;
 
   // Check the innermost scope for a cached landing pad.  If this is

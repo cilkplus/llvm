@@ -1466,6 +1466,9 @@ private:
   /// The current lexical scope.
   LexicalScope *CurLexicalScope;
 
+  /// ExceptionsDisabled - Whether exceptions are currently disabled.
+  bool ExceptionsDisabled;
+
   /// The current source location that should be used for exception
   /// handling code.
   SourceLocation CurEHLocation;
@@ -1544,6 +1547,9 @@ public:
     if (!EHStack.requiresLandingPad()) return 0;
     return getInvokeDestImpl();
   }
+
+  void disableExceptions() { ExceptionsDisabled = true; }
+  void enableExceptions() { ExceptionsDisabled = false; }
 
   const TargetInfo &getTarget() const { return Target; }
   llvm::LLVMContext &getLLVMContext() { return CGM.getLLVMContext(); }

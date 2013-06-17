@@ -2231,7 +2231,9 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
     CodeGenFunction CGF(CGM, true);
     CGF.CapturedStmtInfo = &CSInfo;
 
+    CGF.disableExceptions();
     llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
+    CGF.enableExceptions();
 
     // Always inline this function back to the call site.
     F->addFnAttr(llvm::Attribute::AlwaysInline);
@@ -2240,7 +2242,9 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
     LValue CapStruct = InitCapturedStruct(CS);
 
     // Emit call to the helper function.
+    disableExceptions();
     EmitCallOrInvoke(F, CapStruct.getAddress());
+    enableExceptions();
   }
 
   EmitBlock(Continue.getBlock());
