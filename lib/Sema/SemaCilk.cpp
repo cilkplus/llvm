@@ -1215,7 +1215,7 @@ bool CommonActOnForStmt(Sema &S,
   if (!IsCilkFor && !CheckSIMDForBody(S, Body, ForLoc))
     return false;
 
-  if (IsCilkFor && !S.CurContext->isDependentContext()) {
+  if (!S.CurContext->isDependentContext()) {
     StrideExpr = StrideExpr->getSubExprAsWritten();
 
     // Push an evaluation context in case span needs cleanups.
@@ -1319,7 +1319,8 @@ Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
                           /* IsCilkFor */ false))
     return StmtError();
   return BuildSIMDForStmt(PragmaLoc, Attrs, ForLoc, LParenLoc, First,
-                          Second.get(), Third.get(), RParenLoc, Body);
+                          Second.get(), Third.get(), RParenLoc, Body,
+                          LoopCount.get());
 }
 
 

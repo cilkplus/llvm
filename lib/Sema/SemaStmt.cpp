@@ -3861,11 +3861,14 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
                                   SourceLocation ForLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *Init, Expr *Cond, Expr *Inc,
-                                  SourceLocation RParenLoc, Stmt *Body) {
+                                  SourceLocation RParenLoc, Stmt *Body,
+                                  Expr *LoopCount) {
   SIMDForScopeInfo *FSI = getCurSIMDFor();
   assert(FSI && "SIMDForScopeInfo is out of sync");
   CapturedDecl *CD = FSI->TheCapturedDecl;
   RecordDecl *RD = FSI->TheRecordDecl;
+  DeclContext *DC = CapturedDecl::castToDeclContext(CD);
+  bool IsDependent = DC->isDependentContext();
 
   SmallVector<CapturedStmt::Capture, 4> Captures;
   SmallVector<Expr *, 4> CaptureInits;
@@ -3894,9 +3897,13 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
                                                  I->GetLocal(),
                                                  I->GetUpdateExpr()));
   }
+
+  if (!IsDependent)
+    assert(LoopCount && "invalid null loop count expression");
+
   SIMDForStmt *Result = SIMDForStmt::Create(Context, PragmaLoc, Attrs,
                                             SIMDVars, Init,
-                                            Cond, Inc, CapturedBody,
+                                            Cond, Inc, CapturedBody, LoopCount,
                                             ForLoc, LParenLoc, RParenLoc);
 
   ExprNeedsCleanups = FSI->ExprNeedsCleanups;

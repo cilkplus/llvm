@@ -2389,7 +2389,7 @@ public:
 private:
   /// \brief An enumeration for accessing stored statements in a SIMD for
   /// statement.
-  enum { INIT, COND, INC, BODY, LAST };
+  enum { INIT, COND, INC, BODY, LOOP_COUNT, LAST };
 
   Stmt *SubExprs[LAST]; // SubExprs[INIT] is an expression or declstmt.
                         // SubExprs[BODY] is a CapturedStmt.
@@ -2417,8 +2417,8 @@ private:
 
   SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
               ArrayRef<SIMDVariable> SIMDVars, Stmt *Init, Expr *Cond,
-              Expr *Inc, CapturedStmt *Body, SourceLocation FL,
-              SourceLocation LP, SourceLocation RP);
+              Expr *Inc, CapturedStmt *Body, Expr *LoopCount,
+              SourceLocation FL, SourceLocation LP, SourceLocation RP);
 
   Attr **getStoredSIMDAttrs() const {
     return reinterpret_cast<Attr **>(const_cast<SIMDForStmt *>(this) + 1);
@@ -2432,8 +2432,8 @@ public:
                              ArrayRef<Attr *> SIMDAttrs,
                              ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                              Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                             SourceLocation FL, SourceLocation LP,
-                             SourceLocation RP);
+                             Expr *LoopCount, SourceLocation FL,
+                             SourceLocation LP, SourceLocation RP);
 
   /// \brief Construct an empty SIMD for statement.
   static SIMDForStmt *CreateEmpty(ASTContext &C, unsigned NumSIMDAttrs,
@@ -2475,6 +2475,14 @@ public:
   }
   const CapturedStmt *getBody() const {
     return reinterpret_cast<CapturedStmt *>(SubExprs[BODY]);
+  }
+
+  /// \brief Retrieve the loop count expression.
+  Expr *getLoopCount() {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_COUNT]);
+  }
+  const Expr *getLoopCount() const {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_COUNT]);
   }
 
   SourceLocation getPragmaLoc() const LLVM_READONLY { return PragmaLoc; }

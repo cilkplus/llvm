@@ -6793,7 +6793,8 @@ public:
                               SourceLocation ForLoc,
                               SourceLocation LParenLoc,
                               Stmt *Init, Expr *Cond, Expr *Inc,
-                              SourceLocation RParenLoc, Stmt *Body);
+                              SourceLocation RParenLoc, Stmt *Body,
+                              Expr *LoopCount);
   void CheckSIMDPragmaClauses(SourceLocation PragmaLoc,
                               ArrayRef<Attr *> Attrs);
   void ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,

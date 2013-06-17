@@ -213,6 +213,7 @@ struct StructWithCleanups {
 };
 
 BoolWithCleanups operator<(int, StructWithCleanups);
+int operator-(const StructWithCleanups &, int);
 
 void test_cond() {
   #pragma simd

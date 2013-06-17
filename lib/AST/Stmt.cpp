@@ -1195,8 +1195,8 @@ SIMDForStmt::SIMDVariable *SIMDForStmt::getStoredSIMDVars() const {
 SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
                          ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                          Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                         SourceLocation FL, SourceLocation LP,
-                         SourceLocation RP)
+                         Expr *LoopCount, SourceLocation FL,
+                         SourceLocation LP, SourceLocation RP)
   : Stmt(SIMDForStmtClass), PragmaLoc(PragmaLoc), ForLoc(FL), LParenLoc(LP),
     RParenLoc(RP), NumSIMDAttrs(SIMDAttrs.size()),
     NumSIMDVars(SIMDVars.size()) {
@@ -1206,6 +1206,7 @@ SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
   SubExprs[COND] = Cond;
   SubExprs[INC] = Inc;
   SubExprs[BODY] = Body;
+  SubExprs[LOOP_COUNT] = LoopCount;
 
   // Initialize the SIMD clauses.
   std::copy(SIMDAttrs.begin(), SIMDAttrs.end(), getStoredSIMDAttrs());
@@ -1218,8 +1219,8 @@ SIMDForStmt *SIMDForStmt::Create(ASTContext &C, SourceLocation PragmaLoc,
                                  ArrayRef<Attr *> SIMDAttrs,
                                  ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                                  Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                                 SourceLocation FL, SourceLocation LP,
-                                 SourceLocation RP) {
+                                 Expr *LoopCount, SourceLocation FL,
+                                 SourceLocation LP, SourceLocation RP) {
   unsigned Size = sizeof(SIMDForStmt) + sizeof(Attr *) * SIMDAttrs.size();
   if (!SIMDVars.empty()) {
     // Realign for the following SIMDVariable array.
@@ -1229,7 +1230,7 @@ SIMDForStmt *SIMDForStmt::Create(ASTContext &C, SourceLocation PragmaLoc,
 
   void *Mem = C.Allocate(Size);
   return new (Mem) SIMDForStmt(PragmaLoc, SIMDAttrs, SIMDVars, Init, Cond, Inc,
-                               Body, FL, LP, RP);
+                               Body, LoopCount, FL, LP, RP);
 }
 
 SIMDForStmt::SIMDForStmt(EmptyShell Empty, unsigned NumSIMDAttrs,
