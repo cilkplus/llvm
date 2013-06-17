@@ -88,6 +88,26 @@ void test_private_variables(int n) {
   // CHECK: call void @_Z6anchori(i32 302)
 }
 
+void test_continue() {
+  #pragma simd
+  for (int i = 0; i < 10; ++i) {
+    anchor(401);
+    if (i == 5) continue;
+    anchor(402);
+
+    if (true) continue;
+    anchor(403);
+  }
+  anchor(410);
+  // CHECK: call void @_Z6anchori(i32 401)
+  // CHECK: icmp eq i32
+  // CHECK: br label [[CONTINUE_BLOCK:%[_A-Za-z0-9]+]]
+  // CHECK: call void @_Z6anchori(i32 402)
+  // CHECK-NEXT: br label [[CONTINUE_BLOCK]]
+  // CHECK-NOT: call void @_Z6anchori(i32 403)
+  // CHECK: call void @_Z6anchori(i32 410)
+}
+
 // test()
 // CHECK: !0 = metadata !{metadata !0}
 // test1()

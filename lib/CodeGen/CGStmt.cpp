@@ -2283,9 +2283,17 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
 
     // Emit the SIMD for loop body.
     {
-      // FIXME: Handle continue statements.
       RunCleanupsScope BodyScope(*this);
+      // It is not allowed to have return or break in a SIMD loop body.
+      // Continue statements are allowed and updates to the data
+      // privatization variables will be emitted in a unified continue block.
+      JumpDest LoopContinue = getJumpDestInCurrentScope("for.continue");
+      BreakContinueStack.push_back(BreakContinue(JumpDest(), LoopContinue));
+
       EmitStmt(S);
+
+      BreakContinueStack.pop_back();
+      EmitBlock(LoopContinue.getBlock(), /*IsFinished*/true);
     }
   }
 
