@@ -2170,6 +2170,12 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   // Evaluate the first part before the loop.
   EmitStmt(S.getInit());
 
+  llvm::Value *LoopCount = EmitAnyExpr(S.getLoopCount()).getScalarVal();
+  llvm::Value *LoopIndex = CreateTempAlloca(LoopCount->getType(),
+                                            "__index.addr");
+  Builder.CreateStore(llvm::ConstantInt::get(LoopCount->getType(), 0),
+                      LoopIndex);
+
   // Start the loop with a block that tests the condition.
   // If there's an increment, the continue scope will be overwritten
   // later.
@@ -2239,6 +2245,13 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
 
   EmitBlock(Continue.getBlock());
   EmitStmt(S.getInc());
+
+  {
+    llvm::Value *NewLoopIndex = 
+      Builder.CreateAdd(Builder.CreateLoad(LoopIndex),
+                        llvm::ConstantInt::get(LoopCount->getType(), 1));
+    Builder.CreateStore(NewLoopIndex, LoopIndex);
+  }
 
   BreakContinueStack.pop_back();
 
