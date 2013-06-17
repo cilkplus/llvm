@@ -319,21 +319,34 @@ void test_pragma_simd() {
   for (int i = 0; i < 10; ++i);
 
   int x;
-  #pragma simd firstprivate(x) lastprivate(x) private(x)
-  for (int i = 0; i < 10; ++i);
-  /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
+  /* expected-error@+1 {{private variable shall not appear in multiple simd clauses}} */
   #pragma simd linear(x) private(x) // expected-note {{first used here}}
   for (int i = 0; i < 10; ++i);
   /* expected-error@+1 {{linear variable shall not appear in multiple simd clauses}} */
   #pragma simd private(x) linear(x) // expected-note {{first used here}}
   for (int i = 0; i < 10; ++i);
-  /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
+  /* expected-error@+1 {{private variable shall not appear in multiple simd clauses}} */
   #pragma simd reduction(+:x) private(x) // expected-note {{first used here}}
   for (int i = 0; i < 10; ++i);
   /* expected-error@+1 {{reduction variable shall not appear in multiple simd clauses}} */
   #pragma simd private(x) reduction(+:x) // expected-note {{first used here}}
   for (int i = 0; i < 10; ++i);
-
+  /* expected-error@+1 {{firstprivate variable shall not appear in multiple simd clauses}} */
+  #pragma simd private(x) firstprivate(x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{private variable shall not appear in multiple simd clauses}} */
+  #pragma simd firstprivate(x) private(x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{lastprivate variable shall not appear in multiple simd clauses}} */
+  #pragma simd private(x) lastprivate(x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  /* expected-error@+1 {{private variable shall not appear in multiple simd clauses}} */
+  #pragma simd lastprivate(x) private(x) // expected-note {{first used here}}
+  for (int i = 0; i < 10; ++i);
+  #pragma simd lastprivate(x) firstprivate(x)
+  for (int i = 0; i < 10; ++i);
+  #pragma simd firstprivate(x) lastprivate(x)
+  for (int i = 0; i < 10; ++i);
 }
 
 void test_condition() {

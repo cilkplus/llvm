@@ -6393,7 +6393,8 @@ def err_opencl_global_invalid_addr_space : Error<
   "global variables must have a constant address space qualifier">;
 
 def err_pragma_simd_reuse_var : Error<
-  "%select{linear|reduction}0 variable shall not appear in multiple simd clauses">;
+  "%select{private|lastprivate|firstprivate|linear|reduction}0 variable shall "
+  "not appear in multiple simd clauses">;
 def err_pragma_simd_reduction_maxmin : Error<
   "reduction operator %select{min|max}0 requires arithmetic type">;
 def note_pragma_simd_used_here : Note<
