@@ -236,3 +236,181 @@ namespace TypeOpCheck2 {
     for (int i = 0; i < 10; ++i) ;
   }
 } // namespace
+
+namespace TemplateTests {
+
+template <int length>
+void test_simd_length() {
+  #pragma simd vectorlength(length)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_length2(T length) {
+  #pragma simd vectorlength(length)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_length_for() {
+  #pragma simd vectorlengthfor(T)
+  for (int i = 0; i < 10; i++) {}
+}
+
+struct S { int i; };
+
+template <typename T, typename S>
+void test_simd_linear() {
+  T t;
+  S step;
+  #pragma simd linear(t:step)
+  for (int i = 0; i < 10; i++) {}
+
+  #pragma simd linear(t:sizeof(T))
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T1, typename T2>
+void test_simd_private() {
+  T1 x;
+  T2 y;
+  T1 z;
+  #pragma simd private(x, y, z)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_private2() {
+  T x;
+  #pragma simd private(x.i)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_private3() {
+  const T x;
+  #pragma simd private(x)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_private4() {
+  T x;
+  T &r = x;
+  #pragma simd private(r)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T1, typename T2>
+void test_simd_firstprivate() {
+  T1 x;
+  T2 y;
+  #pragma simd firstprivate(x, y)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_firstprivate2() {
+  T x;
+  #pragma simd firstprivate(x.x)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T1, typename T2>
+void test_simd_lastprivate() {
+  T1 x;
+  T2 y;
+  #pragma simd lastprivate(x, y)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_lastprivate2() {
+  T x;
+  #pragma simd lastprivate(x.x)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_reduction() {
+  T x;
+  #pragma simd reduction(+:x)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_reduction2() {
+  T x[2];
+  #pragma simd reduction(+:x)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T1, typename T2, typename T3>
+void test_simd_multiple_clauses() {
+  T1 x, x2;
+  const T2 y = 4;
+  T3 z;
+  #pragma simd vectorlength(y) reduction(+:x,x2) lastprivate(z)
+  for (int i = 0; i < 10; i++) {}
+}
+
+template <typename T>
+void test_simd_multiple_clauses2() {
+  T x;
+  #pragma simd vectorlength(x) reduction(-:x) private(x)
+  for (int i = 0; i < 10; ++i) {}
+}
+
+void templated_tests() {
+  test_simd_length<2>(); // OK
+  test_simd_length<-2>(); // expected-error@244 {{invalid vectorlength expression: must be a power of two}} \
+                          // expected-note {{in instantiation of function template specialization}}
+
+  test_simd_length2(2); // expected-error@250 {{invalid vectorlength expression: must be an integer constant}} \
+                        // expected-note {{in instantiation of function template specialization}}
+
+  test_simd_length_for<long>(); // OK
+  test_simd_length_for<void>(); // expected-error@256 {{cannot select vector length for void type}} \
+                                // expected-note {{in instantiation of function template specialization}}
+
+  test_simd_linear<int, int>(); // OK
+  test_simd_linear<int, float>(); // expected-error@266 {{invalid linear step: expected integral constant or variable reference}} \
+                                  // expected-note {{in instantiation of function template specialization}}
+  test_simd_linear<S, int>(); // expected-error@266 {{invalid linear variable}} \
+                              // expected-error@269 {{invalid linear variable}} \
+                              // expected-note {{in instantiation of function template specialization}}
+
+  test_simd_private<float, long>(); // OK
+  test_simd_private2<S>(); // expected-error@285 {{expected ','}} \
+                           // expected-error@285 {{expected unqualified-id}}
+
+  test_simd_private3<S>(); // expected-error@292 {{variable in private clause shall not be const-qualified}} \
+                           // expected-error@291 {{default initialization of an object of const type}} \
+                           // expected-note@291 {{variable declared here}} \
+                           // expected-note {{in instantiation of function template specialization}}
+
+  test_simd_private4<int>(); // expected-error@300 {{variable in private clause shall not be a reference}}
+
+  test_simd_firstprivate<long, float>(); // OK
+
+  test_simd_firstprivate2<S>(); // expected-error@315 {{expected ','}} \
+                                // expected-error@315 {{expected unqualified-id}}
+
+  test_simd_lastprivate<double, float>();
+
+  test_simd_lastprivate2<S>(); // expected-error@330 {{expected ','}} \
+                               // expected-error@330 {{expected unqualified-id}}
+
+  test_simd_reduction<int>(); // OK
+
+  test_simd_reduction2<int>(); // expected-error@344 {{variable in reduction clause shall not be of array type}} \
+                               // expected-note@343 {{declared here}}
+
+  test_simd_multiple_clauses<float, long, double>(); // OK
+
+  test_simd_multiple_clauses2<float>(); // expected-error@360 {{private variable shall not appear in multiple simd clauses}} \
+                                        // expected-note@360 {{first used here}} \
+                                        // expected-error@360 {{invalid vectorlength expression: must be an integer constant}} \
+                                        // expected-note {{in instantiation of function template specialization}}
+}
+} // namespace

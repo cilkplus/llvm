@@ -199,8 +199,8 @@ void test_vectorlengthfor() {
   A a;
   test_vectorlengthfor_template2<>([&](int, void*) { const A& aa = a; });
 
-  // FIXME: the following should cause an error once template support is added.
-  test_vectorlengthfor_template<void>();
+  test_vectorlengthfor_template<void>(); // expected-error@168 {{cannot select vector length for void type}} \
+                                         // expected-note {{in instantiation of function template specialization 'test_vectorlengthfor_template<void>' requested here}}
 }
 
 struct BoolWithCleanups {

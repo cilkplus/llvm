@@ -1330,25 +1330,30 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
   if (VectorLengthExpr->getType().isNull())
     return AttrError();
 
-  llvm::APSInt Constant;
-  Constant.setIsUnsigned(true);
-
-  if (!VectorLengthExpr->EvaluateAsInt(Constant, Context)) {
-    Diag(VectorLengthExpr->getLocStart(),
-         diag::err_pragma_simd_invalid_vectorlength_expr) << 0;
-    return AttrError();
+  ExprResult E;
+  if (!VectorLengthExpr->isInstantiationDependent()) {
+    llvm::APSInt Constant;
+    Constant.setIsUnsigned(true);
+    if (!VectorLengthExpr->EvaluateAsInt(Constant, Context)) {
+      Diag(VectorLengthExpr->getLocStart(),
+           diag::err_pragma_simd_invalid_vectorlength_expr) << 0;
+      return AttrError();
+    }
+    if (!Constant.isPowerOf2()) {
+      Diag(VectorLengthExpr->getLocStart(),
+           diag::err_pragma_simd_invalid_vectorlength_expr) << 1;
+      return AttrError();
+    }
+    E = Owned(IntegerLiteral::Create(
+        Context, Constant, Context.getCanonicalType(VectorLengthExpr->getType()),
+        VectorLengthExpr->getLocStart()));
+    if (E.isInvalid())
+      return AttrError();
+  } else {
+    // If the vector length expr is instantiation dependent, store the
+    // templated expr to be transofrmed later.
+    E = VectorLengthExpr;
   }
-  if (!Constant.isPowerOf2()) {
-    Diag(VectorLengthExpr->getLocStart(),
-         diag::err_pragma_simd_invalid_vectorlength_expr) << 1;
-    return AttrError();
-  }
-
-  ExprResult E = Owned(IntegerLiteral::Create(
-      Context, Constant, Context.getCanonicalType(VectorLengthExpr->getType()),
-      VectorLengthExpr->getLocStart()));
-  if (E.isInvalid())
-    return AttrError();
 
   return AttrResult(::new (Context)
                     SIMDLengthAttr(VectorLengthLoc, Context, E.get()));
@@ -1365,16 +1370,19 @@ AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
     Diag(TypeLoc, diag::err_simd_for_length_for_void);
     return AttrError();
   }
-  if (Ty->isIncompleteType()) {
+  if (!VectorLengthForType->isInstantiationDependentType() &&
+      Ty->isIncompleteType()) {
     Diag(TypeLoc, diag::err_simd_for_length_for_incomplete) << Ty;
     return AttrError();
   }
+
   return AttrResult(::new (Context) SIMDLengthForAttr(
-      VectorLengthForLoc, Context, VectorLengthForType));
+      VectorLengthForLoc, Context, VectorLengthForType, TypeLoc));
 }
 
 ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
                                                DeclarationNameInfo Name) {
+  // FIXME: This function should really be in the parser.
   // linear-variable must be a variable with scalar type
   LookupResult Lookup(*this, Name, LookupOrdinaryName);
   LookupParsedName(Lookup, CurScope, &SS, /*AllowBuiltinCreation*/false);
@@ -1392,12 +1400,6 @@ ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
     return ExprError();
   }
 
-  QualType VarType = VD->getType();
-  if (!VarType->isScalarType()) {
-    Diag(Name.getLoc(), diag::err_pragma_simd_invalid_linear_var);
-    return ExprError();
-  }
-
   bool RefersToEnclosingScope = (CurContext != VD->getDeclContext() &&
                                  VD->getDeclContext()->isFunctionOrMethod());
   DeclRefExpr *E =
@@ -1410,13 +1412,19 @@ ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
 
 AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
                                        ArrayRef<Expr *> Exprs) {
-  for (unsigned i = 1, e = Exprs.size(); i < e; i += 2) {
+  for (unsigned i = 0, e = Exprs.size(); i < e; i += 2) {
+    if (Expr *E = Exprs[i]) {
+      if (!E->isTypeDependent() && !E->getType()->isScalarType()) {
+        Diag(E->getExprLoc(), diag::err_pragma_simd_invalid_linear_var);
+        return AttrError();
+      }
+    }
+
     // linear-step must be either an integer constant expression,
     // or be a reference to a variable with integral type.
-    if (Exprs[i]) {
-      Expr *Step = Exprs[i];
+    if (Expr *Step = Exprs[i+1]) {
       llvm::APSInt Constant;
-      if (!Step->EvaluateAsInt(Constant, Context)) {
+      if (!Step->isInstantiationDependent() && !Step->EvaluateAsInt(Constant, Context)) {
         if (!isa<DeclRefExpr>(Step)) {
           Diag(Step->getLocStart(), diag::err_pragma_simd_invalid_linear_step);
           return AttrError();
@@ -1458,18 +1466,19 @@ ExprResult Sema::ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
     return ExprError();
   }
 
-  QualType VarType = VD->getType().getCanonicalType();
+  QualType VarType = VD->getType();
+  if (!VarType->isInstantiationDependentType())
+    VarType = VarType.getCanonicalType();
 
   // A variable that appears in a {first, last} private clause must not have an
   // incomplete type or a reference type.
-  if (VarType->isIncompleteType()) {
-    Diag(NameLoc, diag::err_pragma_simd_var_incomplete)
-      << KindName << VarType;
+  if (VarType->isReferenceType()) {
+    Diag(NameLoc, diag::err_pragma_simd_var_reference) << KindName << VarType;
     return ExprError();
   }
 
-  if (VarType->isReferenceType()) {
-    Diag(NameLoc, diag::err_pragma_simd_var_reference)
+  if (!VarType->isInstantiationDependentType() && VarType->isIncompleteType()) {
+    Diag(NameLoc, diag::err_pragma_simd_var_incomplete)
       << KindName << VarType;
     return ExprError();
   }

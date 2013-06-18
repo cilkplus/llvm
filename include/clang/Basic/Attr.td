@@ -1021,7 +1021,7 @@ def SIMDLength : Attr {
 
 def SIMDLengthFor : Attr {
   let Spellings = [Keyword<"vectorlengthfor">];
-  let Args = [TypeArgument<"TypeHint">];
+  let Args = [TypeArgument<"TypeHint">, SourceLocArgument<"TypeLocation">];
 }
 
 def SIMDLinear : Attr {

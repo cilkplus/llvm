@@ -374,6 +374,9 @@ public:
     return D;
   }
 
+  /// \brief Transform the SIMD attribute associated with a SIMD for loop.
+  AttrResult TransformSIMDAttr(Attr *A);
+
   /// \brief Transform the attributes associated with the given declaration and
   /// place them on the new declaration.
   ///
@@ -5284,6 +5287,121 @@ TreeTransform<Derived>::TransformAttributedStmt(AttributedStmt *S) {
                                             SubStmt.get());
 }
 
+// FIXME: Use TableGen to generate this function
+template <typename Derived>
+AttrResult TreeTransform<Derived>::TransformSIMDAttr(Attr *A) {
+  AttrResult R = AttrEmpty();
+
+  switch (A->getKind()) {
+  case attr::SIMD: {
+    R = AttrResult(A);
+    break;
+  }
+  case attr::SIMDLength: {
+    SIMDLengthAttr *LengthAttr = cast<SIMDLengthAttr>(A);
+    ExprResult E = getDerived().TransformExpr(LengthAttr->getValueExpr());
+    if (E.isUsable())
+      R = getSema().ActOnPragmaSIMDLength(LengthAttr->getLocation(), E.get());
+    break;
+  }
+  case attr::SIMDLengthFor: {
+    SIMDLengthForAttr *LengthForAttr = cast<SIMDLengthForAttr>(A);
+    QualType Ty = getDerived().TransformType(
+        LengthForAttr->getTypeHint().getCanonicalType());
+    R = getSema().ActOnPragmaSIMDLengthFor(
+        LengthForAttr->getLocation(), LengthForAttr->getTypeLocation(), Ty);
+    break;
+  }
+  case attr::SIMDLinear: {
+    SIMDLinearAttr *LinearAttr = cast<SIMDLinearAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDLinearAttr::steps_iterator it = LinearAttr->steps_begin(),
+                                        end = LinearAttr->steps_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      // We need to push even if it is an invalid expr to make a pair.
+      Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDLinear(LinearAttr->getLocation(), Exprs);
+    break;
+  }
+  case attr::SIMDPrivate: {
+    SIMDPrivateAttr *PrivateAttr = cast<SIMDPrivateAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDPrivateAttr::variables_iterator
+             it = PrivateAttr->variables_begin(),
+             end = PrivateAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDPrivate(PrivateAttr->getLocation(),
+                                         llvm::MutableArrayRef<Expr *>(Exprs),
+                                         Sema::SIMD_Private);
+    break;
+  }
+  case attr::SIMDFirstPrivate: {
+    SIMDFirstPrivateAttr *FirstPrivateAttr = cast<SIMDFirstPrivateAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDFirstPrivateAttr::variables_iterator
+             it = FirstPrivateAttr->variables_begin(),
+             end = FirstPrivateAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDPrivate(FirstPrivateAttr->getLocation(),
+                                         llvm::MutableArrayRef<Expr *>(Exprs),
+                                         Sema::SIMD_FirstPrivate);
+    break;
+  }
+  case attr::SIMDLastPrivate: {
+    SIMDLastPrivateAttr *LastPrivateAttr = cast<SIMDLastPrivateAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDLastPrivateAttr::variables_iterator
+             it = LastPrivateAttr->variables_begin(),
+             end = LastPrivateAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDPrivate(LastPrivateAttr->getLocation(),
+                                         llvm::MutableArrayRef<Expr *>(Exprs),
+                                         Sema::SIMD_LastPrivate);
+    break;
+  }
+  case attr::SIMDReduction: {
+    SIMDReductionAttr *ReductionAttr = cast<SIMDReductionAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDReductionAttr::variables_iterator
+             it = ReductionAttr->variables_begin(),
+             end = ReductionAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDReduction(
+        ReductionAttr->getLocation(), ReductionAttr->Operator,
+        llvm::MutableArrayRef<Expr *>(Exprs));
+    break;
+  }
+  default:
+    llvm_unreachable("Unknown SIMD clause");
+    break;
+  }
+
+  return R;
+}
+
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
@@ -9611,58 +9729,58 @@ TreeTransform<Derived>::TransformCilkSpawnStmt(CilkSpawnStmt *S) {
   return Owned(S);
 }
 
-template<typename Derived>
+template <typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {
-  // FIXME: Process SIMD clauses.
   ArrayRef<Attr *> Attrs = S->getSIMDAttrs();
   SourceLocation PragmaLoc = S->getPragmaLoc();
 
-  getSema().ActOnStartOfSIMDForStmt(PragmaLoc, /*Scope*/0, Attrs);
+  SmallVector<Attr *, 1> TransformedAttrs;
+  bool InvalidAttr = false;
+  for (ArrayRef<Attr *>::iterator it = Attrs.begin(), end = Attrs.end();
+       it != end; ++it) {
+    AttrResult TransformedAttr = TransformSIMDAttr(*it);
+    InvalidAttr |= TransformedAttr.isInvalid();
+    TransformedAttrs.push_back(TransformedAttr.get());
+  }
+
+  if (InvalidAttr)
+    return StmtError();
 
   // Transform loop initialization.
   StmtResult Init = getDerived().TransformStmt(S->getInit());
-  if (Init.isInvalid()) {
-    getSema().ActOnSIMDForStmtError();
+  if (Init.isInvalid())
     return StmtError();
-  }
 
   // Transform loop condition.
   ExprResult Cond = getDerived().TransformExpr(S->getCond());
-  if (Cond.isInvalid()) {
-    getSema().ActOnSIMDForStmtError();
+  if (Cond.isInvalid())
     return StmtError();
-  }
 
   assert(S->getCond() && "unexpected empty condition in Cilk for");
   SourceLocation ForLoc = S->getForLoc();
-  ExprResult CondExpr
-    = getSema().ActOnBooleanCondition(/*Scope*/0, ForLoc, Cond.get());
+  ExprResult CondExpr =
+      getSema().ActOnBooleanCondition(/*Scope*/ 0, ForLoc, Cond.get());
 
-  if (CondExpr.isInvalid()) {
-    getSema().ActOnSIMDForStmtError();
+  if (CondExpr.isInvalid())
     return StmtError();
-  }
+
   Cond = CondExpr.get();
 
   Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
-  if (!FullCond.get()) {
-    getSema().ActOnSIMDForStmtError();
+  if (!FullCond.get())
     return StmtError();
-  }
 
   // Transform loop increment.
   ExprResult Inc = getDerived().TransformExpr(S->getInc());
-  if (Inc.isInvalid()) {
-    getSema().ActOnSIMDForStmtError();
+  if (Inc.isInvalid())
     return StmtError();
-  }
 
   Sema::FullExprArg FullInc(getSema().MakeFullExpr(Inc.get()));
-  if (!FullInc.get()) {
-    getSema().ActOnSIMDForStmtError();
+  if (!FullInc.get())
     return StmtError();
-  }
+
+  getSema().ActOnStartOfSIMDForStmt(PragmaLoc, /*Scope*/ 0, TransformedAttrs);
 
   // Transform loop body.
   StmtResult Body = getDerived().TransformStmt(S->getBody()->getCapturedStmt());
@@ -9671,11 +9789,9 @@ TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {
     return StmtError();
   }
 
-  StmtResult Result = getSema().ActOnSIMDForStmt(PragmaLoc, Attrs, ForLoc,
-                                                 S->getLParenLoc(),
-                                                 Init.take(), FullCond,
-                                                 FullInc, S->getRParenLoc(),
-                                                 Body.take());
+  StmtResult Result = getSema().ActOnSIMDForStmt(
+      PragmaLoc, TransformedAttrs, ForLoc, S->getLParenLoc(), Init.take(),
+      FullCond, FullInc, S->getRParenLoc(), Body.take());
   if (Result.isInvalid()) {
     getSema().ActOnSIMDForStmtError();
     return StmtError();

@@ -132,6 +132,8 @@ void test_linear(int arr[]) {
   /* expected-error@+1 {{invalid linear variable}} */
   #pragma simd linear(arr_b)
   for (int i = 0; i < 10; i++) ;
+  /* expected-error@+3 {{expected ','}} */
+  /* expected-error@+2 {{expected identifier}}  */
   /* expected-error@+1 {{invalid linear variable}} */
   #pragma simd linear(a.a:1)
   for (int i = 0; i < 10; ++i) ;
@@ -146,6 +148,8 @@ void test_linear(int arr[]) {
   /* expected-error@+1 {{invalid linear variable}} */
   #pragma simd linear(ai)
   for (int i = 0; i < 10; ++i);
+  /* expected-error@+3 {{expected ','}} */
+  /* expected-error@+2 {{expected identifier}}  */
   /* expected-error@+1 {{invalid linear variable}} */
   #pragma simd linear(ai[1])
   for (int i = 0; i < 10; ++i);
