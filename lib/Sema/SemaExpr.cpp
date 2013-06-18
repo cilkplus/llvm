@@ -11055,7 +11055,7 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
   // Add the newly created local variable
   if (!LocalVar->isInvalidDecl()) {
     LocalVar->setImplicit();
-    LocalVar->isUsed();
+    LocalVar->setUsed();
     DC->addDecl(LocalVar);
     FSI->UpdateVar(Var, LocalVar, UpdateExpr);
   } else

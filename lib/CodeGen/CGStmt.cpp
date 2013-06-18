@@ -2287,7 +2287,7 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
     for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
                                         E = SS.simd_var_end(); I != E; ++I) {
       // FIXME: enable other data clauses.
-      if (!I->isPrivate() && !I->isFirstPrivate())
+      if (!I->isPrivate() && !I->isFirstPrivate() && !I->isLastPrivate())
         continue;
 
       VarDecl *SIMDVar = I->getSIMDVar();
@@ -2313,8 +2313,19 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
 
       EmitStmt(S);
 
+      EmitBlock(LoopContinue.getBlock());
+
+      // Update expressions update a SIMD variable, do not replace those uses
+      // with the local copy's address.
+      Info->setShouldReplaceWithLocal(false);
+      for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
+           E = SS.simd_var_end(); I != E; ++I) {
+        if (I->isLastPrivate())
+          EmitAnyExpr(I->getUpdateExpr());
+      }
+      Info->setShouldReplaceWithLocal(true);
+
       BreakContinueStack.pop_back();
-      EmitBlock(LoopContinue.getBlock(), /*IsFinished*/true);
     }
   }
 
