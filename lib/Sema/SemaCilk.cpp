@@ -1877,7 +1877,7 @@ void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
   CheckSIMDPragmaClauses(PragmaLoc, SIMDAttrList);
 
   CapturedDecl *CD = 0;
-  RecordDecl *RD = CreateCapturedStmtRecordDecl(CD, PragmaLoc, /*NumArgs*/1);
+  RecordDecl *RD = CreateCapturedStmtRecordDecl(CD, PragmaLoc, /*NumArgs*/ 3);
 
   PushSIMDForScope(CurScope, CD, RD, PragmaLoc);
 

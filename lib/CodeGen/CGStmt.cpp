@@ -2242,8 +2242,12 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
     LValue CapStruct = InitCapturedStruct(CS);
 
     // Emit call to the helper function.
+    SmallVector<llvm::Value*, 3> HelperArgs;
+    HelperArgs.push_back(CapStruct.getAddress());
+    HelperArgs.push_back(Builder.CreateLoad(LoopIndex));
+    HelperArgs.push_back(LoopCount);
     disableExceptions();
-    EmitCallOrInvoke(F, CapStruct.getAddress());
+    EmitCallOrInvoke(F, HelperArgs);
     enableExceptions();
   }
 
@@ -2282,12 +2286,15 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
   {
     RunCleanupsScope Scope(*this);
 
-    // Emit all SIMD local variables and update the codegen info.
     const SIMDForStmt &SS = Info->getSIMDForStmt();
+    const CapturedDecl *CD = SS.getBody()->getCapturedDecl();
+    llvm::Value *LoopIndex = LocalDeclMap.lookup(CD->getParam(1));
+
+    // Emit all SIMD local variables and update the codegen info.
     for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
                                         E = SS.simd_var_end(); I != E; ++I) {
-      // FIXME: enable other data clauses.
-      if (!I->isPrivate() && !I->isFirstPrivate() && !I->isLastPrivate())
+      if (!I->isPrivate() && !I->isFirstPrivate() && !I->isLastPrivate() &&
+          !I->isLinear())
         continue;
 
       VarDecl *SIMDVar = I->getSIMDVar();
@@ -2300,6 +2307,23 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
       llvm::Value *Addr = Emission.getAllocatedAddress();
       assert(Addr && "null address");
       Info->updateLocalAddr(SIMDVar, Addr);
+
+      if (I->isLinear()) {
+        const FieldDecl *FD = Info->lookup(SIMDVar);
+        assert(FD && "must have been captured");
+        QualType TagType = getContext().getTagDeclType(FD->getParent());
+        LValue LV = MakeNaturalAlignAddrLValue(Info->getContextValue(), TagType);
+        LV = EmitLValueForField(LV, FD);
+
+        llvm::Value *Start = Builder.CreateLoad(LV.getAddress());
+        llvm::Value *Index = Builder.CreateLoad(LoopIndex);
+        // TODO: Evaluate the step expression.
+        llvm::Value *Step = llvm::ConstantInt::get(Index->getType(), 1);
+        llvm::Value *Result = Builder.CreateMul(Index, Step);
+        Result = Builder.CreateIntCast(Result, Start->getType(), false);
+        Result = Builder.CreateAdd(Start, Result);
+        Builder.CreateStore(Result, Addr);
+      }
     }
 
     // Emit the SIMD for loop body.

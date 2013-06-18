@@ -3870,6 +3870,20 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
   DeclContext *DC = CapturedDecl::castToDeclContext(CD);
   bool IsDependent = DC->isDependentContext();
 
+  if (!IsDependent) {
+    assert(CD->getNumParams() == 3);
+    QualType IndexType = LoopCount->getType();
+    ImplicitParamDecl *Index = 0, *Count = 0;
+    Index = ImplicitParamDecl::Create(getASTContext(), DC, SourceLocation(),
+                                      /*IdInfo*/ 0, IndexType);
+    DC->addDecl(Index);
+    CD->setParam(1, Index);
+    Count = ImplicitParamDecl::Create(getASTContext(), DC, SourceLocation(),
+                                      /*IdInfo*/ 0, IndexType);
+    DC->addDecl(Count);
+    CD->setParam(2, Count);
+  }
+
   SmallVector<CapturedStmt::Capture, 4> Captures;
   SmallVector<Expr *, 4> CaptureInits;
   buildCapturedStmtCaptureList(Captures, CaptureInits, FSI->Captures);
