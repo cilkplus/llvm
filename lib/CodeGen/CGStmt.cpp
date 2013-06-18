@@ -2283,7 +2283,7 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
     for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
                                         E = SS.simd_var_end(); I != E; ++I) {
       // FIXME: enable other data clauses.
-      if (!I->isPrivate() || !I->isFirstPrivate())
+      if (!I->isPrivate() && !I->isFirstPrivate())
         continue;
 
       VarDecl *SIMDVar = I->getSIMDVar();
