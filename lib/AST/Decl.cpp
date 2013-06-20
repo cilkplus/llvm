@@ -3372,6 +3372,41 @@ CapturedDecl *CapturedDecl::CreateDeserialized(ASTContext &C, unsigned ID,
   return new (Mem) CapturedDecl(0, NumParams);
 }
 
+CILKSpawnDecl::CILKSpawnDecl(DeclContext *DC, CapturedStmt *Spawn) :
+  Decl(CILKSpawn, DC, Spawn->getLocStart()), CapturedSpawn(Spawn) {
+}
+
+CILKSpawnDecl *CILKSpawnDecl::Create(ASTContext &C, DeclContext *DC,
+                                     CapturedStmt *Spawn) {
+  return new (C) CILKSpawnDecl(DC, Spawn);
+}
+
+CILKSpawnDecl *CILKSpawnDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
+  void *Mem = AllocateDeserializedDecl(C, ID, sizeof(CILKSpawnDecl));
+  return new (Mem) CILKSpawnDecl(0, 0);
+}
+
+Stmt *CILKSpawnDecl::getSpawnStmt() {
+  return getCapturedStmt()->getCapturedStmt();
+}
+
+bool CILKSpawnDecl::hasReceiver() const {
+  const Stmt *S = getSpawnStmt();
+  assert(S && "null spawn statement");
+  return isa<DeclStmt>(S);
+}
+
+VarDecl *CILKSpawnDecl::getReceiverDecl() const {
+  Stmt *S = const_cast<Stmt *>(getSpawnStmt());
+  assert(S && "null spawn statement");
+  if (DeclStmt *DS = dyn_cast<DeclStmt>(S)) {
+    assert(DS->isSingleDecl() && "single declaration expected");
+    return cast<VarDecl>(DS->getSingleDecl());
+  }
+
+  return 0;
+}
+
 EnumConstantDecl *EnumConstantDecl::Create(ASTContext &C, EnumDecl *CD,
                                            SourceLocation L,
                                            IdentifierInfo *Id, QualType T,

@@ -341,7 +341,7 @@ static bool CheckForInit(Sema &S, Stmt *Init,
   // initialization clause.
   StorageClass SC = ControlVar->getStorageClass();
   if (SC != SC_None) {
-    S.Diag(InitLoc, 
+    S.Diag(InitLoc,
            IsCilkFor ? diag::err_cilk_for_control_variable_storage_class
                      : diag::err_simd_for_control_variable_storage_class)
       << ControlVar->getStorageClassSpecifierString(SC);
@@ -1057,6 +1057,11 @@ public:
 
   bool VisitIndirectGotoStmt(IndirectGotoStmt *S) {
     Diag(S->getLocStart(), "indirect goto", S->getSourceRange());
+    return true;
+  }
+
+  bool VisitCILKSpawnDecl(CILKSpawnDecl *D) {
+    TraverseStmt(D->getSpawnStmt());
     return true;
   }
 
@@ -1935,4 +1940,448 @@ void Sema::ActOnCilkForStmtError() {
 
 void Sema::ActOnSIMDForStmtError() {
   ActOnForStmtError(*this, getCurSIMDFor()->TheRecordDecl);
+}
+
+static Expr *IgnoreImplicitNodeForCilkSpawnCall(Expr *E) {
+  while (true) {
+    if (ImplicitCastExpr *CE = dyn_cast<ImplicitCastExpr>(E))
+      E = CE->getSubExprAsWritten();
+    else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
+      E = EWC->getSubExpr();
+    else if (MaterializeTemporaryExpr *MTE
+        = dyn_cast<MaterializeTemporaryExpr>(E))
+      E = MTE->GetTemporaryExpr();
+    else if (CXXBindTemporaryExpr *BTE = dyn_cast<CXXBindTemporaryExpr>(E))
+      E = BTE->getSubExpr();
+    else if (CXXConstructExpr *CE = dyn_cast<CXXConstructExpr>(E)) {
+      // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
+      // so handle it the same way as CXXFunctionalCastExpr
+      if (isa<CXXTemporaryObjectExpr>(CE))
+        break;
+      if (CE->getNumArgs() >= 1)
+        E = CE->getArg(0);
+      else
+        break;
+    } else
+      break;
+  }
+
+  return E;
+}
+
+static bool CheckUnsupportedCall(Sema &S, CallExpr *Call) {
+  assert(Call->isCilkSpawnCall() && "Cilk spawn expected");
+
+  SourceLocation SpawnLoc = Call->getCilkSpawnLoc();
+  if (Call->isBuiltinCall()) {
+    S.Diag(SpawnLoc, diag::err_cannot_spawn_builtin);
+    return false;
+  } else if (isa<UserDefinedLiteral>(Call) || isa<CUDAKernelCallExpr>(Call)) {
+    S.Diag(SpawnLoc, diag::err_cannot_spawn_function);
+    return false;
+  }
+
+  return true;
+}
+
+static bool CheckSpawnCallExpr(Sema &S, Expr *E, SourceLocation SpawnLoc) {
+  // Do not need to check an already checked spawn.
+  if (isa<CilkSpawnExpr>(E))
+    return true;
+
+  E = IgnoreImplicitNodeForCilkSpawnCall(E);
+  Expr *RHS = 0;
+
+  // x = _Cilk_spawn f(); // x is a non-class object.
+  if (BinaryOperator *B = dyn_cast<BinaryOperator>(E)) {
+    if (B->getOpcode() != BO_Assign) {
+      S.Diag(SpawnLoc, diag::err_spawn_not_whole_expr) << E->getSourceRange();
+      return false;
+    }
+    RHS = B->getRHS();
+  } else {
+    CallExpr *Call = dyn_cast<CallExpr>(E);
+
+    // Not a call.
+    if (!Call) {
+      S.Diag(SpawnLoc, diag::err_spawn_not_whole_expr) << E->getSourceRange();
+      return false;
+    }
+
+    // This is a spawn call.
+    if (Call->isCilkSpawnCall())
+      return CheckUnsupportedCall(S, Call);
+
+    CXXOperatorCallExpr *OC = dyn_cast<CXXOperatorCallExpr>(E);
+    if (!OC || (OC->getOperator() != OO_Equal)) {
+      S.Diag(SpawnLoc, diag::err_spawn_not_whole_expr) << E->getSourceRange();
+      return false;
+    }
+    // x = _Cilk_spawn f(); // x is a class object.
+    RHS = OC->getArg(1);
+  }
+
+  // Up to this point, RHS is expected to be '_Cilk_spawn f()'.
+  RHS = IgnoreImplicitNodeForCilkSpawnCall(RHS);
+
+  CallExpr *Call = dyn_cast<CallExpr>(RHS);
+  if (!Call || !Call->isCilkSpawnCall()) {
+    S.Diag(SpawnLoc, diag::err_spawn_not_whole_expr) << E->getSourceRange();
+    return false;
+  }
+
+  return CheckUnsupportedCall(S, Call);
+}
+
+bool Sema::DiagCilkSpawnFullExpr(Expr *EE) {
+  bool IsValid = true;
+  assert(EE && !CilkSpawnCalls.empty() && "Cilk spawn expected");
+  SourceLocation SpawnLoc = (*CilkSpawnCalls.rbegin())->getCilkSpawnLoc();
+  if (CilkSpawnCalls.size() == 1) {
+    // Only a single Cilk spawn in this expression; check if it is
+    // in a proper place:
+    //
+    // (1) _Cilk_spawn f()
+    //
+    // (2) x = _Cilk_spawn f()
+    //
+    // where the second form may be "operator=" call.
+    IsValid = CheckSpawnCallExpr(*this, EE, SpawnLoc);
+  } else {
+    SmallVectorImpl<CallExpr *>::reverse_iterator I = CilkSpawnCalls.rbegin();
+    SmallVectorImpl<CallExpr *>::reverse_iterator E = CilkSpawnCalls.rend();
+
+    IsValid = false;
+    Diag(SpawnLoc, diag::err_multiple_spawns) << EE->getSourceRange();
+    // Starting from the second spawn, emit a note.
+    for (++I; I != E; ++I)
+      Diag((*I)->getCilkSpawnLoc(), diag::note_multiple_spawns);
+  }
+
+  // FIXME: There are a number of places where invariant of a full expression
+  // is not well-maitained. We clear spawn calls explicitly here.
+  CilkSpawnCalls.clear();
+
+  return IsValid;
+}
+
+namespace {
+
+class CaptureBuilder: public RecursiveASTVisitor<CaptureBuilder> {
+  Sema &S;
+
+public:
+  CaptureBuilder(Sema &S) : S(S) {}
+
+  bool VisitDeclRefExpr(DeclRefExpr *E) {
+    S.MarkDeclRefReferenced(E);
+    return true;
+  }
+
+  bool TraverseLambdaExpr(LambdaExpr *E) {
+    LambdaExpr::capture_init_iterator CI = E->capture_init_begin();
+
+    for (LambdaExpr::capture_iterator C = E->capture_begin(),
+                                   CEnd = E->capture_end();
+                                     C != CEnd; ++C, ++CI) {
+      if (C->capturesVariable())
+        S.MarkVariableReferenced((*CI)->getLocStart(), C->getCapturedVar());
+      else {
+        assert(C->capturesThis() && "Capturing this expected");
+        assert(isa<CXXThisExpr>(*CI) && "CXXThisExpr expected");
+        S.CheckCXXThisCapture((*CI)->getLocStart(), /*explicit*/false);
+      }
+    }
+    assert(CI == E->capture_init_end() && "out of sync");
+    // Only traverse the captures, and skip the body.
+    return true;
+  }
+
+  /// Skip captured statements
+  bool TraverseCapturedStmt(CapturedStmt *) { return true; }
+
+  bool VisitCXXThisExpr(CXXThisExpr *E) {
+    S.CheckCXXThisCapture(E->getLocStart(), /*explicit*/false);
+    return true;
+  }
+};
+
+void CaptureVariablesInStmt(Sema &SemaRef, Stmt *S) {
+  CaptureBuilder Builder(SemaRef);
+  Builder.TraverseStmt(S);
+}
+
+void MarkFunctionAsSpawning(Sema &S) {
+  DeclContext *DC = S.CurContext;
+  while (!DC->isFunctionOrMethod())
+    DC = DC->getParent();
+
+  Decl::Kind Kind = DC->getDeclKind();
+  if (Kind >= Decl::firstFunction && Kind <= Decl::lastFunction)
+    FunctionDecl::castFromDeclContext(DC)->setSpawning();
+  else if (Decl::Captured == Kind)
+    CapturedDecl::castFromDeclContext(DC)->setSpawning();
+  else {
+    S.Diag(SourceLocation(), diag::err_spawn_invalid_decl)
+      << DC->getDeclKindName();
+  }
+}
+
+} // namespace
+
+ExprResult Sema::BuildCilkSpawnExpr(Expr *E) {
+  if (!E)
+    return ExprError();
+
+  if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
+    E = EWC->getSubExpr();
+
+  if (CilkSpawnExpr *CSE = dyn_cast<CilkSpawnExpr>(E)) {
+    E = CSE->getSpawnExpr();
+    assert(E && "Expr expected");
+  }
+
+  Stmt *Body = 0;
+  {
+    // Capture variables used in this full expression.
+    ActOnCapturedRegionStart(E->getLocStart(), /*Scope*/0, CR_CilkSpawn,
+                             /*NumParams*/1);
+    CaptureVariablesInStmt(*this, E);
+    Body = ActOnCapturedRegionEnd(E).get();
+  }
+
+  DeclContext *DC = CurContext;
+  while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
+    DC = DC->getParent();
+
+  CapturedStmt *CS = cast<CapturedStmt>(Body);
+  CILKSpawnDecl *Spawn = CILKSpawnDecl::Create(Context, DC, CS);
+  DC->addDecl(Spawn);
+
+  MarkFunctionAsSpawning(*this);
+  return Owned(new (Context) CilkSpawnExpr(Spawn, E->getType()));
+}
+
+static QualType GetReceiverTmpType(const Expr *E) {
+  do {
+    if (const ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
+      E = EWC->getSubExpr();
+    const MaterializeTemporaryExpr *M = NULL;
+    E = E->findMaterializedTemporary(M);
+  } while (isa<ExprWithCleanups>(E));
+
+  // Skip any implicit casts.
+  SmallVector<const Expr *, 2> CommaLHSs;
+  SmallVector<SubobjectAdjustment, 2> Adjustments;
+  E = E->skipRValueSubobjectAdjustments(CommaLHSs, Adjustments);
+
+  return E->getType();
+}
+
+static void addReceiverParams(Sema &SemaRef, CapturedDecl *CD,
+                              QualType ReceiverType,
+                              QualType ReceiverTmpType) {
+  if (!ReceiverType.isNull()) {
+    DeclContext *DC = CapturedDecl::castToDeclContext(CD);
+    assert(CD->getNumParams() >= 2);
+    ImplicitParamDecl *Receiver
+      = ImplicitParamDecl::Create(SemaRef.getASTContext(), DC, SourceLocation(),
+                                  /*IdInfo*/0, ReceiverType);
+    DC->addDecl(Receiver);
+    CD->setParam(1, Receiver);
+    if (!ReceiverTmpType.isNull()) {
+      assert(CD->getNumParams() == 3);
+      ImplicitParamDecl *ReceiverTmp
+        = ImplicitParamDecl::Create(SemaRef.getASTContext(), DC,
+                                    SourceLocation(), /*IdInfo*/0,
+                                    ReceiverTmpType);
+      DC->addDecl(ReceiverTmp);
+      CD->setParam(2, ReceiverTmp);
+    }
+  }
+}
+
+CILKSpawnDecl *Sema::BuildCilkSpawnDecl(Decl *D) {
+  VarDecl *VD = dyn_cast_or_null<VarDecl>(D);
+  if (!VD || VD->isInvalidDecl())
+    return 0;
+
+  assert(VD->hasInit() && "initializer expected");
+
+  if (VD->isStaticLocal()) {
+    Diag(VD->getLocation(), diag::err_cannot_init_static_variable)
+      << VD->getSourceRange();
+    return 0;
+  }
+
+  // Pass the receiver (and possibly receiver temporary) to the
+  // captured statement.
+  unsigned NumParams = 2;
+
+  // Receiver.
+  QualType ReceiverType = Context.getCanonicalType(VD->getType());
+  ReceiverType = Context.getPointerType(ReceiverType);
+
+  // Receiver temporary.
+  QualType ReceiverTmpType;
+  if (VD->getType()->isReferenceType() && VD->extendsLifetimeOfTemporary()) {
+    ReceiverTmpType = GetReceiverTmpType(VD->getInit());
+    if (!ReceiverTmpType.isNull()) {
+      NumParams = 3;
+      ReceiverTmpType = Context.getPointerType(ReceiverTmpType);
+    }
+  }
+
+  // Start building the Captured statement.
+  ActOnCapturedRegionStart(D->getLocStart(), /*Scope*/0, CR_CilkSpawn,
+                           NumParams);
+
+  // Create a DeclStmt as the CapturedStatement body.
+  DeclStmt *Body = new (Context) DeclStmt(DeclGroupRef(VD),
+                                          VD->getLocStart(),
+                                          VD->getLocEnd());
+  CaptureVariablesInStmt(*this, Body);
+
+  StmtResult R = ActOnCapturedRegionEnd(Body);
+
+  DeclContext *DC = CurContext;
+  while (!(DC->isFunctionOrMethod() || DC->isRecord() || DC->isFileContext()))
+    DC = DC->getParent();
+
+  CapturedStmt *CS = cast<CapturedStmt>(R.release());
+  CILKSpawnDecl *Spawn = CILKSpawnDecl::Create(Context, DC, CS);
+  DC->addDecl(Spawn);
+
+  // Initialize receiver and its associated temporary parameters.
+  addReceiverParams(*this, Spawn->getCapturedStmt()->getCapturedDecl(),
+                    ReceiverType, ReceiverTmpType);
+
+  MarkFunctionAsSpawning(*this);
+  return Spawn;
+}
+
+namespace {
+// Diagnose any _Cilk_spawn expressions (see comment below). InSpawn indicates
+// that S is contained within a spawn, e.g. _Cilk_spawn foo(_Cilk_spawn bar())
+class DiagnoseCilkSpawnHelper
+  : public RecursiveASTVisitor<DiagnoseCilkSpawnHelper> {
+  Sema &SemaRef;
+public:
+  explicit DiagnoseCilkSpawnHelper(Sema &S) : SemaRef(S) { }
+
+  bool TraverseCompoundStmt(CompoundStmt *) { return true; }
+  bool VisitCallExpr(CallExpr *E) {
+    if (E->isCilkSpawnCall())
+      SemaRef.Diag(E->getCilkSpawnLoc(),
+          SemaRef.PDiag(diag::err_spawn_not_whole_expr) << E->getSourceRange());
+    return true;
+  }
+  bool VisitCILKSpawnDecl(CILKSpawnDecl *D) {
+    TraverseStmt(D->getSpawnStmt());
+    return true;
+  }
+};
+
+} // anonymous namespace
+
+// Check that _Cilk_spawn is used only:
+//  - as the entire body of an expression statement,
+//  - as the entire right hand side of an assignment expression that is the
+//    entire body of an expression statement, or
+//  - as the entire initializer-clause in a simple declaration.
+//
+// Since this is run per-compound scope stmt, we don't traverse into sub-
+// compound scopes, but we do need to traverse into loops, ifs, etc. in case of:
+// if (cond) _Cilk_spawn foo();
+//           ^~~~~~~~~~~~~~~~~ not a compound scope
+void Sema::DiagnoseCilkSpawn(Stmt *S) {
+  DiagnoseCilkSpawnHelper D(*this);
+
+  // already checked.
+  if (isa<Expr>(S))
+    return;
+
+  switch (S->getStmtClass()) {
+  case Stmt::AttributedStmtClass:
+    DiagnoseCilkSpawn(cast<AttributedStmt>(S)->getSubStmt());
+    break;
+  case Stmt::CompoundStmtClass:
+  case Stmt::DeclStmtClass:
+    return; // already checked
+  case Stmt::CapturedStmtClass:
+    DiagnoseCilkSpawn(cast<CapturedStmt>(S)->getCapturedStmt());
+    break;
+  case Stmt::CilkForStmtClass: {
+    CilkForStmt *CF = cast<CilkForStmt>(S);
+    if (CF->getInit())
+      D.TraverseStmt(CF->getInit());
+    if (CF->getCond())
+      D.TraverseStmt(CF->getCond());
+    if (CF->getInc())
+      D.TraverseStmt(CF->getInc());
+    // the cilk for body is already checked.
+    break;
+  }
+  case Stmt::CXXCatchStmtClass:
+    DiagnoseCilkSpawn(cast<CXXCatchStmt>(S)->getHandlerBlock());
+    break;
+  case Stmt::CXXForRangeStmtClass: {
+    CXXForRangeStmt *FR = cast<CXXForRangeStmt>(S);
+    D.TraverseStmt(FR->getRangeInit());
+    DiagnoseCilkSpawn(FR->getBody());
+    break;
+  }
+  case Stmt::CXXTryStmtClass:
+    DiagnoseCilkSpawn(cast<CXXTryStmt>(S)->getTryBlock());
+    break;
+  case Stmt::DoStmtClass: {
+    DoStmt *DS = cast<DoStmt>(S);
+    D.TraverseStmt(DS->getCond());
+    DiagnoseCilkSpawn(DS->getBody());
+    break;
+  }
+  case Stmt::ForStmtClass: {
+    ForStmt *F = cast<ForStmt>(S);
+    if (F->getInit())
+      D.TraverseStmt(F->getInit());
+    if (F->getCond())
+      D.TraverseStmt(F->getCond());
+    if (F->getInc())
+      D.TraverseStmt(F->getInc());
+    DiagnoseCilkSpawn(F->getBody());
+    break;
+  }
+  case Stmt::IfStmtClass: {
+    IfStmt *I = cast<IfStmt>(S);
+    D.TraverseStmt(I->getCond());
+    DiagnoseCilkSpawn(I->getThen());
+    if (I->getElse())
+      DiagnoseCilkSpawn(I->getElse());
+    break;
+  }
+  case Stmt::LabelStmtClass:
+    DiagnoseCilkSpawn(cast<LabelStmt>(S)->getSubStmt());
+    break;
+  case Stmt::SwitchStmtClass: {
+    SwitchStmt *SS = cast<SwitchStmt>(S);
+    if (const DeclStmt *DS = SS->getConditionVariableDeclStmt())
+      D.TraverseStmt(const_cast<DeclStmt *>(DS));
+    D.TraverseStmt(SS->getCond());
+    DiagnoseCilkSpawn(SS->getBody());
+    break;
+  }
+  case Stmt::CaseStmtClass:
+  case Stmt::DefaultStmtClass:
+    DiagnoseCilkSpawn(cast<SwitchCase>(S)->getSubStmt());
+    break;
+  case Stmt::WhileStmtClass: {
+    WhileStmt *W = cast<WhileStmt>(S);
+    D.TraverseStmt(W->getCond());
+    DiagnoseCilkSpawn(W->getBody());
+    break;
+  }
+  default:
+    D.TraverseStmt(S);
+    break;
+  }
 }

@@ -74,6 +74,7 @@ def FriendTemplate : Decl;
 def StaticAssert : Decl;
 def Block : Decl, DeclContext;
 def Captured : Decl, DeclContext;
+def CILKSpawn : Decl;
 def ClassScopeFunctionSpecialization : Decl;
 def Import : Decl;
 def OMPThreadPrivate : Decl;

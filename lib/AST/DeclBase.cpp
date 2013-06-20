@@ -563,6 +563,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case ObjCPropertyImpl:
     case Block:
     case Captured:
+    case CILKSpawn:
     case TranslationUnit:
 
     case UsingDirective:

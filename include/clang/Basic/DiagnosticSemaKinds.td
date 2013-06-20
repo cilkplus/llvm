@@ -6459,6 +6459,10 @@ def err_cannot_spawn_function: Error<
   "function cannot be spawned">;
 def err_cannot_init_static_variable: Error<
   "cannot spawn initialize a 'static' variable">;
+def err_multiple_spawns: Error<
+  "multiple spawn calls within a full expression">;
+def note_multiple_spawns: Note<
+  "another spawn here">;
 
 // cilk_for
 def err_cilk_for_initializer_expected_variable : Error<

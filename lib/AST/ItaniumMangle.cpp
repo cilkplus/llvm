@@ -2405,6 +2405,7 @@ recurse:
 
   // FIXME: invent manglings for all these.
   case Expr::BlockExprClass:
+  case Expr::CilkSpawnExprClass:
   case Expr::CXXPseudoDestructorExprClass:
   case Expr::ChooseExprClass:
   case Expr::CompoundLiteralExprClass:

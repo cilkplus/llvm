@@ -827,6 +827,9 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
       Bldr.addNodes(Dst);
       break;
 
+    case Stmt::CilkSpawnExprClass:
+      llvm_unreachable("not implemented yet");
+
     case Stmt::BinaryOperatorClass: {
       const BinaryOperator* B = cast<BinaryOperator>(S);
       if (B->isLogicalOp()) {

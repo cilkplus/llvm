@@ -133,10 +133,10 @@ struct test_templates2 {
     _Cilk_spawn foo() + 5; // expected-error {{_Cilk_spawn is not at statement level}}
     _Cilk_spawn _Cilk_spawn foo(); // expected-error {{consecutive _Cilk_spawn tokens not allowed}}
 
-    T2 c = _Cilk_spawn foo(); // expected-error {{no viable conversion from 'int' to 'tt'}}
     T2 d;
     d = _Cilk_spawn foo();    // expected-error {{no viable overloaded '='}}
     _Cilk_sync;
+    T2 c = _Cilk_spawn foo(); // expected-error {{no viable conversion from 'int' to 'tt'}}
   }
 };
 

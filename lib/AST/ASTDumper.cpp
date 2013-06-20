@@ -200,6 +200,7 @@ namespace  {
     void VisitVarDecl(const VarDecl *D);
     void VisitFileScopeAsmDecl(const FileScopeAsmDecl *D);
     void VisitImportDecl(const ImportDecl *D);
+    void VisitCILKSpawnDecl(const CILKSpawnDecl *D);
 
     // C++ Decls
     void VisitNamespaceDecl(const NamespaceDecl *D);
@@ -267,6 +268,7 @@ namespace  {
     void VisitCompoundAssignOperator(const CompoundAssignOperator *Node);
     void VisitAddrLabelExpr(const AddrLabelExpr *Node);
     void VisitBlockExpr(const BlockExpr *Node);
+    void VisitCilkSpawnExpr(const CilkSpawnExpr *Node);
     void VisitOpaqueValueExpr(const OpaqueValueExpr *Node);
 
     // C++
@@ -1113,6 +1115,11 @@ void ASTDumper::VisitFriendDecl(const FriendDecl *D) {
     dumpDecl(D->getFriendDecl());
 }
 
+void ASTDumper::VisitCILKSpawnDecl(const CILKSpawnDecl *D) {
+  lastChild();
+  dumpStmt(D->getCapturedStmt());
+}
+
 //===----------------------------------------------------------------------===//
 // Obj-C Declarations
 //===----------------------------------------------------------------------===//
@@ -1654,6 +1661,11 @@ void ASTDumper::VisitCompoundAssignOperator(
 void ASTDumper::VisitBlockExpr(const BlockExpr *Node) {
   VisitExpr(Node);
   dumpDecl(Node->getBlockDecl());
+}
+
+void ASTDumper::VisitCilkSpawnExpr(const CilkSpawnExpr *Node) {
+  VisitExpr(Node);
+  dumpDecl(Node->getSpawnDecl());
 }
 
 void ASTDumper::VisitOpaqueValueExpr(const OpaqueValueExpr *Node) {

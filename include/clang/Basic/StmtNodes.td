@@ -181,3 +181,4 @@ def CilkSpawnStmt : Stmt;
 def CilkForGrainsizeStmt : Stmt;
 def CilkForStmt : Stmt;
 def SIMDForStmt : Stmt;
+def CilkSpawnExpr : DStmt<Expr>;

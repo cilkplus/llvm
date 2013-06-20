@@ -4871,6 +4871,12 @@ Expr *Sema::MaybeCreateExprWithCleanups(Expr *SubExpr) {
 
   CleanupVarDeclMarking();
 
+  if (getLangOpts().CilkPlus) {
+    // This full expression contains a single valid Cilk spawn.
+    // Keep it clean for the following full expression.
+    CilkSpawnCalls.clear();
+  }
+
   unsigned FirstCleanup = ExprEvalContexts.back().NumCleanupObjects;
   assert(ExprCleanupObjects.size() >= FirstCleanup);
   assert(ExprNeedsCleanups || ExprCleanupObjects.size() == FirstCleanup);
@@ -5594,6 +5600,7 @@ ExprResult Sema::IgnoredValueConversions(Expr *E) {
 }
 
 ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
+                                     CilkReceiverKind &Kind,
                                      bool DiscardedValue,
                                      bool IsConstexpr) {
   ExprResult FullExpr = Owned(FE);
@@ -5623,7 +5630,36 @@ ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
   }
 
   CheckCompletedExpr(FullExpr.get(), CC, IsConstexpr);
-  return MaybeCreateExprWithCleanups(FullExpr);
+
+  // Check if this full expression can be a supported Cilk spawn expression:
+  // (1) _Cilk_spawn func();
+  // (2) x = _Cilk_spawn func();
+  // and at most a single spawn within this full expression.
+  bool HasValidCilkSpawn = false;
+  if (getLangOpts().CilkPlus && !CilkSpawnCalls.empty()) {
+    if (!DiagCilkSpawnFullExpr(FullExpr.get()))
+      return ExprError();
+
+    // Nothing wrong within this full expression, then it is valid.
+    // However, this spawn expression may be placed into an unexpected place,
+    // e.g., the condition of an if-statement, etc. The later check will be
+    // performed before closing a compound statement.
+    HasValidCilkSpawn = true;
+
+    // If this is a full expression initializing a variable, then this
+    // variable is a receiver and confirm this with the caller.
+    if (Kind == CRK_MaybeReceiver)
+      Kind = CRK_IsReceiver;
+  }
+
+  FullExpr = MaybeCreateExprWithCleanups(FullExpr);
+
+  // Build a Cilk spawn expression out of this full expression. If this is
+  // initialize a receiver, then do not build a CilkSpawnExpr.
+  if (getLangOpts().CilkPlus && HasValidCilkSpawn && (Kind != CRK_IsReceiver))
+    return BuildCilkSpawnExpr(FullExpr.get());
+
+  return FullExpr;
 }
 
 StmtResult Sema::ActOnFinishFullStmt(Stmt *FullStmt) {

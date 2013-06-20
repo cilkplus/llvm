@@ -9172,6 +9172,18 @@ TreeTransform<Derived>::TransformBlockExpr(BlockExpr *E) {
   return SemaRef.ActOnBlockStmtExpr(E->getCaretLocation(), body.get(),
                                     /*Scope=*/0);
 }
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
+  Expr *EE = E->getSpawnExpr();
+  assert(EE && "null _Cilk_spawn expression");
+
+  ExprResult NewSpawn = getDerived().TransformExpr(EE);
+  if (NewSpawn.isInvalid())
+    return ExprError();
+
+  return getSema().BuildCilkSpawnExpr(NewSpawn.get());
+}
 
 template<typename Derived>
 ExprResult

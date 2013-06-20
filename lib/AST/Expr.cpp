@@ -1899,6 +1899,13 @@ Stmt *BlockExpr::getBody() {
   return TheBlock->getBody();
 }
 
+SourceLocation CilkSpawnExpr::getLocStart() const {
+  return TheSpawn->getSpawnStmt()->getLocStart();
+}
+
+SourceLocation CilkSpawnExpr::getLocEnd() const {
+  return TheSpawn->getSpawnStmt()->getLocEnd();
+}
 
 //===----------------------------------------------------------------------===//
 // Generic Expression Routines
@@ -2205,6 +2212,15 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
   case ExprWithCleanupsClass:
     return (cast<ExprWithCleanups>(this)
             ->getSubExpr()->isUnusedResultAWarning(WarnE, Loc, R1, R2, Ctx));
+  case CilkSpawnExprClass: {
+    const CilkSpawnExpr *SpawnE = cast<CilkSpawnExpr>(this);
+    const Stmt *SpawnS = SpawnE->getSpawnDecl()->getSpawnStmt();
+    if (isa<Expr>(SpawnS)) {
+      const Expr *E = cast<Expr>(SpawnS);
+      return E->isUnusedResultAWarning(WarnE, Loc, R1, R2, Ctx);
+    }
+    return false;
+  }
   }
 }
 
@@ -2848,6 +2864,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx) const {
   case ExprWithCleanupsClass:
   case CXXBindTemporaryExprClass:
   case BlockExprClass:
+  case CilkSpawnExprClass:
   case CUDAKernelCallExprClass:
     // These always have a side-effect.
     return true;

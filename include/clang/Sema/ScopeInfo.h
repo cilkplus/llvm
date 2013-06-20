@@ -19,6 +19,7 @@
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/PartialDiagnostic.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "clang/Basic/PragmaSIMD.h"
 

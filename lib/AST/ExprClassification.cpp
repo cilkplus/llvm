@@ -161,6 +161,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::CXXDeleteExprClass:
   case Expr::ImplicitValueInitExprClass:
   case Expr::BlockExprClass:
+  case Expr::CilkSpawnExprClass:
   case Expr::FloatingLiteralClass:
   case Expr::CXXNoexceptExprClass:
   case Expr::CXXScalarValueInitExprClass:

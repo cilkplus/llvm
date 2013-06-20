@@ -7725,6 +7725,7 @@ static ICEDiag CheckICE(const Expr* E, ASTContext &Ctx) {
   case Expr::ObjCIsaExprClass:
   case Expr::ShuffleVectorExprClass:
   case Expr::BlockExprClass:
+  case Expr::CilkSpawnExprClass:
   case Expr::NoStmtClass:
   case Expr::OpaqueValueExprClass:
   case Expr::PackExpansionExprClass:

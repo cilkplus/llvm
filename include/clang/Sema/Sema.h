@@ -279,6 +279,10 @@ public:
 
   llvm::SmallPtrSet<Expr*, 2> MaybeODRUseExprs;
 
+  /// \brief All the Cilk spawn call expressions in this expression
+  /// evaluation context.
+  llvm::SmallVector<CallExpr*, 2> CilkSpawnCalls;
+
   /// \brief Stack containing information about each of the nested
   /// function, block, and method scopes that are currently active.
   ///
@@ -660,6 +664,10 @@ public:
     unsigned NumCleanupObjects;
 
     llvm::SmallPtrSet<Expr*, 2> SavedMaybeODRUseExprs;
+
+    /// \brief All the Cilk spawn call expressions when we entered this
+    /// expression evaluation context.
+    llvm::SmallVector<CallExpr*, 2> SavedCilkSpawnCalls;
 
     /// \brief The lambdas that are present within this context, if it
     /// is indeed an unevaluated context.
@@ -1496,7 +1504,14 @@ public:
                                SourceLocation EqualLoc);
 
   void AddInitializerToDecl(Decl *dcl, Expr *init, bool DirectInit,
-                            bool TypeMayContainAuto);
+                            bool TypeMayContainAuto) {
+    bool IsCilkSpawnReceiver = false;
+    AddInitializerToDecl(dcl, init, DirectInit, TypeMayContainAuto,
+                         IsCilkSpawnReceiver);
+  }
+  void AddInitializerToDecl(Decl *dcl, Expr *init, bool DirectInit,
+                            bool TypeMayContainAuto,
+                            bool &IsCilkSpawnReceiver);
   void ActOnUninitializedDecl(Decl *dcl, bool TypeMayContainAuto);
   void ActOnInitializerError(Decl *Dcl);
   void ActOnCXXForRangeDecl(Decl *D);
@@ -2875,12 +2890,21 @@ public:
                                            SourceLocation Loc,
                                            unsigned NumParams);
 
-  void DiagnoseCilkSpawn(Stmt *S, bool &HasError);
+  void DiagnoseCilkSpawn(Stmt *S);
 
   StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
   ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   ExprResult BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   StmtResult ActOnCilkSpawnStmt(Stmt *S);
+
+  /// \brief Convert a full expression into a CilkSpawnExpr.
+  ExprResult BuildCilkSpawnExpr(Expr *E);
+
+  /// \brief Convert a declaration initialized by a Cilk spawn call into
+  /// a CilkSpawnDecl.
+  CILKSpawnDecl *BuildCilkSpawnDecl(Decl *D);
+
+  bool DiagCilkSpawnFullExpr(Expr *E);
 
   const VarDecl *getCopyElisionCandidate(QualType ReturnType, Expr *E,
                                          bool AllowFunctionParameters);
@@ -4224,11 +4248,24 @@ public:
   Stmt *MaybeCreateStmtWithCleanups(Stmt *SubStmt);
   ExprResult MaybeCreateExprWithCleanups(ExprResult SubExpr);
 
+  enum CilkReceiverKind {
+    CRK_MaybeReceiver,
+    CRK_IsReceiver,
+    CRK_IsNotReceiver
+  };
+
   ExprResult ActOnFinishFullExpr(Expr *Expr) {
     return ActOnFinishFullExpr(Expr, Expr ? Expr->getExprLoc()
                                           : SourceLocation());
   }
   ExprResult ActOnFinishFullExpr(Expr *Expr, SourceLocation CC,
+                                 bool DiscardedValue = false,
+                                 bool IsConstexpr = false) {
+    CilkReceiverKind Kind = CRK_IsNotReceiver;
+    return ActOnFinishFullExpr(Expr, CC, Kind, DiscardedValue, IsConstexpr);
+  }
+  ExprResult ActOnFinishFullExpr(Expr *Expr, SourceLocation CC,
+                                 CilkReceiverKind &Kind,
                                  bool DiscardedValue = false,
                                  bool IsConstexpr = false);
   StmtResult ActOnFinishFullStmt(Stmt *Stmt);

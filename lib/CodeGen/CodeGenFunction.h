@@ -2417,6 +2417,8 @@ public:
   void EmitCilkForHelperBody(const Stmt *S);
   void EmitSIMDForStmt(const SIMDForStmt &S);
   void EmitSIMDForHelperBody(const Stmt *S);
+  void EmitCilkSpawnExpr(const CilkSpawnExpr *E);
+  void EmitCILKSpawnDecl(const CILKSpawnDecl *D);
 
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission

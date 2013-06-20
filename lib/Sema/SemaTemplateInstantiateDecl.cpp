@@ -2272,6 +2272,13 @@ Decl *TemplateDeclInstantiator::VisitOMPThreadPrivateDecl(
   return TD;
 }
 
+Decl *TemplateDeclInstantiator::VisitCILKSpawnDecl(CILKSpawnDecl *D) {
+  VarDecl *VD = D->getReceiverDecl();
+  assert(VD && "Cilk spawn receiver expected");
+  Decl *NewDecl = SemaRef.SubstDecl(VD, Owner, TemplateArgs);
+  return SemaRef.BuildCilkSpawnDecl(NewDecl);
+}
+
 Decl *Sema::SubstDecl(Decl *D, DeclContext *Owner,
                       const MultiLevelTemplateArgumentList &TemplateArgs) {
   TemplateDeclInstantiator Instantiator(*this, Owner, TemplateArgs);

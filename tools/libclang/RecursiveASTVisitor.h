@@ -1210,6 +1210,9 @@ DEF_TRAVERSE_DECL(CapturedDecl, {
     return true;
   })
 
+DEF_TRAVERSE_DECL(CILKSpawnDecl, {
+  })
+
 DEF_TRAVERSE_DECL(EmptyDecl, { })
 
 DEF_TRAVERSE_DECL(FileScopeAsmDecl, {
@@ -2085,6 +2088,10 @@ DEF_TRAVERSE_STMT(AddrLabelExpr, { })
 DEF_TRAVERSE_STMT(ArraySubscriptExpr, { })
 DEF_TRAVERSE_STMT(BlockExpr, {
   TRY_TO(TraverseDecl(S->getBlockDecl()));
+  return true; // no child statements to loop through.
+})
+DEF_TRAVERSE_STMT(CilkSpawnExpr, {
+  TRY_TO(TraverseDecl(S->getSpawnDecl()));
   return true; // no child statements to loop through.
 })
 DEF_TRAVERSE_STMT(ChooseExpr, { })

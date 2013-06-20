@@ -1100,6 +1100,11 @@ public:
     return true;
   }
 
+  bool VisitCILKSpawnDecl(CILKSpawnDecl *D) {
+    VisitStmt(D->getSpawnStmt());
+    return false; // exit
+  }
+
   bool TraverseLambdaExpr(LambdaExpr *) { return true; }
   bool TraverseBlockExpr(BlockExpr *) { return true; }
 };
@@ -1110,9 +1115,9 @@ public:
 /// analysis, since codegen will try to compute this attribute by
 /// scanning the function body of the spawned function.
 void setHelperAttributes(CodeGenFunction &CGF,
-                         const CilkSpawnStmt &S,
+                         const Stmt *S,
                          Function *Helper) {
-  FindSpawnCallExpr Finder(const_cast<Stmt *>(S.getSubStmt()));
+  FindSpawnCallExpr Finder(const_cast<Stmt *>(S));
   assert(Finder.Spawn && "spawn call expected");
 
   // Do not set for indirect spawn calls.
@@ -1187,9 +1192,61 @@ void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
     registerSpawnFunction(*this, Helper);
 
     // Set other attributes.
-    setHelperAttributes(*this, S, Helper);
+    setHelperAttributes(*this, S.getSubStmt(), Helper);
   }
   EmitBlock(Exit);
+}
+
+void CodeGenFunction::EmitCILKSpawnDecl(const CILKSpawnDecl *D) {
+  // Get the __cilkrts_stack_frame
+  Value *SF = LookupStackFrame(*this);
+  assert(SF && "null stack frame unexpected");
+
+  BasicBlock *Entry = createBasicBlock("cilk.spawn.savestate"),
+             *Body  = createBasicBlock("cilk.spawn.helpercall"),
+             *Exit  = createBasicBlock("cilk.spawn.continuation");
+
+  EmitBlock(Entry);
+  {
+    CGBuilderTy B(Entry);
+
+    // Need to save state before spawning
+    Value *C = EmitCilkSetJmp(B, SF, *this);
+    C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
+    B.CreateCondBr(C, Body, Exit);
+  }
+
+  EmitBlock(Body);
+  {
+    // If this spawn initializes a variable, alloc this variable and
+    // set it as the current receiver.
+    VarDecl *VD = D->getReceiverDecl();
+    if (VD) {
+      switch (VD->getStorageClass()) {
+      case SC_None:
+      case SC_Auto:
+      case SC_Register:
+        EmitCaptureReceiverDecl(*VD);
+        break;
+      default:
+        CGM.ErrorUnsupported(VD, "unexpected stroage class for a receiver");
+      }
+    }
+
+    // Emit call to the helper function
+    Function *Helper = EmitSpawnCapturedStmt(*D->getCapturedStmt(), VD);
+
+    // Register the spawn helper function.
+    registerSpawnFunction(*this, Helper);
+
+    // Set other attributes.
+    setHelperAttributes(*this, D->getSpawnStmt(), Helper);
+  }
+  EmitBlock(Exit);
+}
+
+void CodeGenFunction::EmitCilkSpawnExpr(const CilkSpawnExpr *E) {
+  EmitCILKSpawnDecl(E->getSpawnDecl());
 }
 
 static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
@@ -1216,7 +1273,8 @@ static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
 /// Generate an outlined function for the body of a CapturedStmt, store any
 /// captured variables into the captured struct, and call the outlined function.
 llvm::Function *
-CodeGenFunction::EmitSpawnCapturedStmt(const CapturedStmt &S, VarDecl *ReceiverDecl) {
+CodeGenFunction::EmitSpawnCapturedStmt(const CapturedStmt &S,
+                                       VarDecl *ReceiverDecl) {
   const CapturedDecl *CD = S.getCapturedDecl();
   const RecordDecl *RD = S.getCapturedRecordDecl();
   assert(CD->hasBody() && "missing CapturedDecl body");
@@ -1391,8 +1449,6 @@ void CGCilkPlusRuntime::EmitCilkHelperPrologue(CodeGenFunction &CGF) {
 static CXXTryStmt *getEnclosingTryBlock(Stmt *S, const Stmt *Top,
                                         const ParentMap &PMap) {
   assert(S && "NULL Statement");
-  assert((isa<CilkSpawnStmt>(S) ||
-          isa<CXXThrowExpr>(S)) && "unexpected statement");
 
   while (true) {
     S = PMap.getParent(S);
@@ -1458,6 +1514,45 @@ public:
       NeedsSync = true;
     else
       TrySet.insert(TS);
+
+    return true;
+  }
+
+  bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    CXXTryStmt *TS = getEnclosingTryBlock(E, Body, PMap);
+
+    // If a spawn expr is not enclosed by any try-block, then
+    // this function needs an implicit sync; otherwise, this try-block
+    // needs an implicit sync.
+    if (!TS)
+      NeedsSync = true;
+    else
+      TrySet.insert(TS);
+
+    return true;
+  }
+
+  bool VisitDeclStmt(DeclStmt *DS) {
+    bool HasSpawn = false;
+    for (DeclStmt::decl_iterator I = DS->decl_begin(), E = DS->decl_end();
+        I != E; ++I) {
+      if (isa<CILKSpawnDecl>(*I)) {
+        HasSpawn = true;
+        break;
+      }
+    }
+
+    if (HasSpawn) {
+      CXXTryStmt *TS = getEnclosingTryBlock(DS, Body, PMap);
+
+      // If a spawn expr is not enclosed by any try-block, then
+      // this function needs an implicit sync; otherwise, this try-block
+      // needs an implicit sync.
+      if (!TS)
+        NeedsSync = true;
+      else
+        TrySet.insert(TS);
+    }
 
     return true;
   }

@@ -29,6 +29,7 @@
 namespace clang {
 struct ASTTemplateArgumentListInfo;
 class CXXTemporary;
+class CapturedStmt;
 class CompoundStmt;
 class DependentFunctionTemplateSpecializationInfo;
 class Expr;
@@ -3280,6 +3281,41 @@ public:
   static CapturedDecl *castFromDeclContext(const DeclContext *DC) {
     return static_cast<CapturedDecl *>(const_cast<DeclContext *>(DC));
   }
+
+  friend class ASTDeclReader;
+  friend class ASTDeclWriter;
+};
+
+class CILKSpawnDecl : public Decl {
+  /// \brief The CapturedStmt associated to the expression or statement with
+  /// a Cilk spawn call.
+  CapturedStmt *CapturedSpawn;
+
+  CILKSpawnDecl(DeclContext *DC, CapturedStmt *Spawn);
+
+public:
+  static CILKSpawnDecl *Create(ASTContext &C, DeclContext *DC,
+                               CapturedStmt *Spawn);
+  static CILKSpawnDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  /// \brief Returns if this Cilk spawn has a receiver.
+  bool hasReceiver() const;
+
+  /// \brief Returns the receiver declaration.
+  VarDecl *getReceiverDecl() const;
+
+  /// \brief Returns the expression or statement with a Cilk spawn.
+  Stmt *getSpawnStmt();
+  const Stmt *getSpawnStmt() const {
+    return const_cast<CILKSpawnDecl *>(this)->getSpawnStmt();
+  }
+
+  /// \brief Returns the associated CapturedStmt.
+  CapturedStmt *getCapturedStmt() { return CapturedSpawn; }
+  const CapturedStmt *getCapturedStmt() const { return CapturedSpawn; }
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == CILKSpawn; }
 
   friend class ASTDeclReader;
   friend class ASTDeclWriter;

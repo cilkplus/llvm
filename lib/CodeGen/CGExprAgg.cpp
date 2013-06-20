@@ -201,6 +201,9 @@ public:
   void VisitAtomicExpr(AtomicExpr *E) {
     CGF.EmitAtomicExpr(E, EnsureSlot(E->getType()).getAddr());
   }
+  void VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    CGF.EmitCilkSpawnExpr(E);
+  }
 };
 
 /// A helper class for emitting expressions into the value sub-object

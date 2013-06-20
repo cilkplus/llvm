@@ -1822,6 +1822,7 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(Declarator &D,
   }
 
   bool TypeContainsAuto = D.getDeclSpec().containsPlaceholderType();
+  bool IsCilkSpawnReceiver = false;
 
   // Parse declarator '=' initializer.
   // If a '==' or '+=' is found, suggest a fixit to '='.
@@ -1864,7 +1865,8 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(Declarator &D,
         Actions.ActOnInitializerError(ThisDecl);
       } else
         Actions.AddInitializerToDecl(ThisDecl, Init.take(),
-                                     /*DirectInit=*/false, TypeContainsAuto);
+                                     /*DirectInit=*/false, TypeContainsAuto,
+                                     IsCilkSpawnReceiver);
     }
   } else if (Tok.is(tok::l_paren)) {
     // Parse C++ direct initializer: '(' expression-list ')'
@@ -1903,7 +1905,8 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(Declarator &D,
                                                           T.getCloseLocation(),
                                                           Exprs);
       Actions.AddInitializerToDecl(ThisDecl, Initializer.take(),
-                                   /*DirectInit=*/true, TypeContainsAuto);
+                                   /*DirectInit=*/true, TypeContainsAuto,
+                                   IsCilkSpawnReceiver);
     }
   } else if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace) &&
              (!CurParsedObjCImpl || !D.isFunctionDeclarator())) {
@@ -1926,13 +1929,18 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(Declarator &D,
       Actions.ActOnInitializerError(ThisDecl);
     } else
       Actions.AddInitializerToDecl(ThisDecl, Init.take(),
-                                   /*DirectInit=*/true, TypeContainsAuto);
+                                   /*DirectInit=*/true, TypeContainsAuto,
+                                   IsCilkSpawnReceiver);
 
   } else {
     Actions.ActOnUninitializedDecl(ThisDecl, TypeContainsAuto);
   }
 
   Actions.FinalizeDeclaration(ThisDecl);
+  Actions.DiscardCleanupsInEvaluationContext();
+
+  if (getLangOpts().CilkPlus && IsCilkSpawnReceiver && isa<VarDecl>(ThisDecl))
+    return Actions.BuildCilkSpawnDecl(ThisDecl);
 
   return ThisDecl;
 }

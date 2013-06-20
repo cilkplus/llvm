@@ -856,6 +856,10 @@ void ASTStmtReader::VisitBlockExpr(BlockExpr *E) {
   E->setBlockDecl(ReadDeclAs<BlockDecl>(Record, Idx));
 }
 
+void ASTStmtReader::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+  llvm_unreachable("not implemented yet");
+}
+
 void ASTStmtReader::VisitGenericSelectionExpr(GenericSelectionExpr *E) {
   VisitExpr(E);
   E->NumAssocs = Record[Idx++];

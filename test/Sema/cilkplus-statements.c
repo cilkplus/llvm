@@ -18,7 +18,7 @@ void test() {
   int x1 = _Cilk_spawn foo(), y1, z1 = _Cilk_spawn foo(); // OK
 
   int y2 = bar(_Cilk_spawn foo()), y3; // expected-error {{_Cilk_spawn is not at statement level}}
-  int y4 = _Cilk_spawn bar(_Cilk_spawn foo()), y5; // expected-error {{_Cilk_spawn is not at statement level}}
+  int y4 = _Cilk_spawn bar(_Cilk_spawn foo()), y5; // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
 
   int b = _Cilk_spawn foo();
   b = _Cilk_spawn foo();
@@ -34,8 +34,7 @@ void test() {
   { { { _Cilk_spawn foo(); } } }
   { { { _Cilk_spawn 5; } } } // expected-error {{the argument to _Cilk_spawn must be a function call}}
 
-  _Cilk_spawn foo() + 5;           // expected-error {{_Cilk_spawn is not at statement level}} \
-                                      expected-warning {{expression result unused}}
+  _Cilk_spawn foo() + 5;           // expected-error {{_Cilk_spawn is not at statement level}}
   b = _Cilk_spawn foo() + 5;       // expected-error {{_Cilk_spawn is not at statement level}}
   b = 5 + _Cilk_spawn foo();       // expected-error {{_Cilk_spawn is not at statement level}}
   b = (_Cilk_spawn foo());         // expected-error {{_Cilk_spawn is not at statement level}}
@@ -45,20 +44,21 @@ void test() {
   int b3 = (_Cilk_spawn foo());    // expected-error {{_Cilk_spawn is not at statement level}}
   int b4 = bar(_Cilk_spawn foo()); // expected-error {{_Cilk_spawn is not at statement level}}
 
-  if (1) _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{_Cilk_spawn is not at statement level}}
-  if (1) {} else _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{_Cilk_spawn is not at statement level}}
-  while (1) _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{_Cilk_spawn is not at statement level}}
-  for (;;) _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{_Cilk_spawn is not at statement level}}
+  if (1) _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
+  if (1) {} else _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
+  while (1) _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
+  for (;;) _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
   switch (1) {
-  case 0: _Cilk_spawn bar(_Cilk_spawn foo()); break; // expected-error {{_Cilk_spawn is not at statement level}}
-  default: _Cilk_spawn bar(_Cilk_spawn foo()); break; // expected-error {{_Cilk_spawn is not at statement level}}
+  case 0: _Cilk_spawn bar(_Cilk_spawn foo()); break; // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
+  default: _Cilk_spawn bar(_Cilk_spawn foo()); break; // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}} 
   }
   switch (_Cilk_spawn foo()) { // expected-error {{_Cilk_spawn is not at statement level}}
   default: ;
   }
-  _Cilk_spawn bar(_Cilk_spawn foo());         // expected-error {{_Cilk_spawn is not at statement level}}
-  b = _Cilk_spawn bar(_Cilk_spawn foo());     // expected-error {{_Cilk_spawn is not at statement level}}
-  int c = _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{_Cilk_spawn is not at statement level}}
+  _Cilk_spawn bar(_Cilk_spawn foo());         // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
+  b = _Cilk_spawn bar(_Cilk_spawn foo());     // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
+  int c = _Cilk_spawn bar(_Cilk_spawn foo()); // expected-error {{multiple spawn calls within a full expression}} expected-note {{another spawn here}}
+
 
   _Cilk_spawn _Cilk_spawn foo();   // expected-error {{consecutive _Cilk_spawn tokens not allowed}}
 

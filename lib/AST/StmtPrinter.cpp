@@ -1881,6 +1881,10 @@ void StmtPrinter::VisitBlockExpr(BlockExpr *Node) {
   OS << "{ }";
 }
 
+void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
+  llvm_unreachable("not implemented yet");
+}
+
 void StmtPrinter::VisitOpaqueValueExpr(OpaqueValueExpr *Node) { 
   PrintExpr(Node->getSourceExpr());
 }

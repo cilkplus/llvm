@@ -314,264 +314,6 @@ sema::CompoundScopeInfo &Sema::getCurCompoundScopeSkipCilkFor() const {
   return getCurFunction()->CompoundScopes.back();
 }
 
-namespace {
-// Diagnose any _Cilk_spawn expressions (see comment below). InSpawn indicates
-// that S is contained within a spawn, e.g. _Cilk_spawn foo(_Cilk_spawn bar())
-class DiagnoseCilkSpawnHelper
-  : public RecursiveASTVisitor<DiagnoseCilkSpawnHelper> {
-  Sema &SemaRef;
-  bool &HasError;
-public:
-  DiagnoseCilkSpawnHelper(Sema &S, bool &HasError)
-    : SemaRef(S), HasError(HasError) { }
-
-  bool TraverseCompoundStmt(CompoundStmt *) { return true; }
-  bool VisitCallExpr(CallExpr *E) {
-    if (E->isCilkSpawnCall()) {
-      SemaRef.Diag(E->getCilkSpawnLoc(), SemaRef.PDiag(diag::err_spawn_not_whole_expr)
-                                         << E->getSourceRange());
-      HasError = true;
-    }
-    return true;
-  }
-};
-
-static void CleanupAndDiagnoseInitOrAssignmentWithCilkSpawn(
-    Expr *InitOrAssignment, Sema &SemaRef, DiagnoseCilkSpawnHelper &D) {
-  // The assignment or initializer may be wrapped in casts and/or involve
-  // object constructors
-  while (true) {
-    if (ImplicitCastExpr *E = dyn_cast<ImplicitCastExpr>(InitOrAssignment))
-      InitOrAssignment = E->getSubExprAsWritten();
-    else if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(InitOrAssignment))
-      InitOrAssignment = E->getSubExpr();
-    else if (MaterializeTemporaryExpr *E =
-                 dyn_cast<MaterializeTemporaryExpr>(InitOrAssignment))
-      InitOrAssignment = E->GetTemporaryExpr();
-    else if (CXXBindTemporaryExpr *E =
-                 dyn_cast<CXXBindTemporaryExpr>(InitOrAssignment))
-      InitOrAssignment = E->getSubExpr();
-    else if (CXXConstructExpr *E =
-                 dyn_cast<CXXConstructExpr>(InitOrAssignment)) {
-      // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
-      // so handle it the same way as CXXFunctionalCastExpr
-      if (isa<CXXTemporaryObjectExpr>(E))
-        break;
-      if (E->getNumArgs() >= 1)
-        InitOrAssignment = E->getArg(0);
-      else
-        break;
-    } else
-      break;
-  }
-
-  CallExpr *E = dyn_cast<CallExpr>(InitOrAssignment);
-  if (E && E->isCilkSpawnCall()) {
-    if (E->isBuiltinCall())
-      SemaRef.Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_builtin)
-          << E->getSourceRange();
-
-    if (isa<UserDefinedLiteral>(E) || isa<CUDAKernelCallExpr>(E))
-      SemaRef.Diag(E->getCilkSpawnLoc(), diag::err_cannot_spawn_function)
-          << E->getSourceRange();
-
-    for (CallExpr::arg_iterator I = E->arg_begin(), End = E->arg_end();
-         I != End; ++I) {
-      D.TraverseStmt(*I);
-    }
-  } else
-    D.TraverseStmt(InitOrAssignment);
-}
-} // anonymous namespace
-
-
-// Check that _Cilk_spawn is used only:
-//  - as the entire body of an expression statement,
-//  - as the entire right hand side of an assignment expression that is the
-//    entire body of an expression statement, or
-//  - as the entire initializer-clause in a simple declaration.
-//
-// Since this is run per-compound scope stmt, we don't traverse into sub-
-// compound scopes, but we do need to traverse into loops, ifs, etc. in case of:
-// if (cond) _Cilk_spawn foo();
-//           ^~~~~~~~~~~~~~~~~ not a compound scope
-void Sema::DiagnoseCilkSpawn(Stmt *S, bool &HasError) {
-  DiagnoseCilkSpawnHelper D(*this, HasError);
-
-  VarDecl *LHS = 0;
-  Expr *RHS = 0;
-  switch (S->getStmtClass()) {
-  case Stmt::AttributedStmtClass:
-    DiagnoseCilkSpawn(cast<AttributedStmt>(S)->getSubStmt(), HasError);
-    break;
-  case Stmt::CapturedStmtClass:
-  case Stmt::CompoundStmtClass:
-    return; // already checked
-  case Stmt::CilkForStmtClass: {
-    CilkForStmt *CF = cast<CilkForStmt>(S);
-    if (CF->getInit())
-      D.TraverseStmt(CF->getInit());
-    if (CF->getCond())
-      D.TraverseStmt(CF->getCond());
-    if (CF->getInc())
-      D.TraverseStmt(CF->getInc());
-    // The body is a CapturedStmt, which has been checked.
-    break;
-  }
-  case Stmt::CXXCatchStmtClass:
-    DiagnoseCilkSpawn(cast<CXXCatchStmt>(S)->getHandlerBlock(), HasError);
-    break;
-  case Stmt::CXXForRangeStmtClass: {
-    CXXForRangeStmt *FR = cast<CXXForRangeStmt>(S);
-    D.TraverseStmt(FR->getRangeInit());
-    DiagnoseCilkSpawn(FR->getBody(), HasError);
-    break;
-  }
-  case Stmt::CXXBindTemporaryExprClass:
-    DiagnoseCilkSpawn(cast<CXXBindTemporaryExpr>(S)->getSubExpr(), HasError);
-    break;
-  case Stmt::ExprWithCleanupsClass:
-    DiagnoseCilkSpawn(cast<ExprWithCleanups>(S)->getSubExpr(), HasError);
-    break;
-  case Stmt::CXXTryStmtClass:
-    DiagnoseCilkSpawn(cast<CXXTryStmt>(S)->getTryBlock(), HasError);
-    break;
-  case Stmt::DeclStmtClass: {
-    DeclStmt *DS = cast<DeclStmt>(S);
-    if (DS->isSingleDecl() && isa<VarDecl>(DS->getSingleDecl())) {
-      VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
-      if (VD->hasInit()) {
-        LHS = VD;
-        RHS = VD->getInit();
-      }
-    } else {
-      // For multiple declarations, just serialize the _Cilk_spawn calls
-      for (DeclStmt::decl_iterator it = DS->decl_begin(), end = DS->decl_end();
-          it != end; ++it) {
-        if (VarDecl *VD = dyn_cast<VarDecl>(*it)) {
-          if (VD->hasInit()) {
-            Expr *Init = VD->getInit();
-            CleanupAndDiagnoseInitOrAssignmentWithCilkSpawn(Init, *this, D);
-            if (CallExpr *CE = dyn_cast<CallExpr>(Init)) {
-              if (CE->isCilkSpawnCall())
-                CE->setCilkSpawnLoc(SourceLocation());
-            }
-          }
-        } else
-          D.TraverseDecl(*it);
-      }
-    }
-    break;
-  }
-  case Stmt::BinaryOperatorClass: {
-    BinaryOperator *B = cast<BinaryOperator>(S);
-    if (B->getOpcode() == BO_Assign) {
-      D.TraverseStmt(B->getLHS());
-      RHS = B->getRHS();
-    } else
-      D.TraverseStmt(B);
-    break;
-  }
-  case Stmt::CXXOperatorCallExprClass: {
-    CXXOperatorCallExpr *OC = cast<CXXOperatorCallExpr>(S);
-    if (OC->isCilkSpawnCall()) {
-      for (CallExpr::arg_iterator I = OC->arg_begin(),
-           End = OC->arg_end(); I != End; ++I) {
-        D.TraverseStmt(*I);
-      }
-    } else {
-      if (OC->getOperator() == OO_Equal) {
-        D.TraverseStmt(OC->getArg(0));
-        RHS = OC->getArg(1);
-      } else
-        D.TraverseStmt(OC);
-    }
-    break;
-  }
-  case Stmt::DoStmtClass: {
-    DoStmt *DS = cast<DoStmt>(S);
-    D.TraverseStmt(DS->getCond());
-    DiagnoseCilkSpawn(DS->getBody(), HasError);
-    break;
-  }
-  case Stmt::ForStmtClass: {
-    ForStmt *F = cast<ForStmt>(S);
-    if (F->getInit())
-      D.TraverseStmt(F->getInit());
-    if (F->getCond())
-      D.TraverseStmt(F->getCond());
-    if (F->getInc())
-      D.TraverseStmt(F->getInc());
-    DiagnoseCilkSpawn(F->getBody(), HasError);
-    break;
-  }
-  case Stmt::IfStmtClass: {
-    IfStmt *I = cast<IfStmt>(S);
-    D.TraverseStmt(I->getCond());
-    DiagnoseCilkSpawn(I->getThen(), HasError);
-    if (I->getElse())
-      DiagnoseCilkSpawn(I->getElse(), HasError);
-    break;
-  }
-  case Stmt::LabelStmtClass:
-    DiagnoseCilkSpawn(cast<LabelStmt>(S)->getSubStmt(), HasError);
-    break;
-  case Stmt::SwitchStmtClass: {
-    SwitchStmt *SS = cast<SwitchStmt>(S);
-    if (const DeclStmt *DS = SS->getConditionVariableDeclStmt())
-      D.TraverseStmt(const_cast<DeclStmt *>(DS));
-    D.TraverseStmt(SS->getCond());
-    DiagnoseCilkSpawn(SS->getBody(), HasError);
-    break;
-  }
-  case Stmt::CaseStmtClass:
-  case Stmt::DefaultStmtClass:
-    DiagnoseCilkSpawn(cast<SwitchCase>(S)->getSubStmt(), HasError);
-    break;
-  case Stmt::WhileStmtClass: {
-    WhileStmt *W = cast<WhileStmt>(S);
-    D.TraverseStmt(W->getCond());
-    DiagnoseCilkSpawn(W->getBody(), HasError);
-    break;
-  }
-  case Stmt::CXXMemberCallExprClass:
-  case Stmt::CallExprClass: {
-    CallExpr *C = cast<CallExpr>(S);
-    if (C->isCilkSpawnCall() && C->isBuiltinCall())
-      Diag(C->getCilkSpawnLoc(), diag::err_cannot_spawn_builtin)
-           << C->getSourceRange();
-    for (CallExpr::arg_iterator I = C->arg_begin(),
-         End = C->arg_end(); I != End; ++I) {
-      D.TraverseStmt(*I);
-    }
-    break;
-  }
-  default:
-    D.TraverseStmt(S);
-    break;
-  }
-
-  if (!RHS) return;
-
-  if (LHS) {
-    switch (LHS->getStorageClass()) {
-    case SC_None:
-    case SC_Auto:
-    case SC_Register:
-      break;
-    case SC_Static:
-      HasError = true;
-      Diag(LHS->getLocation(), diag::err_cannot_init_static_variable)
-        << LHS->getSourceRange();
-      break;
-    default:
-      llvm_unreachable("variable with an unexpected storage class");
-    }
-  }
-
-  CleanupAndDiagnoseInitOrAssignmentWithCilkSpawn(RHS, *this, D);
-}
-
 StmtResult
 Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
                         MultiStmtArg elts, bool isStmtExpr) {
@@ -614,35 +356,10 @@ Sema::ActOnCompoundStmt(SourceLocation L, SourceLocation R,
       DiagnoseEmptyLoopBody(Elts[i], Elts[i + 1]);
   }
 
-  // If there are _Cilk_spawn expressions in this compound statement, check
-  // whether they are used correctly.
-  if (getCurCompoundScope().HasCilkSpawn) {
-    assert(getLangOpts().CilkPlus && "_Cilk_spawn created without -fcilkplus");
-    DeclContext *DC = CurContext;
-    while (!DC->isFunctionOrMethod())
-      DC = DC->getParent();
-
-    Decl::Kind Kind = DC->getDeclKind();
-    if (Kind >= Decl::firstFunction && Kind <= Decl::lastFunction)
-      FunctionDecl::castFromDeclContext(DC)->setSpawning();
-    else if (Decl::Captured == Kind)
-      CapturedDecl::castFromDeclContext(DC)->setSpawning();
-    else {
-      Diag(SourceLocation(), diag::err_spawn_invalid_decl)
-        << DC->getDeclKindName();
-    }
-
-    bool Dependent = CurContext->isDependentContext();
-    for (unsigned i = 0; i != NumElts; ++i) {
-      bool HasError = false;
-      DiagnoseCilkSpawn(Elts[i], HasError);
-      if (!Dependent && !HasError) {
-        StmtResult Spawn = ActOnCilkSpawnStmt(Elts[i]);
-        if (!Spawn.isInvalid())
-          Elts[i] = Spawn.take();
-      }
-    }
-  }
+  // Check whether Cilk spawns in this compound statement are well-formed.
+  if (getLangOpts().CilkPlus && getCurCompoundScope().HasCilkSpawn)
+    for (unsigned i = 0; i < NumElts; ++i)
+      DiagnoseCilkSpawn(Elts[i]);
 
   return Owned(new (Context) CompoundStmt(Context,
                                           llvm::makeArrayRef(Elts, NumElts),
@@ -3418,6 +3135,8 @@ void Sema::ActOnCapturedRegionStart(SourceLocation Loc, Scope *CurScope,
   // Enter the capturing scope for this captured region.
   PushCapturedRegionScope(CurScope, CD, RD, Kind);
 
+  PushCompoundScope();
+
   if (CurScope)
     PushDeclContext(CurScope, CD);
   else
@@ -3442,6 +3161,8 @@ void Sema::ActOnCapturedRegionError() {
               SourceLocation(), SourceLocation(), /*AttributeList=*/0);
 
   PopDeclContext();
+  // Pop the compound scope we inserted implicitly.
+  PopCompoundScope();
   PopFunctionScopeInfo();
 }
 
@@ -3483,6 +3204,15 @@ StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
   CapturedDecl *CD = RSI->TheCapturedDecl;
   RecordDecl *RD = RSI->TheRecordDecl;
 
+  // If capturing an expression, then needs to make this expression as a full
+  // expression. If it is not parsed after entering the captured region,
+  // then check if it has any nontrivial call.
+  if (Expr *E = dyn_cast<Expr>(S))
+    if (!isa<ExprWithCleanups>(E)) {
+      ExprNeedsCleanups |= E->hasNonTrivialCall(Context);
+      S = MaybeCreateExprWithCleanups(E);
+    }
+
   CapturedStmt *Res = CapturedStmt::Create(getASTContext(), S,
                                            RSI->CapRegionKind, Captures,
                                            CaptureInits, CD, RD);
@@ -3494,6 +3224,8 @@ StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
   PopExpressionEvaluationContext();
 
   PopDeclContext();
+  // Pop the compound scope we inserted implicitly.
+  PopCompoundScope();
   PopFunctionScopeInfo();
 
   return Owned(Res);
@@ -3729,21 +3461,10 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
   bool IsDependent = DC->isDependentContext();
 
   // Handle the special case that the Cilk for body is not a compound statement
-  // and it has a Cilk spawn. In this case, the implicit compound scope
-  // should have this information. We check if spawn calls are used correctly,
-  // and transform them into CilkSpawnStmt's.
-  if (getCurCompoundScope().HasCilkSpawn) {
-    CD->setSpawning();
-    if (!isa<CompoundStmt>(Body)) {
-      bool HasError = false;
-      DiagnoseCilkSpawn(Body, HasError);
-      if (!HasError && !IsDependent) {
-        StmtResult NewBody = ActOnCilkSpawnStmt(Body);
-        if (!NewBody.isInvalid())
-          Body = NewBody.take();
-      }
-    }
-  }
+  // and it has a Cilk spawn. In this case, the implicit compound scope should
+  // have this information.
+  if (getCurCompoundScope().HasCilkSpawn && !isa<CompoundStmt>(Body))
+    DiagnoseCilkSpawn(Body);
 
   SmallVector<CapturedStmt::Capture, 4> Captures;
   SmallVector<Expr *, 4> CaptureInits;

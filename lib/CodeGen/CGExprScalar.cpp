@@ -521,6 +521,10 @@ public:
   }
   Value *VisitAsTypeExpr(AsTypeExpr *CE);
   Value *VisitAtomicExpr(AtomicExpr *AE);
+  Value *VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    CGF.EmitCilkSpawnExpr(E);
+    return 0;
+  }
 };
 }  // end anonymous namespace.
 

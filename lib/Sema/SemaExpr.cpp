@@ -10583,6 +10583,8 @@ Sema::PushExpressionEvaluationContext(ExpressionEvaluationContext NewContext,
   ExprNeedsCleanups = false;
   if (!MaybeODRUseExprs.empty())
     std::swap(MaybeODRUseExprs, ExprEvalContexts.back().SavedMaybeODRUseExprs);
+  if (!CilkSpawnCalls.empty())
+    std::swap(CilkSpawnCalls, ExprEvalContexts.back().SavedCilkSpawnCalls);
 }
 
 void
@@ -10636,6 +10638,9 @@ void Sema::PopExpressionEvaluationContext() {
                             Rec.SavedMaybeODRUseExprs.end());
   }
 
+  // Restore Cilk spawn calls into the current evaluation context.
+  CilkSpawnCalls.swap(Rec.SavedCilkSpawnCalls);
+
   // Pop the current expression evaluation context off the stack.
   ExprEvalContexts.pop_back();
 }
@@ -10646,6 +10651,7 @@ void Sema::DiscardCleanupsInEvaluationContext() {
          ExprCleanupObjects.end());
   ExprNeedsCleanups = false;
   MaybeODRUseExprs.clear();
+  CilkSpawnCalls.clear();
 }
 
 ExprResult Sema::HandleExprEvaluationContextForTypeof(Expr *E) {
@@ -12751,6 +12757,7 @@ Sema::BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
 
   Call->setCilkSpawnLoc(SpawnLoc);
   getCurCompoundScope().setHasCilkSpawn();
+  CilkSpawnCalls.push_back(Call);
 
   return Owned(E);
 }

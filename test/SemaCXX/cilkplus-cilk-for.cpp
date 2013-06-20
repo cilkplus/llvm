@@ -351,4 +351,8 @@ void test_cilk_spawn_in_cilk_for() {
   extern int bar(int);
   _Cilk_for (int i = 0; i < 10; ++i)
     int j = _Cilk_spawn foo(), k = j, x = _Cilk_spawn bar(k); // OK
+
+  _Cilk_for (int i = 0; i < 10; ++i)
+    if (_Cilk_spawn foo()) // expected-error {{_Cilk_spawn is not at statement level}}
+      _Cilk_spawn bar(i);
 }

@@ -105,6 +105,8 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
            "Should not see file-scope variables inside a function!");
     return EmitVarDecl(VD);
   }
+  case Decl::CILKSpawn:
+    return EmitCILKSpawnDecl(cast<CILKSpawnDecl>(&D));
 
   case Decl::Typedef:      // typedef int X;
   case Decl::TypeAlias: {  // using X = int; [C++0x]

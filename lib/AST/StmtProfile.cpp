@@ -474,6 +474,10 @@ void StmtProfiler::VisitBlockExpr(const BlockExpr *S) {
   VisitDecl(S->getBlockDecl());
 }
 
+void StmtProfiler::VisitCilkSpawnExpr(const CilkSpawnExpr *S) {
+  llvm_unreachable("not implemented yet");
+}
+
 void StmtProfiler::VisitGenericSelectionExpr(const GenericSelectionExpr *S) {
   VisitExpr(S);
   for (unsigned i = 0; i != S->getNumAssocs(); ++i) {

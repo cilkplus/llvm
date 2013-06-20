@@ -797,6 +797,10 @@ void ASTStmtWriter::VisitBlockExpr(BlockExpr *E) {
   Code = serialization::EXPR_BLOCK;
 }
 
+void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+  llvm_unreachable("not implemented yet");
+}
+
 void ASTStmtWriter::VisitGenericSelectionExpr(GenericSelectionExpr *E) {
   VisitExpr(E);
   Record.push_back(E->getNumAssocs());
