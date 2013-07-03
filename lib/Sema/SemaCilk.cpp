@@ -1380,36 +1380,6 @@ AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
       VectorLengthForLoc, Context, VectorLengthForType, TypeLoc));
 }
 
-ExprResult Sema::ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
-                                               DeclarationNameInfo Name) {
-  // FIXME: This function should really be in the parser.
-  // linear-variable must be a variable with scalar type
-  LookupResult Lookup(*this, Name, LookupOrdinaryName);
-  LookupParsedName(Lookup, CurScope, &SS, /*AllowBuiltinCreation*/false);
-  if (Lookup.isAmbiguous())
-    return ExprError();
-
-  if (Lookup.empty()) {
-    Diag(Name.getLoc(), diag::err_undeclared_var_use) << Name.getName();
-    return ExprError();
-  }
-
-  VarDecl *VD = 0;
-  if (!(VD = Lookup.getAsSingle<VarDecl>())) {
-    Diag(Name.getLoc(), diag::err_pragma_simd_invalid_linear_var);
-    return ExprError();
-  }
-
-  bool RefersToEnclosingScope = (CurContext != VD->getDeclContext() &&
-                                 VD->getDeclContext()->isFunctionOrMethod());
-  DeclRefExpr *E =
-      DeclRefExpr::Create(Context, NestedNameSpecifierLoc(), SourceLocation(),
-                          VD, RefersToEnclosingScope, Name,
-                          VD->getType().getNonReferenceType(), VK_LValue);
-
-  return Owned(E);
-}
-
 AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
                                        ArrayRef<Expr *> Exprs) {
   for (unsigned i = 0, e = Exprs.size(); i < e; i += 2) {

@@ -6413,8 +6413,6 @@ def err_pragma_simd_invalid_vectorlength_expr : Error<
   "must be a%select{n integer constant| power of two}0">;
 def err_pragma_simd_invalid_linear_step : Error<
   "invalid linear step: expected integral constant or variable reference">;
-def err_pragma_simd_invalid_linear_var : Error<
-  "invalid linear variable">;
 def warn_pragma_simd_linear_expr_zero : Warning<
   "linear step is zero">, InGroup<SourceUsesCilkPlus>, DefaultIgnore;
 def err_pragma_simd_ambiguous_linear_var : Error<

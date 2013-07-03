@@ -6769,9 +6769,6 @@ public:
                                       SourceLocation TypeLoc,
                                       QualType &VectorLengthForType);
 
-  ExprResult ActOnPragmaSIMDLinearVariable(CXXScopeSpec SS,
-                                           DeclarationNameInfo Name);
-
   AttrResult ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
                                    ArrayRef<Expr *> Exprs);
 

@@ -108,24 +108,24 @@ void test_vectorlengthfor()
 void test_linear()
 {
   int i;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd linear(
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+2 {{expected identifier}} */
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+2 {{expected expression}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd linear(,
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+2 {{expected identifier}} */
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+2 {{expected expression}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd linear(,)
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd linear()
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd linear(int)
   for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{invalid linear variable}} */
   #pragma simd linear(0)
   for (i = 0; i < 16; ++i) ;
   /* expected-error@+1 {{use of undeclared identifier 'x'}} */
@@ -146,7 +146,7 @@ void test_linear()
   #pragma simd linear(x:)
   for (i = 0; i < 16; ++i) ;
   /* expected-error@+2 {{expected expression}} */
-  /* expected-error@+1 {{expected identifier}} */
+  /* expected-error@+1 {{expected expression}} */
   #pragma simd linear(x:,)
   for (i = 0; i < 16; ++i) ;
   #pragma simd linear(x:1)

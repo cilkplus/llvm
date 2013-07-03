@@ -88,6 +88,8 @@ def err_attribute_not_type_attr : Error<
 def err_enum_template : Error<"enumeration cannot be a template">;
 def err_pragma_simd_expected_for_loop : Error<
   "expected for statement following '#pragma simd'">;
+def err_pragma_simd_invalid_linear_var : Error<
+  "invalid linear variable">;
 }
 
 // Sema && Lex

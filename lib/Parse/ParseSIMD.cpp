@@ -124,25 +124,14 @@ struct SIMDVectorLengthForItemParser {
 struct SIMDLinearItemParser {
   SmallVector<Expr *, 8> Exprs;
   bool Parse(Parser &P, Sema &S) {
-    CXXScopeSpec SS;
-    SourceLocation TemplateKWLoc;
-    UnqualifiedId Name;
-    if (P.getLangOpts().CPlusPlus &&
-        P.ParseOptionalCXXScopeSpecifier(SS, ParsedType(), false))
-      return false;
-
-    if (P.ParseUnqualifiedId(SS,
-                             false, // EnteringContext
-                             false, // AllowDestructorName
-                             false, // AllowConstructorName,
-                             ParsedType(), TemplateKWLoc, Name))
-      return false;
-
-    ExprResult D =
-        S.ActOnPragmaSIMDLinearVariable(SS, S.GetNameFromUnqualifiedId(Name));
+    ExprResult D = P.ParseConstantExpression();
     if (D.isInvalid())
       return false;
-    Expr *DRExpr = D.get();
+    Expr *E = D.get();
+    if (!isa<DeclRefExpr>(E)) {
+      P.Diag(E->getLocStart(), diag::err_pragma_simd_invalid_linear_var);
+      return false;
+    }
 
     Expr *Step = 0;
     const Token &Tok = P.getCurToken();
@@ -153,7 +142,7 @@ struct SIMDLinearItemParser {
         return false;
       Step = C.get();
     }
-    Exprs.push_back(DRExpr);
+    Exprs.push_back(E);
     Exprs.push_back(Step);
     return true;
   }
