@@ -1850,8 +1850,14 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
   }
 
   if (const VarDecl *VD = dyn_cast<VarDecl>(ND)) {
-    // Check if this is a global variable.
-    if (VD->hasLinkage() || VD->isStaticDataMember()) {
+    bool IsCaptured = false;
+    if (CapturedStmtInfo && CapturedStmtInfo->lookup(VD))
+      IsCaptured = true;
+    else
+      IsCaptured = LambdaCaptureFields.lookup(VD);
+
+    if (!IsCaptured && (VD->hasLinkage() || VD->isStaticDataMember())) {
+      // Do not emit as a global variable if it has been captured.
       // If it's thread_local, emit a call to its wrapper function instead.
       if (VD->getTLSKind() == VarDecl::TLS_Dynamic)
         return CGM.getCXXABI().EmitThreadLocalDeclRefExpr(*this, E);
@@ -1861,7 +1867,9 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     bool isBlockVariable = VD->hasAttr<BlocksAttr>();
 
     llvm::Value *V = LocalDeclMap.lookup(VD);
-    if (!V && VD->isStaticLocal()) 
+
+    if (!IsCaptured && !V && VD->isStaticLocal())
+      // Do not use static local address if it has been captured.
       V = CGM.getStaticLocalDeclAddress(VD);
 
     // Use special handling for lambdas.

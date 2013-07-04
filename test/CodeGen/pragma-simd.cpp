@@ -172,6 +172,91 @@ void test_lastprivate() {
   // CHECK: call void @_Z6anchori(i32 532)
 }
 
+const int a = 10;
+
+struct A {
+  static int s;
+};
+int g;
+static int G;
+void test_private_static() {
+  static int L;
+
+  // Check that the outer static is still being used if not a SIMD Variable
+  #pragma simd
+  for (int i = 0; i < 10; ++i) {
+    anchor(601);
+    L = 1;
+    A::s = 2;
+    G = 3;
+    g = 4;
+  }
+  anchor(602);
+  // CHECK: call void @_Z6anchori(i32 601)
+  // CHECK: store i32 1, i32* @_ZZ19test_private_staticvE1L
+  // CHECK: store i32 2, i32* @_ZN1A1sE
+  // CHECK: store i32 3, i32* @_ZL1G
+  // CHECK: store i32 4, i32* @g
+  // CHECK: call void @_Z6anchori(i32 602)
+
+  // Check that outer static not used when declared a SIMD Variable
+  #pragma simd private(L) private(A::s) private(G) private(g)
+  for (int i = 0; i < 10; ++i) {
+    anchor(611);
+    L = 1;
+    A::s = 2;
+    G = 3;
+    g = 4;
+  }
+  anchor(612);
+  // CHECK: call void @_Z6anchori(i32 611)
+  // CHECK-NOT: store i32 1, i32* @_ZZ19test_private_staticvE1L
+  // CHECK-NOT: store i32 2, i32* @_ZN1A1sE
+  // CHECK-NOT: store i32 3, i32* @_ZL1G
+  // CHECK-NOT: store i32 4, i32* @g
+  // CHECK: call void @_Z6anchori(i32 612)
+
+  // Make sure nested lambdas are not being called with the static as capture
+  #pragma simd private(L) private(A::s)
+  for (int i = 0; i < 10; ++i) {
+    anchor(621);
+    [&] {
+      [&] {
+        L = 1;
+      }();
+      A::s = 2;
+    }();
+  }
+  anchor(622);
+  // CHECK: call void @_Z6anchori(i32 621)
+  // CHECK-NOT: store i32* @_ZZ19test_private_staticvE1L
+  // CHECK-NOT: store i32* @_ZN1A1sE
+  // CHECK: call void @_Z6anchori(i32 622)
+
+  // Make sure that lambdas are being called with the local variable as capture
+  #pragma simd private(L) private(A::s)
+  for (int i = 0; i < 10; ++i) {
+    anchor(631);
+    L = 0;
+    A::s = 1;
+    anchor(632);
+    [&] {
+      [&] {
+        L = 2;
+      }();
+      A::s = 3;
+    }();
+  }
+  anchor(633);
+  // CHECK: call void @_Z6anchori(i32 631)
+  // CHECK: store i32 0, i32* [[LOCAL_L:%[_A-Za-z0-9\.]]]
+  // CHECK-NEXT: store i32 1, i32* [[LOCAL_S:%[_A-Za-z0-9\.]]]
+  // CHECK: call void @_Z6anchori(i32 632)
+  // CHECK: store i32* [[LOCAL_L]]
+  // CHECK: store i32* [[LOCAL_S]]
+  // CHECK: call void @_Z6anchori(i32 633)
+}
+
 // test()
 // CHECK: !0 = metadata !{metadata !0}
 // test1()

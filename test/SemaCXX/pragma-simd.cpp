@@ -413,4 +413,39 @@ void templated_tests() {
                                         // expected-error@360 {{invalid vectorlength expression: must be an integer constant}} \
                                         // expected-note {{in instantiation of function template specialization}}
 }
+
+void use(int x);
+
+struct X {
+  static int x;
+};
+static int G;
+void test_private() {
+  static int L;
+  #pragma simd private(X::x)
+  for (int i = 0; i < 10; ++i) use(X::x); // OK
+  #pragma simd private(G)
+  for (int i = 0; i < 10; ++i) use(G); // OK
+  #pragma simd private(L)
+  for (int i = 0; i < 10; ++i) use(L); // OK
+
+  [&]{
+    #pragma simd private(L) private(G) private(X::x)
+    for (int i = 0; i < 10; ++i) {
+      use(L);
+      use(G);
+      use(X::x);
+    }
+  }();
+  #pragma simd private(L) private(G) private(X::x)
+  for (int i = 0; i < 10; ++i) {
+    [&] {
+      [&] {
+        use(L);
+        use(G);
+        use(X::x);
+      }();
+    }();
+  }
+}
 } // namespace

@@ -11265,7 +11265,24 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
   
   DeclContext *DC = CurContext;
   if (Var->getDeclContext() == DC) return true;
-  if (!Var->hasLocalStorage()) return true;
+
+  // If this is nested in a simd loop. This is used to make sure that globals
+  // can be captured and used in lambdas which are nested in a SIMD for loop.
+  // If SIMDIndex is larger than 0, this variable is nested in a SIMD for loop.
+  unsigned SIMDIndex = 0;
+
+  if (!Var->hasLocalStorage()) {
+    for (unsigned I = 1, E = FunctionScopes.size(); I < E; ++I)
+      if (SIMDForScopeInfo *FSI =
+              dyn_cast<SIMDForScopeInfo>(FunctionScopes[I])) {
+        if (FSI->IsSIMDVariable(Var))
+          SIMDIndex = I;
+        break;
+      }
+    if (SIMDIndex == 0)
+      // This global or static is not inside a SIMD For loop.
+      return true;
+  }
 
   bool HasBlocksAttr = Var->hasAttr<BlocksAttr>();
 
@@ -11382,6 +11399,15 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       return true;
     }
 
+    if (SIMDIndex && FunctionScopesIndex == SIMDIndex) {
+      // This is the SIMD for loop which has a data clause that needs to capture
+      // a static or global variable.
+      // Don't look any further. A copy of this variable needs to be made
+      // in the SIMD for loop scope. The FunctionScopesIndex will be the parent
+      // of this SIMD for loop.
+      FunctionScopesIndex--;
+      break;
+    }
     FunctionScopesIndex--;
     DC = ParentDC;
     Explicit = false;
@@ -11518,7 +11544,7 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
     }
 
     LambdaScopeInfo *LSI = cast<LambdaScopeInfo>(CSI);
-    
+
     // Determine whether we are capturing by reference or by value.
     bool ByRef = false;
     if (I == N - 1 && Kind != TryCapture_Implicit) {
