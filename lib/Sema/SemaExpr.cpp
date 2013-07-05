@@ -11019,6 +11019,9 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
       S.Context.getTrivialTypeSourceInfo(VarType, Loc), SC_None);
   Expr *UpdateExpr = 0;
 
+  // Introduce a new evaluation context for the initializaiton & update
+  S.PushExpressionEvaluationContext(Sema::PotentiallyEvaluated);
+
   // Handle private variables, for which local copies are uninitialized or
   // initialized by its default constructor.
   if (FSI->isPrivate(Var) || FSI->isLinear(Var) || FSI->isReduction(Var))
@@ -11045,12 +11048,18 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
       ExprResult RHS = S.BuildDeclRefExpr(LocalVar, VarType, VK_LValue, Loc);
       ExprResult E = S.BuildBinOp(S.getCurScope(), /*OpLoc*/ SourceLocation(),
                                   BO_Assign, VarDRE, RHS.get());
-      if (!E.isInvalid())
+      if (!E.isInvalid()) {
         UpdateExpr = E.get();
-      else
+        UpdateExpr = S.MakeFullExpr(UpdateExpr).get();
+      } else
         FSI->SetInvalid(Var);
     }
   }
+
+  // Exit the expression evaluation context used for initialization & update.
+  S.CleanupVarDeclMarking();
+  S.DiscardCleanupsInEvaluationContext();
+  S.PopExpressionEvaluationContext();
 
   // Add the newly created local variable
   if (!LocalVar->isInvalidDecl()) {

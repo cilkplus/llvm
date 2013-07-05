@@ -93,6 +93,85 @@ void test_continue() {
   // CHECK: call void @_Z6anchori(i32 410)
 }
 
+struct X {
+  int i;
+  X();
+  ~X();
+};
+struct S {
+  S();
+  ~S();
+  void operator=(S s);
+};
+void test_lastprivate() {
+
+  // Ensure that update block is created, d is stored
+  double d;
+  #pragma simd lastprivate(d)
+  for (int i = 0; i < 10; ++i) {
+    (void)d;
+    anchor(501);
+  }
+  anchor(502);
+  // CHECK: call void @_Z6anchori(i32 501)
+  // CHECK: icmp eq i32
+  // CHECK-NEXT: br {{.+}}, label %[[UPDATE_BODY1:[_A-Za-z0-9\.]+]], label %[[HELPER_EXIT1:[_A-Za-z0-9\.]+]]
+  // CHECK: [[UPDATE_BODY1]]:
+  // CHECK-NEXT: load double*
+  // CHECK-NEXT: getelementptr
+  // CHECK-NEXT: load double**
+  // CHECK-NEXT: store double
+  // CHECK-NEXT: br label %[[HELPER_EXIT1]]
+  // CHECK: [[HELPER_EXIT1]]:
+  // CHECK: call void @_Z6anchori(i32 502)
+
+  // Check that local x being copied into x, x destructor being called
+  X x;
+  #pragma simd lastprivate(x)
+  for (int i = 0; i < 10; ++i) {
+    (void)x;
+    anchor(511);
+  }
+  anchor(512);
+  // CHECK: call void @_Z6anchori(i32 511)
+  // CHECK: icmp eq i32
+  // CHECK: call void @llvm.memcpy
+  // CHECK: call void @llvm.memcpy
+  // CHECK: call void @_Z6anchori(i32 512)
+
+  // Check for assignment op. invocation and destructor called for temporary
+  S s;
+  #pragma simd lastprivate(s)
+  for (int i = 0; i < 10; ++i) {
+    (void)s;
+    anchor(521);
+  }
+  anchor(522);
+  // CHECK: call void @_Z6anchori(i32 521)
+  // CHECK: icmp eq i32
+  // CHECK: call void @_ZN1SaSES_
+  // CHECK-NEXT: call void @_ZN1SD1Ev
+  // CHECK: call void @_Z6anchori(i32 522)
+
+  // Check that all lastprivate variables get updated
+  #pragma simd lastprivate(d) lastprivate(x) lastprivate(s)
+  for (int i = 0; i < 10; ++i) {
+    (void)d;
+    (void)x;
+    (void)s;
+    anchor(531);
+  }
+  anchor(532);
+  // CHECK: call void @_Z6anchori(i32 531)
+  // CHECK: icmp eq i32
+  // CHECK: store double
+  // CHECK: call void @llvm.memcpy
+  // CHECK: call void @llvm.memcpy
+  // CHECK: call void @_ZN1SaSES_
+  // CHECK-NEXT: call void @_ZN1SD1Ev
+  // CHECK: call void @_Z6anchori(i32 532)
+}
+
 // test()
 // CHECK: !0 = metadata !{metadata !0}
 // test1()

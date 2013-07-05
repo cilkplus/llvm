@@ -2289,6 +2289,9 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
     const SIMDForStmt &SS = Info->getSIMDForStmt();
     const CapturedDecl *CD = SS.getBody()->getCapturedDecl();
     llvm::Value *LoopIndex = LocalDeclMap.lookup(CD->getParam(1));
+    llvm::Value *LoopCount = LocalDeclMap.lookup(CD->getParam(2));
+
+    bool RequiresUpdate = false;
 
     // Emit all SIMD local variables and update the codegen info.
     for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
@@ -2323,7 +2326,8 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
         Result = Builder.CreateIntCast(Result, Start->getType(), false);
         Result = Builder.CreateAdd(Start, Result);
         Builder.CreateStore(Result, Addr);
-      }
+      } else if (I->isLastPrivate())
+        RequiresUpdate = true;
     }
 
     // Emit the SIMD for loop body.
@@ -2339,15 +2343,37 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
 
       EmitBlock(LoopContinue.getBlock());
 
-      // Update expressions update a SIMD variable, do not replace those uses
-      // with the local copy's address.
-      Info->setShouldReplaceWithLocal(false);
-      for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
-           E = SS.simd_var_end(); I != E; ++I) {
-        if (I->isLastPrivate())
-          EmitAnyExpr(I->getUpdateExpr());
+      // If an update is required, emit those update expressions to be run on
+      // the last iteration of the loop.
+      //
+      // if (LoopIndex == (LoopCount - 1)) {
+      //   [[ Update Expressions ]]
+      // }
+      if (RequiresUpdate) {
+        RunCleanupsScope UpdateScope(*this);
+        llvm::BasicBlock *UpdateBody = createBasicBlock("update.body");
+        llvm::BasicBlock *UpdateExit = createBasicBlock("update.exit");
+        llvm::Value *Index = Builder.CreateLoad(LoopIndex);
+        llvm::Value *High = Builder.CreateLoad(LoopCount);
+
+        High =
+            Builder.CreateSub(High, llvm::ConstantInt::get(High->getType(), 1));
+        llvm::Value *Cond = Builder.CreateICmpEQ(Index, High);
+        Builder.CreateCondBr(Cond, UpdateBody, UpdateExit);
+
+        EmitBlock(UpdateBody);
+        // Update expressions update a SIMD variable, do not replace those uses
+        // with the local copy's address.
+        Info->setShouldReplaceWithLocal(false);
+        for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
+                                            E = SS.simd_var_end();
+             I != E; ++I) {
+          if (I->isLastPrivate())
+            EmitAnyExpr(I->getUpdateExpr());
+        }
+        Info->setShouldReplaceWithLocal(true);
+        EmitBlock(UpdateExit);
       }
-      Info->setShouldReplaceWithLocal(true);
 
       BreakContinueStack.pop_back();
     }
