@@ -2381,7 +2381,7 @@ public:
     VarDecl *getLocalVar() const { return LocalVar; }
 
     Expr *getUpdateExpr() const {
-      assert(isLastPrivate() && "only for lastprivate variables");
+      assert(isLastPrivate() || isLinear() && "only for lastprivate and linear variables");
       return UpdateExpr;
     }
   };

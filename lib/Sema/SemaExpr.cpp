@@ -11024,7 +11024,7 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
 
   // Handle private variables, for which local copies are uninitialized or
   // initialized by its default constructor.
-  if (FSI->isPrivate(Var) || FSI->isLinear(Var) || FSI->isReduction(Var))
+  if (FSI->isPrivate(Var) || FSI->isReduction(Var))
     // Perform default initialization.
     S.ActOnUninitializedDecl(LocalVar, /*TypeMayContainAuto*/ false);
   else {
@@ -11040,11 +11040,14 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
       // First Private: Perform initialization by copy assignment.
       S.AddInitializerToDecl(LocalVar, VarDRE, /*Direct*/ true, /*Auto*/ false);
     else
-      // Last Private : Perform initialization by default constructor
+      // Last Private or Linear: Perform initialization by default constructor
       S.ActOnUninitializedDecl(LocalVar, /*TypeMayContainAuto*/ false);
 
     // Update Expression
-    if (FSI->isLastPrivate(Var)) {
+    // In the case of Last Private and Linear variables, the value of the
+    // original list item should be assigned to the value corresponding to the
+    // sequentially last iteration.
+    if (FSI->isLastPrivate(Var) || FSI->isLinear(Var)) {
       ExprResult RHS = S.BuildDeclRefExpr(LocalVar, VarType, VK_LValue, Loc);
       ExprResult E = S.BuildBinOp(S.getCurScope(), /*OpLoc*/ SourceLocation(),
                                   BO_Assign, VarDRE, RHS.get());

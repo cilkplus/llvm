@@ -2326,8 +2326,8 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
         Result = Builder.CreateIntCast(Result, Start->getType(), false);
         Result = Builder.CreateAdd(Start, Result);
         Builder.CreateStore(Result, Addr);
-      } else if (I->isLastPrivate())
-        RequiresUpdate = true;
+      }
+      RequiresUpdate = I->isLinear() || I->isLastPrivate();
     }
 
     // Emit the SIMD for loop body.
@@ -2368,7 +2368,7 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
         for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
                                             E = SS.simd_var_end();
              I != E; ++I) {
-          if (I->isLastPrivate())
+          if (I->isLastPrivate() || I->isLinear())
             EmitAnyExpr(I->getUpdateExpr());
         }
         Info->setShouldReplaceWithLocal(true);
