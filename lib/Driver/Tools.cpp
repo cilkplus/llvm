@@ -4744,6 +4744,9 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
     // This is more complicated in gcc...
     CmdArgs.push_back("-lgomp");
 
+  if (Args.hasArg(options::OPT_fcilkplus))
+    CmdArgs.push_back("-lcilkrts");
+
   AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
   
   if (isObjCRuntimeLinked(Args) &&
@@ -6165,6 +6168,9 @@ void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-Bdynamic");
     CmdArgs.push_back("-lm");
   }
+
+  if (Args.hasArg(options::OPT_fcilkplus))
+    CmdArgs.push_back("-lcilkrts");
 
   if (!Args.hasArg(options::OPT_nostdlib)) {
     if (!Args.hasArg(options::OPT_nodefaultlibs)) {
