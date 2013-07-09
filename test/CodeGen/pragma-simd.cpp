@@ -116,13 +116,13 @@ void test_lastprivate() {
   // CHECK: call void @_Z6anchori(i32 501)
   // CHECK: icmp eq i32
   // CHECK-NEXT: br {{.+}}, label %[[UPDATE_BODY1:[_A-Za-z0-9\.]+]], label %[[HELPER_EXIT1:[_A-Za-z0-9\.]+]]
-  // CHECK: [[UPDATE_BODY1]]:
+  // CHECK: [[UPDATE_BODY1]]
   // CHECK-NEXT: load double*
   // CHECK-NEXT: getelementptr
   // CHECK-NEXT: load double**
   // CHECK-NEXT: store double
   // CHECK-NEXT: br label %[[HELPER_EXIT1]]
-  // CHECK: [[HELPER_EXIT1]]:
+  // CHECK: [[HELPER_EXIT1]]
   // CHECK: call void @_Z6anchori(i32 502)
 
   // Check that local x being copied into x, x destructor being called
