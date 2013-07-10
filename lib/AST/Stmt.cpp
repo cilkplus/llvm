@@ -1180,6 +1180,22 @@ CilkForStmt::CilkForStmt(Stmt *Init, Expr *Cond, Expr *Inc, CapturedStmt *Body,
   SubExprs[LOOP_COUNT] = LoopCount;
 }
 
+SIMDForStmt::SIMDVariable::SIMDVariable(unsigned Kind, VarDecl *SIMDVar,
+                                        VarDecl *LocalVar,
+                                        Expr *UpdateExpr,
+                                        ArrayRef<VarDecl *> IndexVars)
+  : Kind(Kind), SIMDVar(SIMDVar), LocalVar(LocalVar), UpdateExpr(UpdateExpr),
+    ArrayIndexNum(IndexVars.size()), ArrayIndexVars(0) {
+  // Allocate an array of index variables if necessary.
+  if (ArrayIndexNum) {
+    ASTContext &C = SIMDVar->getASTContext();
+    unsigned Size = ArrayIndexNum * sizeof(VarDecl *);
+    void *Mem = C.Allocate(Size);
+    std::memcpy(Mem, IndexVars.data(), Size);
+    ArrayIndexVars = reinterpret_cast<VarDecl **>(Mem);
+  }
+}
+
 SIMDForStmt::SIMDVariable *SIMDForStmt::getStoredSIMDVars() const {
   unsigned Size = sizeof(SIMDForStmt) + sizeof(Attr *) * NumSIMDAttrs;
 

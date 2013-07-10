@@ -11005,6 +11005,64 @@ static IdentifierInfo *getLocalVarName(Sema &S, StringRef Name) {
   return &S.Context.Idents.get(OS.str());
 }
 
+static ExprResult buildLocalVariableUpdate(Sema &S, SIMDForScopeInfo *FSI,
+                                           VarDecl *LocalVar, Expr *LHS,
+                                           SourceLocation Loc,
+                                        SmallVectorImpl<VarDecl *> &IndexVars) {
+  QualType BaseType = LHS->getType();
+  QualType SizeType = S.Context.getSizeType();
+
+  // Introduce a new evaluation context for the assignment.
+  EnterExpressionEvaluationContext InitScope(S, Sema::PotentiallyEvaluated);
+
+  ExprResult RHSRef = S.BuildDeclRefExpr(LocalVar, BaseType, VK_LValue, Loc);
+  assert(!RHSRef.isInvalid() && "Reference to local variable cannot fail");
+  Expr *RHS = RHSRef.take();
+
+  while (const ConstantArrayType *Array
+                        = S.Context.getAsConstantArrayType(BaseType)) {
+    // Create the index variable for this array index.
+    VarDecl *IdxVar = 0;
+    {
+      SmallString<8> Str;
+      llvm::raw_svector_ostream OS(Str);
+      OS << "__i" << IndexVars.size();
+      IdentifierInfo *IdxName = &S.Context.Idents.get(OS.str());
+      TypeSourceInfo *TyInfo = S.Context.getTrivialTypeSourceInfo(SizeType, Loc);
+      IdxVar = VarDecl::Create(S.Context, S.CurContext, Loc, Loc, IdxName,
+                               SizeType, TyInfo, SC_None);
+      IndexVars.push_back(IdxVar);
+    }
+
+    // Create a reference to the index variable.
+    ExprResult IdxVarRef = S.BuildDeclRefExpr(IdxVar, SizeType, VK_LValue, Loc);
+    assert(!IdxVarRef.isInvalid() && "Reference to index cannot fail!");
+    IdxVarRef = S.DefaultLvalueConversion(IdxVarRef.take());
+    assert(!IdxVarRef.isInvalid() && "Conversion of index cannot fail!");
+
+    // Subscript the array with this index variable for both LHS and RHS.
+    ExprResult ElemLHS =
+      S.CreateBuiltinArraySubscriptExpr(LHS, Loc, IdxVarRef.take(), Loc);
+    if (ElemLHS.isInvalid())
+      return ExprError();
+
+    ExprResult ElemRHS =
+      S.CreateBuiltinArraySubscriptExpr(RHS, Loc, IdxVarRef.take(), Loc);
+    if (ElemRHS.isInvalid())
+      return ExprError();
+
+    // Recursively build LHS and RHS.
+    LHS = ElemLHS.take();
+    RHS = ElemRHS.take();
+    BaseType = Array->getElementType();
+  }
+
+  // Build the update expression.
+  ExprResult E = S.BuildBinOp(S.getCurScope(), /*OpLoc*/ SourceLocation(),
+                              BO_Assign, LHS, RHS);
+  return S.MaybeCreateExprWithCleanups(E);
+}
+
 static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
                                    VarDecl *Var) {
   if (!FSI->IsSIMDVariable(Var))
@@ -11024,6 +11082,8 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
       S.Context, DC, Loc, Loc, VarName, VarType,
       S.Context.getTrivialTypeSourceInfo(VarType, Loc), SC_None);
   Expr *UpdateExpr = 0;
+  // Index variables for indexing into arrays for the update expression.
+  SmallVector<VarDecl *, 2> IndexVars;
 
   // Introduce a new evaluation context for the initializaiton & update
   S.PushExpressionEvaluationContext(Sema::PotentiallyEvaluated);
@@ -11053,14 +11113,23 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
     // In the case of Last Private and Linear variables, the value of the
     // original list item should be assigned to the value corresponding to the
     // sequentially last iteration.
-    if (FSI->isLastPrivate(Var) || FSI->isLinear(Var)) {
+    //
+    // OMP[2.14.3.5] For an array of non-array type, each element is assigned
+    // to the corresponding element of the orignial array.
+    if (FSI->isLinear(Var)) {
       ExprResult RHS = S.BuildDeclRefExpr(LocalVar, VarType, VK_LValue, Loc);
       ExprResult E = S.BuildBinOp(S.getCurScope(), /*OpLoc*/ SourceLocation(),
                                   BO_Assign, VarDRE, RHS.get());
-      if (!E.isInvalid()) {
+      if (!E.isInvalid())
+        UpdateExpr = S.MaybeCreateExprWithCleanups(E).get();
+      else
+        FSI->SetInvalid(Var);
+    } else if (FSI->isLastPrivate(Var)) {
+      ExprResult E
+        = buildLocalVariableUpdate(S, FSI, LocalVar, VarDRE, Loc, IndexVars);
+      if (!E.isInvalid())
         UpdateExpr = E.get();
-        UpdateExpr = S.MakeFullExpr(UpdateExpr).get();
-      } else
+      else
         FSI->SetInvalid(Var);
     }
   }
@@ -11075,7 +11144,7 @@ static void buildSIMDLocalVariable(Sema &S, SIMDForScopeInfo *FSI,
     LocalVar->setImplicit();
     LocalVar->setUsed();
     DC->addDecl(LocalVar);
-    FSI->UpdateVar(Var, LocalVar, UpdateExpr);
+    FSI->UpdateVar(Var, LocalVar, UpdateExpr, IndexVars);
   } else
     FSI->SetInvalid(Var);
 }

@@ -2295,6 +2295,78 @@ static Expr *GetLinearStep(const SIMDForStmt &SS, VarDecl *SIMDVar) {
   return 0;
 }
 
+static void EmitUpdateExpr(CodeGenFunction &CGF, const Expr *UpdateExpr,
+                           QualType T, ArrayRef<VarDecl *> ArrayIndexes,
+                           unsigned Index) {
+  // Allocate (uninitialized) index variables for the first level.
+  if (Index == 0)
+    for (unsigned I = 0, N = ArrayIndexes.size(); I < N; ++I)
+      CGF.EmitAutoVarDecl(*ArrayIndexes[I]);
+
+  // Emit the update expression for the inner most level. If no loop is needed
+  // then the update expression is emitted in the following block.
+  if (Index == ArrayIndexes.size()) {
+    CodeGenFunction::RunCleanupsScope Scope(CGF);
+    CGF.EmitAnyExpr(UpdateExpr);
+    return;
+  }
+
+  // Emit a loop for the current level of the array.
+  const ConstantArrayType *Array = CGF.getContext().getAsConstantArrayType(T);
+  assert(Array && "array update without the array type");
+  llvm::Value *IndexVar = CGF.GetAddrOfLocalVar(ArrayIndexes[Index]);
+  assert(IndexVar && "Array index variable not loaded");
+
+  // Initialize this index variable to zero.
+  llvm::Type *SizeType = CGF.ConvertType(CGF.getContext().getSizeType());
+  llvm::Value *Zero = llvm::Constant::getNullValue(SizeType);
+  CGF.Builder.CreateStore(Zero, IndexVar);
+
+  llvm::BasicBlock *ForCond = CGF.createBasicBlock("for.cond");
+  llvm::BasicBlock *ForBody = CGF.createBasicBlock("for.body");
+  llvm::BasicBlock *ForInc = CGF.createBasicBlock("for.inc");
+  llvm::BasicBlock *ForEnd = CGF.createBasicBlock("for.end");
+
+  // Emit the condition.
+  llvm::Value *Counter = 0;
+  {
+    CGF.EmitBlock(ForCond);
+
+    Counter = CGF.Builder.CreateLoad(IndexVar);
+    uint64_t NumElements = Array->getSize().getZExtValue();
+    llvm::Value *NumElementsPtr = llvm::ConstantInt::get(Counter->getType(),
+                                                         NumElements);
+    llvm::Value *LessThan = CGF.Builder.CreateICmpULT(Counter, NumElementsPtr);
+    CGF.Builder.CreateCondBr(LessThan, ForBody, ForEnd);
+  }
+
+  // Emit the body.
+  CGF.EmitBlock(ForBody);
+  {
+    CodeGenFunction::RunCleanupsScope Cleanups(CGF);
+
+    // Recurse to emit the inner loop.
+    EmitUpdateExpr(CGF, UpdateExpr, Array->getElementType(), ArrayIndexes,
+                   Index + 1);
+  }
+
+  // Emit the increment.
+  {
+    CGF.EmitBlock(ForInc);
+
+    llvm::Value *NextVal = llvm::ConstantInt::get(Counter->getType(), 1);
+    Counter = CGF.Builder.CreateLoad(IndexVar);
+    NextVal = CGF.Builder.CreateAdd(Counter, NextVal, "inc");
+    CGF.Builder.CreateStore(NextVal, IndexVar);
+
+    // Branch back up to the next iteration.
+    CGF.EmitBranch(ForCond);
+  }
+
+  // Emit the fall-through block.
+  CGF.EmitBlock(ForEnd, true);
+}
+
 void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
   assert(CapturedStmtInfo && "Should be only called inside a CapturedStmt");
   CGSIMDForStmtInfo *Info = cast<CGSIMDForStmtInfo>(CapturedStmtInfo);
@@ -2393,8 +2465,12 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
         for (SIMDForStmt::simd_var_iterator I = SS.simd_var_begin(),
                                             E = SS.simd_var_end();
              I != E; ++I) {
-          if (I->isLastPrivate() || I->isLinear())
-            EmitAnyExpr(I->getUpdateExpr());
+          // Emit the update for this variable. For lastprivate variables,
+          // loops may be needed to complete the update.
+          if (I->isLinear() || I->isLastPrivate())
+            EmitUpdateExpr(*this, I->getUpdateExpr(),
+                           I->getLocalVar()->getType(),
+                           I->getArrayIndexVars(), 0);
         }
         Info->setShouldReplaceWithLocal(true);
         EmitBlock(UpdateExit);

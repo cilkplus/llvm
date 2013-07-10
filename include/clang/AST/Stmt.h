@@ -2325,14 +2325,18 @@ public:
     VarDecl *LocalVar;
 
     /// \brief The update expression. This expression is only created for
-    /// lastprivate variables.
+    /// lastprivate and linear variables.
     Expr *UpdateExpr;
+
+    /// \brief The number of array index variables.
+    unsigned ArrayIndexNum;
+
+    /// \brief The array index variables for the update expression.
+    VarDecl **ArrayIndexVars;
 
   public:
     SIMDVariable(unsigned Kind, VarDecl *SIMDVar, VarDecl *LocalVar,
-                 Expr *UpdateExpr)
-      : Kind(Kind), SIMDVar(SIMDVar), LocalVar(LocalVar),
-        UpdateExpr(UpdateExpr) { }
+                 Expr *UpdateExpr, ArrayRef<VarDecl *> IndexVars);
 
     bool isPrivate() const { return Kind & SIMD_VK_Private; }
     bool isLastPrivate() const { return Kind & SIMD_VK_LastPrivate; }
@@ -2347,6 +2351,11 @@ public:
       assert((isLastPrivate() || isLinear()) &&
              "only for lastprivate and linear variables");
       return UpdateExpr;
+    }
+
+    unsigned getArrayIndexNum() const { return ArrayIndexNum; }
+    ArrayRef<VarDecl *> getArrayIndexVars() const {
+      return ArrayRef<VarDecl *>(ArrayIndexVars, ArrayIndexNum);
     }
   };
 

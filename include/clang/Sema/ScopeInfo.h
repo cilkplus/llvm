@@ -18,10 +18,10 @@
 #include "clang/AST/Type.h"
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/PragmaSIMD.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "clang/Basic/PragmaSIMD.h"
 
 namespace clang {
 
@@ -649,6 +649,9 @@ public:
     /// \brief Constructed expression to update the outer variable.
     Expr *UpdateExpr;
 
+    /// \brief The array index variables created for the update expression.
+    SmallVector<VarDecl *, 2> IndexVars;
+
   public:
     SIMDVariable(VarDecl *Var, SIMDVariableKind K, SourceLocation Loc)
         : Kind(K), LocalDecl(0), OuterDecl(Var), Location(Loc), UpdateExpr(0) {}
@@ -665,6 +668,11 @@ public:
 
     void SetInvalid() { Kind = SIMD_VK_Unknown; }
 
+    void SetIndexVariables(ArrayRef<VarDecl *> Vars) {
+      assert(IndexVars.empty() && "index variable set already");
+      IndexVars.append(Vars.begin(), Vars.end());
+    }
+
     bool IsUsable() const {
       return (Kind != SIMD_VK_Unknown) && LocalDecl;
     }
@@ -677,6 +685,9 @@ public:
 
     Expr *GetUpdateExpr() const { return UpdateExpr; }
 
+    ArrayRef<VarDecl *> GetIndexVariables() const {
+      return IndexVars;
+    }
   };
 
 private:
@@ -775,12 +786,14 @@ public:
     return SourceLocation();
   }
 
-  void UpdateVar(VarDecl *V, VarDecl *Local, Expr *Update) {
+  void UpdateVar(VarDecl *V, VarDecl *Local, Expr *Update,
+                 ArrayRef<VarDecl *> IndexVars) {
     assert(V && "null variable unexpected");
     const_iterator I = SimdVariableMap.find(V);
     if (I != SimdVariableMap.end()) {
       SIMDVariables[I->second].SetLocal(Local);
       SIMDVariables[I->second].SetUpdateExpr(Update);
+      SIMDVariables[I->second].SetIndexVariables(IndexVars);
     }
   }
 

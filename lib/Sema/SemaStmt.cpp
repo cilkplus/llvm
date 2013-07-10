@@ -3404,7 +3404,8 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
     SIMDVars.push_back(SIMDForStmt::SIMDVariable(I->GetKind(),
                                                  I->GetOuter(),
                                                  I->GetLocal(),
-                                                 I->GetUpdateExpr()));
+                                                 I->GetUpdateExpr(),
+                                                 I->GetIndexVariables()));
   }
 
   if (!IsDependent)

@@ -307,6 +307,105 @@ void test_linear() {
   // CHECK-NEXT: call void @_Z6anchori(i32 631)
 }
 
+void use(int&);
+
+void test_array1() {
+  int array[10] = {0};
+  #pragma simd private(array)
+  for (int i = 0; i < 10; i++) {
+    anchor(800);
+    use(array[i]);
+    anchor(801);
+  }
+  // A local array is allocated and no extra indirection will be required.
+  //
+  // CHECK: define void @_Z11test_array1v()
+  //
+  // CHECK: alloca [10 x i32]
+  // CHECK: alloca [10 x i32]
+  //
+  // CHECK: call void @_Z6anchori(i32 800)
+  // CHECK-NOT: load [10 x i32]**
+  // CHECK: call void @_Z6anchori(i32 801)
+}
+
+void test_array2() {
+  int array[10] = {0};
+  #pragma simd
+  for (int i = 0; i < 10; i++) {
+    anchor(802);
+    use(array[i]);
+    anchor(803);
+  }
+  //
+  // CHECK: define void @_Z11test_array2v()
+  //
+  // CHECK: alloca [10 x i32]
+  // CHECK-NOT: alloca [10 x i32]
+  // CHECK: call void @_Z6anchori(i32 802)
+  // CHECK: load [10 x i32]**
+  // CHECK: call void @_Z6anchori(i32 803)
+}
+
+void test_array3() {
+  int array[810] = {0};
+  #pragma simd lastprivate(array)
+  for (int i = 0; i < 10; i++) {
+    use(array[i]);
+    anchor(811);
+  }
+  anchor(812);
+  // CHECK: define void @_Z11test_array3v()
+  // CHECK: call void @_Z6anchori(i32 811)
+  //
+  // Check if there is a loop for the update.
+  //
+  // CHECK: icmp ult {{.*}}, 810
+  //
+  // CHECK: call void @_Z6anchori(i32 812)
+}
+
+void test_array4() {
+  int array[820][821][822];
+
+  #pragma simd lastprivate(array)
+  for (int i = 0; i < 10; i++) {
+    use(array[i][i][i]);
+    anchor(823);
+  }
+  anchor(824);
+  // CHECK: define void @_Z11test_array4v()
+  // CHECK: call void @_Z6anchori(i32 823)
+  //
+  // CHECK: icmp ult {{.*}}, 820
+  // CHECK: icmp ult {{.*}}, 821
+  // CHECK: icmp ult {{.*}}, 822
+  //
+  // CHECK: call void @_Z6anchori(i32 824)
+}
+
+struct Y {
+  Y();
+  void operator=(const Y&);
+};
+
+void use(const Y&);
+
+void test_array5() {
+  Y array[10];
+
+  #pragma simd lastprivate(array)
+  for (int i = 0; i < 10; i++) {
+    use(array[i]);
+    anchor(830);
+  }
+  anchor(831);
+  // CHECK: define void @_Z11test_array5v()
+  // CHECK: call void @_Z6anchori(i32 830)
+  // CHECK: call void @_ZN1YaSERKS_
+  // CHECK: call void @_Z6anchori(i32 831)
+}
+
 // test()
 // CHECK: !0 = metadata !{metadata !0}
 // test1()
