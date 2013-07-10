@@ -1323,6 +1323,20 @@ Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
                           LoopCount, StrideExpr, Span,
                           /* IsCilkFor */ false))
     return StmtError();
+
+  // The Loop Control Variable may not be the subject of a SIMD clause.
+  // SIMD variables capture a local copy inside of the loop, and all
+  // modifications are done on that capture. In the case that the LCV is the
+  // subject of a SIMD clause, the LCV itself will not be updated.
+  {
+    SIMDForScopeInfo *FSI = getCurSIMDFor();
+    VarDecl *LCV = const_cast<VarDecl *>(getLoopControlVariable(*this, First));
+    if (FSI->IsSIMDVariable(LCV)) {
+      Diag(FSI->GetLocation(LCV), diag::err_simd_for_variable_cannot_be_lcv);
+      return StmtError();
+    }
+  }
+
   return BuildSIMDForStmt(PragmaLoc, Attrs, ForLoc, LParenLoc, First,
                           Second.get(), Third.get(), RParenLoc, Body,
                           LoopCount.get());

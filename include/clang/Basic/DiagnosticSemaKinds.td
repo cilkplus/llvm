@@ -6607,6 +6607,8 @@ def err_simd_for_cannot_return: Error<
   "cannot return from within a simd for loop">;
 def err_simd_for_cannot_break: Error<
   "cannot break from a simd for loop">;
+def err_simd_for_variable_cannot_be_lcv: Error<
+  "the simd loop control variable may not be the subject of a simd clause">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

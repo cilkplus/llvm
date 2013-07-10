@@ -538,3 +538,14 @@ void empty_body() {
   for (int i = 0; i < 10; ++i); // OK
   empty_body();
 }
+
+void test_LCV() {
+  int i;
+  // expected-error@+1 {{the simd loop control variable may not be the subject of a simd clause}}
+  #pragma simd private(i)
+  for (i = 0; i < 10; ++i);
+
+  // expected-error@+1 {{the simd loop control variable may not be the subject of a simd clause}}
+  #pragma simd linear(i)
+  for (i = 0; i < 10; ++i);
+}
