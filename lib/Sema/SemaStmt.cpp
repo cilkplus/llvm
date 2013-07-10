@@ -3361,6 +3361,22 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
     CD->setParam(2, Count);
   }
 
+  // If there are any references to variables used as linear step, these need to
+  // be captured in the simd loop.
+  for (ArrayRef<Attr *>::iterator I = Attrs.begin(), E = Attrs.end();
+       I != E; ++I) {
+    if (SIMDLinearAttr *A = dyn_cast<SIMDLinearAttr>(*I)) {
+      for (Expr **S = A->steps_begin()+1, **K = A->steps_end(); S < K; S += 2) {
+        Expr *Step = *S;
+        if (DeclRefExpr *DRE = dyn_cast_or_null<DeclRefExpr>(Step)) {
+          ValueDecl *VD = DRE->getDecl();
+          assert(VD && isa<VarDecl>(VD) && "Step must be a VarDecl");
+          MarkVariableReferenced(Step->getLocStart(), cast<VarDecl>(VD));
+        }
+      }
+    }
+  }
+
   SmallVector<CapturedStmt::Capture, 4> Captures;
   SmallVector<Expr *, 4> CaptureInits;
   buildCapturedStmtCaptureList(Captures, CaptureInits, FSI->Captures);

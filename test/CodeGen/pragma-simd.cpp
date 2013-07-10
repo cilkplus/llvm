@@ -257,6 +257,56 @@ void test_private_static() {
   // CHECK: call void @_Z6anchori(i32 633)
 }
 
+void test_linear() {
+  int x = 0;
+  anchor(600);
+  #pragma simd linear(x)
+  for (int i = 0; i < 100; ++i) {
+    anchor(601);
+    (void)x;
+  }
+  // CHECK: call void @_Z6anchori(i32 600)
+  // CHECK: add i32
+  // CHECK-NEXT: store i32
+  // CHECK-NEXT: call void @_Z6anchori(i32 601)
+
+  anchor(610);
+  #pragma simd linear(x:5)
+  for (int i = 0; i < 100; ++i) {
+    anchor(611);
+    (void)x;
+  }
+  // CHECK: call void @_Z6anchori(i32 610)
+  // CHECK: mul i32 %{{.+}}, 5
+  // CHECK-NEXT: add i32
+  // CHECK-NEXT: store i32
+  // CHECK-NEXT: call void @_Z6anchori(i32 611)
+
+  // Check that pointers are being correctly incremented
+  int *p;
+  anchor(620);
+  #pragma simd linear(p)
+  for (int i = 0; i < 100; ++i) {
+    anchor(621);
+    (void)p;
+  }
+  // CHECK: call void @_Z6anchori(i32 620)
+  // CHECK: getelementptr i32*
+  // CHECK-NEXT: store i32*
+  // CHECK-NEXT: call void @_Z6anchori(i32 621)
+
+  anchor(630);
+  #pragma simd linear(p)
+  for (int i = 0; i < 100; ++i) {
+    anchor(631);
+    (void)p;
+  }
+  // CHECK: call void @_Z6anchori(i32 630)
+  // CHECK: getelementptr i32*
+  // CHECK-NEXT: store i32*
+  // CHECK-NEXT: call void @_Z6anchori(i32 631)
+}
+
 // test()
 // CHECK: !0 = metadata !{metadata !0}
 // test1()

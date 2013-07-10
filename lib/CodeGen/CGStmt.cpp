@@ -2274,6 +2274,25 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   EmitBlock(LoopExit.getBlock(), true);
 }
 
+static Expr *GetLinearStep(const SIMDForStmt &SS, VarDecl *SIMDVar) {
+  // Get the linear step from the SIMD Attributes list
+  ArrayRef<Attr *> Attrs = SS.getSIMDAttrs();
+  for (ArrayRef<Attr *>::iterator I = Attrs.begin(), E = Attrs.end();
+       I != E; ++I) {
+    Attr *A = *I;
+    if (SIMDLinearAttr *LA = dyn_cast<SIMDLinearAttr>(A))
+      // This is a Linear clause, iterate over its variables and steps.
+      for (Expr **L = LA->steps_begin(), **S = L+1, **K = LA->steps_end();
+           L != K; L += 2, S += 2) {
+        assert(isa<DeclRefExpr>(*L) && "Linear variable must be a DeclRefExpr");
+        if (VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(*L)->getDecl()))
+          if (VD == SIMDVar)
+            return *S;
+      }
+  }
+  return 0;
+}
+
 void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
   assert(CapturedStmtInfo && "Should be only called inside a CapturedStmt");
   CGSIMDForStmtInfo *Info = cast<CGSIMDForStmtInfo>(CapturedStmtInfo);
@@ -2317,11 +2336,18 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
 
         llvm::Value *Start = Builder.CreateLoad(LV.getAddress());
         llvm::Value *Index = Builder.CreateLoad(LoopIndex);
-        // TODO: Evaluate the step expression.
-        llvm::Value *Step = llvm::ConstantInt::get(Index->getType(), 1);
-        llvm::Value *Result = Builder.CreateMul(Index, Step);
-        Result = Builder.CreateIntCast(Result, Start->getType(), false);
-        Result = Builder.CreateAdd(Start, Result);
+        llvm::Value *Result = 0;
+        if (Expr *StepExpr = GetLinearStep(SS, SIMDVar))
+          Result = EmitAnyExpr(StepExpr).getScalarVal();
+        else
+          Result = llvm::ConstantInt::get(Index->getType(), 1);
+        Result = Builder.CreateMul(Index, Result);
+        if (LocalVar->getType()->isPointerType())
+          Result = Builder.CreateGEP(Start, Result);
+        else {
+          Result = Builder.CreateIntCast(Result, Start->getType(), false);
+          Result = Builder.CreateAdd(Start, Result);
+        }
         Builder.CreateStore(Result, Addr);
       }
       RequiresUpdate = I->isLinear() || I->isLastPrivate();
