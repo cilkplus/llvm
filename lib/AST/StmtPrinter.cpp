@@ -1901,10 +1901,6 @@ void StmtPrinter::VisitCilkSyncStmt(CilkSyncStmt *) {
   Indent() << "_Cilk_sync;\n";
 }
 
-void StmtPrinter::VisitCilkSpawnStmt(CilkSpawnStmt *Node) {
-  PrintStmt(Node->getCapturedStmt());
-}
-
 void StmtPrinter::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *Node) {
   Indent() << "#pragma cilk grainsize = ";
   PrintExpr(Node->getGrainsize());

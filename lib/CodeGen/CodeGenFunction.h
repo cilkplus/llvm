@@ -2410,7 +2410,6 @@ public:
   llvm::Function *GenerateCapturedStmtFunction(const CapturedDecl *CD,
                                                const RecordDecl *RD);
 
-  void EmitCilkSpawnStmt(const CilkSpawnStmt &S);
   llvm::Function *EmitSpawnCapturedStmt(const CapturedStmt &S, VarDecl *VD);
   void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);

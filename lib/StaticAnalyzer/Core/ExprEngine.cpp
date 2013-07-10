@@ -658,8 +658,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::WhileStmtClass:
     case Expr::MSDependentExistsStmtClass:
     case Stmt::CapturedStmtClass:
-    case Expr::CilkSyncStmtClass:
-    case Stmt::CilkSpawnStmtClass:
+    case Stmt::CilkSyncStmtClass:
     case Stmt::CilkForGrainsizeStmtClass:
     case Stmt::CilkForStmtClass:
     case Stmt::SIMDForStmtClass:

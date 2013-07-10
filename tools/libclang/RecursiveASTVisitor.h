@@ -2170,7 +2170,6 @@ DEF_TRAVERSE_STMT(OpaqueValueExpr, { })
 DEF_TRAVERSE_STMT(CUDAKernelCallExpr, { })
 
 DEF_TRAVERSE_STMT(CilkSyncStmt, { })
-DEF_TRAVERSE_STMT(CilkSpawnStmt, { })
 DEF_TRAVERSE_STMT(CilkForGrainsizeStmt, { })
 DEF_TRAVERSE_STMT(CilkForStmt, { })
 DEF_TRAVERSE_STMT(SIMDForStmt, { })

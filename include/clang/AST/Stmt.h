@@ -2138,43 +2138,6 @@ public:
   child_range children() { return child_range(); }
 };
 
-/// \brief Represents a _Cilk_spawn statement.
-class CilkSpawnStmt : public Stmt {
-  CapturedStmt *TheCapturedStmt;
-  VarDecl *ReceiverDecl;
-public:
-  explicit CilkSpawnStmt(CapturedStmt *S)
-    : Stmt(CilkSpawnStmtClass), TheCapturedStmt(S), ReceiverDecl(0) { }
-
-  explicit CilkSpawnStmt(EmptyShell Empty)
-    : Stmt(CilkSpawnStmtClass, Empty) { }
-
-  CapturedStmt *getCapturedStmt() const { return TheCapturedStmt; }
-  Stmt *getSubStmt() const { return TheCapturedStmt->getCapturedStmt(); }
-
-  VarDecl *getReceiverDecl() const { return ReceiverDecl; }
-  void setReceiverDecl(VarDecl *VD) { ReceiverDecl = VD; }
-
-  SourceLocation getLocStart() const LLVM_READONLY {
-    return TheCapturedStmt->getLocStart();
-  }
-  SourceLocation getLocEnd() const LLVM_READONLY {
-    return TheCapturedStmt->getLocEnd();
-  }
-  SourceRange getSourceRange() const LLVM_READONLY {
-    return TheCapturedStmt->getSourceRange();
-  }
-
-  static bool classof(const Stmt *T) {
-    return T->getStmtClass() == CilkSpawnStmtClass;
-  }
-  static bool classof(CilkSpawnStmt *) { return true; }
-
-  child_range children() {
-    return child_range((Stmt**)&TheCapturedStmt, (Stmt**)&TheCapturedStmt+1);
-  }
-};
-
 /// \brief This represents a Cilk for grainsize statement.
 /// \code
 /// #pragma cilk grainsize = expr

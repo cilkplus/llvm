@@ -2895,7 +2895,6 @@ public:
   StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
   ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
   ExprResult BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
-  StmtResult ActOnCilkSpawnStmt(Stmt *S);
 
   /// \brief Convert a full expression into a CilkSpawnExpr.
   ExprResult BuildCilkSpawnExpr(Expr *E);

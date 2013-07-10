@@ -174,9 +174,6 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHTryStmtClass:
     // FIXME Not yet implemented
     break;
-  case Stmt::CilkSpawnStmtClass:
-    EmitCilkSpawnStmt(cast<CilkSpawnStmt>(*S));
-    break;
   case Stmt::CilkForGrainsizeStmtClass:
     EmitCilkForGrainsizeStmt(cast<CilkForGrainsizeStmt>(*S));
     break;

@@ -1322,7 +1322,6 @@ namespace clang {
 
       // Cilk Plus
       STMT_CILKSYNC,
-      STMT_CILKSPAWN,
       STMT_CILK_FOR_GRAINSIZE,
       STMT_CILK_FOR,
       STMT_SIMD_FOR

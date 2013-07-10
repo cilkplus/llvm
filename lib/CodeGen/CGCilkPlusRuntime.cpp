@@ -1146,57 +1146,6 @@ void setHelperAttributes(CodeGenFunction &CGF,
 namespace clang {
 namespace CodeGen {
 
-/// \brief Emit code for a CilkSpawnStmt.
-void CodeGenFunction::EmitCilkSpawnStmt(const CilkSpawnStmt &S) {
-  // Get the __cilkrts_stack_frame
-  Value *SF = LookupStackFrame(*this);
-  assert(SF && "null stack frame unexpected");
-
-  BasicBlock *Entry = createBasicBlock("cilk.spawn.savestate"),
-             *Body  = createBasicBlock("cilk.spawn.helpercall"),
-             *Exit  = createBasicBlock("cilk.spawn.continuation");
-
-  EmitBlock(Entry);
-  {
-    CGBuilderTy B(Entry);
-
-    // Need to save state before spawning
-    Value *C = EmitCilkSetJmp(B, SF, *this);
-    C = B.CreateICmpEQ(C, ConstantInt::get(C->getType(), 0));
-    B.CreateCondBr(C, Body, Exit);
-  }
-
-  EmitBlock(Body);
-  {
-    // If this spawn initializes a variable, alloc this variable and
-    // set it as the current receiver.
-    if (const DeclStmt *DS = dyn_cast<DeclStmt>(S.getSubStmt())) {
-      assert(DS->isSingleDecl() && "single decl expected");
-      const VarDecl *VD = cast<VarDecl>(DS->getSingleDecl());
-
-      switch (VD->getStorageClass()) {
-      case SC_None:
-      case SC_Auto:
-      case SC_Register:
-        EmitCaptureReceiverDecl(*VD);
-        break;
-      default:
-        CGM.ErrorUnsupported(VD, "unexpected stroage class for a receiver");
-      }
-    }
-
-    // Emit call to the helper function
-    Function *Helper = EmitSpawnCapturedStmt(*S.getCapturedStmt(), S.getReceiverDecl());
-
-    // Register the spawn helper function.
-    registerSpawnFunction(*this, Helper);
-
-    // Set other attributes.
-    setHelperAttributes(*this, S.getSubStmt(), Helper);
-  }
-  EmitBlock(Exit);
-}
-
 void CodeGenFunction::EmitCILKSpawnDecl(const CILKSpawnDecl *D) {
   // Get the __cilkrts_stack_frame
   Value *SF = LookupStackFrame(*this);
@@ -1504,20 +1453,6 @@ public:
   bool TraverseLambdaExpr(LambdaExpr *E) { return true; }
   bool TraverseBlockExpr(BlockExpr *E) { return true; }
   bool TraverseCapturedStmt(CapturedStmt *) { return true; }
-  bool TraverseCilkSpawnStmt(CilkSpawnStmt *S) {
-    CXXTryStmt *TS = getEnclosingTryBlock(S, Body, PMap);
-
-    // If a spawn statement is not enclosed by any try-block, then
-    // this function needs an implicit sync; otherwise, this try-block
-    // needs an implicit sync.
-    if (!TS)
-      NeedsSync = true;
-    else
-      TrySet.insert(TS);
-
-    return true;
-  }
-
   bool VisitCilkSpawnExpr(CilkSpawnExpr *E) {
     CXXTryStmt *TS = getEnclosingTryBlock(E, Body, PMap);
 

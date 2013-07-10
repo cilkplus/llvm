@@ -9734,13 +9734,6 @@ TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
   return Result;
 }
 
-template<typename Derived>
-StmtResult
-TreeTransform<Derived>::TransformCilkSpawnStmt(CilkSpawnStmt *S) {
-  // FIXME: not implemented yet
-  return Owned(S);
-}
-
 template <typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {

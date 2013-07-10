@@ -1616,12 +1616,6 @@ void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
   Code = serialization::STMT_CILKSYNC;
 }
 
-void ASTStmtWriter::VisitCilkSpawnStmt(CilkSpawnStmt *S) {
-  VisitStmt(S);
-  Writer.AddStmt(S->getSubStmt());
-  Code = serialization::STMT_CILKSPAWN;
-}
-
 void ASTStmtWriter::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
   Code = serialization::STMT_CILK_FOR_GRAINSIZE;
   llvm_unreachable("not implemented yet");
