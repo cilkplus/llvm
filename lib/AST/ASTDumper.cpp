@@ -200,7 +200,7 @@ namespace  {
     void VisitVarDecl(const VarDecl *D);
     void VisitFileScopeAsmDecl(const FileScopeAsmDecl *D);
     void VisitImportDecl(const ImportDecl *D);
-    void VisitCILKSpawnDecl(const CILKSpawnDecl *D);
+    void VisitCilkSpawnDecl(const CilkSpawnDecl *D);
 
     // C++ Decls
     void VisitNamespaceDecl(const NamespaceDecl *D);
@@ -1115,7 +1115,7 @@ void ASTDumper::VisitFriendDecl(const FriendDecl *D) {
     dumpDecl(D->getFriendDecl());
 }
 
-void ASTDumper::VisitCILKSpawnDecl(const CILKSpawnDecl *D) {
+void ASTDumper::VisitCilkSpawnDecl(const CilkSpawnDecl *D) {
   lastChild();
   dumpStmt(D->getCapturedStmt());
 }

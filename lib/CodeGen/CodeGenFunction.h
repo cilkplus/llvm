@@ -765,9 +765,9 @@ public:
     llvm::Value *InnerLoopControlVarAddr;
   };
 
-  class CGCilkSpawnStmtInfo : public CGCapturedStmtInfo {
+  class CGCilkSpawnInfo : public CGCapturedStmtInfo {
   public:
-    explicit CGCilkSpawnStmtInfo(const CapturedStmt &S, VarDecl *VD)
+    explicit CGCilkSpawnInfo(const CapturedStmt &S, VarDecl *VD)
       : CGCapturedStmtInfo(S, CR_CilkSpawn), ReceiverDecl(VD) { }
 
     virtual void EmitBody(CodeGenFunction &CGF, Stmt *S);
@@ -784,7 +784,7 @@ public:
     llvm::Value *getReceiverTmp() const { return ReceiverTmp; }
     void setReceiverTmp(llvm::Value *val) { ReceiverTmp = val; }
 
-    static bool classof(const CGCilkSpawnStmtInfo *) { return true; }
+    static bool classof(const CGCilkSpawnInfo *) { return true; }
     static bool classof(const CGCapturedStmtInfo *I) {
       return I->getKind() == CR_CilkSpawn;
     }
@@ -2417,7 +2417,7 @@ public:
   void EmitSIMDForStmt(const SIMDForStmt &S);
   void EmitSIMDForHelperBody(const Stmt *S);
   void EmitCilkSpawnExpr(const CilkSpawnExpr *E);
-  void EmitCILKSpawnDecl(const CILKSpawnDecl *D);
+  void EmitCilkSpawnDecl(const CilkSpawnDecl *D);
 
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission

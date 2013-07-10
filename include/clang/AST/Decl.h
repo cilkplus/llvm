@@ -3286,17 +3286,17 @@ public:
   friend class ASTDeclWriter;
 };
 
-class CILKSpawnDecl : public Decl {
+class CilkSpawnDecl : public Decl {
   /// \brief The CapturedStmt associated to the expression or statement with
   /// a Cilk spawn call.
   CapturedStmt *CapturedSpawn;
 
-  CILKSpawnDecl(DeclContext *DC, CapturedStmt *Spawn);
+  CilkSpawnDecl(DeclContext *DC, CapturedStmt *Spawn);
 
 public:
-  static CILKSpawnDecl *Create(ASTContext &C, DeclContext *DC,
+  static CilkSpawnDecl *Create(ASTContext &C, DeclContext *DC,
                                CapturedStmt *Spawn);
-  static CILKSpawnDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+  static CilkSpawnDecl *CreateDeserialized(ASTContext &C, unsigned ID);
 
   /// \brief Returns if this Cilk spawn has a receiver.
   bool hasReceiver() const;
@@ -3307,7 +3307,7 @@ public:
   /// \brief Returns the expression or statement with a Cilk spawn.
   Stmt *getSpawnStmt();
   const Stmt *getSpawnStmt() const {
-    return const_cast<CILKSpawnDecl *>(this)->getSpawnStmt();
+    return const_cast<CilkSpawnDecl *>(this)->getSpawnStmt();
   }
 
   /// \brief Returns the associated CapturedStmt.
@@ -3315,7 +3315,7 @@ public:
   const CapturedStmt *getCapturedStmt() const { return CapturedSpawn; }
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
-  static bool classofKind(Kind K) { return K == CILKSpawn; }
+  static bool classofKind(Kind K) { return K == CilkSpawn; }
 
   friend class ASTDeclReader;
   friend class ASTDeclWriter;

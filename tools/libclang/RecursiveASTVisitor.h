@@ -1210,7 +1210,7 @@ DEF_TRAVERSE_DECL(CapturedDecl, {
     return true;
   })
 
-DEF_TRAVERSE_DECL(CILKSpawnDecl, {
+DEF_TRAVERSE_DECL(CilkSpawnDecl, {
   })
 
 DEF_TRAVERSE_DECL(EmptyDecl, { })

@@ -1081,8 +1081,6 @@ static llvm::Value *CreateStackFrame(CodeGenFunction &CGF) {
 namespace {
 /// \brief Helper to find the spawn call.
 ///
-/// This CallExpr should be cached into CilkSpawnStmt.
-///
 class FindSpawnCallExpr : public RecursiveASTVisitor<FindSpawnCallExpr> {
 public:
   const CallExpr *Spawn;
@@ -1100,7 +1098,7 @@ public:
     return true;
   }
 
-  bool VisitCILKSpawnDecl(CILKSpawnDecl *D) {
+  bool VisitCilkSpawnDecl(CilkSpawnDecl *D) {
     VisitStmt(D->getSpawnStmt());
     return false; // exit
   }
@@ -1146,7 +1144,7 @@ void setHelperAttributes(CodeGenFunction &CGF,
 namespace clang {
 namespace CodeGen {
 
-void CodeGenFunction::EmitCILKSpawnDecl(const CILKSpawnDecl *D) {
+void CodeGenFunction::EmitCilkSpawnDecl(const CilkSpawnDecl *D) {
   // Get the __cilkrts_stack_frame
   Value *SF = LookupStackFrame(*this);
   assert(SF && "null stack frame unexpected");
@@ -1195,7 +1193,7 @@ void CodeGenFunction::EmitCILKSpawnDecl(const CILKSpawnDecl *D) {
 }
 
 void CodeGenFunction::EmitCilkSpawnExpr(const CilkSpawnExpr *E) {
-  EmitCILKSpawnDecl(E->getSpawnDecl());
+  EmitCilkSpawnDecl(E->getSpawnDecl());
 }
 
 static void maybeCleanupBoundTemporary(CodeGenFunction &CGF,
@@ -1246,7 +1244,7 @@ CodeGenFunction::EmitSpawnCapturedStmt(const CapturedStmt &S,
 
   // Emit the CapturedDecl
   CodeGenFunction CGF(CGM, true);
-  CGF.CapturedStmtInfo = new CGCilkSpawnStmtInfo(S, ReceiverDecl);
+  CGF.CapturedStmtInfo = new CGCilkSpawnInfo(S, ReceiverDecl);
   llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
   delete CGF.CapturedStmtInfo;
 
@@ -1471,7 +1469,7 @@ public:
     bool HasSpawn = false;
     for (DeclStmt::decl_iterator I = DS->decl_begin(), E = DS->decl_end();
         I != E; ++I) {
-      if (isa<CILKSpawnDecl>(*I)) {
+      if (isa<CilkSpawnDecl>(*I)) {
         HasSpawn = true;
         break;
       }

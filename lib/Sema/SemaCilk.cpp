@@ -1060,7 +1060,7 @@ public:
     return true;
   }
 
-  bool VisitCILKSpawnDecl(CILKSpawnDecl *D) {
+  bool VisitCilkSpawnDecl(CilkSpawnDecl *D) {
     TraverseStmt(D->getSpawnStmt());
     return true;
   }
@@ -2155,7 +2155,7 @@ ExprResult Sema::BuildCilkSpawnExpr(Expr *E) {
     DC = DC->getParent();
 
   CapturedStmt *CS = cast<CapturedStmt>(Body);
-  CILKSpawnDecl *Spawn = CILKSpawnDecl::Create(Context, DC, CS);
+  CilkSpawnDecl *Spawn = CilkSpawnDecl::Create(Context, DC, CS);
   DC->addDecl(Spawn);
 
   MarkFunctionAsSpawning(*this);
@@ -2201,7 +2201,7 @@ static void addReceiverParams(Sema &SemaRef, CapturedDecl *CD,
   }
 }
 
-CILKSpawnDecl *Sema::BuildCilkSpawnDecl(Decl *D) {
+CilkSpawnDecl *Sema::BuildCilkSpawnDecl(Decl *D) {
   VarDecl *VD = dyn_cast_or_null<VarDecl>(D);
   if (!VD || VD->isInvalidDecl())
     return 0;
@@ -2249,7 +2249,7 @@ CILKSpawnDecl *Sema::BuildCilkSpawnDecl(Decl *D) {
     DC = DC->getParent();
 
   CapturedStmt *CS = cast<CapturedStmt>(R.release());
-  CILKSpawnDecl *Spawn = CILKSpawnDecl::Create(Context, DC, CS);
+  CilkSpawnDecl *Spawn = CilkSpawnDecl::Create(Context, DC, CS);
   DC->addDecl(Spawn);
 
   // Initialize receiver and its associated temporary parameters.
@@ -2276,7 +2276,7 @@ public:
           SemaRef.PDiag(diag::err_spawn_not_whole_expr) << E->getSourceRange());
     return true;
   }
-  bool VisitCILKSpawnDecl(CILKSpawnDecl *D) {
+  bool VisitCilkSpawnDecl(CilkSpawnDecl *D) {
     TraverseStmt(D->getSpawnStmt());
     return true;
   }

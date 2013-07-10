@@ -200,8 +200,8 @@ CodeGenFunction::CreateReferenceTemporary(QualType Type,
   }
 
   // In a captured statement, don't alloca the receiver temp; it is passed in.
-  if (CGCilkSpawnStmtInfo *Info =
-        dyn_cast_or_null<CGCilkSpawnStmtInfo>(CapturedStmtInfo)) {
+  if (CGCilkSpawnInfo *Info =
+        dyn_cast_or_null<CGCilkSpawnInfo>(CapturedStmtInfo)) {
     if (Info->isReceiverDecl(InitializedDecl)) {
       assert(Info->getReceiverTmp() &&
              "Expected receiver temporary in captured statement");
@@ -429,8 +429,8 @@ CodeGenFunction::EmitReferenceBindingToExpr(const Expr *E,
 
   // If we are inside a captured statement helper, then the cleanups for the
   // destructor are emitted in the calling function, rather than the helper.
-  if (CGCilkSpawnStmtInfo *Info =
-        dyn_cast_or_null<CGCilkSpawnStmtInfo>(CapturedStmtInfo))
+  if (CGCilkSpawnInfo *Info =
+        dyn_cast_or_null<CGCilkSpawnInfo>(CapturedStmtInfo))
     if (Info->isReceiverDecl(InitializedDecl))
       return RValue::get(Value);
 

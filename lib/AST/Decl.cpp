@@ -3372,31 +3372,31 @@ CapturedDecl *CapturedDecl::CreateDeserialized(ASTContext &C, unsigned ID,
   return new (Mem) CapturedDecl(0, NumParams);
 }
 
-CILKSpawnDecl::CILKSpawnDecl(DeclContext *DC, CapturedStmt *Spawn) :
-  Decl(CILKSpawn, DC, Spawn->getLocStart()), CapturedSpawn(Spawn) {
+CilkSpawnDecl::CilkSpawnDecl(DeclContext *DC, CapturedStmt *Spawn) :
+  Decl(CilkSpawn, DC, Spawn->getLocStart()), CapturedSpawn(Spawn) {
 }
 
-CILKSpawnDecl *CILKSpawnDecl::Create(ASTContext &C, DeclContext *DC,
+CilkSpawnDecl *CilkSpawnDecl::Create(ASTContext &C, DeclContext *DC,
                                      CapturedStmt *Spawn) {
-  return new (C) CILKSpawnDecl(DC, Spawn);
+  return new (C) CilkSpawnDecl(DC, Spawn);
 }
 
-CILKSpawnDecl *CILKSpawnDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
-  void *Mem = AllocateDeserializedDecl(C, ID, sizeof(CILKSpawnDecl));
-  return new (Mem) CILKSpawnDecl(0, 0);
+CilkSpawnDecl *CilkSpawnDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
+  void *Mem = AllocateDeserializedDecl(C, ID, sizeof(CilkSpawnDecl));
+  return new (Mem) CilkSpawnDecl(0, 0);
 }
 
-Stmt *CILKSpawnDecl::getSpawnStmt() {
+Stmt *CilkSpawnDecl::getSpawnStmt() {
   return getCapturedStmt()->getCapturedStmt();
 }
 
-bool CILKSpawnDecl::hasReceiver() const {
+bool CilkSpawnDecl::hasReceiver() const {
   const Stmt *S = getSpawnStmt();
   assert(S && "null spawn statement");
   return isa<DeclStmt>(S);
 }
 
-VarDecl *CILKSpawnDecl::getReceiverDecl() const {
+VarDecl *CilkSpawnDecl::getReceiverDecl() const {
   Stmt *S = const_cast<Stmt *>(getSpawnStmt());
   assert(S && "null spawn statement");
   if (DeclStmt *DS = dyn_cast<DeclStmt>(S)) {

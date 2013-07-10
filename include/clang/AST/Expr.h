@@ -4477,10 +4477,10 @@ public:
 
 /// \brief Adaptor class for mixing a CilkSpawnDecl with expressions.
 class CilkSpawnExpr : public Expr {
-  CILKSpawnDecl *TheSpawn;
+  CilkSpawnDecl *TheSpawn;
 
 public:
-  explicit CilkSpawnExpr(CILKSpawnDecl *D, QualType Ty)
+  explicit CilkSpawnExpr(CilkSpawnDecl *D, QualType Ty)
     : Expr(CilkSpawnExprClass, Ty, VK_RValue, OK_Ordinary,
            Ty->isDependentType(), Ty->isDependentType(),
            Ty->isInstantiationDependentType(), false), TheSpawn(D) { }
@@ -4488,9 +4488,9 @@ public:
   /// \brief Build an empty block expression.
   explicit CilkSpawnExpr(EmptyShell Empty) : Expr(CilkSpawnExprClass, Empty) { }
 
-  const CILKSpawnDecl *getSpawnDecl() const { return TheSpawn; }
-  CILKSpawnDecl *getSpawnDecl() { return TheSpawn; }
-  void setSpawnDecl(CILKSpawnDecl *D) { TheSpawn = D; }
+  const CilkSpawnDecl *getSpawnDecl() const { return TheSpawn; }
+  CilkSpawnDecl *getSpawnDecl() { return TheSpawn; }
+  void setSpawnDecl(CilkSpawnDecl *D) { TheSpawn = D; }
 
   Stmt *getSpawnStmt() { return TheSpawn->getSpawnStmt(); }
   const Stmt *getSpawnStmt() const { return TheSpawn->getSpawnStmt(); }

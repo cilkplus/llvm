@@ -105,8 +105,8 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
            "Should not see file-scope variables inside a function!");
     return EmitVarDecl(VD);
   }
-  case Decl::CILKSpawn:
-    return EmitCILKSpawnDecl(cast<CILKSpawnDecl>(&D));
+  case Decl::CilkSpawn:
+    return EmitCilkSpawnDecl(cast<CilkSpawnDecl>(&D));
 
   case Decl::Typedef:      // typedef int X;
   case Decl::TypeAlias: {  // using X = int; [C++0x]
@@ -825,8 +825,8 @@ void CodeGenFunction::EmitCaptureReceiverDecl(const VarDecl &D) {
 /// variable declaration with auto, register, or no storage class specifier.
 /// These turn into simple stack objects, or GlobalValues depending on target.
 void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
-  if (CGCilkSpawnStmtInfo *Info =
-        dyn_cast_or_null<CGCilkSpawnStmtInfo>(CapturedStmtInfo)) {
+  if (CGCilkSpawnInfo *Info =
+        dyn_cast_or_null<CGCilkSpawnInfo>(CapturedStmtInfo)) {
     // Do initialization if this decl is inside the helper function.
     if (Info->isReceiverDecl(&D)) {
       AutoVarEmission Emission(D);

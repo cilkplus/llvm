@@ -2112,9 +2112,9 @@ void CodeGenFunction::EmitCilkForHelperBody(const Stmt *S) {
 }
 
 void
-CodeGenFunction::CGCilkSpawnStmtInfo::EmitBody(CodeGenFunction &CGF, Stmt *S) {
+CodeGenFunction::CGCilkSpawnInfo::EmitBody(CodeGenFunction &CGF, Stmt *S) {
   // If there is a receiver, save its address.
-  CGCilkSpawnStmtInfo *Info = cast<CGCilkSpawnStmtInfo>(CGF.CapturedStmtInfo);
+  CGCilkSpawnInfo *Info = cast<CGCilkSpawnInfo>(CGF.CapturedStmtInfo);
   if (Info->getReceiverDecl()) {
     assert(CGF.CurFn->arg_size() >= 2);
     llvm::Function::arg_iterator A = CGF.CurFn->arg_begin();

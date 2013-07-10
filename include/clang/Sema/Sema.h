@@ -2901,7 +2901,7 @@ public:
 
   /// \brief Convert a declaration initialized by a Cilk spawn call into
   /// a CilkSpawnDecl.
-  CILKSpawnDecl *BuildCilkSpawnDecl(Decl *D);
+  CilkSpawnDecl *BuildCilkSpawnDecl(Decl *D);
 
   bool DiagCilkSpawnFullExpr(Expr *E);
 

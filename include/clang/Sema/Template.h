@@ -430,7 +430,7 @@ namespace clang {
     Decl *VisitClassScopeFunctionSpecializationDecl(
                                       ClassScopeFunctionSpecializationDecl *D);
     Decl *VisitOMPThreadPrivateDecl(OMPThreadPrivateDecl *D);
-    Decl *VisitCILKSpawnDecl(CILKSpawnDecl *D);
+    Decl *VisitCilkSpawnDecl(CilkSpawnDecl *D);
 
     // Base case. FIXME: Remove once we can instantiate everything.
     Decl *VisitDecl(Decl *D) {
