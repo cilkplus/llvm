@@ -1026,7 +1026,33 @@ def SIMDLengthFor : Attr {
 
 def SIMDLinear : Attr {
   let Spellings = [Keyword<"linear">];
-  let Args = [VariadicExprArgument<"Steps">];
+  // Array alternates between linear variable and linear step.
+  let Args = [VariadicExprArgument<"Items">];
+  let AdditionalMembers = [{
+    class linear_iterator {
+    private:
+      items_iterator it;
+    public:
+      linear_iterator(const SIMDLinearAttr &A, bool step, bool end) {
+        it = ((end) ? A.items_end() : A.items_begin()) + step;
+      }
+      Expr *operator*() { return *it; }
+      void operator++() { it += 2; }
+      bool operator!=(const linear_iterator &i) const { return (it != i.it); }
+    };
+    linear_iterator vars_begin() const {
+      return linear_iterator(*this, false, false);
+    }
+    linear_iterator steps_begin() const {
+      return linear_iterator(*this, true, false);
+    }
+    linear_iterator vars_end() const {
+      return linear_iterator(*this, false, true);
+    }
+    linear_iterator steps_end() const {
+      return linear_iterator(*this, true, true);
+    }
+  }];
 }
 
 def SIMDPrivate : Attr {

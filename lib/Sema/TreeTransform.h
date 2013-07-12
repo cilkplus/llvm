@@ -5315,8 +5315,8 @@ AttrResult TreeTransform<Derived>::TransformSIMDAttr(Attr *A) {
   case attr::SIMDLinear: {
     SIMDLinearAttr *LinearAttr = cast<SIMDLinearAttr>(A);
     SmallVector<Expr *, 1> Exprs;
-    for (SIMDLinearAttr::steps_iterator it = LinearAttr->steps_begin(),
-                                        end = LinearAttr->steps_end();
+    for (SIMDLinearAttr::items_iterator it = LinearAttr->items_begin(),
+                                        end = LinearAttr->items_end();
          it != end; ++it) {
       ExprResult E = getDerived().TransformExpr(*it);
       // We need to push even if it is an invalid expr to make a pair.

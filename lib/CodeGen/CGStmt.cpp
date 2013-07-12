@@ -2282,10 +2282,12 @@ static Expr *GetLinearStep(const SIMDForStmt &SS, VarDecl *SIMDVar) {
     Attr *A = *I;
     if (SIMDLinearAttr *LA = dyn_cast<SIMDLinearAttr>(A))
       // This is a Linear clause, iterate over its variables and steps.
-      for (Expr **L = LA->steps_begin(), **S = L+1, **K = LA->steps_end();
-           L != K; L += 2, S += 2) {
-        assert(isa<DeclRefExpr>(*L) && "Linear variable must be a DeclRefExpr");
-        if (VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(*L)->getDecl()))
+      for (SIMDLinearAttr::linear_iterator V = LA->vars_begin(),
+                                           S = LA->steps_begin(),
+                                           SE = LA->steps_end();
+           S != SE; ++S, ++V) {
+        assert(isa<DeclRefExpr>(*V) && "Linear variable must be a DeclRefExpr");
+        if (VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(*V)->getDecl()))
           if (VD == SIMDVar)
             return *S;
       }

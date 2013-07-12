@@ -3366,7 +3366,9 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
   for (ArrayRef<Attr *>::iterator I = Attrs.begin(), E = Attrs.end();
        I != E; ++I) {
     if (SIMDLinearAttr *A = dyn_cast<SIMDLinearAttr>(*I)) {
-      for (Expr **S = A->steps_begin()+1, **K = A->steps_end(); S < K; S += 2) {
+      for (SIMDLinearAttr::linear_iterator S = A->steps_begin(),
+                                           SE = A->steps_end();
+           S != SE; ++S) {
         Expr *Step = *S;
         if (DeclRefExpr *DRE = dyn_cast_or_null<DeclRefExpr>(Step)) {
           ValueDecl *VD = DRE->getDecl();

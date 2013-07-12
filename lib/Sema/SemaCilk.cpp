@@ -1720,14 +1720,17 @@ typedef llvm::SmallDenseMap<const ValueDecl *,
 
 void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
   const SIMDLinearAttr *LA = static_cast<const SIMDLinearAttr *>(A);
-  for (Expr **i = LA->steps_begin(), **e = LA->steps_end(); i < e; i += 2) {
-    const Expr *LE = *i;
+  for (SIMDLinearAttr::linear_iterator V = LA->vars_begin(),
+                                       S = LA->steps_begin(),
+                                       SE = LA->steps_end();
+       S != SE; ++S, ++V) {
+    const Expr *LE = *V;
     if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(LE)) {
       const ValueDecl *VD = D->getDecl();
       UsedDecls[VD].push_back(UsedDecl(false, A, D));
     }
-    const Expr *SE = *(i+1);
-    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(SE)) {
+    const Expr *Step = *S;
+    if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(Step)) {
       const ValueDecl *VD = D->getDecl();
       UsedDecls[VD].push_back(UsedDecl(true, LA, D));
     }
@@ -1903,8 +1906,9 @@ void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
       break;
     case attr::SIMDLinear: {
       const SIMDLinearAttr *LA = static_cast<const SIMDLinearAttr *>(A);
-      for (Expr **I = LA->steps_begin(), **E = LA->steps_end();
-           I != E; I += 2) {
+      for (SIMDLinearAttr::linear_iterator I = LA->vars_begin(),
+                                           E = LA->vars_end();
+           I != E; ++I) {
         Expr *DE = *I;
         assert (DE && isa<DeclRefExpr>(DE) && "reference to a variable expected");
         VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());
