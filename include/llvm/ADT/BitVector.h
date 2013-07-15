@@ -138,8 +138,15 @@ public:
 
   /// all - Returns true if all bits are set.
   bool all() const {
-    // TODO: Optimize this.
-    return count() == size();
+    for (unsigned i = 0; i < Size / BITWORD_SIZE; ++i)
+      if (Bits[i] != ~0UL)
+        return false;
+
+    // If bits remain check that they are ones. The unused bits are always zero.
+    if (unsigned Remainder = Size % BITWORD_SIZE)
+      return Bits[Size / BITWORD_SIZE] == (1UL << Remainder) - 1;
+
+    return true;
   }
 
   /// none - Returns true if none of the bits are set.

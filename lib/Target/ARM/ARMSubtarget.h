@@ -37,7 +37,8 @@ protected:
   /// ARMProcFamily - ARM processor family: Cortex-A8, Cortex-A9, and others.
   ARMProcFamilyEnum ARMProcFamily;
 
-  /// HasV4TOps, HasV5TOps, HasV5TEOps, HasV6Ops, HasV6T2Ops, HasV7Ops -
+  /// HasV4TOps, HasV5TOps, HasV5TEOps,
+  /// HasV6Ops, HasV6T2Ops, HasV7Ops, HasV8Ops -
   /// Specify whether target support specific ARM ISA variants.
   bool HasV4TOps;
   bool HasV5TOps;
@@ -45,12 +46,14 @@ protected:
   bool HasV6Ops;
   bool HasV6T2Ops;
   bool HasV7Ops;
+  bool HasV8Ops;
 
-  /// HasVFPv2, HasVFPv3, HasVFPv4, HasNEON - Specify what
+  /// HasVFPv2, HasVFPv3, HasVFPv4, HasV8FP, HasNEON - Specify what
   /// floating point ISAs are supported.
   bool HasVFPv2;
   bool HasVFPv3;
   bool HasVFPv4;
+  bool HasV8FP;
   bool HasNEON;
 
   /// UseNEONForSinglePrecisionFP - if the NEONFP attribute has been
@@ -192,10 +195,6 @@ protected:
 
  public:
   enum {
-    isELF, isDarwin
-  } TargetType;
-
-  enum {
     ARM_ABI_APCS,
     ARM_ABI_AAPCS // ARM EABI
   } TargetABI;
@@ -231,6 +230,7 @@ public:
   bool hasV6Ops()   const { return HasV6Ops;   }
   bool hasV6T2Ops() const { return HasV6T2Ops; }
   bool hasV7Ops()   const { return HasV7Ops;  }
+  bool hasV8Ops()   const { return HasV8Ops;  }
 
   bool isCortexA5() const { return ARMProcFamily == CortexA5; }
   bool isCortexA8() const { return ARMProcFamily == CortexA8; }
@@ -246,6 +246,7 @@ public:
   bool hasVFP2() const { return HasVFPv2; }
   bool hasVFP3() const { return HasVFPv3; }
   bool hasVFP4() const { return HasVFPv4; }
+  bool hasV8FP() const { return HasV8FP; }
   bool hasNEON() const { return HasNEON;  }
   bool useNEONForSinglePrecisionFP() const {
     return hasNEON() && UseNEONForSinglePrecisionFP; }

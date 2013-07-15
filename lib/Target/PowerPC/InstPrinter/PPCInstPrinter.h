@@ -21,15 +21,14 @@ namespace llvm {
 class MCOperand;
 
 class PPCInstPrinter : public MCInstPrinter {
-  // 0 -> AIX, 1 -> Darwin.
-  unsigned SyntaxVariant;
+  bool IsDarwin;
 public:
   PPCInstPrinter(const MCAsmInfo &MAI, const MCInstrInfo &MII,
-                 const MCRegisterInfo &MRI, unsigned syntaxVariant)
-    : MCInstPrinter(MAI, MII, MRI), SyntaxVariant(syntaxVariant) {}
+                 const MCRegisterInfo &MRI, bool isDarwin)
+    : MCInstPrinter(MAI, MII, MRI), IsDarwin(isDarwin) {}
   
   bool isDarwinSyntax() const {
-    return SyntaxVariant == 1;
+    return IsDarwin;
   }
   
   virtual void printRegName(raw_ostream &OS, unsigned RegNo) const;
@@ -51,7 +50,8 @@ public:
   void printS16ImmOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printU16ImmOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBranchOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
-  void printAbsAddrOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printAbsBranchOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printTLSCall(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 
   void printcrbitm(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 

@@ -141,10 +141,6 @@ namespace {
   /// SelectionDAG operations.
   ///
   class X86DAGToDAGISel : public SelectionDAGISel {
-    /// X86Lowering - This object fully describes how to lower LLVM code to an
-    /// X86-specific SelectionDAG.
-    const X86TargetLowering &X86Lowering;
-
     /// Subtarget - Keep a pointer to the X86Subtarget around so that we can
     /// make the right decision when generating code for different targets.
     const X86Subtarget *Subtarget;
@@ -156,7 +152,6 @@ namespace {
   public:
     explicit X86DAGToDAGISel(X86TargetMachine &tm, CodeGenOpt::Level OptLevel)
       : SelectionDAGISel(tm, OptLevel),
-        X86Lowering(*tm.getTargetLowering()),
         Subtarget(&tm.getSubtarget<X86Subtarget>()),
         OptForSize(false) {}
 
@@ -204,6 +199,9 @@ namespace {
     bool SelectLEAAddr(SDValue N, SDValue &Base,
                        SDValue &Scale, SDValue &Index, SDValue &Disp,
                        SDValue &Segment);
+    bool SelectLEA64_32Addr(SDValue N, SDValue &Base,
+                            SDValue &Scale, SDValue &Index, SDValue &Disp,
+                            SDValue &Segment);
     bool SelectTLSADDRAddr(SDValue N, SDValue &Base,
                            SDValue &Scale, SDValue &Index, SDValue &Disp,
                            SDValue &Segment);
@@ -230,7 +228,8 @@ namespace {
                                    SDValue &Scale, SDValue &Index,
                                    SDValue &Disp, SDValue &Segment) {
       Base  = (AM.BaseType == X86ISelAddressMode::FrameIndexBase) ?
-        CurDAG->getTargetFrameIndex(AM.Base_FrameIndex, TLI.getPointerTy()) :
+        CurDAG->getTargetFrameIndex(AM.Base_FrameIndex,
+                                    getTargetLowering()->getPointerTy()) :
         AM.Base_Reg;
       Scale = getI8Imm(AM.Scale);
       Index = AM.IndexReg;
@@ -501,8 +500,10 @@ void X86DAGToDAGISel::PreprocessISelDAG() {
 
     // If the source and destination are SSE registers, then this is a legal
     // conversion that should not be lowered.
-    bool SrcIsSSE = X86Lowering.isScalarFPTypeInSSEReg(SrcVT);
-    bool DstIsSSE = X86Lowering.isScalarFPTypeInSSEReg(DstVT);
+    const X86TargetLowering *X86Lowering =
+        static_cast<const X86TargetLowering *>(getTargetLowering());
+    bool SrcIsSSE = X86Lowering->isScalarFPTypeInSSEReg(SrcVT);
+    bool DstIsSSE = X86Lowering->isScalarFPTypeInSSEReg(DstVT);
     if (SrcIsSSE && DstIsSSE)
       continue;
 
@@ -1394,7 +1395,8 @@ bool X86DAGToDAGISel::SelectMOV64Imm32(SDValue N, SDValue &Imm) {
   // In static codegen with small code model, we can get the address of a label
   // into a register with 'movl'. TableGen has already made sure we're looking
   // at a label of some kind.
-  assert(N->getOpcode() == X86ISD::Wrapper && "Unexpected node type for MOV32ri64");
+  assert(N->getOpcode() == X86ISD::Wrapper &&
+         "Unexpected node type for MOV32ri64");
   N = N.getOperand(0);
 
   if (N->getOpcode() != ISD::TargetConstantPool &&
@@ -1406,6 +1408,43 @@ bool X86DAGToDAGISel::SelectMOV64Imm32(SDValue N, SDValue &Imm) {
 
   Imm = N;
   return TM.getCodeModel() == CodeModel::Small;
+}
+
+bool X86DAGToDAGISel::SelectLEA64_32Addr(SDValue N, SDValue &Base,
+                                         SDValue &Scale, SDValue &Index,
+                                         SDValue &Disp, SDValue &Segment) {
+  if (!SelectLEAAddr(N, Base, Scale, Index, Disp, Segment))
+    return false;
+
+  SDLoc DL(N);
+  RegisterSDNode *RN = dyn_cast<RegisterSDNode>(Base);
+  if (RN && RN->getReg() == 0)
+    Base = CurDAG->getRegister(0, MVT::i64);
+  else if (Base.getValueType() == MVT::i32 && !dyn_cast<FrameIndexSDNode>(N)) {
+    // Base could already be %rip, particularly in the x32 ABI.
+    Base = SDValue(CurDAG->getMachineNode(
+                       TargetOpcode::SUBREG_TO_REG, DL, MVT::i64,
+                       CurDAG->getTargetConstant(0, MVT::i64),
+                       Base,
+                       CurDAG->getTargetConstant(X86::sub_32bit, MVT::i32)),
+                   0);
+  }
+
+  RN = dyn_cast<RegisterSDNode>(Index);
+  if (RN && RN->getReg() == 0)
+    Index = CurDAG->getRegister(0, MVT::i64);
+  else {
+    assert(Index.getValueType() == MVT::i32 &&
+           "Expect to be extending 32-bit registers for use in LEA");
+    Index = SDValue(CurDAG->getMachineNode(
+                        TargetOpcode::SUBREG_TO_REG, DL, MVT::i64,
+                        CurDAG->getTargetConstant(0, MVT::i64),
+                        Index,
+                        CurDAG->getTargetConstant(X86::sub_32bit, MVT::i32)),
+                    0);
+  }
+
+  return true;
 }
 
 /// SelectLEAAddr - it calls SelectAddr and determines if the maximal addressing
@@ -1515,7 +1554,8 @@ bool X86DAGToDAGISel::TryFoldLoad(SDNode *P, SDValue N,
 ///
 SDNode *X86DAGToDAGISel::getGlobalBaseReg() {
   unsigned GlobalBaseReg = getInstrInfo()->getGlobalBaseReg(MF);
-  return CurDAG->getRegister(GlobalBaseReg, TLI.getPointerTy()).getNode();
+  return CurDAG->getRegister(GlobalBaseReg,
+                             getTargetLowering()->getPointerTy()).getNode();
 }
 
 SDNode *X86DAGToDAGISel::SelectAtomic64(SDNode *Node, unsigned Opc) {
@@ -2041,6 +2081,8 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
     case Intrinsic::x86_avx2_gather_d_d_256:
     case Intrinsic::x86_avx2_gather_q_d:
     case Intrinsic::x86_avx2_gather_q_d_256: {
+      if (!Subtarget->hasAVX2())
+        break;
       unsigned Opc;
       switch (IntNo) {
       default: llvm_unreachable("Impossible intrinsic");
@@ -2489,6 +2531,11 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
 
     // Prevent use of AH in a REX instruction by referencing AX instead.
     // Shift it down 8 bits.
+    //
+    // The current assumption of the register allocator is that isel
+    // won't generate explicit references to the GPR8_NOREX registers. If
+    // the allocator and/or the backend get enhanced to be more robust in
+    // that regard, this can be, and should be, removed.
     if (HiReg == X86::AH && Subtarget->is64Bit() &&
         !SDValue(Node, 1).use_empty()) {
       SDValue Result = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl,

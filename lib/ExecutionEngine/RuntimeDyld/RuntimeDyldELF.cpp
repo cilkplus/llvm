@@ -334,8 +334,8 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
     *TargetPtr &= 0xff80001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= Result >> (48 - 5);
-    // Shift is "lsl #48", in bits 22:21
-    *TargetPtr |= 3 << 21;
+    // Shift must be "lsl #48", in bits 22:21
+    assert((*TargetPtr >> 21 & 0x3) == 3 && "invalid shift for relocation");
     break;
   }
   case ELF::R_AARCH64_MOVW_UABS_G2_NC: {
@@ -347,8 +347,8 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
     *TargetPtr &= 0xff80001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= ((Result & 0xffff00000000ULL) >> (32 - 5));
-    // Shift is "lsl #32", in bits 22:21
-    *TargetPtr |= 2 << 21;
+    // Shift must be "lsl #32", in bits 22:21
+    assert((*TargetPtr >> 21 & 0x3) == 2 && "invalid shift for relocation");
     break;
   }
   case ELF::R_AARCH64_MOVW_UABS_G1_NC: {
@@ -359,8 +359,8 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
     *TargetPtr &= 0xff80001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= ((Result & 0xffff0000U) >> (16 - 5));
-    // Shift is "lsl #16", in bits 22:21
-    *TargetPtr |= 1 << 21;
+    // Shift must be "lsl #16", in bits 22:2
+    assert((*TargetPtr >> 21 & 0x3) == 1 && "invalid shift for relocation");
     break;
   }
   case ELF::R_AARCH64_MOVW_UABS_G0_NC: {
@@ -371,7 +371,8 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
     *TargetPtr &= 0xff80001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= ((Result & 0xffffU) << 5);
-    // Shift is "lsl #0", in bits 22:21. No action needed.
+    // Shift must be "lsl #0", in bits 22:21.
+    assert((*TargetPtr >> 21 & 0x3) == 0 && "invalid shift for relocation");
     break;
   }
   }
@@ -551,9 +552,8 @@ void RuntimeDyldELF::findOPDEntrySection(ObjectImage &Obj,
         continue;
       }
 
-      SymbolRef TargetSymbol;
       uint64_t TargetSymbolOffset;
-      check(i->getSymbol(TargetSymbol));
+      symbol_iterator TargetSymbol = i->getSymbol();
       check(i->getOffset(TargetSymbolOffset));
       int64_t Addend;
       check(getELFRelocationAddend(*i, Addend));
@@ -576,7 +576,7 @@ void RuntimeDyldELF::findOPDEntrySection(ObjectImage &Obj,
         continue;
 
       section_iterator tsi(Obj.end_sections());
-      check(TargetSymbol.getSection(tsi));
+      check(TargetSymbol->getSection(tsi));
       Rel.SectionID = findOrEmitSection(Obj, (*tsi), true, LocalSections);
       Rel.Addend = (intptr_t)Addend;
       return;
@@ -777,28 +777,32 @@ void RuntimeDyldELF::processRelocationRef(unsigned SectionID,
   Check(RelI.getType(RelType));
   int64_t Addend;
   Check(getELFRelocationAddend(RelI, Addend));
-  SymbolRef Symbol;
-  Check(RelI.getSymbol(Symbol));
+  symbol_iterator Symbol = RelI.getSymbol();
 
   // Obtain the symbol name which is referenced in the relocation
   StringRef TargetName;
-  Symbol.getName(TargetName);
+  if (Symbol != Obj.end_symbols())
+    Symbol->getName(TargetName);
   DEBUG(dbgs() << "\t\tRelType: " << RelType
                << " Addend: " << Addend
                << " TargetName: " << TargetName
                << "\n");
   RelocationValueRef Value;
   // First search for the symbol in the local symbol table
-  SymbolTableMap::const_iterator lsi = Symbols.find(TargetName.data());
-  SymbolRef::Type SymType;
-  Symbol.getType(SymType);
+  SymbolTableMap::const_iterator lsi = Symbols.end();
+  SymbolRef::Type SymType = SymbolRef::ST_Unknown;
+  if (Symbol != Obj.end_symbols()) {
+    lsi = Symbols.find(TargetName.data());
+    Symbol->getType(SymType);
+  }
   if (lsi != Symbols.end()) {
     Value.SectionID = lsi->second.first;
     Value.Addend = lsi->second.second + Addend;
   } else {
     // Search for the symbol in the global symbol table
-    SymbolTableMap::const_iterator gsi =
-        GlobalSymbolTable.find(TargetName.data());
+    SymbolTableMap::const_iterator gsi = GlobalSymbolTable.end();
+    if (Symbol != Obj.end_symbols())
+      gsi = GlobalSymbolTable.find(TargetName.data());
     if (gsi != GlobalSymbolTable.end()) {
       Value.SectionID = gsi->second.first;
       Value.Addend = gsi->second.second + Addend;
@@ -809,7 +813,7 @@ void RuntimeDyldELF::processRelocationRef(unsigned SectionID,
           // and can be changed by another developers. Maybe best way is add
           // a new symbol type ST_Section to SymbolRef and use it.
           section_iterator si(Obj.end_sections());
-          Symbol.getSection(si);
+          Symbol->getSection(si);
           if (si == Obj.end_sections())
             llvm_unreachable("Symbol section not found, bad object file format!");
           DEBUG(dbgs() << "\t\tThis is section symbol\n");

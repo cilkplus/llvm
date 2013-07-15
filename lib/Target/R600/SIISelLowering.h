@@ -21,9 +21,6 @@
 namespace llvm {
 
 class SITargetLowering : public AMDGPUTargetLowering {
-  const SIInstrInfo * TII;
-  const TargetRegisterInfo * TRI;
-
   SDValue LowerParameter(SelectionDAG &DAG, EVT VT, SDLoc DL,
                          SDValue Chain, unsigned Offset) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
@@ -43,6 +40,7 @@ class SITargetLowering : public AMDGPUTargetLowering {
 
 public:
   SITargetLowering(TargetMachine &tm);
+  bool allowsUnalignedMemoryAccesses(EVT  VT, bool *IsFast) const;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool isVarArg,

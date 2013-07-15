@@ -40,7 +40,7 @@ bb:                                               ; preds = %entry, %bb
   %a_addr.0 = add i32 %.pn, %a_addr.18
   %3 = add nsw i32 %1, 1
   %exitcond = icmp eq i32 %3, %b
-;CHECK:      subcc
+;CHECK:      cmp
 ;CHECK:      bne
 ;CHECK-NOT:  nop
   br i1 %exitcond, label %bb5, label %bb
@@ -57,9 +57,9 @@ entry:
 ;CHECK:      test_inlineasm
 ;CHECK:      sethi
 ;CHECK:      !NO_APP
-;CHECK-NEXT: subcc
+;CHECK-NEXT: cmp
 ;CHECK-NEXT: bg
-;CHECK-NEXT: nop
+;CHECK-NEXT: or
   tail call void asm sideeffect "sethi 0, %g0", ""() nounwind
   %0 = icmp slt i32 %a, 0
   br i1 %0, label %bb, label %bb1
@@ -109,7 +109,7 @@ declare i32 @func(i32*)
 
 define i32 @restore_add(i32 %a, i32 %b) {
 entry:
-;CHECK:  restore_add:
+;CHECK-LABEL:  restore_add:
 ;CHECK:  jmp %i7+8
 ;CHECK:  restore %o0, %i1, %o0
   %0 = tail call i32 @bar(i32 %a) nounwind
@@ -119,7 +119,7 @@ entry:
 
 define i32 @restore_add_imm(i32 %a) {
 entry:
-;CHECK:  restore_add_imm:
+;CHECK-LABEL:  restore_add_imm:
 ;CHECK:  jmp %i7+8
 ;CHECK:  restore %o0, 20, %o0
   %0 = tail call i32 @bar(i32 %a) nounwind
@@ -129,7 +129,7 @@ entry:
 
 define i32 @restore_or(i32 %a) {
 entry:
-;CHECK:  restore_or:
+;CHECK-LABEL:  restore_or:
 ;CHECK:  jmp %i7+8
 ;CHECK:  restore %g0, %o0, %o0
   %0 = tail call i32 @bar(i32 %a) nounwind
@@ -138,7 +138,7 @@ entry:
 
 define i32 @restore_or_imm(i32 %a) {
 entry:
-;CHECK:  restore_or_imm:
+;CHECK-LABEL:  restore_or_imm:
 ;CHECK:  or %o0, 20, %i0
 ;CHECK:  jmp %i7+8
 ;CHECK:  restore %g0, %g0, %g0

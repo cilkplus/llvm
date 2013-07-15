@@ -510,7 +510,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
     // into an AND, as we know the bits will be cleared.
     //    e.g. (X | C1) ^ C2 --> (X | C1) & ~C2 iff (C1&C2) == C2
     // NB: it is okay if more bits are known than are requested
-    if ((NewMask & (KnownZero|KnownOne)) == NewMask) { // all known on one side 
+    if ((NewMask & (KnownZero|KnownOne)) == NewMask) { // all known on one side
       if (KnownOne == KnownOne2) { // set bits are the same on both sides
         EVT VT = Op.getValueType();
         SDValue ANDC = TLO.DAG.getConstant(~KnownOne & NewMask, VT);
@@ -1992,7 +1992,7 @@ void TargetLowering::LowerAsmOperandForConstraint(SDValue Op,
 
 std::pair<unsigned, const TargetRegisterClass*> TargetLowering::
 getRegForInlineAsmConstraint(const std::string &Constraint,
-                             EVT VT) const {
+                             MVT VT) const {
   if (Constraint[0] != '{')
     return std::make_pair(0u, static_cast<TargetRegisterClass*>(0));
   assert(*(Constraint.end()-1) == '}' && "Not a brace enclosed constraint?");
@@ -2438,7 +2438,7 @@ void TargetLowering::ComputeConstraintToUse(AsmOperandInfo &OpInfo,
   }
 }
 
-/// BuildExactDiv - Given an exact SDIV by a constant, create a multiplication
+/// \brief Given an exact SDIV by a constant, create a multiplication
 /// with the multiplicative inverse of the constant.
 SDValue TargetLowering::BuildExactSDIV(SDValue Op1, SDValue Op2, SDLoc dl,
                                        SelectionDAG &DAG) const {
@@ -2464,7 +2464,7 @@ SDValue TargetLowering::BuildExactSDIV(SDValue Op1, SDValue Op2, SDLoc dl,
   return DAG.getNode(ISD::MUL, dl, Op1.getValueType(), Op1, Op2);
 }
 
-/// BuildSDIVSequence - Given an ISD::SDIV node expressing a divide by constant,
+/// \brief Given an ISD::SDIV node expressing a divide by constant,
 /// return a DAG expression to select that will generate the same value by
 /// multiplying by a magic number.  See:
 /// <http://the.wall.riscom.net/books/proc/ppc/cwg/code2.html>
@@ -2524,7 +2524,7 @@ BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
   return DAG.getNode(ISD::ADD, dl, VT, Q, T);
 }
 
-/// BuildUDIVSequence - Given an ISD::UDIV node expressing a divide by constant,
+/// \brief Given an ISD::UDIV node expressing a divide by constant,
 /// return a DAG expression to select that will generate the same value by
 /// multiplying by a magic number.  See:
 /// <http://the.wall.riscom.net/books/proc/ppc/cwg/code2.html>

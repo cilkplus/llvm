@@ -11,25 +11,42 @@
 #include "PPCMCExpr.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCAsmInfo.h"
 
 using namespace llvm;
 
 const PPCMCExpr*
 PPCMCExpr::Create(VariantKind Kind, const MCExpr *Expr,
-                       MCContext &Ctx) {
-  return new (Ctx) PPCMCExpr(Kind, Expr);
+                  bool isDarwin, MCContext &Ctx) {
+  return new (Ctx) PPCMCExpr(Kind, Expr, isDarwin);
 }
 
 void PPCMCExpr::PrintImpl(raw_ostream &OS) const {
-  switch (Kind) {
-  default: llvm_unreachable("Invalid kind!");
-  case VK_PPC_HA16: OS << "ha16"; break;
-  case VK_PPC_LO16: OS << "lo16"; break;
-  }
+  if (isDarwinSyntax()) {
+    switch (Kind) {
+    default: llvm_unreachable("Invalid kind!");
+    case VK_PPC_LO: OS << "lo16"; break;
+    case VK_PPC_HI: OS << "hi16"; break;
+    case VK_PPC_HA: OS << "ha16"; break;
+    }
 
-  OS << '(';
-  getSubExpr()->print(OS);
-  OS << ')';
+    OS << '(';
+    getSubExpr()->print(OS);
+    OS << ')';
+  } else {
+    getSubExpr()->print(OS);
+
+    switch (Kind) {
+    default: llvm_unreachable("Invalid kind!");
+    case VK_PPC_LO: OS << "@l"; break;
+    case VK_PPC_HI: OS << "@h"; break;
+    case VK_PPC_HA: OS << "@ha"; break;
+    case VK_PPC_HIGHER: OS << "@higher"; break;
+    case VK_PPC_HIGHERA: OS << "@highera"; break;
+    case VK_PPC_HIGHEST: OS << "@highest"; break;
+    case VK_PPC_HIGHESTA: OS << "@highesta"; break;
+    }
+  }
 }
 
 bool
@@ -45,11 +62,26 @@ PPCMCExpr::EvaluateAsRelocatableImpl(MCValue &Res,
     switch (Kind) {
       default:
         llvm_unreachable("Invalid kind!");
-      case VK_PPC_HA16:
-        Result = ((Result >> 16) + ((Result & 0x8000) ? 1 : 0)) & 0xffff;
-        break;
-      case VK_PPC_LO16:
+      case VK_PPC_LO:
         Result = Result & 0xffff;
+        break;
+      case VK_PPC_HI:
+        Result = (Result >> 16) & 0xffff;
+        break;
+      case VK_PPC_HA:
+        Result = ((Result + 0x8000) >> 16) & 0xffff;
+        break;
+      case VK_PPC_HIGHER:
+        Result = (Result >> 32) & 0xffff;
+        break;
+      case VK_PPC_HIGHERA:
+        Result = ((Result + 0x8000) >> 32) & 0xffff;
+        break;
+      case VK_PPC_HIGHEST:
+        Result = (Result >> 48) & 0xffff;
+        break;
+      case VK_PPC_HIGHESTA:
+        Result = ((Result + 0x8000) >> 48) & 0xffff;
         break;
     }
     Res = MCValue::get(Result);
@@ -62,11 +94,26 @@ PPCMCExpr::EvaluateAsRelocatableImpl(MCValue &Res,
     switch (Kind) {
       default:
         llvm_unreachable("Invalid kind!");
-      case VK_PPC_HA16:
-        Modifier = MCSymbolRefExpr::VK_PPC_ADDR16_HA;
+      case VK_PPC_LO:
+        Modifier = MCSymbolRefExpr::VK_PPC_LO;
         break;
-      case VK_PPC_LO16:
-        Modifier = MCSymbolRefExpr::VK_PPC_ADDR16_LO;
+      case VK_PPC_HI:
+        Modifier = MCSymbolRefExpr::VK_PPC_HI;
+        break;
+      case VK_PPC_HA:
+        Modifier = MCSymbolRefExpr::VK_PPC_HA;
+        break;
+      case VK_PPC_HIGHERA:
+        Modifier = MCSymbolRefExpr::VK_PPC_HIGHERA;
+        break;
+      case VK_PPC_HIGHER:
+        Modifier = MCSymbolRefExpr::VK_PPC_HIGHER;
+        break;
+      case VK_PPC_HIGHEST:
+        Modifier = MCSymbolRefExpr::VK_PPC_HIGHEST;
+        break;
+      case VK_PPC_HIGHESTA:
+        Modifier = MCSymbolRefExpr::VK_PPC_HIGHESTA;
         break;
     }
     Sym = MCSymbolRefExpr::Create(&Sym->getSymbol(), Modifier, Context);

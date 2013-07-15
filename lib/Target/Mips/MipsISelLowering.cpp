@@ -346,11 +346,6 @@ MipsTargetLowering(MipsTargetMachine &TM)
     setOperationAction(ISD::FNEG,             MVT::f64,   Expand);
   }
 
-  setOperationAction(ISD::EXCEPTIONADDR,     MVT::i32, Expand);
-  setOperationAction(ISD::EXCEPTIONADDR,     MVT::i64, Expand);
-  setOperationAction(ISD::EHSELECTION,       MVT::i32, Expand);
-  setOperationAction(ISD::EHSELECTION,       MVT::i64, Expand);
-
   setOperationAction(ISD::EH_RETURN, MVT::Other, Custom);
 
   setOperationAction(ISD::VAARG,             MVT::Other, Expand);
@@ -1084,9 +1079,9 @@ MipsTargetLowering::emitAtomicBinaryPartword(MachineInstr *MI,
   BuildMI(BB, DL, TII->get(Mips::ORi), MaskUpper)
     .addReg(Mips::ZERO).addImm(MaskImm);
   BuildMI(BB, DL, TII->get(Mips::SLLV), Mask)
-    .addReg(ShiftAmt).addReg(MaskUpper);
+    .addReg(MaskUpper).addReg(ShiftAmt);
   BuildMI(BB, DL, TII->get(Mips::NOR), Mask2).addReg(Mips::ZERO).addReg(Mask);
-  BuildMI(BB, DL, TII->get(Mips::SLLV), Incr2).addReg(ShiftAmt).addReg(Incr);
+  BuildMI(BB, DL, TII->get(Mips::SLLV), Incr2).addReg(Incr).addReg(ShiftAmt);
 
   // atomic.load.binop
   // loopMBB:
@@ -1147,7 +1142,7 @@ MipsTargetLowering::emitAtomicBinaryPartword(MachineInstr *MI,
   BuildMI(BB, DL, TII->get(Mips::AND), MaskedOldVal1)
     .addReg(OldVal).addReg(Mask);
   BuildMI(BB, DL, TII->get(Mips::SRLV), SrlRes)
-      .addReg(ShiftAmt).addReg(MaskedOldVal1);
+      .addReg(MaskedOldVal1).addReg(ShiftAmt);
   BuildMI(BB, DL, TII->get(Mips::SLL), SllRes)
       .addReg(SrlRes).addImm(ShiftImm);
   BuildMI(BB, DL, TII->get(Mips::SRA), Dest)
@@ -1334,16 +1329,16 @@ MipsTargetLowering::emitAtomicCmpSwapPartword(MachineInstr *MI,
   BuildMI(BB, DL, TII->get(Mips::ORi), MaskUpper)
     .addReg(Mips::ZERO).addImm(MaskImm);
   BuildMI(BB, DL, TII->get(Mips::SLLV), Mask)
-    .addReg(ShiftAmt).addReg(MaskUpper);
+    .addReg(MaskUpper).addReg(ShiftAmt);
   BuildMI(BB, DL, TII->get(Mips::NOR), Mask2).addReg(Mips::ZERO).addReg(Mask);
   BuildMI(BB, DL, TII->get(Mips::ANDi), MaskedCmpVal)
     .addReg(CmpVal).addImm(MaskImm);
   BuildMI(BB, DL, TII->get(Mips::SLLV), ShiftedCmpVal)
-    .addReg(ShiftAmt).addReg(MaskedCmpVal);
+    .addReg(MaskedCmpVal).addReg(ShiftAmt);
   BuildMI(BB, DL, TII->get(Mips::ANDi), MaskedNewVal)
     .addReg(NewVal).addImm(MaskImm);
   BuildMI(BB, DL, TII->get(Mips::SLLV), ShiftedNewVal)
-    .addReg(ShiftAmt).addReg(MaskedNewVal);
+    .addReg(MaskedNewVal).addReg(ShiftAmt);
 
   //  loop1MBB:
   //    ll      oldval,0(alginedaddr)
@@ -1379,7 +1374,7 @@ MipsTargetLowering::emitAtomicCmpSwapPartword(MachineInstr *MI,
   int64_t ShiftImm = (Size == 1) ? 24 : 16;
 
   BuildMI(BB, DL, TII->get(Mips::SRLV), SrlRes)
-      .addReg(ShiftAmt).addReg(MaskedOldVal0);
+      .addReg(MaskedOldVal0).addReg(ShiftAmt);
   BuildMI(BB, DL, TII->get(Mips::SLL), SllRes)
       .addReg(SrlRes).addImm(ShiftImm);
   BuildMI(BB, DL, TII->get(Mips::SRA), Dest)
@@ -2328,9 +2323,9 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                               SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG                     = CLI.DAG;
   SDLoc DL                              = CLI.DL;
-  SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
-  SmallVector<SDValue, 32> &OutVals     = CLI.OutVals;
-  SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals     = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins   = CLI.Ins;
   SDValue Chain                         = CLI.Chain;
   SDValue Callee                        = CLI.Callee;
   bool &IsTailCall                      = CLI.IsTailCall;
@@ -2885,7 +2880,7 @@ MipsTargetLowering::getSingleConstraintMatchWeight(
 /// to an LLVM register class, return a register of 0 and the register class
 /// pointer.
 std::pair<unsigned, const TargetRegisterClass*> MipsTargetLowering::
-getRegForInlineAsmConstraint(const std::string &Constraint, EVT VT) const
+getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const
 {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
@@ -3388,7 +3383,7 @@ copyByValRegs(SDValue Chain, SDLoc DL, std::vector<SDValue> &OutChains,
 void MipsTargetLowering::
 passByValArg(SDValue Chain, SDLoc DL,
              std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
-             SmallVector<SDValue, 8> &MemOpChains, SDValue StackPtr,
+             SmallVectorImpl<SDValue> &MemOpChains, SDValue StackPtr,
              MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg,
              const MipsCC &CC, const ByValArgInfo &ByVal,
              const ISD::ArgFlagsTy &Flags, bool isLittle) const {

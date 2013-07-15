@@ -133,8 +133,7 @@ namespace {
   public:
     static char ID;
     SystemZLongBranch(const SystemZTargetMachine &tm)
-      : MachineFunctionPass(ID),
-        TII(static_cast<const SystemZInstrInfo *>(tm.getInstrInfo())) {}
+      : MachineFunctionPass(ID), TII(0) {}
 
     virtual const char *getPassName() const {
       return "SystemZ Long Branch";
@@ -311,7 +310,7 @@ bool SystemZLongBranch::mustRelaxBranch(const TerminatorInfo &Terminator,
 // Return true if, under current assumptions, any terminator needs
 // to be relaxed.
 bool SystemZLongBranch::mustRelaxABranch() {
-  for (SmallVector<TerminatorInfo, 16>::iterator TI = Terminators.begin(),
+  for (SmallVectorImpl<TerminatorInfo>::iterator TI = Terminators.begin(),
          TE = Terminators.end(); TI != TE; ++TI)
     if (mustRelaxBranch(*TI, TI->Address))
       return true;
@@ -323,7 +322,7 @@ bool SystemZLongBranch::mustRelaxABranch() {
 void SystemZLongBranch::setWorstCaseAddresses() {
   SmallVector<TerminatorInfo, 16>::iterator TI = Terminators.begin();
   BlockPosition Position(MF->getAlignment());
-  for (SmallVector<MBBInfo, 16>::iterator BI = MBBs.begin(), BE = MBBs.end();
+  for (SmallVectorImpl<MBBInfo>::iterator BI = MBBs.begin(), BE = MBBs.end();
        BI != BE; ++BI) {
     skipNonTerminators(Position, *BI);
     for (unsigned BTI = 0, BTE = BI->NumTerminators; BTI != BTE; ++BTI) {
@@ -387,7 +386,7 @@ void SystemZLongBranch::relaxBranch(TerminatorInfo &Terminator) {
 void SystemZLongBranch::relaxBranches() {
   SmallVector<TerminatorInfo, 16>::iterator TI = Terminators.begin();
   BlockPosition Position(MF->getAlignment());
-  for (SmallVector<MBBInfo, 16>::iterator BI = MBBs.begin(), BE = MBBs.end();
+  for (SmallVectorImpl<MBBInfo>::iterator BI = MBBs.begin(), BE = MBBs.end();
        BI != BE; ++BI) {
     skipNonTerminators(Position, *BI);
     for (unsigned BTI = 0, BTE = BI->NumTerminators; BTI != BTE; ++BTI) {
@@ -402,6 +401,7 @@ void SystemZLongBranch::relaxBranches() {
 }
 
 bool SystemZLongBranch::runOnMachineFunction(MachineFunction &F) {
+  TII = static_cast<const SystemZInstrInfo *>(F.getTarget().getInstrInfo());
   MF = &F;
   uint64_t Size = initMBBInfo();
   if (Size <= MaxForwardRange || !mustRelaxABranch())

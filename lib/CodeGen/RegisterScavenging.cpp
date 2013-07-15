@@ -44,8 +44,8 @@ bool RegScavenger::isAliasUsed(unsigned Reg) const {
 }
 
 void RegScavenger::initRegState() {
-  for (SmallVector<ScavengedInfo, 2>::iterator I = Scavenged.begin(),
-       IE = Scavenged.end(); I != IE; ++I) {
+  for (SmallVectorImpl<ScavengedInfo>::iterator I = Scavenged.begin(),
+         IE = Scavenged.end(); I != IE; ++I) {
     I->Reg = 0;
     I->Restore = NULL;
   }
@@ -181,8 +181,8 @@ void RegScavenger::forward() {
 
   MachineInstr *MI = MBBI;
 
-  for (SmallVector<ScavengedInfo, 2>::iterator I = Scavenged.begin(),
-       IE = Scavenged.end(); I != IE; ++I) {
+  for (SmallVectorImpl<ScavengedInfo>::iterator I = Scavenged.begin(),
+         IE = Scavenged.end(); I != IE; ++I) {
     if (I->Restore != MI)
       continue;
 
@@ -368,7 +368,7 @@ unsigned RegScavenger::scavengeRegister(const TargetRegisterClass *RC,
   // Exclude all the registers being used by the instruction.
   for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i) {
     MachineOperand &MO = I->getOperand(i);
-    if (MO.isReg() && MO.getReg() != 0 &&
+    if (MO.isReg() && MO.getReg() != 0 && !(MO.isUse() && MO.isUndef()) &&
         !TargetRegisterInfo::isVirtualRegister(MO.getReg()))
       Candidates.reset(MO.getReg());
   }

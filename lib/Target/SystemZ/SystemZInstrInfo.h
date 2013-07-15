@@ -32,8 +32,14 @@ namespace SystemZII {
     SimpleBDXStore = (1 << 1),
     Has20BitOffset = (1 << 2),
     HasIndex       = (1 << 3),
-    Is128Bit       = (1 << 4)
+    Is128Bit       = (1 << 4),
+    AccessSizeMask = (31 << 5),
+    AccessSizeShift = 5
   };
+  static inline unsigned getAccessSize(unsigned int Flags) {
+    return (Flags & AccessSizeMask) >> AccessSizeShift;
+  }
+
   // SystemZ MachineOperand target flags.
   enum {
     // Masks out the bits for the access model.
@@ -85,6 +91,8 @@ public:
                                        int &FrameIndex) const LLVM_OVERRIDE;
   virtual unsigned isStoreToStackSlot(const MachineInstr *MI,
                                       int &FrameIndex) const LLVM_OVERRIDE;
+  virtual bool isStackSlotCopy(const MachineInstr *MI, int &DestFrameIndex,
+                               int &SrcFrameIndex) const LLVM_OVERRIDE;
   virtual bool AnalyzeBranch(MachineBasicBlock &MBB,
                              MachineBasicBlock *&TBB,
                              MachineBasicBlock *&FBB,
@@ -111,6 +119,14 @@ public:
                          unsigned DestReg, int FrameIdx,
                          const TargetRegisterClass *RC,
                          const TargetRegisterInfo *TRI) const LLVM_OVERRIDE;
+  virtual MachineInstr *
+    foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
+                          const SmallVectorImpl<unsigned> &Ops,
+                          int FrameIndex) const;
+  virtual MachineInstr *
+    foldMemoryOperandImpl(MachineFunction &MF, MachineInstr* MI,
+                          const SmallVectorImpl<unsigned> &Ops,
+                          MachineInstr* LoadMI) const;
   virtual bool
     expandPostRAPseudo(MachineBasicBlock::iterator MBBI) const LLVM_OVERRIDE;
   virtual bool

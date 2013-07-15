@@ -21,9 +21,6 @@
 
 namespace llvm {
 
-/// A signed type to represent a floating point numbers unbiased exponent.
-typedef signed short exponent_t;
-
 struct fltSemantics;
 class APSInt;
 class StringRef;
@@ -125,6 +122,9 @@ enum lostFraction { // Example of truncated bits:
 class APFloat {
 public:
 
+  /// A signed type to represent a floating point numbers unbiased exponent.
+  typedef signed short ExponentType;
+
   /// \name Floating Point Semantics.
   /// @{
 
@@ -191,7 +191,6 @@ public:
   APFloat(const fltSemantics &); // Default construct to 0.0
   APFloat(const fltSemantics &, StringRef);
   APFloat(const fltSemantics &, integerPart);
-  APFloat(const fltSemantics &, fltCategory, bool negative);
   APFloat(const fltSemantics &, uninitializedTag);
   APFloat(const fltSemantics &, const APInt &);
   explicit APFloat(double d);
@@ -211,14 +210,18 @@ public:
   ///
   /// \param Negative True iff the number should be negative.
   static APFloat getZero(const fltSemantics &Sem, bool Negative = false) {
-    return APFloat(Sem, fcZero, Negative);
+    APFloat Val(Sem, uninitialized);
+    Val.makeZero(Negative);
+    return Val;
   }
 
   /// Factory for Positive and Negative Infinity.
   ///
   /// \param Negative True iff the number should be negative.
   static APFloat getInf(const fltSemantics &Sem, bool Negative = false) {
-    return APFloat(Sem, fcInfinity, Negative);
+    APFloat Val(Sem, uninitialized);
+    Val.makeInf(Negative);
+    return Val;
   }
 
   /// Factory for QNaN values.
@@ -300,6 +303,8 @@ public:
   /// IEEE-754R 5.3.1: nextUp/nextDown.
   opStatus next(bool nextDown);
 
+  /// @}
+
   /// \name Sign operations.
   /// @{
 
@@ -359,10 +364,7 @@ public:
   ///
   /// This implies that the current value of the float is not zero, subnormal,
   /// infinite, or NaN following the definition of normality from IEEE-754R.
-  ///
-  /// The current implementation of isNormal() differs from this by treating
-  /// subnormal values as normal values.
-  bool isIEEENormal() const { return !isDenormal() && isNormal(); }
+  bool isNormal() const { return !isDenormal() && isFiniteNonZero(); }
 
   /// Returns true if and only if the current value is zero, subnormal, or
   /// normal.
@@ -394,9 +396,17 @@ public:
   fltCategory getCategory() const { return category; }
   const fltSemantics &getSemantics() const { return *semantics; }
   bool isNonZero() const { return category != fcZero; }
-  bool isNormal() const { return category == fcNormal; }
+  bool isFiniteNonZero() const { return isFinite() && !isZero(); }
   bool isPosZero() const { return isZero() && !isNegative(); }
   bool isNegZero() const { return isZero() && isNegative(); }
+
+  /// Returns true if and only if the number has the smallest possible non-zero
+  /// magnitude in the current semantics.
+  bool isSmallest() const;
+
+  /// Returns true if and only if the number has the largest possible finite
+  /// magnitude in the current semantics.
+  bool isLargest() const;
 
   /// @}
 
@@ -491,24 +501,15 @@ private:
   void makeNaN(bool SNaN = false, bool Neg = false, const APInt *fill = 0);
   static APFloat makeNaN(const fltSemantics &Sem, bool SNaN, bool Negative,
                          const APInt *fill);
-
-  /// @}
-
-  /// \name Special value queries only useful internally to APFloat
-  /// @{
-
-  /// Returns true if and only if the number has the smallest possible non-zero
-  /// magnitude in the current semantics.
-  bool isSmallest() const;
-  /// Returns true if and only if the number has the largest possible finite
-  /// magnitude in the current semantics.
-  bool isLargest() const;
+  void makeInf(bool Neg = false);
+  void makeZero(bool Neg = false);
 
   /// @}
 
   /// \name Miscellany
   /// @{
 
+  bool convertFromStringSpecials(StringRef str);
   opStatus normalize(roundingMode, lostFraction);
   opStatus addOrSubtract(const APFloat &, roundingMode, bool subtract);
   cmpResult compareAbsoluteValue(const APFloat &) const;
@@ -557,7 +558,7 @@ private:
   } significand;
 
   /// The signed unbiased exponent of the value.
-  exponent_t exponent;
+  ExponentType exponent;
 
   /// What kind of floating point number this is.
   ///

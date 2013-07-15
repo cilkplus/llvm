@@ -63,7 +63,8 @@ namespace llvm {
       FlagObjcClassComplete  = 1 << 9,
       FlagObjectPointer      = 1 << 10,
       FlagVector             = 1 << 11,
-      FlagStaticMember       = 1 << 12
+      FlagStaticMember       = 1 << 12,
+      FlagIndirectVariable   = 1 << 13
     };
   protected:
     const MDNode *DbgNode;
@@ -221,7 +222,7 @@ namespace llvm {
     explicit DIEnumerator(const MDNode *N = 0) : DIDescriptor(N) {}
 
     StringRef getName() const        { return getStringField(1); }
-    uint64_t getEnumValue() const      { return getUInt64Field(2); }
+    int64_t getEnumValue() const      { return getInt64Field(2); }
     bool Verify() const;
   };
 
@@ -553,6 +554,11 @@ namespace llvm {
       return (getUnsignedField(6) & FlagObjectPointer) != 0;
     }
 
+    /// \brief Return true if this variable is represented as a pointer.
+    bool isIndirect() const {
+      return (getUnsignedField(6) & FlagIndirectVariable) != 0;
+    }
+
     /// getInlinedAt - If this variable is inlined then return inline location.
     MDNode *getInlinedAt() const;
 
@@ -648,22 +654,22 @@ namespace llvm {
     StringRef getObjCPropertySetterName() const {
       return getStringField(5);
     }
-    bool isReadOnlyObjCProperty() {
+    bool isReadOnlyObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_readonly) != 0;
     }
-    bool isReadWriteObjCProperty() {
+    bool isReadWriteObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_readwrite) != 0;
     }
-    bool isAssignObjCProperty() {
+    bool isAssignObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_assign) != 0;
     }
-    bool isRetainObjCProperty() {
+    bool isRetainObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_retain) != 0;
     }
-    bool isCopyObjCProperty() {
+    bool isCopyObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_copy) != 0;
     }
-    bool isNonAtomicObjCProperty() {
+    bool isNonAtomicObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_nonatomic) != 0;
     }
 
@@ -749,7 +755,7 @@ namespace llvm {
     bool addType(DIType DT);
 
   public:
-    typedef SmallVector<MDNode *, 8>::const_iterator iterator;
+    typedef SmallVectorImpl<MDNode *>::const_iterator iterator;
     iterator compile_unit_begin()    const { return CUs.begin(); }
     iterator compile_unit_end()      const { return CUs.end(); }
     iterator subprogram_begin()      const { return SPs.begin(); }

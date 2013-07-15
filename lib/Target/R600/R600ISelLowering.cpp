@@ -27,7 +27,7 @@ using namespace llvm;
 
 R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
     AMDGPUTargetLowering(TM),
-    TII(static_cast<const R600InstrInfo*>(TM.getInstrInfo())) {
+    Gen(TM.getSubtarget<AMDGPUSubtarget>().getGeneration()) {
   addRegisterClass(MVT::v4f32, &AMDGPU::R600_Reg128RegClass);
   addRegisterClass(MVT::f32, &AMDGPU::R600_Reg32RegClass);
   addRegisterClass(MVT::v4i32, &AMDGPU::R600_Reg128RegClass);
@@ -39,29 +39,14 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::FDIV, MVT::v4f32, Expand);
   setOperationAction(ISD::FSUB, MVT::v4f32, Expand);
 
-  setOperationAction(ISD::ADD,  MVT::v4i32, Expand);
-  setOperationAction(ISD::AND,  MVT::v4i32, Expand);
+  setOperationAction(ISD::FCOS, MVT::f32, Custom);
+  setOperationAction(ISD::FSIN, MVT::f32, Custom);
+
   setOperationAction(ISD::FP_TO_SINT, MVT::v4i32, Expand);
   setOperationAction(ISD::FP_TO_UINT, MVT::v4i32, Expand);
-  setOperationAction(ISD::MUL,  MVT::v2i32, Expand);
-  setOperationAction(ISD::MUL,  MVT::v4i32, Expand);
-  setOperationAction(ISD::OR, MVT::v4i32, Expand);
-  setOperationAction(ISD::OR, MVT::v2i32, Expand);
   setOperationAction(ISD::SINT_TO_FP, MVT::v4i32, Expand);
-  setOperationAction(ISD::SHL, MVT::v4i32, Expand);
-  setOperationAction(ISD::SHL, MVT::v2i32, Expand);
-  setOperationAction(ISD::SRL, MVT::v4i32, Expand);
-  setOperationAction(ISD::SRL, MVT::v2i32, Expand);
-  setOperationAction(ISD::SRA, MVT::v4i32, Expand);
-  setOperationAction(ISD::SRA, MVT::v2i32, Expand);
-  setOperationAction(ISD::SUB, MVT::v4i32, Expand);
-  setOperationAction(ISD::SUB, MVT::v2i32, Expand);
   setOperationAction(ISD::UINT_TO_FP, MVT::v4i32, Expand);
-  setOperationAction(ISD::UDIV, MVT::v4i32, Expand);
-  setOperationAction(ISD::UREM, MVT::v4i32, Expand);
   setOperationAction(ISD::SETCC, MVT::v4i32, Expand);
-  setOperationAction(ISD::XOR, MVT::v4i32, Expand);
-  setOperationAction(ISD::XOR, MVT::v2i32, Expand);
 
   setOperationAction(ISD::BR_CC, MVT::i32, Expand);
   setOperationAction(ISD::BR_CC, MVT::f32, Expand);
@@ -87,7 +72,7 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
 
   // Legalize loads and stores to the private address space.
   setOperationAction(ISD::LOAD, MVT::i32, Custom);
-  setOperationAction(ISD::LOAD, MVT::v2i32, Custom);
+  setOperationAction(ISD::LOAD, MVT::v2i32, Expand);
   setOperationAction(ISD::LOAD, MVT::v4i32, Custom);
   setLoadExtAction(ISD::EXTLOAD, MVT::v4i8, Custom);
   setLoadExtAction(ISD::EXTLOAD, MVT::i8, Custom);
@@ -95,7 +80,7 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setLoadExtAction(ISD::ZEXTLOAD, MVT::v4i8, Custom);
   setOperationAction(ISD::STORE, MVT::i8, Custom);
   setOperationAction(ISD::STORE, MVT::i32, Custom);
-  setOperationAction(ISD::STORE, MVT::v2i32, Custom);
+  setOperationAction(ISD::STORE, MVT::v2i32, Expand);
   setOperationAction(ISD::STORE, MVT::v4i32, Custom);
 
   setOperationAction(ISD::LOAD, MVT::i32, Custom);
@@ -107,6 +92,8 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setTargetDAGCombine(ISD::EXTRACT_VECTOR_ELT);
   setTargetDAGCombine(ISD::SELECT_CC);
 
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+
   setBooleanContents(ZeroOrNegativeOneBooleanContent);
   setBooleanVectorContents(ZeroOrNegativeOneBooleanContent);
   setSchedulingPreference(Sched::VLIW);
@@ -117,6 +104,8 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
   MachineFunction * MF = BB->getParent();
   MachineRegisterInfo &MRI = MF->getRegInfo();
   MachineBasicBlock::iterator I = *MI;
+  const R600InstrInfo *TII =
+    static_cast<const R600InstrInfo*>(MF->getTarget().getInstrInfo());
 
   switch (MI->getOpcode()) {
   default: return AMDGPUTargetLowering::EmitInstrWithCustomInserter(MI, BB);
@@ -155,6 +144,19 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
     break;
   }
 
+  case AMDGPU::LDS_READ_RET: {
+    MachineInstrBuilder NewMI = BuildMI(*BB, I, BB->findDebugLoc(I),
+                                        TII->get(MI->getOpcode()),
+                                        AMDGPU::OQAP);
+    for (unsigned i = 1, e = MI->getNumOperands(); i < e; ++i) {
+      NewMI.addOperand(MI->getOperand(i));
+    }
+    TII->buildDefaultInstruction(*BB, I, AMDGPU::MOV,
+                                 MI->getOperand(0).getReg(),
+                                 AMDGPU::OQAP);
+    break;
+  }
+
   case AMDGPU::MOV_IMM_F32:
     TII->buildMovImm(*BB, I, MI->getOperand(0).getReg(),
                      MI->getOperand(1).getFPImm()->getValueAPF()
@@ -167,7 +169,7 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
   case AMDGPU::CONST_COPY: {
     MachineInstr *NewMI = TII->buildDefaultInstruction(*BB, MI, AMDGPU::MOV,
         MI->getOperand(0).getReg(), AMDGPU::ALU_CONST);
-    TII->setImmOperand(NewMI, R600Operands::SRC0_SEL,
+    TII->setImmOperand(NewMI, AMDGPU::OpName::src0_sel,
         MI->getOperand(1).getImm());
     break;
   }
@@ -473,21 +475,24 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
 //===----------------------------------------------------------------------===//
 
 SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
   switch (Op.getOpcode()) {
   default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
+  case ISD::FCOS:
+  case ISD::FSIN: return LowerTrig(Op, DAG);
   case ISD::SELECT_CC: return LowerSELECT_CC(Op, DAG);
   case ISD::SELECT: return LowerSELECT(Op, DAG);
   case ISD::STORE: return LowerSTORE(Op, DAG);
   case ISD::LOAD: return LowerLOAD(Op, DAG);
   case ISD::FrameIndex: return LowerFrameIndex(Op, DAG);
+  case ISD::GlobalAddress: return LowerGlobalAddress(MFI, Op, DAG);
   case ISD::INTRINSIC_VOID: {
     SDValue Chain = Op.getOperand(0);
     unsigned IntrinsicID =
                          cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
     switch (IntrinsicID) {
     case AMDGPUIntrinsic::AMDGPU_store_output: {
-      MachineFunction &MF = DAG.getMachineFunction();
-      R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
       int64_t RegIndex = cast<ConstantSDNode>(Op.getOperand(3))->getZExtValue();
       unsigned Reg = AMDGPU::R600_TReg32RegClass.getRegister(RegIndex);
       MFI->LiveOuts.push_back(Reg);
@@ -536,6 +541,9 @@ SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const 
       int ijb = cast<ConstantSDNode>(Op.getOperand(2))->getSExtValue();
       MachineSDNode *interp;
       if (ijb < 0) {
+        const MachineFunction &MF = DAG.getMachineFunction();
+        const R600InstrInfo *TII =
+          static_cast<const R600InstrInfo*>(MF.getTarget().getInstrInfo());
         interp = DAG.getMachineNode(AMDGPU::INTERP_VEC_LOAD, DL,
             MVT::v4f32, DAG.getTargetConstant(slot / 4 , MVT::i32));
         return DAG.getTargetExtractSubreg(
@@ -721,6 +729,37 @@ void R600TargetLowering::ReplaceNodeResults(SDNode *N,
     Results.push_back(SDValue(Node, 0));
     return;
   }
+}
+
+SDValue R600TargetLowering::LowerTrig(SDValue Op, SelectionDAG &DAG) const {
+  // On hw >= R700, COS/SIN input must be between -1. and 1.
+  // Thus we lower them to TRIG ( FRACT ( x / 2Pi + 0.5) - 0.5)
+  EVT VT = Op.getValueType();
+  SDValue Arg = Op.getOperand(0);
+  SDValue FractPart = DAG.getNode(AMDGPUISD::FRACT, SDLoc(Op), VT,
+      DAG.getNode(ISD::FADD, SDLoc(Op), VT,
+        DAG.getNode(ISD::FMUL, SDLoc(Op), VT, Arg,
+          DAG.getConstantFP(0.15915494309, MVT::f32)),
+        DAG.getConstantFP(0.5, MVT::f32)));
+  unsigned TrigNode;
+  switch (Op.getOpcode()) {
+  case ISD::FCOS:
+    TrigNode = AMDGPUISD::COS_HW;
+    break;
+  case ISD::FSIN:
+    TrigNode = AMDGPUISD::SIN_HW;
+    break;
+  default:
+    llvm_unreachable("Wrong trig opcode");
+  }
+  SDValue TrigVal = DAG.getNode(TrigNode, SDLoc(Op), VT,
+      DAG.getNode(ISD::FADD, SDLoc(Op), VT, FractPart,
+        DAG.getConstantFP(-0.5, MVT::f32)));
+  if (Gen >= AMDGPUSubtarget::R700)
+    return TrigVal;
+  // On R600 hw, COS/SIN input must be between -Pi and Pi.
+  return DAG.getNode(ISD::FMUL, SDLoc(Op), VT, TrigVal,
+      DAG.getConstantFP(3.14159265359, MVT::f32));
 }
 
 SDValue R600TargetLowering::LowerFPTOUINT(SDValue Op, SelectionDAG &DAG) const {
@@ -1210,8 +1249,9 @@ EVT R600TargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
    return VT.changeVectorElementTypeToInteger();
 }
 
-SDValue CompactSwizzlableVector(SelectionDAG &DAG, SDValue VectorEntry,
-                                DenseMap<unsigned, unsigned> &RemapSwizzle) {
+static SDValue
+CompactSwizzlableVector(SelectionDAG &DAG, SDValue VectorEntry,
+                        DenseMap<unsigned, unsigned> &RemapSwizzle) {
   assert(VectorEntry.getOpcode() == ISD::BUILD_VECTOR);
   assert(RemapSwizzle.empty());
   SDValue NewBldVec[4] = {
@@ -1247,8 +1287,8 @@ SDValue CompactSwizzlableVector(SelectionDAG &DAG, SDValue VectorEntry,
       VectorEntry.getValueType(), NewBldVec, 4);
 }
 
-SDValue ReorganizeVector(SelectionDAG &DAG, SDValue VectorEntry,
-                         DenseMap<unsigned, unsigned> &RemapSwizzle) {
+static SDValue ReorganizeVector(SelectionDAG &DAG, SDValue VectorEntry,
+                                DenseMap<unsigned, unsigned> &RemapSwizzle) {
   assert(VectorEntry.getOpcode() == ISD::BUILD_VECTOR);
   assert(RemapSwizzle.empty());
   SDValue NewBldVec[4] = {
@@ -1258,6 +1298,8 @@ SDValue ReorganizeVector(SelectionDAG &DAG, SDValue VectorEntry,
       VectorEntry.getOperand(3)
   };
   bool isUnmovable[4] = { false, false, false, false };
+  for (unsigned i = 0; i < 4; i++)
+    RemapSwizzle[i] = i;
 
   for (unsigned i = 0; i < 4; i++) {
     if (NewBldVec[i].getOpcode() == ISD::EXTRACT_VECTOR_ELT) {
@@ -1266,8 +1308,7 @@ SDValue ReorganizeVector(SelectionDAG &DAG, SDValue VectorEntry,
       if (!isUnmovable[Idx]) {
         // Swap i and Idx
         std::swap(NewBldVec[Idx], NewBldVec[i]);
-        RemapSwizzle[Idx] = i;
-        RemapSwizzle[i] = Idx;
+        std::swap(RemapSwizzle[RemapSwizzle[Idx]], RemapSwizzle[RemapSwizzle[i]]);
       }
       isUnmovable[Idx] = true;
     }

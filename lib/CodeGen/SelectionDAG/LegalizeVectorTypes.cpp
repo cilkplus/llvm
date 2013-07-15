@@ -274,16 +274,17 @@ SDValue DAGTypeLegalizer::ScalarizeVecRes_VSELECT(SDNode *N) {
         break;
     }
   }
-  return DAG.getNode(ISD::SELECT, SDLoc(N),
-                     LHS.getValueType(), Cond, LHS,
-                     GetScalarizedVector(N->getOperand(2)));
+
+  return DAG.getSelect(SDLoc(N),
+                       LHS.getValueType(), Cond, LHS,
+                       GetScalarizedVector(N->getOperand(2)));
 }
 
 SDValue DAGTypeLegalizer::ScalarizeVecRes_SELECT(SDNode *N) {
   SDValue LHS = GetScalarizedVector(N->getOperand(1));
-  return DAG.getNode(ISD::SELECT, SDLoc(N),
-                     LHS.getValueType(), N->getOperand(0), LHS,
-                     GetScalarizedVector(N->getOperand(2)));
+  return DAG.getSelect(SDLoc(N),
+                       LHS.getValueType(), N->getOperand(0), LHS,
+                       GetScalarizedVector(N->getOperand(2)));
 }
 
 SDValue DAGTypeLegalizer::ScalarizeVecRes_SELECT_CC(SDNode *N) {
@@ -1871,7 +1872,10 @@ SDValue DAGTypeLegalizer::WidenVecRes_BUILD_VECTOR(SDNode *N) {
   SDLoc dl(N);
   // Build a vector with undefined for the new nodes.
   EVT VT = N->getValueType(0);
-  EVT EltVT = VT.getVectorElementType();
+
+  // Integer BUILD_VECTOR operands may be larger than the node's vector element
+  // type. The UNDEFs need to have the same type as the existing operands.
+  EVT EltVT = N->getOperand(0).getValueType();
   unsigned NumElts = VT.getVectorNumElements();
 
   EVT WidenVT = TLI.getTypeToTransformTo(*DAG.getContext(), VT);
@@ -2464,7 +2468,7 @@ static EVT FindMemType(SelectionDAG& DAG, const TargetLowering &TLI,
 //  LDOps: Load operators to build a vector type
 //  [Start,End) the list of loads to use.
 static SDValue BuildVectorFromScalar(SelectionDAG& DAG, EVT VecTy,
-                                     SmallVector<SDValue, 16>& LdOps,
+                                     SmallVectorImpl<SDValue> &LdOps,
                                      unsigned Start, unsigned End) {
   SDLoc dl(LdOps[Start]);
   EVT LdTy = LdOps[Start].getValueType();
@@ -2491,7 +2495,7 @@ static SDValue BuildVectorFromScalar(SelectionDAG& DAG, EVT VecTy,
   return DAG.getNode(ISD::BITCAST, dl, VecTy, VecOp);
 }
 
-SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVector<SDValue, 16> &LdChain,
+SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
                                               LoadSDNode *LD) {
   // The strategy assumes that we can efficiently load powers of two widths.
   // The routines chops the vector into the largest vector loads with the same
@@ -2645,8 +2649,8 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVector<SDValue, 16> &LdChain,
 }
 
 SDValue
-DAGTypeLegalizer::GenWidenVectorExtLoads(SmallVector<SDValue, 16>& LdChain,
-                                         LoadSDNode * LD,
+DAGTypeLegalizer::GenWidenVectorExtLoads(SmallVectorImpl<SDValue> &LdChain,
+                                         LoadSDNode *LD,
                                          ISD::LoadExtType ExtType) {
   // For extension loads, it may not be more efficient to chop up the vector
   // and then extended it.  Instead, we unroll the load and build a new vector.
@@ -2693,7 +2697,7 @@ DAGTypeLegalizer::GenWidenVectorExtLoads(SmallVector<SDValue, 16>& LdChain,
 }
 
 
-void DAGTypeLegalizer::GenWidenVectorStores(SmallVector<SDValue, 16>& StChain,
+void DAGTypeLegalizer::GenWidenVectorStores(SmallVectorImpl<SDValue> &StChain,
                                             StoreSDNode *ST) {
   // The strategy assumes that we can efficiently store powers of two widths.
   // The routines chops the vector into the largest vector stores with the same
@@ -2762,7 +2766,7 @@ void DAGTypeLegalizer::GenWidenVectorStores(SmallVector<SDValue, 16>& StChain,
 }
 
 void
-DAGTypeLegalizer::GenWidenVectorTruncStores(SmallVector<SDValue, 16>& StChain,
+DAGTypeLegalizer::GenWidenVectorTruncStores(SmallVectorImpl<SDValue> &StChain,
                                             StoreSDNode *ST) {
   // For extension loads, it may not be more efficient to truncate the vector
   // and then store it.  Instead, we extract each element and then store it.

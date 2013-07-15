@@ -330,6 +330,9 @@ static bool isOpcWithIntImmediate(SDNode *N, unsigned Opc, unsigned& Imm) {
 }
 
 bool PPCDAGToDAGISel::isRunOfOnes(unsigned Val, unsigned &MB, unsigned &ME) {
+  if (!Val)
+    return false;
+
   if (isShiftedMask_32(Val)) {
     // look for the first non-zero bit
     MB = countLeadingZeros(Val);
@@ -435,7 +438,7 @@ SDNode *PPCDAGToDAGISel::SelectBitfieldInsert(SDNode *N) {
     }
 
     unsigned MB, ME;
-    if (InsertMask && isRunOfOnes(InsertMask, MB, ME)) {
+    if (isRunOfOnes(InsertMask, MB, ME)) {
       SDValue Tmp1, Tmp2;
 
       if ((Op1Opc == ISD::SHL || Op1Opc == ISD::SRL) &&
@@ -447,10 +450,10 @@ SDNode *PPCDAGToDAGISel::SelectBitfieldInsert(SDNode *N) {
         unsigned SHOpc = Op1.getOperand(0).getOpcode();
         if ((SHOpc == ISD::SHL || SHOpc == ISD::SRL) &&
             isInt32Immediate(Op1.getOperand(0).getOperand(1), Value)) {
+	  // Note that Value must be in range here (less than 32) because
+	  // otherwise there would not be any bits set in InsertMask.
           Op1 = Op1.getOperand(0).getOperand(0);
           SH  = (SHOpc == ISD::SHL) ? Value : 32 - Value;
-        } else {
-          Op1 = Op1.getOperand(0);
         }
       }
 
@@ -594,12 +597,8 @@ static PPC::Predicate getPredicateForSetCC(ISD::CondCode CC) {
 /// getCRIdxForSetCC - Return the index of the condition register field
 /// associated with the SetCC condition, and whether or not the field is
 /// treated as inverted.  That is, lt = 0; ge = 0 inverted.
-///
-/// If this returns with Other != -1, then the returned comparison is an or of
-/// two simpler comparisons.  In this case, Invert is guaranteed to be false.
-static unsigned getCRIdxForSetCC(ISD::CondCode CC, bool &Invert, int &Other) {
+static unsigned getCRIdxForSetCC(ISD::CondCode CC, bool &Invert) {
   Invert = false;
-  Other = -1;
   switch (CC) {
   default: llvm_unreachable("Unknown condition!");
   case ISD::SETOLT:
@@ -847,8 +846,7 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
   }
 
   bool Inv;
-  int OtherCondIdx;
-  unsigned Idx = getCRIdxForSetCC(CC, Inv, OtherCondIdx);
+  unsigned Idx = getCRIdxForSetCC(CC, Inv);
   SDValue CCReg = SelectCC(LHS, RHS, CC, dl);
   SDValue IntCR;
 
@@ -859,35 +857,18 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
   CCReg = CurDAG->getCopyToReg(CurDAG->getEntryNode(), dl, CR7Reg, CCReg,
                                InFlag).getValue(1);
 
-  if (PPCSubTarget.hasMFOCRF() && OtherCondIdx == -1)
-    IntCR = SDValue(CurDAG->getMachineNode(PPC::MFOCRF, dl, MVT::i32, CR7Reg,
-                                           CCReg), 0);
-  else
-    IntCR = SDValue(CurDAG->getMachineNode(PPC::MFCRpseud, dl, MVT::i32,
-                                           CR7Reg, CCReg), 0);
+  IntCR = SDValue(CurDAG->getMachineNode(PPC::MFOCRF, dl, MVT::i32, CR7Reg,
+                                         CCReg), 0);
 
   SDValue Ops[] = { IntCR, getI32Imm((32-(3-Idx)) & 31),
                       getI32Imm(31), getI32Imm(31) };
-  if (OtherCondIdx == -1 && !Inv)
+  if (!Inv)
     return CurDAG->SelectNodeTo(N, PPC::RLWINM, MVT::i32, Ops, 4);
 
   // Get the specified bit.
   SDValue Tmp =
     SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops), 0);
-  if (Inv) {
-    assert(OtherCondIdx == -1 && "Can't have split plus negation");
-    return CurDAG->SelectNodeTo(N, PPC::XORI, MVT::i32, Tmp, getI32Imm(1));
-  }
-
-  // Otherwise, we have to turn an operation like SETONE -> SETOLT | SETOGT.
-  // We already got the bit for the first part of the comparison (e.g. SETULE).
-
-  // Get the other bit of the comparison.
-  Ops[1] = getI32Imm((32-(3-OtherCondIdx)) & 31);
-  SDValue OtherCond =
-    SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops), 0);
-
-  return CurDAG->SelectNodeTo(N, PPC::OR, MVT::i32, Tmp, OtherCond);
+  return CurDAG->SelectNodeTo(N, PPC::XORI, MVT::i32, Tmp, getI32Imm(1));
 }
 
 
@@ -992,15 +973,10 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
                                   getSmallIPtrImm(0));
   }
 
-  case PPCISD::MFCR: {
+  case PPCISD::MFOCRF: {
     SDValue InFlag = N->getOperand(1);
-    // Use MFOCRF if supported.
-    if (PPCSubTarget.hasMFOCRF())
-      return CurDAG->getMachineNode(PPC::MFOCRF, dl, MVT::i32,
-                                    N->getOperand(0), InFlag);
-    else
-      return CurDAG->getMachineNode(PPC::MFCRpseud, dl, MVT::i32,
-                                    N->getOperand(0), InFlag);
+    return CurDAG->getMachineNode(PPC::MFOCRF, dl, MVT::i32,
+                                  N->getOperand(0), InFlag);
   }
 
   case ISD::SDIV: {
@@ -1502,13 +1478,13 @@ void PPCDAGToDAGISel::PostprocessISelDAG() {
         continue;
       break;
     case PPC::ADDIdtprelL:
-      Flags = PPCII::MO_DTPREL16_LO;
+      Flags = PPCII::MO_DTPREL_LO;
       break;
     case PPC::ADDItlsldL:
-      Flags = PPCII::MO_TLSLD16_LO;
+      Flags = PPCII::MO_TLSLD_LO;
       break;
     case PPC::ADDItocL:
-      Flags = PPCII::MO_TOC16_LO;
+      Flags = PPCII::MO_TOC_LO;
       break;
     }
 
@@ -1530,6 +1506,14 @@ void PPCDAGToDAGISel::PostprocessISelDAG() {
       if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(ImmOpnd)) {
         SDLoc dl(GA);
         const GlobalValue *GV = GA->getGlobal();
+        // We can't perform this optimization for data whose alignment
+        // is insufficient for the instruction encoding.
+        if (GV->getAlignment() < 4 &&
+            (StorageOpcode == PPC::LD || StorageOpcode == PPC::STD ||
+             StorageOpcode == PPC::LWA)) {
+          DEBUG(dbgs() << "Rejected this candidate for alignment.\n\n");
+          continue;
+        }
         ImmOpnd = CurDAG->getTargetGlobalAddress(GV, dl, MVT::i64, 0, Flags);
       } else if (ConstantPoolSDNode *CP =
                  dyn_cast<ConstantPoolSDNode>(ImmOpnd)) {

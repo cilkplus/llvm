@@ -20,6 +20,7 @@
 #include "PPCRegisterInfo.h"
 #include "PPCSubtarget.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
@@ -115,11 +116,10 @@ namespace llvm {
       /// Return with a flag operand, matched by 'blr'
       RET_FLAG,
 
-      /// R32 = MFCR(CRREG, INFLAG) - Represents the MFCRpseud/MFOCRF
-      /// instructions.  This copies the bits corresponding to the specified
-      /// CRREG into the resultant GPR.  Bits corresponding to other CR regs
-      /// are undefined.
-      MFCR,
+      /// R32 = MFOCRF(CRREG, INFLAG) - Represents the MFOCRF instruction.
+      /// This copies the bits corresponding to the specified CRREG into the
+      /// resultant GPR.  Bits corresponding to other CR regs are undefined.
+      MFOCRF,
 
       // EH_SJLJ_SETJMP - SjLj exception handling setjmp.
       EH_SJLJ_SETJMP,
@@ -335,8 +335,6 @@ namespace llvm {
 
   class PPCTargetLowering : public TargetLowering {
     const PPCSubtarget &PPCSubTarget;
-    const PPCRegisterInfo *PPCRegInfo;
-    const PPCInstrInfo *PPCII;
 
   public:
     explicit PPCTargetLowering(PPCTargetMachine &TM);
@@ -421,7 +419,7 @@ namespace llvm {
 
     std::pair<unsigned, const TargetRegisterClass*>
       getRegForInlineAsmConstraint(const std::string &Constraint,
-                                   EVT VT) const;
+                                   MVT VT) const;
 
     /// getByValTypeAlignment - Return the desired alignment for ByVal aggregate
     /// function arguments in the caller parameter area.  This is the actual
@@ -461,11 +459,11 @@ namespace llvm {
     /// relative to software emulation.
     virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast = 0) const;
 
-    /// isFMAFasterThanMulAndAdd - Return true if an FMA operation is faster than
-    /// a pair of mul and add instructions. fmuladd intrinsics will be expanded to
-    /// FMAs when this method returns true (and FMAs are legal), otherwise fmuladd
-    /// is expanded to mul + add.
-    virtual bool isFMAFasterThanMulAndAdd(EVT VT) const;
+    /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
+    /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
+    /// expanded to FMAs when this method returns true, otherwise fmuladd is
+    /// expanded to fmul + fadd.
+    virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const;
 
   private:
     SDValue getFramePointerFrameIndex(SelectionDAG & DAG) const;
@@ -623,6 +621,23 @@ namespace llvm {
     SDValue DAGCombineFastRecip(SDValue Op, DAGCombinerInfo &DCI) const;
     SDValue DAGCombineFastRecipFSQRT(SDValue Op, DAGCombinerInfo &DCI) const;
   };
+
+  bool CC_PPC32_SVR4_Custom_Dummy(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
+                                  CCValAssign::LocInfo &LocInfo,
+                                  ISD::ArgFlagsTy &ArgFlags,
+                                  CCState &State);
+
+  bool CC_PPC32_SVR4_Custom_AlignArgRegs(unsigned &ValNo, MVT &ValVT,
+                                         MVT &LocVT,
+                                         CCValAssign::LocInfo &LocInfo,
+                                         ISD::ArgFlagsTy &ArgFlags,
+                                         CCState &State);
+
+  bool CC_PPC32_SVR4_Custom_AlignFPArgRegs(unsigned &ValNo, MVT &ValVT,
+                                           MVT &LocVT,
+                                           CCValAssign::LocInfo &LocInfo,
+                                           ISD::ArgFlagsTy &ArgFlags,
+                                           CCState &State);
 }
 
 #endif   // LLVM_TARGET_POWERPC_PPC32ISELLOWERING_H

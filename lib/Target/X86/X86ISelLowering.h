@@ -610,7 +610,7 @@ namespace llvm {
     /// error, this returns a register number of 0.
     std::pair<unsigned, const TargetRegisterClass*>
       getRegForInlineAsmConstraint(const std::string &Constraint,
-                                   EVT VT) const;
+                                   MVT VT) const;
 
     /// isLegalAddressingMode - Return true if the addressing mode represented
     /// by AM is legal for this target, for a load/store of the specified type.
@@ -646,11 +646,11 @@ namespace llvm {
     virtual bool isZExtFree(EVT VT1, EVT VT2) const;
     virtual bool isZExtFree(SDValue Val, EVT VT2) const;
 
-    /// isFMAFasterThanMulAndAdd - Return true if an FMA operation is faster than
-    /// a pair of mul and add instructions. fmuladd intrinsics will be expanded to
-    /// FMAs when this method returns true (and FMAs are legal), otherwise fmuladd
-    /// is expanded to mul + add.
-    virtual bool isFMAFasterThanMulAndAdd(EVT) const { return true; }
+    /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
+    /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
+    /// expanded to FMAs when this method returns true, otherwise fmuladd is
+    /// expanded to fmul + fadd.
+    virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const;
 
     /// isNarrowingProfitable - Return true if it's profitable to narrow
     /// operations of type VT1 to VT2. e.g. on x86, it's profitable to narrow
@@ -734,7 +734,6 @@ namespace llvm {
     /// Subtarget - Keep a pointer to the X86Subtarget around so that we can
     /// make the right decision when generating code for different targets.
     const X86Subtarget *Subtarget;
-    const X86RegisterInfo *RegInfo;
     const DataLayout *TD;
 
     /// Used to store the TargetOptions so that we don't waste time resetting

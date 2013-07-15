@@ -33,8 +33,7 @@
 #include <unistd.h>
 #else
 #include <io.h>
-// Simplistic definitinos of these macros to allow files to be read with
-// MapInFilePages.
+// Simplistic definitinos of these macros for use in getOpenFile.
 #ifndef S_ISREG
 #define S_ISREG(x) (1)
 #endif
@@ -174,14 +173,6 @@ error_code MemoryBuffer::getFileOrSTDIN(StringRef Filename,
   return getFile(Filename, result, FileSize);
 }
 
-error_code MemoryBuffer::getFileOrSTDIN(const char *Filename,
-                                        OwningPtr<MemoryBuffer> &result,
-                                        int64_t FileSize) {
-  if (strcmp(Filename, "-") == 0)
-    return getSTDIN(result);
-  return getFile(Filename, result, FileSize);
-}
-
 //===----------------------------------------------------------------------===//
 // MemoryBuffer::getFile implementation.
 //===----------------------------------------------------------------------===//
@@ -262,17 +253,6 @@ error_code MemoryBuffer::getFile(const char *Filename,
                                  OwningPtr<MemoryBuffer> &result,
                                  int64_t FileSize,
                                  bool RequiresNullTerminator) {
-  // FIXME: Review if this check is unnecessary on windows as well.
-#ifdef LLVM_ON_WIN32
-  // First check that the "file" is not a directory
-  bool is_dir = false;
-  error_code err = sys::fs::is_directory(Filename, is_dir);
-  if (err)
-    return err;
-  if (is_dir)
-    return make_error_code(errc::is_a_directory);
-#endif
-
   int OpenFlags = O_RDONLY;
 #ifdef O_BINARY
   OpenFlags |= O_BINARY;  // Open input file in binary mode on win32.
@@ -420,7 +400,7 @@ error_code MemoryBuffer::getSTDIN(OwningPtr<MemoryBuffer> &result) {
   //
   // FIXME: That isn't necessarily true, we should try to mmap stdin and
   // fallback if it fails.
-  sys::Program::ChangeStdinToBinary();
+  sys::ChangeStdinToBinary();
 
   return getMemoryBufferForStream(0, "<stdin>", result);
 }

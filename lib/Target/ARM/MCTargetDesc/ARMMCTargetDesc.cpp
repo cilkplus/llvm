@@ -59,8 +59,12 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
   std::string ARMArchFeature;
   if (Idx) {
     unsigned SubVer = TT[Idx];
-    if (SubVer >= '7' && SubVer <= '9') {
+    if (SubVer == '8') {
+      // FIXME: Parse v8 features
+      ARMArchFeature = "+v8";
+    } else if (SubVer == '7') {
       if (Len >= Idx+2 && TT[Idx+1] == 'm') {
+        isThumb = true;
         if (NoCPU)
           // v7m: FeatureNoARM, FeatureDB, FeatureHWDiv, FeatureMClass
           ARMArchFeature = "+v7,+noarm,+db,+hwdiv,+mclass";
@@ -99,6 +103,7 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
       if (Len >= Idx+3 && TT[Idx+1] == 't' && TT[Idx+2] == '2')
         ARMArchFeature = "+v6t2";
       else if (Len >= Idx+2 && TT[Idx+1] == 'm') {
+        isThumb = true;
         if (NoCPU)
           // v6m: FeatureNoARM, FeatureMClass
           ARMArchFeature = "+v6,+noarm,+mclass";

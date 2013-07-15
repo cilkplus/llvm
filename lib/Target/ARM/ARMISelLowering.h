@@ -349,7 +349,7 @@ namespace llvm {
 
     std::pair<unsigned, const TargetRegisterClass*>
       getRegForInlineAsmConstraint(const std::string &Constraint,
-                                   EVT VT) const;
+                                   MVT VT) const;
 
     /// LowerAsmOperandForConstraint - Lower the specified operand into the Ops
     /// vector.  If it is invalid, don't add anything to Ops. If hasMemory is
@@ -417,7 +417,7 @@ namespace llvm {
                           RegsToPassVector &RegsToPass,
                           CCValAssign &VA, CCValAssign &NextVA,
                           SDValue &StackPtr,
-                          SmallVector<SDValue, 8> &MemOpChains,
+                          SmallVectorImpl<SDValue> &MemOpChains,
                           ISD::ArgFlagsTy Flags) const;
     SDValue GetF64FormalArgument(CCValAssign &VA, CCValAssign &NextVA,
                                  SDValue &Root, SelectionDAG &DAG,
@@ -457,6 +457,17 @@ namespace llvm {
                             const ARMSubtarget *ST) const;
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG,
                               const ARMSubtarget *ST) const;
+
+    /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
+    /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
+    /// expanded to FMAs when this method returns true, otherwise fmuladd is
+    /// expanded to fmul + fadd.
+    ///
+    /// ARM supports both fused and unfused multiply-add operations; we already
+    /// lower a pair of fmul and fadd to the latter so it's not clear that there
+    /// would be a gain or that the gain would be worthwhile enough to risk
+    /// correctness bugs.
+    virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const { return false; }
 
     SDValue ReconstructShuffle(SDValue Op, SelectionDAG &DAG) const;
 

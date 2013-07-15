@@ -13,6 +13,7 @@
 
 #include "SystemZInstrInfo.h"
 #include "SystemZInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Target/TargetMachine.h"
 
 #define GET_INSTRINFO_CTOR
@@ -23,7 +24,7 @@ using namespace llvm;
 
 SystemZInstrInfo::SystemZInstrInfo(SystemZTargetMachine &tm)
   : SystemZGenInstrInfo(SystemZ::ADJCALLSTACKDOWN, SystemZ::ADJCALLSTACKUP),
-    RI(tm, *this) {
+    RI(tm) {
 }
 
 // MI is a 128-bit load or store.  Split it into two 64-bit loads or stores,
@@ -80,7 +81,8 @@ void SystemZInstrInfo::splitAdjDynAlloc(MachineBasicBlock::iterator MI) const {
 // Return 0 otherwise.
 //
 // Flag is SimpleBDXLoad for loads and SimpleBDXStore for stores.
-static int isSimpleMove(const MachineInstr *MI, int &FrameIndex, int Flag) {
+static int isSimpleMove(const MachineInstr *MI, int &FrameIndex,
+                        unsigned Flag) {
   const MCInstrDesc &MCID = MI->getDesc();
   if ((MCID.TSFlags & Flag) &&
       MI->getOperand(1).isFI() &&
@@ -100,6 +102,31 @@ unsigned SystemZInstrInfo::isLoadFromStackSlot(const MachineInstr *MI,
 unsigned SystemZInstrInfo::isStoreToStackSlot(const MachineInstr *MI,
                                               int &FrameIndex) const {
   return isSimpleMove(MI, FrameIndex, SystemZII::SimpleBDXStore);
+}
+
+bool SystemZInstrInfo::isStackSlotCopy(const MachineInstr *MI,
+                                       int &DestFrameIndex,
+                                       int &SrcFrameIndex) const {
+  // Check for MVC 0(Length,FI1),0(FI2)
+  const MachineFrameInfo *MFI = MI->getParent()->getParent()->getFrameInfo();
+  if (MI->getOpcode() != SystemZ::MVC ||
+      !MI->getOperand(0).isFI() ||
+      MI->getOperand(1).getImm() != 0 ||
+      !MI->getOperand(3).isFI() ||
+      MI->getOperand(4).getImm() != 0)
+    return false;
+
+  // Check that Length covers the full slots.
+  int64_t Length = MI->getOperand(2).getImm();
+  unsigned FI1 = MI->getOperand(0).getIndex();
+  unsigned FI2 = MI->getOperand(3).getIndex();
+  if (MFI->getObjectSize(FI1) != Length ||
+      MFI->getObjectSize(FI2) != Length)
+    return false;
+
+  DestFrameIndex = FI1;
+  SrcFrameIndex = FI2;
+  return true;
 }
 
 bool SystemZInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
@@ -313,6 +340,114 @@ SystemZInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   getLoadStoreOpcodes(RC, LoadOpcode, StoreOpcode);
   addFrameReference(BuildMI(MBB, MBBI, DL, get(LoadOpcode), DestReg),
                     FrameIdx);
+}
+
+// Return true if MI is a simple load or store with a 12-bit displacement
+// and no index.  Flag is SimpleBDXLoad for loads and SimpleBDXStore for stores.
+static bool isSimpleBD12Move(const MachineInstr *MI, unsigned Flag) {
+  const MCInstrDesc &MCID = MI->getDesc();
+  return ((MCID.TSFlags & Flag) &&
+          isUInt<12>(MI->getOperand(2).getImm()) &&
+          MI->getOperand(3).getReg() == 0);
+}
+
+MachineInstr *
+SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
+                                        MachineInstr *MI,
+                                        const SmallVectorImpl<unsigned> &Ops,
+                                        int FrameIndex) const {
+  const MachineFrameInfo *MFI = MF.getFrameInfo();
+  unsigned Size = MFI->getObjectSize(FrameIndex);
+
+  // Eary exit for cases we don't care about
+  if (Ops.size() != 1)
+    return 0;
+
+  unsigned OpNum = Ops[0];
+  assert(Size == MF.getRegInfo()
+         .getRegClass(MI->getOperand(OpNum).getReg())->getSize() &&
+         "Invalid size combination");
+
+  unsigned Opcode = MI->getOpcode();
+  if (Opcode == SystemZ::LGDR || Opcode == SystemZ::LDGR) {
+    bool Op0IsGPR = (Opcode == SystemZ::LGDR);
+    bool Op1IsGPR = (Opcode == SystemZ::LDGR);
+    // If we're spilling the destination of an LDGR or LGDR, store the
+    // source register instead.
+    if (OpNum == 0) {
+      unsigned StoreOpcode = Op1IsGPR ? SystemZ::STG : SystemZ::STD;
+      return BuildMI(MF, MI->getDebugLoc(), get(StoreOpcode))
+        .addOperand(MI->getOperand(1)).addFrameIndex(FrameIndex)
+        .addImm(0).addReg(0);
+    }
+    // If we're spilling the source of an LDGR or LGDR, load the
+    // destination register instead.
+    if (OpNum == 1) {
+      unsigned LoadOpcode = Op0IsGPR ? SystemZ::LG : SystemZ::LD;
+      unsigned Dest = MI->getOperand(0).getReg();
+      return BuildMI(MF, MI->getDebugLoc(), get(LoadOpcode), Dest)
+        .addFrameIndex(FrameIndex).addImm(0).addReg(0);
+    }
+  }
+
+  // Look for cases where the source of a simple store or the destination
+  // of a simple load is being spilled.  Try to use MVC instead.
+  //
+  // Although MVC is in practice a fast choice in these cases, it is still
+  // logically a bytewise copy.  This means that we cannot use it if the
+  // load or store is volatile.  It also means that the transformation is
+  // not valid in cases where the two memories partially overlap; however,
+  // that is not a problem here, because we know that one of the memories
+  // is a full frame index.
+  if (OpNum == 0 && MI->hasOneMemOperand()) {
+    MachineMemOperand *MMO = *MI->memoperands_begin();
+    if (MMO->getSize() == Size && !MMO->isVolatile()) {
+      // Handle conversion of loads.
+      if (isSimpleBD12Move(MI, SystemZII::SimpleBDXLoad)) {
+        return BuildMI(MF, MI->getDebugLoc(), get(SystemZ::MVC))
+          .addFrameIndex(FrameIndex).addImm(0).addImm(Size)
+          .addOperand(MI->getOperand(1)).addImm(MI->getOperand(2).getImm())
+          .addMemOperand(MMO);
+      }
+      // Handle conversion of stores.
+      if (isSimpleBD12Move(MI, SystemZII::SimpleBDXStore)) {
+        return BuildMI(MF, MI->getDebugLoc(), get(SystemZ::MVC))
+          .addOperand(MI->getOperand(1)).addImm(MI->getOperand(2).getImm())
+          .addImm(Size).addFrameIndex(FrameIndex).addImm(0)
+          .addMemOperand(MMO);
+      }
+    }
+  }
+
+  // If the spilled operand is the final one, try to change <INSN>R
+  // into <INSN>.
+  int MemOpcode = SystemZ::getMemOpcode(Opcode);
+  if (MemOpcode >= 0) {
+    unsigned NumOps = MI->getNumExplicitOperands();
+    if (OpNum == NumOps - 1) {
+      const MCInstrDesc &MemDesc = get(MemOpcode);
+      uint64_t AccessBytes = SystemZII::getAccessSize(MemDesc.TSFlags);
+      assert(AccessBytes != 0 && "Size of access should be known");
+      assert(AccessBytes <= Size && "Access outside the frame index");
+      uint64_t Offset = Size - AccessBytes;
+      MachineInstrBuilder MIB = BuildMI(MF, MI->getDebugLoc(), get(MemOpcode));
+      for (unsigned I = 0; I < OpNum; ++I)
+        MIB.addOperand(MI->getOperand(I));
+      MIB.addFrameIndex(FrameIndex).addImm(Offset);
+      if (MemDesc.TSFlags & SystemZII::HasIndex)
+        MIB.addReg(0);
+      return MIB;
+    }
+  }
+
+  return 0;
+}
+
+MachineInstr *
+SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr* MI,
+                                        const SmallVectorImpl<unsigned> &Ops,
+                                        MachineInstr* LoadMI) const {
+  return 0;
 }
 
 bool

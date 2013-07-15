@@ -39,12 +39,8 @@ static TargetLoweringObjectFile *createTLOF(AArch64TargetMachine &TM) {
   llvm_unreachable("unknown subtarget type");
 }
 
-
 AArch64TargetLowering::AArch64TargetLowering(AArch64TargetMachine &TM)
-  : TargetLowering(TM, createTLOF(TM)),
-    Subtarget(&TM.getSubtarget<AArch64Subtarget>()),
-    RegInfo(TM.getRegisterInfo()),
-    Itins(TM.getInstrItineraryData()) {
+  : TargetLowering(TM, createTLOF(TM)), Itins(TM.getInstrItineraryData()) {
 
   // SIMD compares set the entire lane's bits to 1
   setBooleanVectorContents(ZeroOrNegativeOneBooleanContent);
@@ -253,9 +249,6 @@ AArch64TargetLowering::AArch64TargetLowering(AArch64TargetMachine &TM)
   setTruncStoreAction(MVT::f64, MVT::f16, Expand);
   setTruncStoreAction(MVT::f32, MVT::f16, Expand);
 
-  setOperationAction(ISD::EXCEPTIONADDR, MVT::i64, Expand);
-  setOperationAction(ISD::EHSELECTION, MVT::i64, Expand);
-
   setExceptionPointerRegister(AArch64::X0);
   setExceptionSelectorRegister(AArch64::X1);
 }
@@ -271,16 +264,16 @@ EVT AArch64TargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
 static void getExclusiveOperation(unsigned Size, AtomicOrdering Ord,
                                   unsigned &LdrOpc,
                                   unsigned &StrOpc) {
-  static unsigned LoadBares[] = {AArch64::LDXR_byte, AArch64::LDXR_hword,
-                                 AArch64::LDXR_word, AArch64::LDXR_dword};
-  static unsigned LoadAcqs[] = {AArch64::LDAXR_byte, AArch64::LDAXR_hword,
-                                AArch64::LDAXR_word, AArch64::LDAXR_dword};
-  static unsigned StoreBares[] = {AArch64::STXR_byte, AArch64::STXR_hword,
-                                  AArch64::STXR_word, AArch64::STXR_dword};
-  static unsigned StoreRels[] = {AArch64::STLXR_byte, AArch64::STLXR_hword,
-                                 AArch64::STLXR_word, AArch64::STLXR_dword};
+  static const unsigned LoadBares[] = {AArch64::LDXR_byte, AArch64::LDXR_hword,
+                                       AArch64::LDXR_word, AArch64::LDXR_dword};
+  static const unsigned LoadAcqs[] = {AArch64::LDAXR_byte, AArch64::LDAXR_hword,
+                                     AArch64::LDAXR_word, AArch64::LDAXR_dword};
+  static const unsigned StoreBares[] = {AArch64::STXR_byte, AArch64::STXR_hword,
+                                       AArch64::STXR_word, AArch64::STXR_dword};
+  static const unsigned StoreRels[] = {AArch64::STLXR_byte,AArch64::STLXR_hword,
+                                     AArch64::STLXR_word, AArch64::STLXR_dword};
 
-  unsigned *LoadOps, *StoreOps;
+  const unsigned *LoadOps, *StoreOps;
   if (Ord == Acquire || Ord == AcquireRelease || Ord == SequentiallyConsistent)
     LoadOps = LoadAcqs;
   else
@@ -1086,9 +1079,9 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
                                  SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG                     = CLI.DAG;
   SDLoc &dl                             = CLI.DL;
-  SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
-  SmallVector<SDValue, 32> &OutVals     = CLI.OutVals;
-  SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals     = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins   = CLI.Ins;
   SDValue Chain                         = CLI.Chain;
   SDValue Callee                        = CLI.Callee;
   bool &IsTailCall                      = CLI.IsTailCall;
@@ -1928,7 +1921,7 @@ AArch64TargetLowering::LowerGlobalAddressELFSmall(SDValue Op,
   }
 
   unsigned char HiFixup, LoFixup;
-  bool UseGOT = Subtarget->GVIsIndirectSymbol(GV, RelocM);
+  bool UseGOT = getSubtarget()->GVIsIndirectSymbol(GV, RelocM);
 
   if (UseGOT) {
     HiFixup = AArch64II::MO_GOT;
@@ -2024,7 +2017,7 @@ SDValue AArch64TargetLowering::LowerTLSDescCall(SDValue SymAddr,
 SDValue
 AArch64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
                                              SelectionDAG &DAG) const {
-  assert(Subtarget->isTargetELF() &&
+  assert(getSubtarget()->isTargetELF() &&
          "TLS not implemented for non-ELF targets");
   assert(getTargetMachine().getCodeModel() == CodeModel::Small
          && "TLS only supported in small memory model");
@@ -2799,10 +2792,31 @@ AArch64TargetLowering::PerformDAGCombine(SDNode *N,
   switch (N->getOpcode()) {
   default: break;
   case ISD::AND: return PerformANDCombine(N, DCI);
-  case ISD::OR: return PerformORCombine(N, DCI, Subtarget);
+  case ISD::OR: return PerformORCombine(N, DCI, getSubtarget());
   case ISD::SRA: return PerformSRACombine(N, DCI);
   }
   return SDValue();
+}
+
+bool
+AArch64TargetLowering::isFMAFasterThanFMulAndFAdd(EVT VT) const {
+  VT = VT.getScalarType();
+
+  if (!VT.isSimple())
+    return false;
+
+  switch (VT.getSimpleVT().SimpleTy) {
+  case MVT::f16:
+  case MVT::f32:
+  case MVT::f64:
+    return true;
+  case MVT::f128:
+    return false;
+  default:
+    break;
+  }
+
+  return false;
 }
 
 AArch64TargetLowering::ConstraintType
@@ -2936,7 +2950,7 @@ AArch64TargetLowering::LowerAsmOperandForConstraint(SDValue Op,
 std::pair<unsigned, const TargetRegisterClass*>
 AArch64TargetLowering::getRegForInlineAsmConstraint(
                                                   const std::string &Constraint,
-                                                  EVT VT) const {
+                                                  MVT VT) const {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
     case 'r':

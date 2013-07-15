@@ -282,7 +282,7 @@ namespace llvm {
       /// Return pointer to array of integer argument registers.
       const uint16_t *intArgRegs() const;
 
-      typedef SmallVector<ByValArgInfo, 2>::const_iterator byval_iterator;
+      typedef SmallVectorImpl<ByValArgInfo>::const_iterator byval_iterator;
       byval_iterator byval_begin() const { return ByValArgs.begin(); }
       byval_iterator byval_end() const { return ByValArgs.end(); }
 
@@ -386,7 +386,7 @@ namespace llvm {
     /// passByValArg - Pass a byval argument in registers or on stack.
     void passByValArg(SDValue Chain, SDLoc DL,
                       std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
-                      SmallVector<SDValue, 8> &MemOpChains, SDValue StackPtr,
+                      SmallVectorImpl<SDValue> &MemOpChains, SDValue StackPtr,
                       MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg,
                       const MipsCC &CC, const ByValArgInfo &ByVal,
                       const ISD::ArgFlagsTy &Flags, bool isLittle) const;
@@ -435,7 +435,7 @@ namespace llvm {
 
     std::pair<unsigned, const TargetRegisterClass*>
               getRegForInlineAsmConstraint(const std::string &Constraint,
-              EVT VT) const;
+                                           MVT VT) const;
 
     /// LowerAsmOperandForConstraint - Lower the specified operand into the Ops
     /// vector.  If it is invalid, don't add anything to Ops. If hasMemory is

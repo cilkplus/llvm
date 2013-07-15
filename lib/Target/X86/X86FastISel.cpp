@@ -45,10 +45,6 @@ class X86FastISel : public FastISel {
   /// make the right decision when generating code for different targets.
   const X86Subtarget *Subtarget;
 
-  /// RegInfo - X86 register info.
-  ///
-  const X86RegisterInfo *RegInfo;
-
   /// X86ScalarSSEf32, X86ScalarSSEf64 - Select between SSE or x87
   /// floating point ops.
   /// When SSE is available, use it for f32 operations.
@@ -63,7 +59,6 @@ public:
     Subtarget = &TM.getSubtarget<X86Subtarget>();
     X86ScalarSSEf64 = Subtarget->hasSSE2();
     X86ScalarSSEf32 = Subtarget->hasSSE1();
-    RegInfo = static_cast<const X86RegisterInfo*>(TM.getRegisterInfo());
   }
 
   virtual bool TargetSelectInstruction(const Instruction *I);
@@ -717,10 +712,11 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
   CallingConv::ID CC = F.getCallingConv();
   if (CC != CallingConv::C &&
       CC != CallingConv::Fast &&
-      CC != CallingConv::X86_FastCall)
+      CC != CallingConv::X86_FastCall &&
+      CC != CallingConv::X86_64_SysV)
     return false;
 
-  if (Subtarget->isTargetWin64())
+  if (Subtarget->isCallingConvWin64(CC))
     return false;
 
   // Don't handle popping bytes on return for now.
@@ -1365,11 +1361,11 @@ bool X86FastISel::X86SelectDivRem(const Instruction *I) {
       // fit neatly into the table above.
       if (VT.SimpleTy == MVT::i16) {
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL,
-                TII.get(TargetOpcode::COPY), TypeEntry.HighInReg)
+                TII.get(Copy), TypeEntry.HighInReg)
           .addReg(Zero32, 0, X86::sub_16bit);
       } else if (VT.SimpleTy == MVT::i32) {
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL,
-                TII.get(TargetOpcode::COPY), TypeEntry.HighInReg)
+                TII.get(Copy), TypeEntry.HighInReg)
             .addReg(Zero32);
       } else if (VT.SimpleTy == MVT::i64) {
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL,
@@ -1381,10 +1377,37 @@ bool X86FastISel::X86SelectDivRem(const Instruction *I) {
   // Generate the DIV/IDIV instruction.
   BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL,
           TII.get(OpEntry.OpDivRem)).addReg(Op1Reg);
-  // Copy output register into result register.
-  unsigned ResultReg = createResultReg(TypeEntry.RC);
-  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL,
-          TII.get(Copy), ResultReg).addReg(OpEntry.DivRemResultReg);
+  // For i8 remainder, we can't reference AH directly, as we'll end
+  // up with bogus copies like %R9B = COPY %AH. Reference AX
+  // instead to prevent AH references in a REX instruction.
+  //
+  // The current assumption of the fast register allocator is that isel
+  // won't generate explicit references to the GPR8_NOREX registers. If
+  // the allocator and/or the backend get enhanced to be more robust in
+  // that regard, this can be, and should be, removed.
+  unsigned ResultReg = 0;
+  if ((I->getOpcode() == Instruction::SRem ||
+       I->getOpcode() == Instruction::URem) &&
+      OpEntry.DivRemResultReg == X86::AH && Subtarget->is64Bit()) {
+    unsigned SourceSuperReg = createResultReg(&X86::GR16RegClass);
+    unsigned ResultSuperReg = createResultReg(&X86::GR16RegClass);
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL,
+            TII.get(Copy), SourceSuperReg).addReg(X86::AX);
+
+    // Shift AX right by 8 bits instead of using AH.
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(X86::SHR16ri),
+            ResultSuperReg).addReg(SourceSuperReg).addImm(8);
+
+    // Now reference the 8-bit subreg of the result.
+    ResultReg = FastEmitInst_extractsubreg(MVT::i8, ResultSuperReg,
+                                           /*Kill=*/true, X86::sub_8bit);
+  }
+  // Copy the result out of the physreg if we haven't already.
+  if (!ResultReg) {
+    ResultReg = createResultReg(TypeEntry.RC);
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(Copy), ResultReg)
+        .addReg(OpEntry.DivRemResultReg);
+  }
   UpdateValueMap(I, ResultReg);
 
   return true;
@@ -1683,9 +1706,6 @@ bool X86FastISel::FastLowerArguments() {
   if (!FuncInfo.CanLowerReturn)
     return false;
 
-  if (Subtarget->isTargetWin64())
-    return false;
-
   const Function *F = FuncInfo.Fn;
   if (F->isVarArg())
     return false;
@@ -1693,7 +1713,10 @@ bool X86FastISel::FastLowerArguments() {
   CallingConv::ID CC = F->getCallingConv();
   if (CC != CallingConv::C)
     return false;
-  
+
+  if (Subtarget->isCallingConvWin64(CC))
+    return false;
+
   if (!Subtarget->is64Bit())
     return false;
   
@@ -1737,8 +1760,6 @@ bool X86FastISel::FastLowerArguments() {
   const TargetRegisterClass *RC64 = TLI.getRegClassFor(MVT::i64);
   for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end();
        I != E; ++I, ++Idx) {
-    if (I->use_empty())
-      continue;
     bool is32Bit = TLI.getValueType(I->getType()) == MVT::i32;
     const TargetRegisterClass *RC = is32Bit ? RC32 : RC64;
     unsigned SrcReg = is32Bit ? GPR32ArgRegs[Idx] : GPR64ArgRegs[Idx];
@@ -1797,8 +1818,10 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
   // Handle only C and fastcc calling conventions for now.
   ImmutableCallSite CS(CI);
   CallingConv::ID CC = CS.getCallingConv();
+  bool isWin64 = Subtarget->isCallingConvWin64(CC);
   if (CC != CallingConv::C && CC != CallingConv::Fast &&
-      CC != CallingConv::X86_FastCall)
+      CC != CallingConv::X86_FastCall && CC != CallingConv::X86_64_Win64 &&
+      CC != CallingConv::X86_64_SysV)
     return false;
 
   // fastcc with -tailcallopt is intended to provide a guaranteed
@@ -1812,7 +1835,7 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
 
   // Don't know how to handle Win64 varargs yet.  Nothing special needed for
   // x86-32.  Special handling for x86-64 is implemented.
-  if (isVarArg && Subtarget->isTargetWin64())
+  if (isVarArg && isWin64)
     return false;
 
   // Fast-isel doesn't know about callee-pop yet.
@@ -1942,7 +1965,7 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
                  I->getParent()->getContext());
 
   // Allocate shadow area for Win64
-  if (Subtarget->isTargetWin64())
+  if (isWin64)
     CCInfo.AllocateStack(32, 8);
 
   CCInfo.AnalyzeCallOperands(ArgVTs, ArgFlags, CC_X86);
@@ -2025,6 +2048,8 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
     } else {
       unsigned LocMemOffset = VA.getLocMemOffset();
       X86AddressMode AM;
+      const X86RegisterInfo *RegInfo = static_cast<const X86RegisterInfo*>(
+          getTargetMachine()->getRegisterInfo());
       AM.Base.Reg = RegInfo->getStackRegister();
       AM.Disp = LocMemOffset;
       const Value *ArgVal = ArgVals[VA.getValNo()];
@@ -2056,7 +2081,7 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
             X86::EBX).addReg(Base);
   }
 
-  if (Subtarget->is64Bit() && isVarArg && !Subtarget->isTargetWin64()) {
+  if (Subtarget->is64Bit() && isVarArg && !isWin64) {
     // Count the number of XMM registers allocated.
     static const uint16_t XMMArgRegs[] = {
       X86::XMM0, X86::XMM1, X86::XMM2, X86::XMM3,
@@ -2125,7 +2150,7 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
   if (Subtarget->isPICStyleGOT())
     MIB.addReg(X86::EBX, RegState::Implicit);
 
-  if (Subtarget->is64Bit() && isVarArg && !Subtarget->isTargetWin64())
+  if (Subtarget->is64Bit() && isVarArg && !isWin64)
     MIB.addReg(X86::AL, RegState::Implicit);
 
   // Add implicit physical register uses to the call.

@@ -229,28 +229,12 @@ struct NType {
 
 }
 
-void ScalarTraits<COFFYAML::BinaryRef>::output(const COFFYAML::BinaryRef &Val,
-                                               void *, llvm::raw_ostream &Out) {
-  ArrayRef<uint8_t> Data = Val.getBinary();
-  for (ArrayRef<uint8_t>::iterator I = Data.begin(), E = Data.end(); I != E;
-       ++I) {
-    uint8_t Byte = *I;
-    Out << hexdigit(Byte >> 4);
-    Out << hexdigit(Byte & 0xf);
-  }
-}
-
-StringRef ScalarTraits<COFFYAML::BinaryRef>::input(StringRef Scalar, void *,
-                                                   COFFYAML::BinaryRef &Val) {
-  Val = COFFYAML::BinaryRef(Scalar);
-  return StringRef();
-}
-
-void MappingTraits<COFF::relocation>::mapping(IO &IO, COFF::relocation &Rel) {
+void MappingTraits<COFFYAML::Relocation>::mapping(IO &IO,
+                                                  COFFYAML::Relocation &Rel) {
   MappingNormalization<NType, uint16_t> NT(IO, Rel.Type);
 
   IO.mapRequired("VirtualAddress", Rel.VirtualAddress);
-  IO.mapRequired("SymbolTableIndex", Rel.SymbolTableIndex);
+  IO.mapRequired("SymbolName", Rel.SymbolName);
   IO.mapRequired("Type", NT->Type);
 }
 
@@ -272,8 +256,9 @@ void MappingTraits<COFFYAML::Symbol>::mapping(IO &IO, COFFYAML::Symbol &S) {
   IO.mapRequired("SimpleType", S.SimpleType);
   IO.mapRequired("ComplexType", S.ComplexType);
   IO.mapRequired("StorageClass", NS->StorageClass);
-  IO.mapOptional("NumberOfAuxSymbols", S.Header.NumberOfAuxSymbols);
-  IO.mapOptional("AuxiliaryData", S.AuxiliaryData);
+  IO.mapOptional("NumberOfAuxSymbols", S.Header.NumberOfAuxSymbols,
+                 (uint8_t) 0);
+  IO.mapOptional("AuxiliaryData", S.AuxiliaryData, object::yaml::BinaryRef());
 }
 
 void MappingTraits<COFFYAML::Section>::mapping(IO &IO, COFFYAML::Section &Sec) {

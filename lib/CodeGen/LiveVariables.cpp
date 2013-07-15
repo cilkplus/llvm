@@ -441,7 +441,7 @@ void LiveVariables::HandleRegMask(const MachineOperand &MO) {
 }
 
 void LiveVariables::HandlePhysRegDef(unsigned Reg, MachineInstr *MI,
-                                     SmallVector<unsigned, 4> &Defs) {
+                                     SmallVectorImpl<unsigned> &Defs) {
   // What parts of the register are previously defined?
   SmallSet<unsigned, 32> Live;
   if (PhysRegDef[Reg] || PhysRegUse[Reg]) {
@@ -484,7 +484,7 @@ void LiveVariables::HandlePhysRegDef(unsigned Reg, MachineInstr *MI,
 }
 
 void LiveVariables::UpdatePhysRegDefs(MachineInstr *MI,
-                                      SmallVector<unsigned, 4> &Defs) {
+                                      SmallVectorImpl<unsigned> &Defs) {
   while (!Defs.empty()) {
     unsigned Reg = Defs.back();
     Defs.pop_back();
@@ -609,9 +609,9 @@ bool LiveVariables::runOnMachineFunction(MachineFunction &mf) {
     // if they have PHI nodes, and if so, we simulate an assignment at the end
     // of the current block.
     if (!PHIVarInfo[MBB->getNumber()].empty()) {
-      SmallVector<unsigned, 4>& VarInfoVec = PHIVarInfo[MBB->getNumber()];
+      SmallVectorImpl<unsigned> &VarInfoVec = PHIVarInfo[MBB->getNumber()];
 
-      for (SmallVector<unsigned, 4>::iterator I = VarInfoVec.begin(),
+      for (SmallVectorImpl<unsigned>::iterator I = VarInfoVec.begin(),
              E = VarInfoVec.end(); I != E; ++I)
         // Mark it alive only in the block we are representing.
         MarkVirtRegAliveInBlock(getVarInfo(*I),MRI->getVRegDef(*I)->getParent(),

@@ -20,30 +20,44 @@ class PPCMCExpr : public MCTargetExpr {
 public:
   enum VariantKind {
     VK_PPC_None,
-    VK_PPC_HA16,
-    VK_PPC_LO16
+    VK_PPC_LO,
+    VK_PPC_HI,
+    VK_PPC_HA,
+    VK_PPC_HIGHER,
+    VK_PPC_HIGHERA,
+    VK_PPC_HIGHEST,
+    VK_PPC_HIGHESTA
   };
 
 private:
   const VariantKind Kind;
   const MCExpr *Expr;
+  bool IsDarwin;
 
-  explicit PPCMCExpr(VariantKind _Kind, const MCExpr *_Expr)
-    : Kind(_Kind), Expr(_Expr) {}
+  explicit PPCMCExpr(VariantKind _Kind, const MCExpr *_Expr,
+                     bool _IsDarwin)
+    : Kind(_Kind), Expr(_Expr), IsDarwin(_IsDarwin) {}
 
 public:
   /// @name Construction
   /// @{
 
   static const PPCMCExpr *Create(VariantKind Kind, const MCExpr *Expr,
-                                      MCContext &Ctx);
+                                 bool isDarwin, MCContext &Ctx);
 
-  static const PPCMCExpr *CreateHa16(const MCExpr *Expr, MCContext &Ctx) {
-    return Create(VK_PPC_HA16, Expr, Ctx);
+  static const PPCMCExpr *CreateLo(const MCExpr *Expr,
+                                   bool isDarwin, MCContext &Ctx) {
+    return Create(VK_PPC_LO, Expr, isDarwin, Ctx);
   }
 
-  static const PPCMCExpr *CreateLo16(const MCExpr *Expr, MCContext &Ctx) {
-    return Create(VK_PPC_LO16, Expr, Ctx);
+  static const PPCMCExpr *CreateHi(const MCExpr *Expr,
+                                   bool isDarwin, MCContext &Ctx) {
+    return Create(VK_PPC_HI, Expr, isDarwin, Ctx);
+  }
+
+  static const PPCMCExpr *CreateHa(const MCExpr *Expr,
+                                   bool isDarwin, MCContext &Ctx) {
+    return Create(VK_PPC_HA, Expr, isDarwin, Ctx);
   }
 
   /// @}
@@ -55,6 +69,10 @@ public:
 
   /// getSubExpr - Get the child of this expression.
   const MCExpr *getSubExpr() const { return Expr; }
+
+  /// isDarwinSyntax - True if expression is to be printed using Darwin syntax.
+  bool isDarwinSyntax() const { return IsDarwin; }
+
 
   /// @}
 

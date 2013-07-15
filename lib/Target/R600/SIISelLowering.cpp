@@ -14,7 +14,6 @@
 
 #include "SIISelLowering.h"
 #include "AMDGPU.h"
-#include "AMDIL.h"
 #include "AMDILIntrinsicInfo.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
@@ -30,9 +29,7 @@ const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
 using namespace llvm;
 
 SITargetLowering::SITargetLowering(TargetMachine &TM) :
-    AMDGPUTargetLowering(TM),
-    TII(static_cast<const SIInstrInfo*>(TM.getInstrInfo())),
-    TRI(TM.getRegisterInfo()) {
+    AMDGPUTargetLowering(TM) {
 
   addRegisterClass(MVT::i1, &AMDGPU::SReg_64RegClass);
   addRegisterClass(MVT::i64, &AMDGPU::SReg_64RegClass);
@@ -48,6 +45,7 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   addRegisterClass(MVT::v2i32, &AMDGPU::VReg_64RegClass);
   addRegisterClass(MVT::v2f32, &AMDGPU::VReg_64RegClass);
+  addRegisterClass(MVT::f64, &AMDGPU::VReg_64RegClass);
 
   addRegisterClass(MVT::v4i32, &AMDGPU::VReg_128RegClass);
   addRegisterClass(MVT::v4f32, &AMDGPU::VReg_128RegClass);
@@ -78,12 +76,28 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
 
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, Expand);
+
+  setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
+
   setTargetDAGCombine(ISD::SELECT_CC);
 
   setTargetDAGCombine(ISD::SETCC);
 
   setSchedulingPreference(Sched::RegPressure);
 }
+
+//===----------------------------------------------------------------------===//
+// TargetLowering queries
+//===----------------------------------------------------------------------===//
+
+bool SITargetLowering::allowsUnalignedMemoryAccesses(EVT  VT,
+                                                     bool *IsFast) const {
+  // XXX: This depends on the address space and also we may want to revist
+  // the alignment values we specify in the DataLayout.
+  return VT.bitsGT(MVT::i32);
+}
+
 
 SDValue SITargetLowering::LowerParameter(SelectionDAG &DAG, EVT VT,
                                          SDLoc DL, SDValue Chain,
@@ -257,6 +271,8 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     return AMDGPUTargetLowering::EmitInstrWithCustomInserter(MI, BB);
   case AMDGPU::BRANCH: return BB;
   case AMDGPU::SI_ADDR64_RSRC: {
+    const SIInstrInfo *TII =
+      static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
     MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
     unsigned SuperReg = MI->getOperand(0).getReg();
     unsigned SubRegLo = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
@@ -282,6 +298,21 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     MI->eraseFromParent();
     break;
   }
+  case AMDGPU::V_SUB_F64: {
+    const SIInstrInfo *TII =
+      static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
+    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_ADD_F64),
+            MI->getOperand(0).getReg())
+            .addReg(MI->getOperand(1).getReg())
+            .addReg(MI->getOperand(2).getReg())
+            .addImm(0)  /* src2 */
+            .addImm(0)  /* ABS */
+            .addImm(0)  /* CLAMP */
+            .addImm(0)  /* OMOD */
+            .addImm(2); /* NEG */
+    MI->eraseFromParent();
+    break;
+  }
   }
   return BB;
 }
@@ -299,11 +330,14 @@ MVT SITargetLowering::getScalarShiftAmountTy(EVT VT) const {
 //===----------------------------------------------------------------------===//
 
 SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   switch (Op.getOpcode()) {
   default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
   case ISD::BRCOND: return LowerBRCOND(Op, DAG);
   case ISD::SELECT_CC: return LowerSELECT_CC(Op, DAG);
   case ISD::SIGN_EXTEND: return LowerSIGN_EXTEND(Op, DAG);
+  case ISD::GlobalAddress: return LowerGlobalAddress(MFI, Op, DAG);
   case ISD::INTRINSIC_WO_CHAIN: {
     unsigned IntrinsicID =
                          cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
@@ -582,6 +616,8 @@ bool SITargetLowering::foldImm(SDValue &Operand, int32_t &Immediate,
                                bool &ScalarSlotUsed) const {
 
   MachineSDNode *Mov = dyn_cast<MachineSDNode>(Operand);
+  const SIInstrInfo *TII =
+    static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
   if (Mov == 0 || !TII->isMov(Mov->getMachineOpcode()))
     return false;
 
@@ -621,7 +657,10 @@ bool SITargetLowering::fitsRegClass(SelectionDAG &DAG, const SDValue &Op,
   SDNode *Node = Op.getNode();
 
   const TargetRegisterClass *OpClass;
+  const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
   if (MachineSDNode *MN = dyn_cast<MachineSDNode>(Node)) {
+    const SIInstrInfo *TII =
+      static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
     const MCInstrDesc &Desc = TII->get(MN->getMachineOpcode());
     int OpClassID = Desc.OpInfo[Op.getResNo()].RegClass;
     if (OpClassID == -1) {
@@ -680,12 +719,25 @@ void SITargetLowering::ensureSRegLimit(SelectionDAG &DAG, SDValue &Operand,
   Operand = SDValue(Node, 0);
 }
 
+/// \returns true if \p Node's operands are different from the SDValue list
+/// \p Ops
+static bool isNodeChanged(const SDNode *Node, const std::vector<SDValue> &Ops) {
+  for (unsigned i = 0, e = Node->getNumOperands(); i < e; ++i) {
+    if (Ops[i].getNode() != Node->getOperand(i).getNode()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// \brief Try to fold the Nodes operands into the Node
 SDNode *SITargetLowering::foldOperands(MachineSDNode *Node,
                                        SelectionDAG &DAG) const {
 
   // Original encoding (either e32 or e64)
   int Opcode = Node->getMachineOpcode();
+  const SIInstrInfo *TII =
+    static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
   const MCInstrDesc *Desc = &TII->get(Opcode);
 
   unsigned NumDefs = Desc->getNumDefs();
@@ -814,17 +866,8 @@ SDNode *SITargetLowering::foldOperands(MachineSDNode *Node,
   // Nodes that have a glue result are not CSE'd by getMachineNode(), so in
   // this case a brand new node is always be created, even if the operands
   // are the same as before.  So, manually check if anything has been changed.
-  if (Desc->Opcode == Opcode) {
-    bool Changed = false;
-    for (unsigned i = 0, e = Node->getNumOperands(); i < e; ++i) {
-      if (Ops[i].getNode() != Node->getOperand(i).getNode()) {
-        Changed = true;
-        break;
-      }
-    }
-    if (!Changed) {
-      return Node;
-    }
+  if (Desc->Opcode == Opcode && !isNodeChanged(Node, Ops)) {
+    return Node;
   }
 
   // Create a complete new instruction

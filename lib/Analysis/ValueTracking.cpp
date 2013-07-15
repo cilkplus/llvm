@@ -855,16 +855,22 @@ bool llvm::isKnownToBeAPowerOfTwo(Value *V, bool OrZero, unsigned Depth) {
     return false;
   }
 
-  // Adding a power of two to the same power of two is a power of two or zero.
-  if (OrZero && match(V, m_Add(m_Value(X), m_Value(Y)))) {
-    if (match(X, m_And(m_Value(), m_Specific(Y)))) {
-      if (isKnownToBeAPowerOfTwo(Y, /*OrZero*/true, Depth))
-        return true;
-    } else if (match(Y, m_And(m_Value(), m_Specific(X)))) {
-      if (isKnownToBeAPowerOfTwo(X, /*OrZero*/true, Depth))
-        return true;
-    }
-  }
+  if (match(V, m_Add(m_Value(X), m_Value(Y))))
+    if (OverflowingBinaryOperator *VOBO = cast<OverflowingBinaryOperator>(V))
+      if (OrZero || VOBO->hasNoUnsignedWrap() || VOBO->hasNoSignedWrap()) {
+        // Adding a power of two to the same power of two is a power of two or
+        // zero.
+        if (BinaryOperator *XBO = dyn_cast<BinaryOperator>(X))
+          if (XBO->getOpcode() == Instruction::And)
+            if (XBO->getOperand(0) == Y || XBO->getOperand(1) == Y)
+              if (isKnownToBeAPowerOfTwo(Y, OrZero, Depth))
+                return true;
+        if (BinaryOperator *YBO = dyn_cast<BinaryOperator>(Y))
+          if (YBO->getOpcode() == Instruction::And)
+            if (YBO->getOperand(0) == X || YBO->getOperand(1) == X)
+              if (isKnownToBeAPowerOfTwo(X, OrZero, Depth))
+                return true;
+      }
 
   // An exact divide or right shift can only shift off zero bits, so the result
   // is a power of two only if the first operand is a power of two and not
@@ -1520,7 +1526,7 @@ Value *llvm::isBytewiseValue(Value *V) {
 // struct. To is the result struct built so far, new insertvalue instructions
 // build on that.
 static Value *BuildSubAggregate(Value *From, Value* To, Type *IndexedType,
-                                SmallVector<unsigned, 10> &Idxs,
+                                SmallVectorImpl<unsigned> &Idxs,
                                 unsigned IdxSkip,
                                 Instruction *InsertBefore) {
   llvm::StructType *STy = dyn_cast<llvm::StructType>(IndexedType);

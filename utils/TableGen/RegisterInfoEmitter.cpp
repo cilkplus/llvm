@@ -58,8 +58,6 @@ private:
   void EmitRegMappingTables(raw_ostream &o,
                             const std::vector<CodeGenRegister*> &Regs,
                             bool isCtor);
-  void EmitRegClasses(raw_ostream &OS, CodeGenTarget &Target);
-
   void EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
                            const std::string &ClassName);
   void emitComposeSubRegIndices(raw_ostream &OS, CodeGenRegBank &RegBank,
@@ -311,7 +309,7 @@ RegisterInfoEmitter::EmitRegMappingTables(raw_ostream &OS,
                                        const std::vector<CodeGenRegister*> &Regs,
                                           bool isCtor) {
   // Collect all information about dwarf register numbers
-  typedef std::map<Record*, std::vector<int64_t>, LessRecord> DwarfRegNumsMapTy;
+  typedef std::map<Record*, std::vector<int64_t>, LessRecordRegister> DwarfRegNumsMapTy;
   DwarfRegNumsMapTy DwarfRegNums;
 
   // First, just pull all provided information to the map

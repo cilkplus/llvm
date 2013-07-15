@@ -1,10 +1,10 @@
 ; RUN: llc < %s -march=sparcv9 -disable-sparc-delay-filler -disable-sparc-leaf-proc | FileCheck %s
 ; RUN: llc < %s -march=sparcv9  | FileCheck %s -check-prefix=OPT
 
-; CHECK: ret2:
+; CHECK-LABEL: ret2:
 ; CHECK: or %g0, %i1, %i0
 
-; OPT: ret2:
+; OPT-LABEL: ret2:
 ; OPT: jmp %o7+8
 ; OPT: or %g0, %o1, %o0
 define i64 @ret2(i64 %a, i64 %b) {
@@ -14,7 +14,7 @@ define i64 @ret2(i64 %a, i64 %b) {
 ; CHECK: shl_imm
 ; CHECK: sllx %i0, 7, %i0
 
-; OPT: shl_imm:
+; OPT-LABEL: shl_imm:
 ; OPT: jmp %o7+8
 ; OPT: sllx %o0, 7, %o0
 define i64 @shl_imm(i64 %a) {
@@ -25,7 +25,7 @@ define i64 @shl_imm(i64 %a) {
 ; CHECK: sra_reg
 ; CHECK: srax %i0, %i1, %i0
 
-; OPT: sra_reg:
+; OPT-LABEL: sra_reg:
 ; OPT: jmp %o7+8
 ; OPT: srax %o0, %o1, %o0
 define i64 @sra_reg(i64 %a, i64 %b) {
@@ -161,6 +161,14 @@ define i64 @loads(i64* %p, i32* %q, i32* %r, i16* %s) {
   ret i64 %x3
 }
 
+; CHECK: load_bool
+; CHECK: ldub [%i0], %i0
+define i64 @load_bool(i1* %p) {
+  %a = load i1* %p
+  %b = zext i1 %a to i64
+  ret i64 %b
+}
+
 ; CHECK: stores
 ; CHECK: ldx [%i0+8], [[R:%[goli][0-7]]]
 ; CHECK: stx [[R]], [%i0+16]
@@ -230,7 +238,7 @@ entry:
 declare void @g(i8*)
 
 ; CHECK: expand_setcc
-; CHECK: subcc %i0, 1,
+; CHECK: cmp %i0, 1
 ; CHECK: movl %xcc, 1,
 define i32 @expand_setcc(i64 %a) {
   %cond = icmp sle i64 %a, 0
@@ -263,11 +271,11 @@ define double @bitcast_f64_i64(i64 %x) {
   ret double %y
 }
 
-; CHECK: store_zero:
+; CHECK-LABEL: store_zero:
 ; CHECK: stx %g0, [%i0]
 ; CHECK: stx %g0, [%i1+8]
 
-; OPT:  store_zero:
+; OPT-LABEL:  store_zero:
 ; OPT:  stx %g0, [%o0]
 ; OPT:  stx %g0, [%o1+8]
 define i64 @store_zero(i64* nocapture %a, i64* nocapture %b) {

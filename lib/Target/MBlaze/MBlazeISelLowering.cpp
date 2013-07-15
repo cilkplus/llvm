@@ -687,9 +687,9 @@ LowerCall(TargetLowering::CallLoweringInfo &CLI,
           SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG                     = CLI.DAG;
   SDLoc dl                              = CLI.DL;
-  SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
-  SmallVector<SDValue, 32> &OutVals     = CLI.OutVals;
-  SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals     = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins   = CLI.Ins;
   SDValue Chain                         = CLI.Chain;
   SDValue Callee                        = CLI.Callee;
   bool &isTailCall                      = CLI.IsTailCall;
@@ -1127,7 +1127,7 @@ MBlazeTargetLowering::getSingleConstraintMatchWeight(
 /// to an LLVM register class, return a register of 0 and the register class
 /// pointer.
 std::pair<unsigned, const TargetRegisterClass*> MBlazeTargetLowering::
-getRegForInlineAsmConstraint(const std::string &Constraint, EVT VT) const {
+getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
     case 'r':

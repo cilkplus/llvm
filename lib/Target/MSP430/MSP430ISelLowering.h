@@ -93,12 +93,13 @@ namespace llvm {
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
     SDValue getReturnAddressFrameIndex(SelectionDAG &DAG) const;
 
     TargetLowering::ConstraintType
     getConstraintType(const std::string &Constraint) const;
     std::pair<unsigned, const TargetRegisterClass*>
-    getRegForInlineAsmConstraint(const std::string &Constraint, EVT VT) const;
+    getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const;
 
     /// isTruncateFree - Return true if it's free to truncate a value of type
     /// Ty1 to type Ty2. e.g. On msp430 it's free to truncate a i16 value in

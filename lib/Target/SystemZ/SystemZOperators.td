@@ -52,6 +52,10 @@ def SDT_ZAtomicCmpSwapW     : SDTypeProfile<1, 6,
                                              SDTCisVT<4, i32>,
                                              SDTCisVT<5, i32>,
                                              SDTCisVT<6, i32>]>;
+def SDT_ZCopy               : SDTypeProfile<0, 3,
+                                            [SDTCisPtrTy<0>,
+                                             SDTCisPtrTy<1>,
+                                             SDTCisVT<2, i32>]>;
 
 //===----------------------------------------------------------------------===//
 // Node definitions
@@ -81,6 +85,7 @@ def z_adjdynalloc       : SDNode<"SystemZISD::ADJDYNALLOC", SDT_ZAdjDynAlloc>;
 def z_extract_access    : SDNode<"SystemZISD::EXTRACT_ACCESS",
                                  SDT_ZExtractAccess>;
 def z_umul_lohi64       : SDNode<"SystemZISD::UMUL_LOHI64", SDT_ZGR128Binary64>;
+def z_sdivrem32         : SDNode<"SystemZISD::SDIVREM32", SDT_ZGR128Binary32>;
 def z_sdivrem64         : SDNode<"SystemZISD::SDIVREM64", SDT_ZGR128Binary64>;
 def z_udivrem32         : SDNode<"SystemZISD::UDIVREM32", SDT_ZGR128Binary32>;
 def z_udivrem64         : SDNode<"SystemZISD::UDIVREM64", SDT_ZGR128Binary64>;
@@ -102,6 +107,9 @@ def z_atomic_loadw_umin : AtomicWOp<"ATOMIC_LOADW_UMIN">;
 def z_atomic_loadw_umax : AtomicWOp<"ATOMIC_LOADW_UMAX">;
 def z_atomic_cmp_swapw  : AtomicWOp<"ATOMIC_CMP_SWAPW", SDT_ZAtomicCmpSwapW>;
 
+def z_mvc               : SDNode<"SystemZISD::MVC", SDT_ZCopy,
+                                 [SDNPHasChain, SDNPMayStore, SDNPMayLoad]>;
+
 //===----------------------------------------------------------------------===//
 // Pattern fragments
 //===----------------------------------------------------------------------===//
@@ -119,6 +127,20 @@ def zext32 : PatFrag<(ops node:$src), (zext (i32 node:$src))>;
 // Typed floating-point loads.
 def loadf32 : PatFrag<(ops node:$src), (f32 (load node:$src))>;
 def loadf64 : PatFrag<(ops node:$src), (f64 (load node:$src))>;
+
+// Extending loads in which the extension type doesn't matter.
+def anyextload : PatFrag<(ops node:$ptr), (unindexedload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getExtensionType() != ISD::NON_EXTLOAD;
+}]>;
+def anyextloadi8 : PatFrag<(ops node:$ptr), (anyextload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i8;
+}]>;
+def anyextloadi16 : PatFrag<(ops node:$ptr), (anyextload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i16;
+}]>;
+def anyextloadi32 : PatFrag<(ops node:$ptr), (anyextload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i32;
+}]>;
 
 // Aligned loads.
 class AlignedLoad<SDPatternOperator load>
@@ -149,7 +171,10 @@ class NonvolatileLoad<SDPatternOperator load>
   LoadSDNode *Load = cast<LoadSDNode>(N);
   return !Load->isVolatile();
 }]>;
-def nonvolatile_load : NonvolatileLoad<load>;
+def nonvolatile_load          : NonvolatileLoad<load>;
+def nonvolatile_anyextloadi8  : NonvolatileLoad<anyextloadi8>;
+def nonvolatile_anyextloadi16 : NonvolatileLoad<anyextloadi16>;
+def nonvolatile_anyextloadi32 : NonvolatileLoad<anyextloadi32>;
 
 // Non-volatile stores.
 class NonvolatileStore<SDPatternOperator store>
@@ -157,7 +182,10 @@ class NonvolatileStore<SDPatternOperator store>
   StoreSDNode *Store = cast<StoreSDNode>(N);
   return !Store->isVolatile();
 }]>;
-def nonvolatile_store : NonvolatileStore<store>;
+def nonvolatile_store         : NonvolatileStore<store>;
+def nonvolatile_truncstorei8  : NonvolatileStore<truncstorei8>;
+def nonvolatile_truncstorei16 : NonvolatileStore<truncstorei16>;
+def nonvolatile_truncstorei32 : NonvolatileStore<truncstorei32>;
 
 // Insertions.
 def inserti8 : PatFrag<(ops node:$src1, node:$src2),
