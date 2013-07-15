@@ -31,7 +31,7 @@
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ValueHandle.h"
-#include "llvm/Transforms/Utils/BlackList.h"
+#include "llvm/Transforms/Utils/SpecialCaseList.h"
 
 namespace llvm {
   class Module;
@@ -309,7 +309,8 @@ class CodeGenModule : public CodeGenTypeCache {
   llvm::StringMap<llvm::GlobalVariable*> ConstantStringMap;
   llvm::DenseMap<const Decl*, llvm::Constant *> StaticLocalDeclMap;
   llvm::DenseMap<const Decl*, llvm::GlobalVariable*> StaticLocalDeclGuardMap;
-  
+  llvm::DenseMap<const Expr*, llvm::Constant *> MaterializedGlobalTemporaryMap;
+
   llvm::DenseMap<QualType, llvm::Constant *> AtomicSetterHelperFnMap;
   llvm::DenseMap<QualType, llvm::Constant *> AtomicGetterHelperFnMap;
 
@@ -388,7 +389,7 @@ class CodeGenModule : public CodeGenTypeCache {
   void createCilkPlusRuntime();
 
   bool isTriviallyRecursive(const FunctionDecl *F);
-  bool shouldEmitFunction(const FunctionDecl *F);
+  bool shouldEmitFunction(GlobalDecl GD);
 
   /// @name Cache for Blocks Runtime Globals
   /// @{
@@ -414,7 +415,7 @@ class CodeGenModule : public CodeGenTypeCache {
 
   GlobalDecl initializedGlobalDecl;
 
-  llvm::BlackList SanitizerBlacklist;
+  llvm::SpecialCaseList SanitizerBlacklist;
 
   const SanitizerOptions &SanOpts;
 
@@ -739,7 +740,12 @@ public:
   /// GetAddrOfConstantCompoundLiteral - Returns a pointer to a constant global
   /// variable for the given file-scope compound literal expression.
   llvm::Constant *GetAddrOfConstantCompoundLiteral(const CompoundLiteralExpr*E);
-  
+
+  /// \brief Returns a pointer to a global variable representing a temporary
+  /// with static or thread storage duration.
+  llvm::Constant *GetAddrOfGlobalTemporary(const MaterializeTemporaryExpr *E,
+                                           const Expr *Inner);
+
   /// \brief Retrieve the record type that describes the state of an
   /// Objective-C fast enumeration loop (for..in).
   QualType getObjCFastEnumerationStateType();
@@ -926,11 +932,10 @@ public:
   /// \brief Appends a dependent lib to the "Linker Options" metadata value.
   void AddDependentLib(StringRef Lib);
 
-  llvm::GlobalVariable::LinkageTypes
-  getFunctionLinkage(const FunctionDecl *FD);
+  llvm::GlobalVariable::LinkageTypes getFunctionLinkage(GlobalDecl GD);
 
-  void setFunctionLinkage(const FunctionDecl *FD, llvm::GlobalValue *V) {
-    V->setLinkage(getFunctionLinkage(FD));
+  void setFunctionLinkage(GlobalDecl GD, llvm::GlobalValue *V) {
+    V->setLinkage(getFunctionLinkage(GD));
   }
 
   /// getVTableLinkage - Return the appropriate linkage for the vtable, VTT,
@@ -944,8 +949,7 @@ public:
   /// GetLLVMLinkageVarDefinition - Returns LLVM linkage for a global 
   /// variable.
   llvm::GlobalValue::LinkageTypes 
-  GetLLVMLinkageVarDefinition(const VarDecl *D,
-                              llvm::GlobalVariable *GV);
+  GetLLVMLinkageVarDefinition(const VarDecl *D, bool isConstant);
   
   /// Emit all the global annotations.
   void EmitGlobalAnnotations();
@@ -974,7 +978,7 @@ public:
   /// annotations are emitted during finalization of the LLVM code.
   void AddGlobalAnnotations(const ValueDecl *D, llvm::GlobalValue *GV);
 
-  const llvm::BlackList &getSanitizerBlacklist() const {
+  const llvm::SpecialCaseList &getSanitizerBlacklist() const {
     return SanitizerBlacklist;
   }
 
@@ -1023,8 +1027,6 @@ private:
 
   void EmitGlobalFunctionDefinition(GlobalDecl GD);
   void EmitGlobalVarDefinition(const VarDecl *D);
-  llvm::Constant *MaybeEmitGlobalStdInitializerListInitializer(const VarDecl *D,
-                                                              const Expr *init);
   void EmitAliasDefinition(GlobalDecl GD);
   void EmitObjCPropertyImplementations(const ObjCImplementationDecl *D);
   void EmitObjCIvarInitializations(ObjCImplementationDecl *D);

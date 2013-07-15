@@ -11,6 +11,7 @@
 ///
 //===----------------------------------------------------------------------===//
 #include "clang/AST/ParentMap.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Overload.h"
 #include "clang/Sema/SemaInternal.h"
@@ -1030,6 +1031,26 @@ void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
 }
 
 namespace {
+
+bool extendsLifetimeOfTemporary(const VarDecl *VD) {
+  // Attempt to determine whether this declaration lifetime-extends a
+  // temporary.
+  //
+  // FIXME: This is incorrect. Non-reference declarations can lifetime-extend
+  // temporaries, and a single declaration can extend multiple temporaries.
+  // We should look at the storage duration on each nested
+  // MaterializeTemporaryExpr instead.
+  //
+  // Commit 49bab4c0046e8300c79e79b7ca9a479696c7e87a
+  //
+  const Expr *Init = VD->getInit();
+  if (!Init)
+    return false;
+  if (const ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(Init))
+    Init = EWC->getSubExpr();
+  return isa<MaterializeTemporaryExpr>(Init);
+}
+
 /// \brief Helper class to diagnose a SIMD for loop body.
 //
 /// FIXME: Check OpenMP directive and construct.
@@ -1133,9 +1154,9 @@ public:
       if (T.isNull())
         continue;
 
-      // If this is a reference that binds to a tempory, then consider its
+      // If this is a reference that binds to a temporary, then consider its
       // non-reference type.
-      if (T->isReferenceType() && VD->extendsLifetimeOfTemporary())
+      if (T->isReferenceType() && extendsLifetimeOfTemporary(VD))
         T = T.getNonReferenceType();
 
       if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
@@ -2242,7 +2263,7 @@ CilkSpawnDecl *Sema::BuildCilkSpawnDecl(Decl *D) {
 
   // Receiver temporary.
   QualType ReceiverTmpType;
-  if (VD->getType()->isReferenceType() && VD->extendsLifetimeOfTemporary()) {
+  if (VD->getType()->isReferenceType() && extendsLifetimeOfTemporary(VD)) {
     ReceiverTmpType = GetReceiverTmpType(VD->getInit());
     if (!ReceiverTmpType.isNull()) {
       NumParams = 3;

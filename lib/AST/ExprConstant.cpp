@@ -1001,6 +1001,10 @@ static bool IsGlobalLValue(APValue::LValueBase B) {
     const CompoundLiteralExpr *CLE = cast<CompoundLiteralExpr>(E);
     return CLE->isFileScope() && CLE->isLValue();
   }
+  case Expr::MaterializeTemporaryExprClass:
+    // A materialized temporary might have been lifetime-extended to static
+    // storage duration.
+    return cast<MaterializeTemporaryExpr>(E)->getStorageDuration() == SD_Static;
   // A string literal has static storage duration.
   case Expr::StringLiteralClass:
   case Expr::PredefinedExprClass:
@@ -1128,6 +1132,12 @@ static bool CheckLiteralType(EvalInfo &Info, const Expr *E,
 /// check that the expression is of literal type.
 static bool CheckConstantExpression(EvalInfo &Info, SourceLocation DiagLoc,
                                     QualType Type, const APValue &Value) {
+  if (Value.isUninit()) {
+    Info.Diag(DiagLoc, diag::note_constexpr_uninitialized)
+      << true << Type;
+    return false;
+  }
+
   // Core issue 1454: For a literal constant expression of array or class type,
   // each subobject of its value shall have been initialized by a constant
   // expression.
@@ -1182,7 +1192,10 @@ const ValueDecl *GetLValueBaseDecl(const LValue &LVal) {
 }
 
 static bool IsLiteralLValue(const LValue &Value) {
-  return Value.Base.dyn_cast<const Expr*>() && !Value.CallIndex;
+  if (Value.CallIndex)
+    return false;
+  const Expr *E = Value.Base.dyn_cast<const Expr*>();
+  return E && !isa<MaterializeTemporaryExpr>(E);
 }
 
 static bool IsWeakLValue(const LValue &Value) {
@@ -2279,11 +2292,44 @@ CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E, AccessKinds AK,
     const Expr *Base = LVal.Base.dyn_cast<const Expr*>();
 
     if (!Frame) {
-      Info.Diag(E);
-      return CompleteObject();
-    }
+      if (const MaterializeTemporaryExpr *MTE =
+              dyn_cast<MaterializeTemporaryExpr>(Base)) {
+        assert(MTE->getStorageDuration() == SD_Static &&
+               "should have a frame for a non-global materialized temporary");
 
-    BaseVal = &Frame->Temporaries[Base];
+        // Per C++1y [expr.const]p2:
+        //  an lvalue-to-rvalue conversion [is not allowed unless it applies to]
+        //   - a [...] glvalue of integral or enumeration type that refers to
+        //     a non-volatile const object [...]
+        //   [...]
+        //   - a [...] glvalue of literal type that refers to a non-volatile
+        //     object whose lifetime began within the evaluation of e.
+        //
+        // C++11 misses the 'began within the evaluation of e' check and
+        // instead allows all temporaries, including things like:
+        //   int &&r = 1;
+        //   int x = ++r;
+        //   constexpr int k = r;
+        // Therefore we use the C++1y rules in C++11 too.
+        const ValueDecl *VD = Info.EvaluatingDecl.dyn_cast<const ValueDecl*>();
+        const ValueDecl *ED = MTE->getExtendingDecl();
+        if (!(BaseType.isConstQualified() &&
+              BaseType->isIntegralOrEnumerationType()) &&
+            !(VD && VD->getCanonicalDecl() == ED->getCanonicalDecl())) {
+          Info.Diag(E, diag::note_constexpr_access_static_temporary, 1) << AK;
+          Info.Note(MTE->getExprLoc(), diag::note_constexpr_temporary_here);
+          return CompleteObject();
+        }
+
+        BaseVal = Info.Ctx.getMaterializedTemporaryValue(MTE, false);
+        assert(BaseVal && "got reference to unevaluated temporary");
+      } else {
+        Info.Diag(E);
+        return CompleteObject();
+      }
+    } else {
+      BaseVal = &Frame->Temporaries[Base];
+    }
 
     // Volatile temporary objects cannot be accessed in constant expressions.
     if (BaseType.isVolatileQualified()) {
@@ -2843,6 +2889,13 @@ static bool EvaluateDecl(EvalInfo &Info, const Decl *D) {
     Result.set(VD, Info.CurrentCall->Index);
     APValue &Val = Info.CurrentCall->Temporaries[VD];
 
+    if (!VD->getInit()) {
+      Info.Diag(D->getLocStart(), diag::note_constexpr_uninitialized)
+        << false << VD->getType();
+      Val = APValue();
+      return false;
+    }
+
     if (!EvaluateInPlace(Val, Info, Result, VD->getInit())) {
       // Wipe out any partially-computed value, to allow tracking that this
       // evaluation failed.
@@ -2927,7 +2980,10 @@ static EvalStmtResult EvaluateSwitch(APValue &Result, EvalInfo &Info,
   case ESR_Returned:
     return ESR;
   case ESR_CaseNotFound:
-    llvm_unreachable("couldn't find switch case");
+    // This can only happen if the switch case is nested within a statement
+    // expression. We have no intention of supporting that.
+    Info.Diag(Found->getLocStart(), diag::note_constexpr_stmt_expr_unsupported);
+    return ESR_Failed;
   }
   llvm_unreachable("Invalid EvalStmtResult!");
 }
@@ -3808,6 +3864,40 @@ public:
     return DerivedSuccess(RVal, UO);
   }
 
+  RetTy VisitStmtExpr(const StmtExpr *E) {
+    // We will have checked the full-expressions inside the statement expression
+    // when they were completed, and don't need to check them again now.
+    if (Info.getIntOverflowCheckMode())
+      return Error(E);
+
+    const CompoundStmt *CS = E->getSubStmt();
+    for (CompoundStmt::const_body_iterator BI = CS->body_begin(),
+                                           BE = CS->body_end();
+         /**/; ++BI) {
+      if (BI + 1 == BE) {
+        const Expr *FinalExpr = dyn_cast<Expr>(*BI);
+        if (!FinalExpr) {
+          Info.Diag((*BI)->getLocStart(),
+                    diag::note_constexpr_stmt_expr_unsupported);
+          return false;
+        }
+        return this->Visit(FinalExpr);
+      }
+
+      APValue ReturnValue;
+      EvalStmtResult ESR = EvaluateStmt(ReturnValue, Info, *BI);
+      if (ESR != ESR_Succeeded) {
+        // FIXME: If the statement-expression terminated due to 'return',
+        // 'break', or 'continue', it would be nice to propagate that to
+        // the outer statement evaluation rather than bailing out.
+        if (ESR != ESR_Failed)
+          Info.Diag((*BI)->getLocStart(),
+                    diag::note_constexpr_stmt_expr_unsupported);
+        return false;
+      }
+    }
+  }
+
   /// Visit a value which is evaluated, but whose value is ignored.
   void VisitIgnoredValue(const Expr *E) {
     EvaluateIgnoredValue(Info, E);
@@ -3940,6 +4030,8 @@ public:
 //  * Any Expr, with a CallIndex indicating the function in which the temporary
 //    was evaluated, for cases where the MaterializeTemporaryExpr is missing
 //    from the AST (FIXME).
+//  * A MaterializeTemporaryExpr that has static storage duration, with no
+//    CallIndex, for a lifetime-extended temporary.
 // plus an offset in bytes.
 //===----------------------------------------------------------------------===//
 namespace {
@@ -4045,14 +4137,30 @@ bool LValueExprEvaluator::VisitMaterializeTemporaryExpr(
     if (!EvaluateIgnoredValue(Info, CommaLHSs[I]))
       return false;
 
+  // A materialized temporary with static storage duration can appear within the
+  // result of a constant expression evaluation, so we need to preserve its
+  // value for use outside this evaluation.
+  APValue *Value;
+  if (E->getStorageDuration() == SD_Static) {
+    Value = Info.Ctx.getMaterializedTemporaryValue(E, true);
+    *Value = APValue();
+    Result.set(E);
+  } else {
+    Value = &Info.CurrentCall->Temporaries[E];
+    Result.set(E, Info.CurrentCall->Index);
+  }
+
+  QualType Type = Inner->getType();
+
   // Materialize the temporary itself.
-  APValue *Value = &Info.CurrentCall->Temporaries[E];
-  Result.set(E, Info.CurrentCall->Index);
-  if (!EvaluateInPlace(*Value, Info, Result, Inner))
+  if (!EvaluateInPlace(*Value, Info, Result, Inner) ||
+      (E->getStorageDuration() == SD_Static &&
+       !CheckConstantExpression(Info, E->getExprLoc(), Type, *Value))) {
+    *Value = APValue();
     return false;
+  }
 
   // Adjust our lvalue to refer to the desired subobject.
-  QualType Type = Inner->getType();
   for (unsigned I = Adjustments.size(); I != 0; /**/) {
     --I;
     switch (Adjustments[I].Kind) {
@@ -4405,7 +4513,13 @@ bool PointerExprEvaluator::VisitCallExpr(const CallExpr *E) {
   if (IsStringLiteralCall(E))
     return Success(E);
 
-  return ExprEvaluatorBaseTy::VisitCallExpr(E);
+  switch (E->isBuiltinCall()) {
+  case Builtin::BI__builtin_addressof:
+    return EvaluateLValue(E->getArg(0), Result, Info);
+
+  default:
+    return ExprEvaluatorBaseTy::VisitCallExpr(E);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -4519,6 +4633,7 @@ namespace {
     bool VisitCastExpr(const CastExpr *E);
     bool VisitInitListExpr(const InitListExpr *E);
     bool VisitCXXConstructExpr(const CXXConstructExpr *E);
+    bool VisitCXXStdInitializerListExpr(const CXXStdInitializerListExpr *E);
   };
 }
 
@@ -4634,10 +4749,6 @@ bool RecordExprEvaluator::VisitCastExpr(const CastExpr *E) {
 }
 
 bool RecordExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
-  // Cannot constant-evaluate std::initializer_list inits.
-  if (E->initializesStdInitializerList())
-    return false;
-
   const RecordDecl *RD = E->getType()->castAs<RecordType>()->getDecl();
   if (RD->isInvalidDecl()) return false;
   const ASTRecordLayout &Layout = Info.Ctx.getASTRecordLayout(RD);
@@ -4751,6 +4862,58 @@ bool RecordExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E) {
   return HandleConstructorCall(E->getExprLoc(), This, Args,
                                cast<CXXConstructorDecl>(Definition), Info,
                                Result);
+}
+
+bool RecordExprEvaluator::VisitCXXStdInitializerListExpr(
+    const CXXStdInitializerListExpr *E) {
+  const ConstantArrayType *ArrayType =
+      Info.Ctx.getAsConstantArrayType(E->getSubExpr()->getType());
+
+  LValue Array;
+  if (!EvaluateLValue(E->getSubExpr(), Array, Info))
+    return false;
+
+  // Get a pointer to the first element of the array.
+  Array.addArray(Info, E, ArrayType);
+
+  // FIXME: Perform the checks on the field types in SemaInit.
+  RecordDecl *Record = E->getType()->castAs<RecordType>()->getDecl();
+  RecordDecl::field_iterator Field = Record->field_begin();
+  if (Field == Record->field_end())
+    return Error(E);
+
+  // Start pointer.
+  if (!Field->getType()->isPointerType() ||
+      !Info.Ctx.hasSameType(Field->getType()->getPointeeType(),
+                            ArrayType->getElementType()))
+    return Error(E);
+
+  // FIXME: What if the initializer_list type has base classes, etc?
+  Result = APValue(APValue::UninitStruct(), 0, 2);
+  Array.moveInto(Result.getStructField(0));
+
+  if (++Field == Record->field_end())
+    return Error(E);
+
+  if (Field->getType()->isPointerType() &&
+      Info.Ctx.hasSameType(Field->getType()->getPointeeType(),
+                           ArrayType->getElementType())) {
+    // End pointer.
+    if (!HandleLValueArrayAdjustment(Info, E, Array,
+                                     ArrayType->getElementType(),
+                                     ArrayType->getSize().getZExtValue()))
+      return false;
+    Array.moveInto(Result.getStructField(1));
+  } else if (Info.Ctx.hasSameType(Field->getType(), Info.Ctx.getSizeType()))
+    // Length.
+    Result.getStructField(1) = APValue(APSInt(ArrayType->getSize()));
+  else
+    return Error(E);
+
+  if (++Field != Record->field_end())
+    return Error(E);
+
+  return true;
 }
 
 static bool EvaluateRecord(const Expr *E, const LValue &This,
@@ -5588,8 +5751,36 @@ bool IntExprEvaluator::VisitCallExpr(const CallExpr *E) {
   case Builtin::BI__builtin_classify_type:
     return Success(EvaluateBuiltinClassifyType(E), E);
 
+  // FIXME: BI__builtin_clrsb
+  // FIXME: BI__builtin_clrsbl
+  // FIXME: BI__builtin_clrsbll
+
+  case Builtin::BI__builtin_clz:
+  case Builtin::BI__builtin_clzl:
+  case Builtin::BI__builtin_clzll: {
+    APSInt Val;
+    if (!EvaluateInteger(E->getArg(0), Val, Info))
+      return false;
+    if (!Val)
+      return Error(E);
+
+    return Success(Val.countLeadingZeros(), E);
+  }
+
   case Builtin::BI__builtin_constant_p:
     return Success(EvaluateBuiltinConstantP(Info.Ctx, E->getArg(0)), E);
+
+  case Builtin::BI__builtin_ctz:
+  case Builtin::BI__builtin_ctzl:
+  case Builtin::BI__builtin_ctzll: {
+    APSInt Val;
+    if (!EvaluateInteger(E->getArg(0), Val, Info))
+      return false;
+    if (!Val)
+      return Error(E);
+
+    return Success(Val.countTrailingZeros(), E);
+  }
 
   case Builtin::BI__builtin_eh_return_data_regno: {
     int Operand = E->getArg(0)->EvaluateKnownConstInt(Info.Ctx).getZExtValue();
@@ -5599,6 +5790,57 @@ bool IntExprEvaluator::VisitCallExpr(const CallExpr *E) {
 
   case Builtin::BI__builtin_expect:
     return Visit(E->getArg(0));
+
+  case Builtin::BI__builtin_ffs:
+  case Builtin::BI__builtin_ffsl:
+  case Builtin::BI__builtin_ffsll: {
+    APSInt Val;
+    if (!EvaluateInteger(E->getArg(0), Val, Info))
+      return false;
+
+    unsigned N = Val.countTrailingZeros();
+    return Success(N == Val.getBitWidth() ? 0 : N + 1, E);
+  }
+
+  case Builtin::BI__builtin_fpclassify: {
+    APFloat Val(0.0);
+    if (!EvaluateFloat(E->getArg(5), Val, Info))
+      return false;
+    unsigned Arg;
+    switch (Val.getCategory()) {
+    case APFloat::fcNaN: Arg = 0; break;
+    case APFloat::fcInfinity: Arg = 1; break;
+    case APFloat::fcNormal: Arg = Val.isDenormal() ? 3 : 2; break;
+    case APFloat::fcZero: Arg = 4; break;
+    }
+    return Visit(E->getArg(Arg));
+  }
+
+  case Builtin::BI__builtin_isinf_sign: {
+    APFloat Val(0.0);
+    return EvaluateFloat(E->getArg(0), Val, Info) &&
+           Success(Val.isInfinity() ? (Val.isNegative() ? -1 : 1) : 0, E);
+  }
+
+  case Builtin::BI__builtin_parity:
+  case Builtin::BI__builtin_parityl:
+  case Builtin::BI__builtin_parityll: {
+    APSInt Val;
+    if (!EvaluateInteger(E->getArg(0), Val, Info))
+      return false;
+
+    return Success(Val.countPopulation() % 2, E);
+  }
+
+  case Builtin::BI__builtin_popcount:
+  case Builtin::BI__builtin_popcountl:
+  case Builtin::BI__builtin_popcountll: {
+    APSInt Val;
+    if (!EvaluateInteger(E->getArg(0), Val, Info))
+      return false;
+
+    return Success(Val.countPopulation(), E);
+  }
 
   case Builtin::BIstrlen:
     // A call to strlen is not a constant expression.
@@ -6801,6 +7043,10 @@ bool FloatExprEvaluator::VisitCallExpr(const CallExpr *E) {
       Result.changeSign();
     return true;
 
+  // FIXME: Builtin::BI__builtin_powi
+  // FIXME: Builtin::BI__builtin_powif
+  // FIXME: Builtin::BI__builtin_powil
+
   case Builtin::BI__builtin_copysign:
   case Builtin::BI__builtin_copysignf:
   case Builtin::BI__builtin_copysignl: {
@@ -7608,10 +7854,10 @@ void Expr::EvaluateForOverflow(const ASTContext &Ctx,
   }
 }
 
- bool Expr::EvalResult::isGlobalLValue() const {
-   assert(Val.isLValue());
-   return IsGlobalLValue(Val.getLValueBase());
- }
+bool Expr::EvalResult::isGlobalLValue() const {
+  assert(Val.isLValue());
+  return IsGlobalLValue(Val.getLValueBase());
+}
 
 
 /// isIntegerConstantExpr - this recursive routine will test if an expression is
@@ -7705,6 +7951,7 @@ static ICEDiag CheckICE(const Expr* E, ASTContext &Ctx) {
   case Expr::UnresolvedLookupExprClass:
   case Expr::DependentScopeDeclRefExprClass:
   case Expr::CXXConstructExprClass:
+  case Expr::CXXStdInitializerListExprClass:
   case Expr::CXXBindTemporaryExprClass:
   case Expr::ExprWithCleanupsClass:
   case Expr::CXXTemporaryObjectExprClass:

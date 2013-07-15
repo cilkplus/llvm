@@ -16,6 +16,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/CommentVisitor.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/DeclLookups.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclVisitor.h"
 #include "clang/AST/StmtVisitor.h"
@@ -176,6 +177,7 @@ namespace  {
     void dumpName(const NamedDecl *D);
     bool hasNodes(const DeclContext *DC);
     void dumpDeclContext(const DeclContext *DC);
+    void dumpLookups(const DeclContext *DC);
     void dumpAttr(const Attr *A);
 
     // C++ Utilities
@@ -278,6 +280,7 @@ namespace  {
     void VisitCXXFunctionalCastExpr(const CXXFunctionalCastExpr *Node);
     void VisitCXXConstructExpr(const CXXConstructExpr *Node);
     void VisitCXXBindTemporaryExpr(const CXXBindTemporaryExpr *Node);
+    void VisitMaterializeTemporaryExpr(const MaterializeTemporaryExpr *Node);
     void VisitExprWithCleanups(const ExprWithCleanups *Node);
     void VisitUnresolvedLookupExpr(const UnresolvedLookupExpr *Node);
     void dumpCXXTemporary(const CXXTemporary *Temporary);
@@ -336,8 +339,8 @@ void ASTDumper::indent() {
     OS << "\n";
 
   ColorScope Color(*this, IndentColor);
-  for (llvm::SmallVector<IndentType, 32>::const_iterator I = Indents.begin(),
-                                                         E = Indents.end();
+  for (SmallVectorImpl<IndentType>::const_iterator I = Indents.begin(),
+                                                   E = Indents.end();
        I != E; ++I) {
     switch (*I) {
     case IT_Child:
@@ -505,6 +508,51 @@ void ASTDumper::dumpDeclContext(const DeclContext *DC) {
     IndentScope Indent(*this);
     ColorScope Color(*this, UndeserializedColor);
     OS << "<undeserialized declarations>";
+  }
+}
+
+void ASTDumper::dumpLookups(const DeclContext *DC) {
+  IndentScope Indent(*this);
+
+  OS << "StoredDeclsMap ";
+  dumpBareDeclRef(cast<Decl>(DC));
+
+  const DeclContext *Primary = DC->getPrimaryContext();
+  if (Primary != DC) {
+    OS << " primary";
+    dumpPointer(cast<Decl>(Primary));
+  }
+
+  bool HasUndeserializedLookups = Primary->hasExternalVisibleStorage();
+
+  DeclContext::all_lookups_iterator I = Primary->noload_lookups_begin(),
+                                    E = Primary->noload_lookups_end();
+  while (I != E) {
+    DeclarationName Name = I.getLookupName();
+    DeclContextLookupResult R = *I++;
+    if (I == E && !HasUndeserializedLookups)
+      lastChild();
+
+    IndentScope Indent(*this);
+    OS << "DeclarationName ";
+    {
+      ColorScope Color(*this, DeclNameColor);
+      OS << '\'' << Name << '\'';
+    }
+
+    for (DeclContextLookupResult::iterator RI = R.begin(), RE = R.end();
+         RI != RE; ++RI) {
+      if (RI + 1 == RE)
+        lastChild();
+      dumpDeclRef(*RI);
+    }
+  }
+
+  if (HasUndeserializedLookups) {
+    lastChild();
+    IndentScope Indent(*this);
+    ColorScope Color(*this, UndeserializedColor);
+    OS << "<undeserialized lookups>";
   }
 }
 
@@ -1730,6 +1778,15 @@ void ASTDumper::VisitCXXBindTemporaryExpr(const CXXBindTemporaryExpr *Node) {
   dumpCXXTemporary(Node->getTemporary());
 }
 
+void
+ASTDumper::VisitMaterializeTemporaryExpr(const MaterializeTemporaryExpr *Node) {
+  VisitExpr(Node);
+  if (const ValueDecl *VD = Node->getExtendingDecl()) {
+    OS << " extended by ";
+    dumpBareDeclRef(VD);
+  }
+}
+
 void ASTDumper::VisitExprWithCleanups(const ExprWithCleanups *Node) {
   VisitExpr(Node);
   for (unsigned i = 0, e = Node->getNumObjects(); i != e; ++i)
@@ -2020,6 +2077,20 @@ void Decl::dumpColor() const {
               &getASTContext().getSourceManager(), /*ShowColors*/true);
   P.dumpDecl(this);
 }
+
+void DeclContext::dumpLookups() const {
+  dumpLookups(llvm::errs());
+}
+
+void DeclContext::dumpLookups(raw_ostream &OS) const {
+  const DeclContext *DC = this;
+  while (!DC->isTranslationUnit())
+    DC = DC->getParent();
+  ASTContext &Ctx = cast<TranslationUnitDecl>(DC)->getASTContext();
+  ASTDumper P(OS, &Ctx.getCommentCommandTraits(), &Ctx.getSourceManager());
+  P.dumpLookups(this);
+}
+
 //===----------------------------------------------------------------------===//
 // Stmt method implementations
 //===----------------------------------------------------------------------===//

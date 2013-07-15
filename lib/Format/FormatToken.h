@@ -51,9 +51,24 @@ enum TokenType {
   TT_StartOfName,
   TT_TemplateCloser,
   TT_TemplateOpener,
+  TT_TrailingReturnArrow,
   TT_TrailingUnaryOperator,
   TT_UnaryOperator,
   TT_Unknown
+};
+
+// Represents what type of block a set of braces open.
+enum BraceBlockKind {
+  BK_Unknown,
+  BK_Block,
+  BK_BracedInit
+};
+
+// The packing kind of a function's parameters.
+enum ParameterPackingKind {
+  PPK_BinPacked,
+  PPK_OnePerLine,
+  PPK_Inconclusive
 };
 
 /// \brief A wrapper around a \c Token storing information about the
@@ -61,9 +76,10 @@ enum TokenType {
 struct FormatToken {
   FormatToken()
       : NewlinesBefore(0), HasUnescapedNewline(false), LastNewlineOffset(0),
-        TokenLength(0), IsFirst(false), MustBreakBefore(false),
-        Type(TT_Unknown), SpacesRequiredBefore(0), CanBreakBefore(false),
-        ClosesTemplateDeclaration(false), ParameterCount(0), TotalLength(0),
+        CodePointCount(0), IsFirst(false), MustBreakBefore(false),
+        BlockKind(BK_Unknown), Type(TT_Unknown), SpacesRequiredBefore(0),
+        CanBreakBefore(false), ClosesTemplateDeclaration(false),
+        ParameterCount(0), PackingKind(PPK_Inconclusive), TotalLength(0),
         UnbreakableTailLength(0), BindingStrength(0), SplitPenalty(0),
         LongestObjCSelectorName(0), FakeRParens(0), LastInChainOfCalls(false),
         PartOfMultiVariableDeclStmt(false), MatchingParen(NULL), Previous(NULL),
@@ -89,10 +105,9 @@ struct FormatToken {
   /// whitespace (relative to \c WhiteSpaceStart). 0 if there is no '\n'.
   unsigned LastNewlineOffset;
 
-  /// \brief The length of the non-whitespace parts of the token. This is
-  /// necessary because we need to handle escaped newlines that are stored
-  /// with the token.
-  unsigned TokenLength;
+  /// \brief The length of the non-whitespace parts of the token in CodePoints.
+  /// We need this to correctly measure number of columns a token spans.
+  unsigned CodePointCount;
 
   /// \brief Indicates that this is the first token.
   bool IsFirst;
@@ -118,6 +133,9 @@ struct FormatToken {
   /// escaped newlines.
   StringRef TokenText;
 
+  /// \brief Contains the kind of block if this token is a brace.
+  BraceBlockKind BlockKind;
+
   TokenType Type;
 
   unsigned SpacesRequiredBefore;
@@ -131,6 +149,9 @@ struct FormatToken {
   /// 0 parameters from functions with 1 parameter. Thus, we can simply count
   /// the number of commas.
   unsigned ParameterCount;
+
+  /// \brief If this is an opening parenthesis, how are the parameters packed?
+  ParameterPackingKind PackingKind;
 
   /// \brief The total length of the line up to and including this token.
   unsigned TotalLength;
@@ -213,9 +234,8 @@ struct FormatToken {
   bool opensScope() const {
     return isOneOf(tok::l_paren, tok::l_brace, tok::l_square) ||
            Type == TT_TemplateOpener;
-
   }
-  /// \brief Returns whether \p Tok is )]} or a template opening >.
+  /// \brief Returns whether \p Tok is )]} or a template closing >.
   bool closesScope() const {
     return isOneOf(tok::r_paren, tok::r_brace, tok::r_square) ||
            Type == TT_TemplateCloser;
@@ -249,7 +269,7 @@ struct FormatToken {
   }
 
   /// \brief Returns the previous token ignoring comments.
-  FormatToken *getPreviousNoneComment() const {
+  FormatToken *getPreviousNonComment() const {
     FormatToken *Tok = Previous;
     while (Tok != NULL && Tok->is(tok::comment))
       Tok = Tok->Previous;
@@ -257,7 +277,7 @@ struct FormatToken {
   }
 
   /// \brief Returns the next token ignoring comments.
-  const FormatToken *getNextNoneComment() const {
+  const FormatToken *getNextNonComment() const {
     const FormatToken *Tok = Next;
     while (Tok != NULL && Tok->is(tok::comment))
       Tok = Tok->Next;
@@ -271,8 +291,8 @@ struct FormatToken {
 
 private:
   // Disallow copying.
-  FormatToken(const FormatToken &);
-  void operator=(const FormatToken &);
+  FormatToken(const FormatToken &) LLVM_DELETED_FUNCTION;
+  void operator=(const FormatToken &) LLVM_DELETED_FUNCTION;
 };
 
 } // namespace format

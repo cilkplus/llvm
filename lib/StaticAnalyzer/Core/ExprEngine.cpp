@@ -607,6 +607,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::CXXDefaultInitExprClass:
     case Stmt::CXXDependentScopeMemberExprClass:
     case Stmt::CXXPseudoDestructorExprClass:
+    case Stmt::CXXStdInitializerListExprClass:
     case Stmt::CXXTryStmtClass:
     case Stmt::CXXTypeidExprClass:
     case Stmt::CXXUuidofExprClass:
@@ -651,7 +652,6 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::IfStmtClass:
     case Stmt::IndirectGotoStmtClass:
     case Stmt::LabelStmtClass:
-    case Stmt::AttributedStmtClass:
     case Stmt::NoStmtClass:
     case Stmt::NullStmtClass:
     case Stmt::SwitchStmtClass:
@@ -712,6 +712,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     // Cases we intentionally don't evaluate, since they don't need
     // to be explicitly evaluated.
     case Stmt::AddrLabelExprClass:
+    case Stmt::AttributedStmtClass:
     case Stmt::IntegerLiteralClass:
     case Stmt::CharacterLiteralClass:
     case Stmt::ImplicitValueInitExprClass:
@@ -1731,7 +1732,24 @@ void ExprEngine::VisitMemberExpr(const MemberExpr *M, ExplodedNode *Pred,
 
   FieldDecl *field = cast<FieldDecl>(Member);
   SVal L = state->getLValue(field, baseExprVal);
-  if (M->isGLValue()) {
+
+  if (M->isGLValue() || M->getType()->isArrayType()) {
+
+    // We special case rvalue of array type because the analyzer cannot reason
+    // about it, since we expect all regions to be wrapped in Locs. So we will
+    // treat these as lvalues assuming that they will decay to pointers as soon
+    // as they are used.
+    if (!M->isGLValue()) {
+      assert(M->getType()->isArrayType());
+      const ImplicitCastExpr *PE =
+        dyn_cast<ImplicitCastExpr>(Pred->getParentMap().getParent(M));
+      if (!PE || PE->getCastKind() != CK_ArrayToPointerDecay) {
+        assert(false &&
+               "We assume that array is always wrapped in ArrayToPointerDecay");
+        L = UnknownVal();
+      }
+    }
+
     if (field->getType()->isReferenceType()) {
       if (const MemRegion *R = L.getAsRegion())
         L = state->getSVal(R);

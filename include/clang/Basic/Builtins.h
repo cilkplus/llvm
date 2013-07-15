@@ -75,9 +75,8 @@ public:
   /// such.
   void InitializeBuiltins(IdentifierTable &Table, const LangOptions& LangOpts);
 
-  /// \brief Popular the vector with the names of all of the builtins.
-  void GetBuiltinNames(SmallVectorImpl<const char *> &Names,
-                       bool NoBuiltins);
+  /// \brief Populate the vector with the names of all of the builtins.
+  void GetBuiltinNames(SmallVectorImpl<const char *> &Names);
 
   /// \brief Return the identifier name for the specified builtin,
   /// e.g. "__builtin_abs".
@@ -128,6 +127,13 @@ public:
   /// priori.
   bool isPredefinedLibFunction(unsigned ID) const {
     return strchr(GetRecord(ID).Attributes, 'f') != 0;
+  }
+
+  /// \brief Determines whether this builtin is a predefined compiler-rt/libgcc
+  /// function, such as "__clear_cache", where we know the signature a
+  /// priori.
+  bool isPredefinedRuntimeFunction(unsigned ID) const {
+    return strchr(GetRecord(ID).Attributes, 'i') != 0;
   }
 
   /// \brief Determines whether this builtin has custom typechecking.

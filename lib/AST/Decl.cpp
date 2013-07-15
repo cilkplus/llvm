@@ -287,13 +287,12 @@ getLVForTemplateParameterList(const TemplateParameterList *params,
 static LinkageInfo getLVForDecl(const NamedDecl *D,
                                 LVComputationKind computation);
 
-static const FunctionDecl *getOutermostFunctionContext(const Decl *D) {
-  const FunctionDecl *Ret = NULL;
+static const Decl *getOutermostFuncOrBlockContext(const Decl *D) {
+  const Decl *Ret = NULL;
   const DeclContext *DC = D->getDeclContext();
   while (DC->getDeclKind() != Decl::TranslationUnit) {
-    const FunctionDecl *F = dyn_cast<FunctionDecl>(DC);
-    if (F)
-      Ret = F;
+    if (isa<FunctionDecl>(DC) || isa<BlockDecl>(DC))
+      Ret = cast<Decl>(DC);
     DC = DC->getParent();
   }
   return Ret;
@@ -996,6 +995,22 @@ NamedDecl::getExplicitVisibility(ExplicitVisibilityKind kind) const {
   return None;
 }
 
+static LinkageInfo getLVForClosure(const DeclContext *DC, Decl *ContextDecl,
+                                   LVComputationKind computation) {
+  // This lambda has its linkage/visibility determined by its owner.
+  if (ContextDecl) {
+    if (isa<ParmVarDecl>(ContextDecl))
+      DC = ContextDecl->getDeclContext()->getRedeclContext();
+    else
+      return getLVForDecl(cast<NamedDecl>(ContextDecl), computation);
+  }
+
+  if (const NamedDecl *ND = dyn_cast<NamedDecl>(DC))
+    return getLVForDecl(ND, computation);
+
+  return LinkageInfo::external();
+}
+
 static LinkageInfo getLVForLocalDecl(const NamedDecl *D,
                                      LVComputationKind computation) {
   if (const FunctionDecl *Function = dyn_cast<FunctionDecl>(D)) {
@@ -1043,19 +1058,34 @@ static LinkageInfo getLVForLocalDecl(const NamedDecl *D,
 
       return LV;
     }
+
+    if (!Var->isStaticLocal())
+      return LinkageInfo::none();
   }
 
-  if (!isa<TagDecl>(D))
+  ASTContext &Context = D->getASTContext();
+  if (!Context.getLangOpts().CPlusPlus)
     return LinkageInfo::none();
 
-  const FunctionDecl *FD = getOutermostFunctionContext(D);
-  if (!FD)
+  const Decl *OuterD = getOutermostFuncOrBlockContext(D);
+  if (!OuterD)
     return LinkageInfo::none();
 
-  if (!FD->isInlined() && FD->getTemplateSpecializationKind() == TSK_Undeclared)
-    return LinkageInfo::none();
+  LinkageInfo LV;
+  if (const BlockDecl *BD = dyn_cast<BlockDecl>(OuterD)) {
+    if (!BD->getBlockManglingNumber())
+      return LinkageInfo::none();
 
-  LinkageInfo LV = getLVForDecl(FD, computation);
+    LV = getLVForClosure(BD->getDeclContext()->getRedeclContext(),
+                         BD->getBlockManglingContextDecl(), computation);
+  } else {
+    const FunctionDecl *FD = cast<FunctionDecl>(OuterD);
+    if (!FD->isInlined() &&
+        FD->getTemplateSpecializationKind() == TSK_Undeclared)
+      return LinkageInfo::none();
+
+    LV = getLVForDecl(FD, computation);
+  }
   if (!isExternallyVisible(LV.getLinkage()))
     return LinkageInfo::none();
   return LinkageInfo(VisibleNoLinkage, LV.getVisibility(),
@@ -1091,20 +1121,10 @@ static LinkageInfo computeLVForDecl(const NamedDecl *D,
           // This lambda has no mangling number, so it's internal.
           return LinkageInfo::internal();
         }
-        
-        // This lambda has its linkage/visibility determined by its owner.
-        const DeclContext *DC = D->getDeclContext()->getRedeclContext();
-        if (Decl *ContextDecl = Record->getLambdaContextDecl()) {
-          if (isa<ParmVarDecl>(ContextDecl))
-            DC = ContextDecl->getDeclContext()->getRedeclContext();
-          else
-            return getLVForDecl(cast<NamedDecl>(ContextDecl), computation);
-        }
 
-        if (const NamedDecl *ND = dyn_cast<NamedDecl>(DC))
-          return getLVForDecl(ND, computation);
-        
-        return LinkageInfo::external();
+        // This lambda has its linkage/visibility determined by its owner.
+        return getLVForClosure(D->getDeclContext()->getRedeclContext(),
+                               Record->getLambdaContextDecl(), computation);
       }
       
       break;
@@ -1711,18 +1731,6 @@ VarDecl *VarDecl::getActingDefinition() {
   return LastTentative;
 }
 
-bool VarDecl::isTentativeDefinitionNow() const {
-  DefinitionKind Kind = isThisDeclarationADefinition();
-  if (Kind != TentativeDefinition)
-    return false;
-
-  for (redecl_iterator I = redecls_begin(), E = redecls_end(); I != E; ++I) {
-    if ((*I)->isThisDeclarationADefinition() == Definition)
-      return false;
-  }
-  return true;
-}
-
 VarDecl *VarDecl::getDefinition(ASTContext &C) {
   VarDecl *First = getFirstDeclaration();
   for (redecl_iterator I = First->redecls_begin(), E = First->redecls_end();
@@ -1936,19 +1944,6 @@ bool VarDecl::checkInitIsICE() const {
   return Eval->IsICE;
 }
 
-bool VarDecl::extendsLifetimeOfTemporary() const {
-  assert(getType()->isReferenceType() &&"Non-references never extend lifetime");
-  
-  const Expr *E = getInit();
-  if (!E)
-    return false;
-  
-  if (const ExprWithCleanups *Cleanups = dyn_cast<ExprWithCleanups>(E))
-    E = Cleanups->getSubExpr();
-  
-  return isa<MaterializeTemporaryExpr>(E);
-}
-
 VarDecl *VarDecl::getInstantiatedFromStaticDataMember() const {
   if (MemberSpecializationInfo *MSI = getMemberSpecializationInfo())
     return cast<VarDecl>(MSI->getInstantiatedFrom());
@@ -1989,6 +1984,14 @@ ParmVarDecl *ParmVarDecl::Create(ASTContext &C, DeclContext *DC,
                                  StorageClass S, Expr *DefArg) {
   return new (C) ParmVarDecl(ParmVar, DC, StartLoc, IdLoc, Id, T, TInfo,
                              S, DefArg);
+}
+
+QualType ParmVarDecl::getOriginalType() const {
+  TypeSourceInfo *TSI = getTypeSourceInfo();
+  QualType T = TSI ? TSI->getType() : getType();
+  if (const DecayedType *DT = dyn_cast<DecayedType>(T))
+    return DT->getOriginalType();
+  return T;
 }
 
 ParmVarDecl *ParmVarDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
@@ -2905,22 +2908,10 @@ unsigned FieldDecl::getFieldIndex() const {
 
   unsigned Index = 0;
   const RecordDecl *RD = getParent();
-  const FieldDecl *LastFD = 0;
-  bool IsMsStruct = RD->isMsStruct(getASTContext());
 
   for (RecordDecl::field_iterator I = RD->field_begin(), E = RD->field_end();
-       I != E; ++I, ++Index) {
+       I != E; ++I, ++Index)
     I->CachedFieldIndex = Index + 1;
-
-    if (IsMsStruct) {
-      // Zero-length bitfields following non-bitfield members are ignored.
-      if (getASTContext().ZeroBitfieldFollowsNonBitfield(*I, LastFD)) {
-        --Index;
-        continue;
-      }
-      LastFD = *I;
-    }
-  }
 
   assert(CachedFieldIndex && "failed to find field in parent");
   return CachedFieldIndex - 1;

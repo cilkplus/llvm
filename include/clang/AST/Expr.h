@@ -277,7 +277,6 @@ public:
     MLV_IncompleteType,
     MLV_ConstQualified,
     MLV_ArrayType,
-    MLV_ReadonlyProperty,
     MLV_NoSetterProperty,
     MLV_MemberFunction,
     MLV_SubObjCPropertySetting,
@@ -3820,13 +3819,6 @@ public:
   }
   void sawArrayRangeDesignator(bool ARD = true) {
     InitListExprBits.HadArrayRangeDesignator = ARD;
-  }
-
-  bool initializesStdInitializerList() const {
-    return InitListExprBits.InitializesStdInitializerList != 0;
-  }
-  void setInitializesStdInitializerList(bool ISIL = true) {
-    InitListExprBits.InitializesStdInitializerList = ISIL;
   }
 
   SourceLocation getLocStart() const LLVM_READONLY;

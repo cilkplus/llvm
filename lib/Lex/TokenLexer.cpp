@@ -121,7 +121,7 @@ void TokenLexer::destroy() {
 
 /// Remove comma ahead of __VA_ARGS__, if present, according to compiler dialect
 /// settings.  Returns true if the comma is removed.
-static bool MaybeRemoveCommaBeforeVaArgs(SmallVector<Token, 128> &ResultToks,
+static bool MaybeRemoveCommaBeforeVaArgs(SmallVectorImpl<Token> &ResultToks,
                                          bool &NextTokGetsSpace,
                                          bool HasPasteOperator,
                                          MacroInfo *Macro, unsigned MacroArgNo,
@@ -277,6 +277,14 @@ void TokenLexer::ExpandFunctionArguments() {
         unsigned FirstResult = ResultToks.size();
         unsigned NumToks = MacroArgs::getArgLength(ResultArgToks);
         ResultToks.append(ResultArgToks, ResultArgToks+NumToks);
+
+        // In Microsoft-compatibility mode, we follow MSVC's preprocessing
+        // behavior by not considering single commas from nested macro
+        // expansions as argument separators. Set a flag on the token so we can
+        // test for this later when the macro expansion is processed.
+        if (PP.getLangOpts().MicrosoftMode && NumToks == 1 &&
+            ResultToks.back().is(tok::comma))
+          ResultToks.back().setFlag(Token::IgnoredComma);
 
         // If the '##' came from expanding an argument, turn it into 'unknown'
         // to avoid pasting.

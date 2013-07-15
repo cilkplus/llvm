@@ -93,9 +93,6 @@ void Sema::ActOnForEachDeclStmt(DeclGroupPtrTy dg) {
     return;
   }
 
-  // suppress any potential 'unused variable' warning.
-  var->setUsed();
-
   // foreach variables are never actually initialized in the way that
   // the parser came up with.
   var->setInit(0);
@@ -1146,9 +1143,9 @@ Sema::ActOnFinishSwitchStmt(SourceLocation SwitchLoc, Stmt *Switch,
 void
 Sema::DiagnoseAssignmentEnum(QualType DstType, QualType SrcType,
                              Expr *SrcExpr) {
-  unsigned DIAG = diag::warn_not_in_enum_assignement;
-  if (Diags.getDiagnosticLevel(DIAG, SrcExpr->getExprLoc())
-      == DiagnosticsEngine::Ignored)
+  if (Diags.getDiagnosticLevel(diag::warn_not_in_enum_assignment,
+                               SrcExpr->getExprLoc()) ==
+      DiagnosticsEngine::Ignored)
     return;
 
   if (const EnumType *ET = DstType->getAs<EnumType>())
@@ -1157,13 +1154,14 @@ Sema::DiagnoseAssignmentEnum(QualType DstType, QualType SrcType,
       if (!SrcExpr->isTypeDependent() && !SrcExpr->isValueDependent() &&
           SrcExpr->isIntegerConstantExpr(Context)) {
         // Get the bitwidth of the enum value before promotions.
-        unsigned DstWith = Context.getIntWidth(DstType);
+        unsigned DstWidth = Context.getIntWidth(DstType);
         bool DstIsSigned = DstType->isSignedIntegerOrEnumerationType();
 
         llvm::APSInt RhsVal = SrcExpr->EvaluateKnownConstInt(Context);
+        AdjustAPSInt(RhsVal, DstWidth, DstIsSigned);
         const EnumDecl *ED = ET->getDecl();
-        typedef SmallVector<std::pair<llvm::APSInt, EnumConstantDecl*>, 64>
-        EnumValsTy;
+        typedef SmallVector<std::pair<llvm::APSInt, EnumConstantDecl *>, 64>
+            EnumValsTy;
         EnumValsTy EnumVals;
 
         // Gather all enum values, set their type and sort them,
@@ -1171,21 +1169,21 @@ Sema::DiagnoseAssignmentEnum(QualType DstType, QualType SrcType,
         for (EnumDecl::enumerator_iterator EDI = ED->enumerator_begin();
              EDI != ED->enumerator_end(); ++EDI) {
           llvm::APSInt Val = EDI->getInitVal();
-          AdjustAPSInt(Val, DstWith, DstIsSigned);
+          AdjustAPSInt(Val, DstWidth, DstIsSigned);
           EnumVals.push_back(std::make_pair(Val, *EDI));
         }
         if (EnumVals.empty())
           return;
         std::stable_sort(EnumVals.begin(), EnumVals.end(), CmpEnumVals);
         EnumValsTy::iterator EIend =
-        std::unique(EnumVals.begin(), EnumVals.end(), EqEnumVals);
+            std::unique(EnumVals.begin(), EnumVals.end(), EqEnumVals);
 
-        // See which case values aren't in enum.
+        // See which values aren't in the enum.
         EnumValsTy::const_iterator EI = EnumVals.begin();
         while (EI != EIend && EI->first < RhsVal)
           EI++;
         if (EI == EIend || EI->first != RhsVal) {
-          Diag(SrcExpr->getExprLoc(), diag::warn_not_in_enum_assignement)
+          Diag(SrcExpr->getExprLoc(), diag::warn_not_in_enum_assignment)
           << DstType;
         }
       }
@@ -1244,13 +1242,13 @@ namespace {
   // of the excluded constructs are used.
   class DeclExtractor : public EvaluatedExprVisitor<DeclExtractor> {
     llvm::SmallPtrSet<VarDecl*, 8> &Decls;
-    SmallVector<SourceRange, 10> &Ranges;
+    SmallVectorImpl<SourceRange> &Ranges;
     bool Simple;
   public:
     typedef EvaluatedExprVisitor<DeclExtractor> Inherited;
 
     DeclExtractor(Sema &S, llvm::SmallPtrSet<VarDecl*, 8> &Decls,
-                  SmallVector<SourceRange, 10> &Ranges) :
+                  SmallVectorImpl<SourceRange> &Ranges) :
         Inherited(S.Context),
         Decls(Decls),
         Ranges(Ranges),
@@ -1793,7 +1791,8 @@ Sema::ActOnCXXForRangeStmt(SourceLocation ForLoc,
 
   // Claim the type doesn't contain auto: we've already done the checking.
   DeclGroupPtrTy RangeGroup =
-    BuildDeclaratorGroup((Decl**)&RangeVar, 1, /*TypeMayContainAuto=*/false);
+      BuildDeclaratorGroup(llvm::MutableArrayRef<Decl *>((Decl **)&RangeVar, 1),
+                           /*TypeMayContainAuto=*/ false);
   StmtResult RangeDecl = ActOnDeclStmt(RangeGroup, RangeLoc, RangeLoc);
   if (RangeDecl.isInvalid())
     return StmtError();
@@ -2073,7 +2072,8 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
     Decl *BeginEndDecls[] = { BeginVar, EndVar };
     // Claim the type doesn't contain auto: we've already done the checking.
     DeclGroupPtrTy BeginEndGroup =
-      BuildDeclaratorGroup(BeginEndDecls, 2, /*TypeMayContainAuto=*/false);
+        BuildDeclaratorGroup(llvm::MutableArrayRef<Decl *>(BeginEndDecls, 2),
+                             /*TypeMayContainAuto=*/ false);
     BeginEndDecl = ActOnDeclStmt(BeginEndGroup, ColonLoc, ColonLoc);
 
     const QualType BeginRefNonRefType = BeginType.getNonReferenceType();
@@ -2761,11 +2761,10 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
       // If we have a related result type, we need to implicitly
       // convert back to the formal result type.  We can't pretend to
       // initialize the result again --- we might end double-retaining
-      // --- so instead we initialize a notional temporary; this can
-      // lead to less-than-great diagnostics, but this stage is much
-      // less likely to fail than the previous stage.
+      // --- so instead we initialize a notional temporary.
       if (!RelatedRetType.isNull()) {
-        Entity = InitializedEntity::InitializeTemporary(FnRetType);
+        Entity = InitializedEntity::InitializeRelatedResult(getCurMethodDecl(),
+                                                            FnRetType);
         Res = PerformCopyInitialization(Entity, ReturnLoc, RetValExp);
         if (Res.isInvalid()) {
           // FIXME: Clean up temporaries here anyway?

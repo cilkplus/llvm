@@ -13,6 +13,7 @@
 
 #include "clang/Parse/Parser.h"
 #include "RAIIObjectsForParser.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/Basic/AddressSpaces.h"
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/OpenCL.h"
@@ -1063,9 +1064,8 @@ void Parser::ParseLexedAttribute(LateParsedAttribute &LA,
     RecordDecl *RD = dyn_cast_or_null<RecordDecl>(D->getDeclContext());
 
     // Allow 'this' within late-parsed attributes.
-    Sema::CXXThisScopeRAII ThisScope(Actions, RD,
-                                     /*TypeQuals=*/0,
-                                     ND && RD && ND->isCXXInstanceMember());
+    Sema::CXXThisScopeRAII ThisScope(Actions, RD, /*TypeQuals=*/0,
+                                     ND && ND->isCXXInstanceMember());
 
     if (LA.Decls.size() == 1) {
       // If the Decl is templatized, add template parameters to scope.
@@ -1667,7 +1667,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
       Actions.ActOnCXXForRangeDecl(ThisDecl);
     Actions.FinalizeDeclaration(ThisDecl);
     D.complete(ThisDecl);
-    return Actions.FinalizeDeclaratorGroup(getCurScope(), DS, &ThisDecl, 1);
+    return Actions.FinalizeDeclaratorGroup(getCurScope(), DS, ThisDecl);
   }
 
   SmallVector<Decl *, 8> DeclsInGroup;
@@ -1734,9 +1734,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
     }
   }
 
-  return Actions.FinalizeDeclaratorGroup(getCurScope(), DS,
-                                         DeclsInGroup.data(),
-                                         DeclsInGroup.size());
+  return Actions.FinalizeDeclaratorGroup(getCurScope(), DS, DeclsInGroup);
 }
 
 /// Parse an optional simple-asm-expr and attributes, and attach them to a
@@ -3225,12 +3223,6 @@ void Parser::ParseStructUnionBody(SourceLocation RecordLoc,
   ParseScope StructScope(this, Scope::ClassScope|Scope::DeclScope);
   Actions.ActOnTagStartDefinition(getCurScope(), TagDecl);
 
-  // Empty structs are an extension in C (C99 6.7.2.1p7).
-  if (Tok.is(tok::r_brace)) {
-    Diag(Tok, diag::ext_empty_struct_union) << (TagType == TST_union);
-    Diag(Tok, diag::warn_empty_struct_union_compat) << (TagType == TST_union);
-  }
-
   SmallVector<Decl *, 32> FieldDecls;
 
   // While we still have something to read, read the declarations in the struct.
@@ -4712,6 +4704,12 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
     D.SetIdentifier(Tok.getIdentifierInfo(), Tok.getLocation());
     ConsumeToken();
     goto PastIdentifier;
+  } else if (Tok.is(tok::identifier) && D.diagnoseIdentifier()) {
+    Diag(Tok.getLocation(), diag::err_unexpected_unqualified_id)
+      << FixItHint::CreateRemoval(Tok.getLocation());
+    D.SetIdentifier(0, Tok.getLocation());
+    ConsumeToken();
+    goto PastIdentifier;
   }
 
   if (Tok.is(tok::l_paren)) {
@@ -5132,7 +5130,7 @@ bool Parser::isFunctionDeclaratorIdentifierList() {
 ///
 void Parser::ParseFunctionDeclaratorIdentifierList(
        Declarator &D,
-       SmallVector<DeclaratorChunk::ParamInfo, 16> &ParamInfo) {
+       SmallVectorImpl<DeclaratorChunk::ParamInfo> &ParamInfo) {
   // If there was no identifier specified for the declarator, either we are in
   // an abstract-declarator, or we are in a parameter declarator which was found
   // to be abstract.  In abstract-declarators, identifier lists are not valid:
@@ -5213,7 +5211,7 @@ void Parser::ParseFunctionDeclaratorIdentifierList(
 void Parser::ParseParameterDeclarationClause(
        Declarator &D,
        ParsedAttributes &FirstArgAttrs,
-       SmallVector<DeclaratorChunk::ParamInfo, 16> &ParamInfo,
+       SmallVectorImpl<DeclaratorChunk::ParamInfo> &ParamInfo,
        SourceLocation &EllipsisLoc) {
 
   while (1) {
@@ -5601,6 +5599,10 @@ bool Parser::TryAltiVecVectorTokenOutOfLine() {
       Tok.setKind(tok::kw___vector);
       return true;
     }
+    if (Next.getIdentifierInfo() == Ident_bool) {
+      Tok.setKind(tok::kw___vector);
+      return true;
+    }
     return false;
   }
 }
@@ -5629,6 +5631,10 @@ bool Parser::TryAltiVecTokenOutOfLine(DeclSpec &DS, SourceLocation Loc,
         isInvalid = DS.SetTypeAltiVecVector(true, Loc, PrevSpec, DiagID);
         return true;
       }
+      if (Next.getIdentifierInfo() == Ident_bool) {
+        isInvalid = DS.SetTypeAltiVecVector(true, Loc, PrevSpec, DiagID);
+        return true;
+      }
       break;
     default:
       break;
@@ -5636,6 +5642,10 @@ bool Parser::TryAltiVecTokenOutOfLine(DeclSpec &DS, SourceLocation Loc,
   } else if ((Tok.getIdentifierInfo() == Ident_pixel) &&
              DS.isTypeAltiVecVector()) {
     isInvalid = DS.SetTypeAltiVecPixel(true, Loc, PrevSpec, DiagID);
+    return true;
+  } else if ((Tok.getIdentifierInfo() == Ident_bool) &&
+             DS.isTypeAltiVecVector()) {
+    isInvalid = DS.SetTypeAltiVecBool(true, Loc, PrevSpec, DiagID);
     return true;
   }
   return false;
