@@ -554,7 +554,7 @@ static void CheckForCondition(Sema &S,
   Expr *LHS = 0;
   Expr *RHS = 0;
 
-  Cond = Cond->IgnoreParenNoopCasts(S.Context);
+  Cond = Cond->IgnoreParens();
   if (!ExtractForCondition(S, Cond, Opcode, OpLoc, LHS, RHS, IsCilkFor))
     return;
 
