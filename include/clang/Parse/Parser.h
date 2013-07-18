@@ -1987,6 +1987,19 @@ private:
                                   ParsedAttributes &Attrs,
                                   SourceLocation *EndLoc);
 
+  void ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
+                                       SourceLocation AttrNameLoc,
+                                       ParsedAttributes &Attrs,
+                                       SourceLocation *EndLoc,
+                                       AttributeList::Syntax Syntax);
+
+  void ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
+                                       SourceLocation AttrNameLoc,
+                                       ParsedAttributes &Attrs,
+                                       SourceLocation *EndLoc,
+                                       IdentifierInfo &ScopeName,
+                                       SourceLocation ScopeLoc);
+
   void ParseTypeTagForDatatypeAttribute(IdentifierInfo &AttrName,
                                         SourceLocation AttrNameLoc,
                                         ParsedAttributes &Attrs,

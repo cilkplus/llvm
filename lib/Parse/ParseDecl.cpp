@@ -186,6 +186,17 @@ static bool attributeHasExprArgs(const IdentifierInfo &II) {
            .Default(false);
 }
 
+/// \brief Determine whether the attribute takes a type argument.
+static bool attributeHasTypeArg(const IdentifierInfo *ScopeName,
+                                const IdentifierInfo *AttrName) {
+  return AttrName &&
+    (AttrName->isStr("vec_type_hint") ||
+     (ScopeName &&
+      ScopeName->isStr("_Cilk_elemental") &&
+      AttrName->isStr("vectorlengthfor")));
+}
+
+
 /// Parse the arguments to a parameterized GNU attribute or
 /// a C++11 attribute in "gnu" namespace.
 void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
@@ -214,6 +225,12 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
     ParseTypeTagForDatatypeAttribute(*AttrName, AttrNameLoc, Attrs, EndLoc);
     return;
   }
+  // Cilk Plus elemental function attributes have their own grammar.
+  if (getLangOpts().CilkPlus && AttrName->isStr("vector")) {
+    ParseCilkPlusElementalAttribute(*AttrName, AttrNameLoc, Attrs, EndLoc,
+                                    Syntax);
+    return;
+  }
 
   ConsumeParen(); // ignore the left paren loc for now
 
@@ -224,6 +241,7 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
   TypeResult T;
   SourceRange TypeRange;
   bool TypeParsed = false;
+  bool HasTypeArgument = attributeHasTypeArg(ScopeName, AttrName);
 
   switch (Tok.getKind()) {
   case tok::kw_char:
@@ -249,7 +267,7 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
     break;
 
   case tok::identifier:
-    if (AttrName->isStr("vec_type_hint")) {
+    if (HasTypeArgument) {
       T = ParseTypeName(&TypeRange);
       TypeParsed = true;
       break;
@@ -270,7 +288,7 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
   bool isInvalid = false;
   bool isParmType = false;
 
-  if (!BuiltinType && !AttrName->isStr("vec_type_hint") &&
+  if (!BuiltinType && !HasTypeArgument &&
       (ParmLoc.isValid() ? Tok.is(tok::comma) : Tok.isNot(tok::r_paren))) {
     // Eat the comma.
     if (ParmLoc.isValid())
@@ -305,7 +323,7 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
         Diag(Tok, diag::err_iboutletcollection_with_protocol);
       SkipUntil(tok::r_paren, false, true); // skip until ')'
     }
-  } else if (AttrName->isStr("vec_type_hint")) {
+  } else if (HasTypeArgument) {
     if (T.get() && !T.isInvalid())
       isParmType = true;
     else {
@@ -520,6 +538,9 @@ void Parser::ParseComplexMicrosoftDeclSpec(IdentifierInfo *Ident,
                                AttributeList::AS_Declspec);
     }
     T.skipToEnd();
+  } else if (Ident->isStr("vector")) {
+    ParseCilkPlusElementalAttribute(*Ident, Loc, Attrs, 0,
+                                    AttributeList::AS_Declspec);
   } else {
     // We don't recognize this as a valid declspec, but instead of creating the
     // attribute and allowing sema to warn about it, we will warn here instead.
@@ -1188,6 +1209,171 @@ void Parser::ParseThreadSafetyAttribute(IdentifierInfo &AttrName,
   if (EndLoc)
     *EndLoc = T.getCloseLocation();
 }
+
+/// \brief Parse Cilk Plus elemental function attribute clauses.
+///
+/// We need to special case the parsing due to the fact that a Cilk Plus
+/// vector() attribute can contain arguments that themselves have arguments.
+/// Each property is parsed and stored as if it were a distinct attribute.
+/// This drastically simplifies parsing and Sema at the cost of re-grouping
+/// the attributes in CodeGen.
+///
+///    elemental-clauses:
+///      elemental-clause
+///      elemental-clauses , elemental-clause
+///    
+///    elemental-clause:
+///      processor-clause
+///      vectorlength-clause
+///      elemental-uniform-clause
+///      elemental-linear-clause
+///      mask-clause
+
+void Parser::ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
+                                             SourceLocation AttrNameLoc,
+                                             ParsedAttributes &Attrs,
+                                             SourceLocation *EndLoc,
+                                             AttributeList::Syntax Syntax) {
+  assert(Tok.is(tok::l_paren) && "Attribute arg list not starting with '('");
+
+  IdentifierInfo *CilkScopeName = PP.getIdentifierInfo("_Cilk_elemental");
+
+  // Add the 'vector' attribute itself.
+  Attrs.addNew(&AttrName, AttrNameLoc, 0, AttrNameLoc,
+               0, SourceLocation(), 0, 0, AttributeList::AS_GNU);
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  while (Tok.isNot(tok::r_paren)) {
+    if (Tok.isNot(tok::identifier)) {
+      Diag(Tok, diag::err_expected_ident);
+      T.skipToEnd();
+      return;
+    }
+    IdentifierInfo *SubAttrName = Tok.getIdentifierInfo();
+    SourceLocation SubAttrNameLoc = ConsumeToken();
+
+    if (Tok.is(tok::l_paren)) {
+      if (SubAttrName->isStr("uniform") || SubAttrName->isStr("linear")) {
+        // These sub-attributes are parsed specially because their
+        // arguments are function parameters not yet declared.
+        ParseFunctionParameterAttribute(*SubAttrName, SubAttrNameLoc,
+                                        Attrs, EndLoc, *CilkScopeName,
+                                        AttrNameLoc);
+      } else {
+        ParseGNUAttributeArgs(SubAttrName, SubAttrNameLoc, Attrs, EndLoc,
+                              CilkScopeName, AttrNameLoc,
+                              AttributeList::AS_CXX11);
+      }
+    } else {
+      Attrs.addNew(SubAttrName, SubAttrNameLoc,
+                   CilkScopeName, AttrNameLoc,
+                   0, SourceLocation(), 0, 0, AttributeList::AS_CXX11);
+    }
+
+    if (Tok.isNot(tok::comma))
+      break;
+    ConsumeToken(); // Eat the comma, move to the next argument
+  }
+  // Match the ')'.
+  T.consumeClose();
+  if (EndLoc)
+    *EndLoc = T.getCloseLocation();
+}
+
+/// \brief Parse an identifer list.
+///
+/// We need to special case the parsing due to the fact that identifiers
+/// may appear as attribute arguments before they appear as parameters
+/// in a function declaration.
+///
+///    uniform-param-list:
+///      parameter-name
+///      uniform-param-list , parameter-name
+///    
+///    elemental-linear-param-list:
+///      elemental-linear-param
+///      elemental-linear-param-list , elemental-linear-param
+///    
+///    elemental-linear-param:
+///      parameter-name
+///      parameter-name : elemental-linear-step
+///    
+///    elemental-linear-step:
+///      constant-expression
+///      parameter-name
+///    
+///    parameter-name:
+///      identifier
+///    
+void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
+                                             SourceLocation AttrNameLoc,
+                                             ParsedAttributes &Attrs,
+                                             SourceLocation *EndLoc,
+                                             IdentifierInfo &ScopeName,
+                                             SourceLocation ScopeLoc) {
+  assert(Tok.is(tok::l_paren) && "Attribute arg list not starting with '('");
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  // Now parse the list of identifiers.
+  while (Tok.isNot(tok::r_paren)) {
+    if (Tok.isNot(tok::identifier)) {
+      Diag(Tok, diag::err_expected_ident);
+      T.skipToEnd();
+      return;
+    }
+    // Create a separate attribute for each identifier, in order to be able
+    // to use the Parm field, and not have to shoehorn not-yet-declared
+    // identifiers into an Expr list.
+    IdentifierInfo *ParmName = Tok.getIdentifierInfo();
+    IdentifierInfo *StepName = 0;
+    SourceLocation ParmLoc = ConsumeToken();
+    ExprVector ArgExprs;
+    unsigned NumArgs = 0;
+    if (AttrName.isStr("linear")) {
+      if (Tok.is(tok::colon)) {
+        ConsumeToken();
+        // This behaviour matches current icc (13.1.2) but may need to change.
+        if (Tok.is(tok::identifier)) {
+          // const Token &T = PP.LookAhead(0);
+          // if (T.is(tok::comma) || T.is(tok::r_paren)) {
+            StepName = Tok.getIdentifierInfo();
+            ConsumeToken();
+          // }
+        }
+        if (!StepName) {
+          ExprResult StepExpr = ParseConstantExpression();
+          if (StepExpr.isInvalid()) {
+            SkipUntil(tok::r_paren);
+            return;
+          }
+          ArgExprs.push_back(StepExpr.release());
+          ++NumArgs;
+        }
+      }
+    }
+    if (StepName)
+      Attrs.addNewPropertyAttr(&AttrName, AttrNameLoc, &ScopeName, ScopeLoc,
+                               ParmName, ParmLoc, StepName, 0,
+                               AttributeList::AS_CXX11);
+    else
+      Attrs.addNew(&AttrName, AttrNameLoc, &ScopeName, ScopeLoc,
+                   ParmName, ParmLoc, ArgExprs.data(), NumArgs,
+                   AttributeList::AS_CXX11);
+
+    if (Tok.isNot(tok::comma))
+      break;
+    ConsumeToken(); // Eat the comma, move to the next argument
+  }
+  // Match the ')'.
+  T.consumeClose();
+  if (EndLoc)
+    *EndLoc = T.getCloseLocation();
+}
+
 
 void Parser::ParseTypeTagForDatatypeAttribute(IdentifierInfo &AttrName,
                                               SourceLocation AttrNameLoc,

@@ -423,6 +423,23 @@ static void GenOpenCLArgMetadata(const FunctionDecl *FD, llvm::Function *Fn,
   kernelMDArgs.push_back(llvm::MDNode::get(Context, argNames));
 }
 
+llvm::MDNode *CodeGenFunction::MakeVecTypeHintMetadata(StringRef Name,
+                                                       const QualType &T) {
+  llvm::LLVMContext &Context = getLLVMContext();
+  const ExtVectorType *EVTy = T->getAs<ExtVectorType>();
+  const VectorType *VTy = T->getAs<VectorType>();
+  bool isSignedInteger =
+    T->isSignedIntegerType() ||
+    (EVTy && EVTy->getElementType()->isSignedIntegerType()) ||
+    (VTy && VTy->getElementType()->isSignedIntegerType());
+  llvm::Value *attrMDArgs[] = {
+    llvm::MDString::get(Context, Name),
+    llvm::UndefValue::get(CGM.getTypes().ConvertType(T)),
+    Builder.getInt32(isSignedInteger ? 1 : 0)
+  };
+  return llvm::MDNode::get(Context, attrMDArgs);
+}
+
 void CodeGenFunction::EmitOpenCLKernelMetadata(const FunctionDecl *FD,
                                                llvm::Function *Fn)
 {
@@ -440,19 +457,8 @@ void CodeGenFunction::EmitOpenCLKernelMetadata(const FunctionDecl *FD,
 
   if (FD->hasAttr<VecTypeHintAttr>()) {
     VecTypeHintAttr *attr = FD->getAttr<VecTypeHintAttr>();
-    QualType hintQTy = attr->getTypeHint();
-    const ExtVectorType *hintEltQTy = hintQTy->getAs<ExtVectorType>();
-    bool isSignedInteger =
-        hintQTy->isSignedIntegerType() ||
-        (hintEltQTy && hintEltQTy->getElementType()->isSignedIntegerType());
-    llvm::Value *attrMDArgs[] = {
-      llvm::MDString::get(Context, "vec_type_hint"),
-      llvm::UndefValue::get(CGM.getTypes().ConvertType(attr->getTypeHint())),
-      llvm::ConstantInt::get(
-          llvm::IntegerType::get(Context, 32),
-          llvm::APInt(32, (uint64_t)(isSignedInteger ? 1 : 0)))
-    };
-    kernelMDArgs.push_back(llvm::MDNode::get(Context, attrMDArgs));
+    kernelMDArgs.push_back(MakeVecTypeHintMetadata("vec_type_hint",
+                                                   attr->getTypeHint()));
   }
 
   if (FD->hasAttr<WorkGroupSizeHintAttr>()) {
@@ -481,6 +487,215 @@ void CodeGenFunction::EmitOpenCLKernelMetadata(const FunctionDecl *FD,
   llvm::NamedMDNode *OpenCLKernelMetadata =
     CGM.getModule().getOrInsertNamedMetadata("opencl.kernels");
   OpenCLKernelMetadata->addOperand(kernelMDNode);
+}
+
+struct CilkElementalGroup {
+  typedef SmallVector<CilkProcessorAttr::CilkProcessor, 1> ProcessorVector;
+  typedef SmallVector<QualType, 1> VecLengthForVector;
+  typedef SmallVector<unsigned, 1> VecLengthVector;
+  typedef SmallVector<CilkLinearAttr*, 8> LinearVector;
+  typedef SmallVector<llvm::MDNode*, 2> MaskVector;
+  ProcessorVector Processor;
+  VecLengthVector VecLength;
+  VecLengthForVector VecLengthFor;
+  LinearVector Linear;
+  MaskVector Mask;
+};
+
+void CodeGenFunction::EmitCilkElementalMetadata(const FunctionDecl *FD,
+                                                llvm::Function *Fn) {
+  if (!FD->hasAttr<CilkElementalAttr>())
+    return;
+
+  llvm::LLVMContext &Context = getLLVMContext();
+  ASTContext &C = getContext();
+
+  // Common metadata nodes.
+  llvm::NamedMDNode *CilkElementalMetadata =
+    CGM.getModule().getOrInsertNamedMetadata("cilk.functions");
+  llvm::Value *ElementalMDArgs[] = {
+    llvm::MDString::get(Context, "elemental")
+  };
+  llvm::MDNode *ElementalNode = llvm::MDNode::get(Context, ElementalMDArgs);
+  llvm::Value *MaskMDArgs[] = {
+    llvm::MDString::get(Context, "mask"),
+    Builder.getInt1(1)
+  };
+  llvm::MDNode *MaskNode = llvm::MDNode::get(Context, MaskMDArgs);
+  MaskMDArgs[1] = Builder.getInt1(0);
+  llvm::MDNode *NoMaskNode = llvm::MDNode::get(Context, MaskMDArgs);
+  llvm::Value *UndefStep = llvm::UndefValue::get(CGM.IntTy);
+  SmallVector<llvm::Value*, 8> ParameterNameArgs;
+  ParameterNameArgs.push_back(llvm::MDString::get(Context, "arg_name"));
+  llvm::MDNode *ParameterNameNode = 0;
+
+  // Group elemental function attributes by vector() declaration.
+  typedef llvm::SmallDenseMap<unsigned, CilkElementalGroup, 4> GroupMap;
+  GroupMap Groups;
+  for (Decl::attr_iterator AI = FD->attr_begin(), AE = FD->attr_end();
+       AI != AE;
+       ++AI) {
+    if (CilkElementalAttr *A = dyn_cast<CilkElementalAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups.FindAndConstruct(key);
+    } else if (CilkProcessorAttr *A = dyn_cast<CilkProcessorAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].Processor.push_back(A->getProcessor());
+    } else if (CilkVecLengthForAttr *A = dyn_cast<CilkVecLengthForAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].VecLengthFor.push_back(A->getTypeHint());
+    } else if (CilkVecLengthAttr *A = dyn_cast<CilkVecLengthAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].VecLength.push_back(A->getLength());
+    } else if (CilkMaskAttr *A = dyn_cast<CilkMaskAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].Mask.push_back(A->getMask() ? MaskNode : NoMaskNode);
+    } else if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].Linear.push_back(A);
+    }
+  }
+
+  for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end();
+       GI != GE;
+       ++GI) {
+    CilkElementalGroup &G = GI->second;
+
+    // Parameter information.
+    const ParmVarDecl *FirstNonStepParm = 0;
+    SmallVector<llvm::Value*, 8> StepArgs;
+    StepArgs.push_back(llvm::MDString::get(Context, "arg_step"));
+    for (unsigned I = 0; I != FD->getNumParams(); ++I) {
+      const ParmVarDecl *Parm = FD->getParamDecl(I);
+      StringRef ParmName = Parm->getName();
+      if (!ParameterNameNode)
+        ParameterNameArgs.push_back(llvm::MDString::get(Context, ParmName));
+      // Look for a uniform/linear attribute for this parameter.
+      CilkElementalGroup::LinearVector::iterator SI = G.Linear.begin(),
+                                                 SE = G.Linear.end();
+      for (; SI != SE; ++SI)
+        if ((*SI)->getParameter()->getName() == ParmName)
+          break;
+      if (SI == SE) {
+        StepArgs.push_back(UndefStep);
+        if (!FirstNonStepParm)
+          FirstNonStepParm = Parm;
+      } else if (IdentifierInfo *S = (*SI)->getStepParameter()) {
+        StepArgs.push_back(llvm::MDString::get(Context, S->getName()));
+      } else {
+        StepArgs.push_back(llvm::ConstantInt::get(CGM.IntTy,
+                                                  (*SI)->getStepValue()));
+      }
+    }
+    llvm::MDNode *StepNode = llvm::MDNode::get(Context, StepArgs);
+    if (!ParameterNameNode)
+      ParameterNameNode = llvm::MDNode::get(Context, ParameterNameArgs);
+
+    // If there is no vectorlengthfor() in this group, determine the
+    // characteristic type. This can depend on the linear/uniform attributes,
+    // so it can differ between groups.
+    if (G.VecLengthFor.empty()) {
+      QualType CharacteristicType;
+      if (!FnRetTy->isVoidType())
+        CharacteristicType = FnRetTy;
+      else if (FirstNonStepParm)
+        CharacteristicType = FirstNonStepParm->getType().getCanonicalType();
+      else
+        CharacteristicType = C.IntTy;
+      G.VecLengthFor.push_back(CharacteristicType);
+    }
+
+    // If no mask variants are specified, generate both.
+    if (G.Mask.empty()) {
+      G.Mask.push_back(MaskNode);
+      G.Mask.push_back(NoMaskNode);
+    }
+
+    // If no target processor is specified, use the current target.
+    if (G.Processor.empty())
+      G.Processor.push_back(CilkProcessorAttr::Unspecified);
+
+    // If no vector length is specified, push a dummy value to iterate over.
+    if (G.VecLength.empty())
+      G.VecLength.push_back(0);
+
+    for (CilkElementalGroup::VecLengthForVector::iterator
+          TI = G.VecLengthFor.begin(),
+          TE = G.VecLengthFor.end();
+          TI != TE;
+          ++TI) {
+
+      for (CilkElementalGroup::ProcessorVector::iterator
+            PI = G.Processor.begin(),
+            PE = G.Processor.end();
+          PI != PE;
+          ++PI) {
+
+        // Processor node.
+        uint64_t VectorRegisterBytes = 0;
+        llvm::MDNode *ProcessorNode = 0;
+        if (*PI == CilkProcessorAttr::Unspecified) {
+          // Since no vector(processor(...)) attribute is present, inspect the
+          // current target features to determine the appropriate vector size.
+          // This is currently X86 specific.
+          if (Target.hasFeature("avx2"))
+            VectorRegisterBytes = 64;
+          else if (Target.hasFeature("avx"))
+            VectorRegisterBytes = 32;
+          else if (Target.hasFeature("sse2"))
+            VectorRegisterBytes = 16;
+          else if (Target.hasFeature("sse") &&
+                  (*TI)->isFloatingType() &&
+                  C.getTypeSizeInChars(*TI).getQuantity() == 4)
+            VectorRegisterBytes = 16;
+          else if (Target.hasFeature("mmx") && (*TI)->isIntegerType())
+            VectorRegisterBytes = 8;
+        } else {
+          llvm::Value *attrMDArgs[] = {
+            llvm::MDString::get(Context, "processor"),
+            llvm::MDString::get(Context,
+                                CilkProcessorAttr::getProcessorString(*PI))
+          };
+          ProcessorNode = llvm::MDNode::get(Context, attrMDArgs);
+          VectorRegisterBytes = CilkProcessorAttr::getProcessorVectorBytes(*PI);
+        }
+
+        for (CilkElementalGroup::VecLengthVector::iterator
+              LI = G.VecLength.begin(),
+              LE = G.VecLength.end();
+             LI != LE;
+             ++LI) {
+
+          uint64_t VectorLength = *LI ? *LI :
+            (CharUnits::fromQuantity(VectorRegisterBytes)
+             / C.getTypeSizeInChars(*TI));
+          QualType VecType = C.getVectorType(*TI,
+                                             VectorLength ? VectorLength : 1,
+                                             VectorType::GenericVector);
+          llvm::MDNode *VecTypeNode = MakeVecTypeHintMetadata("vec_type_hint",
+                                                              VecType);
+
+          for (CilkElementalGroup::MaskVector::iterator
+                MI = G.Mask.begin(),
+                ME = G.Mask.end();
+               MI != ME;
+               ++MI) {
+            SmallVector <llvm::Value*, 7> kernelMDArgs;
+            kernelMDArgs.push_back(Fn);
+            kernelMDArgs.push_back(ElementalNode);
+            kernelMDArgs.push_back(ParameterNameNode);
+            kernelMDArgs.push_back(StepNode);
+            kernelMDArgs.push_back(VecTypeNode);
+            kernelMDArgs.push_back(*MI);
+            if (ProcessorNode)
+              kernelMDArgs.push_back(ProcessorNode);
+            CilkElementalMetadata->addOperand(llvm::MDNode::get(Context,
+                                                                kernelMDArgs));
+          }
+        }
+      }
+    }
+  }
 }
 
 void CodeGenFunction::StartFunction(GlobalDecl GD,
@@ -519,6 +734,12 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
     // Add metadata for a kernel function.
     if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D))
       EmitOpenCLKernelMetadata(FD, Fn);
+  }
+
+  if (getLangOpts().CilkPlus) {
+    // Add metadata for an elemental function.
+    if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D))
+      EmitCilkElementalMetadata(FD, Fn);
   }
 
   llvm::BasicBlock *EntryBB = createBasicBlock("entry", CurFn);

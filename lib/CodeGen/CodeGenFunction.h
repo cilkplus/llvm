@@ -1083,8 +1083,16 @@ private:
   ///   "work_group_size_hint", and three 32-bit integers X, Y and Z.
   /// - A node for the reqd_work_group_size(X,Y,Z) qualifier contains string 
   ///   "reqd_work_group_size", and three 32-bit integers X, Y and Z.
-  void EmitOpenCLKernelMetadata(const FunctionDecl *FD, 
+  void EmitOpenCLKernelMetadata(const FunctionDecl *FD,
                                 llvm::Function *Fn);
+
+  /// Add an elemental function metadata node to the named metadata node
+  /// 'cilk.functions'.
+  void EmitCilkElementalMetadata(const FunctionDecl *FD, llvm::Function *Fn);
+
+  // Construct a metadata node expressing a type in the form defined
+  // by SPIR 'vec_type_hint'.
+  llvm::MDNode *MakeVecTypeHintMetadata(StringRef Name, const QualType &T);
 
 public:
   CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext=false);

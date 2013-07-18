@@ -1052,25 +1052,33 @@ bool extendsLifetimeOfTemporary(const VarDecl *VD) {
   return isa<MaterializeTemporaryExpr>(Init);
 }
 
-/// \brief Helper class to diagnose a SIMD for loop body.
+/// \brief Helper class to diagnose a SIMD for loop or elemental function body.
 //
 /// FIXME: Check OpenMP directive and construct.
 class DiagnoseSIMDForBodyHelper
   : public RecursiveASTVisitor<DiagnoseSIMDForBodyHelper> {
+public:
+  enum BodyKind {
+    BK_SIMDFor,
+    BK_Elemental
+  };
+private:
   Sema &SemaRef;
   /// \brief The current simd for loop location.
   SourceLocation LoopLoc;
   bool &IsValid;
+  BodyKind Kind;
 
   void Diag(SourceLocation L, const char *Msg, SourceRange Range) {
     SemaRef.Diag(L, SemaRef.PDiag(diag::err_simd_for_body_no_construct)
-                      << Msg << Range);
+                      << Msg << Kind << Range);
     IsValid = true;
   }
 
 public:
-  DiagnoseSIMDForBodyHelper(Sema &S, bool &IsValid, SourceLocation Loc)
-    : SemaRef(S), LoopLoc(Loc), IsValid(IsValid) { }
+  DiagnoseSIMDForBodyHelper(Sema &S, bool &IsValid, SourceLocation Loc,
+                            enum BodyKind K)
+    : SemaRef(S), LoopLoc(Loc), IsValid(IsValid), Kind(K) { }
 
   bool VisitGotoStmt(GotoStmt *S) {
     Diag(S->getLocStart(), "goto", S->getSourceRange());
@@ -1164,7 +1172,7 @@ public:
         if (RD->hasNonTrivialDestructor()) {
           SemaRef.Diag(VD->getLocStart(),
               SemaRef.PDiag(diag::err_simd_for_body_no_nontrivial_destructor)
-              << VD->getSourceRange());
+              << Kind << VD->getSourceRange());
           IsValid = false;
         }
     }
@@ -1172,9 +1180,11 @@ public:
   }
 
   bool VisitSIMDForStmt(SIMDForStmt *S) {
-    SemaRef.Diag(S->getForLoc(), SemaRef.PDiag(diag::err_simd_for_nested));
-    SemaRef.Diag(LoopLoc, SemaRef.PDiag(diag::note_simd_for_nested));
-    IsValid = false;
+    if (Kind == BK_SIMDFor) {
+      SemaRef.Diag(S->getForLoc(), SemaRef.PDiag(diag::err_simd_for_nested));
+      SemaRef.Diag(LoopLoc, SemaRef.PDiag(diag::note_simd_for_nested));
+      IsValid = false;
+    }
     return true;
   }
 };
@@ -1193,9 +1203,28 @@ public:
 //
 static bool CheckSIMDForBody(Sema &S, Stmt *Body, SourceLocation ForLoc) {
   bool IsValid(true);
-  DiagnoseSIMDForBodyHelper D(S, IsValid, ForLoc);
+  DiagnoseSIMDForBodyHelper D(S, IsValid, ForLoc,
+                              DiagnoseSIMDForBodyHelper::BK_SIMDFor);
   D.TraverseStmt(Body);
   return IsValid;
+}
+static void CheckElementalFunctionBody(Sema &S, FunctionDecl *F, Stmt *Body) {
+  bool IsValid(true);
+  DiagnoseSIMDForBodyHelper D(S, IsValid, F->getLocation(),
+                              DiagnoseSIMDForBodyHelper::BK_Elemental);
+  D.TraverseStmt(Body);
+}
+
+
+/// Enforce restrictions on Cilk Plus elemental functions.
+void Sema::DiagnoseCilkElemental(FunctionDecl *F, Stmt *Body) {
+  // An elemental function must not have an exception specification.
+  const FunctionProtoType *FPT = dyn_cast<FunctionProtoType>(F->getType());
+  if (FPT && FPT->hasExceptionSpec()) {
+    // FIXME: Is the location available of the 'throw' keyword available?
+    Diag(F->getLocation(), diag::err_cilk_elemental_exception_spec);
+  }
+  CheckElementalFunctionBody(*this, F, Body);
 }
 
 static

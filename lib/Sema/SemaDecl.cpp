@@ -9208,7 +9208,10 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
       MarkBaseAndMemberDestructorsReferenced(Destructor->getLocation(),
                                              Destructor->getParent());
     }
-    
+
+    if (FD && FD->hasAttr<CilkElementalAttr>())
+      DiagnoseCilkElemental(FD, Body);
+
     // If any errors have occurred, clear out any temporaries that may have
     // been leftover. This ensures that these temporaries won't be picked up for
     // deletion in some later function.
@@ -9248,7 +9251,6 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
 
   return dcl;
 }
-
 
 /// When we finish delayed parsing of an attribute, we must attach it to the
 /// relevant Decl.

@@ -6627,17 +6627,43 @@ def warn_cilk_for_wraparound: Warning <
   "%0 stride causes %1 wraparound">, InGroup<SourceUsesCilkPlus>, DefaultWarn;
 
 def note_cilk_for_wraparound_undefined: Note <
-  "Wraparounds cause undefined behavior in Cilk for">;
+  "wraparounds cause undefined behavior in Cilk for">;
+
+def err_cilk_elemental_not_function_parameter: Error<
+  "not a function parameter">;
+def err_cilk_elemental_vectorlength: Error<
+  "vectorlength must be positive">;
+def err_cilk_elemental_unrecognized_processor: Error<
+  "unrecognized processor">;
+def err_cilk_elemental_inconsistent_step: Error<
+  "%select{uniform|linear}0 attribute inconsistent with previous %select{uniform|linear}1 attribute">;
+def warn_cilk_elemental_uniform_parameter_type: Warning<
+  "uniform parameter must have integral or pointer type">,
+  InGroup<SourceUsesCilkPlus>, DefaultWarn;
+def warn_cilk_elemental_inconsistent_vectorlengthfor: Warning<
+  "inconsistent vectorlengthfor attribute">,
+  InGroup<SourceUsesCilkPlus>, DefaultWarn;
+def warn_cilk_elemental_inconsistent_vectorlength: Warning<
+  "repeated vectorlength attribute">,
+  InGroup<SourceUsesCilkPlus>, DefaultWarn;
+def warn_cilk_elemental_inconsistent_processor: Warning<
+  "inconsistent processor attribute">,
+  InGroup<SourceUsesCilkPlus>, DefaultWarn;
+def warn_attribute_wrong_number_arguments : Warning<
+  "attribute %plural{0:takes no arguments|1:takes one argument|"
+  ":requires exactly %0 arguments}0">;
+def err_cilk_elemental_exception_spec : Error<
+  "exception specifications are not allowed on elemental functions">;
 
 // simd for
 def err_simd_for_body_no_construct: Error<
-  "%0 is not allowed within simd for">;
+  "%0 is not allowed within %select{simd for|an elemental function}1">;
 def err_simd_for_nested: Error<
   "nested simd for not supported">;
 def note_simd_for_nested: Note<
   "outer simd for here">;
 def err_simd_for_body_no_nontrivial_destructor: Error<
-  "non-static variable with a non-trivial destructor is not allowed within simd for">;
+  "non-static variable with a non-trivial destructor is not allowed within %select{simd for|an elemental function}0">;
 def err_simd_for_decl_multiple_variables : Error<
   "cannot declare more than one loop control variable in simd for">;
 def err_simd_for_initializer_expected_decl : Error<

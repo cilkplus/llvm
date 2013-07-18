@@ -2908,6 +2908,7 @@ public:
                                            unsigned NumParams);
 
   void DiagnoseCilkSpawn(Stmt *S);
+  void DiagnoseCilkElemental(FunctionDecl *D, Stmt *S);
 
   StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
   ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);

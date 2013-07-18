@@ -1088,3 +1088,118 @@ def SIMDReduction : Attr {
     SIMDReductionKind Operator;
   }];
 }
+
+// Cilk Plus elemental function vector() attribute arguments are defined
+// as attributes themselves in the dummy _Cilk_elemental scope.
+def CilkProcessor : InheritableAttr {
+  let Spellings = [CXX11<"_Cilk_elemental", "processor">];
+  let Args = [SourceLocArgument<"Group">,
+              EnumArgument<"Processor", "CilkProcessor",
+                           ["<unspecified>",
+                            "pentium_4", "pentium_4_sse3", "core2_duo_sse3",
+                            "core_2_duo_sse_4_1", "core_i7_sse4_2"],
+                           ["Unspecified",
+                            "Pentium_4", "Pentium_4_sse3", "Core2_duo_sse3",
+                            "Core_2_duo_sse_4_1", "Core_i7_sse4_2"]>];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+  let AdditionalMembers =
+    [{
+      static CilkProcessor getValue(llvm::StringRef Processor) {
+        return llvm::StringSwitch<CilkProcessor>(Processor)
+          .Case("pentium_4", Pentium_4)
+          .Case("pentium_4_sse3", Pentium_4_sse3)
+          .Case("core2_duo_sse3", Core2_duo_sse3)
+          .Case("core_2_duo_sse_4_1", Core_2_duo_sse_4_1)
+          .Case("core_i7_sse4_2", Core_i7_sse4_2)
+          .Default(Unspecified);
+      }
+      static StringRef getProcessorString(CilkProcessor Processor) {
+        switch (Processor) {
+        case Pentium_4:
+          return "pentium_4";
+        case Pentium_4_sse3:
+          return "pentium_4_sse3";
+        case Core2_duo_sse3:
+          return "core2_duo_sse3";
+        case Core_2_duo_sse_4_1:
+          return "core_2_duo_sse_4_1";
+        case Core_i7_sse4_2:
+          return "core_i7_sse4_2";
+        default:
+          return "";
+        }
+      }
+      StringRef getName() const {
+        return getProcessorString(processor);
+      }
+      static unsigned getProcessorVectorBytes(CilkProcessor Proc) {
+        switch (Proc) {
+        case Pentium_4:
+        case Pentium_4_sse3:
+        case Core2_duo_sse3:
+        case Core_2_duo_sse_4_1:
+        case Core_i7_sse4_2:
+          return 16;
+        default:
+          return 1;
+        }
+      }
+      unsigned getVectorBytes() const {
+        return getProcessorVectorBytes(processor);
+      }
+    }];
+}
+
+def CilkVecLength : InheritableAttr {
+  let Spellings = [CXX11<"_Cilk_elemental", "vectorlength">];
+  let Args = [SourceLocArgument<"Group">, UnsignedArgument<"Length">];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+}
+
+def CilkVecLengthFor : InheritableAttr {
+  let Spellings = [CXX11<"_Cilk_elemental", "vectorlengthfor">];
+  let Args = [SourceLocArgument<"Group">, TypeArgument<"TypeHint">];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+}
+
+def CilkLinear : InheritableAttr {
+  let Spellings = [CXX11<"_Cilk_elemental", "linear">];
+  let Args = [SourceLocArgument<"Group">,
+              IdentifierArgument<"Parameter">,
+              IntArgument<"StepValue">, IdentifierArgument<"StepParameter">];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+}
+
+def CilkUniform : InheritableAttr {
+  let Spellings = [CXX11<"_Cilk_elemental", "uniform">];
+  let Args = [SourceLocArgument<"Group">, IdentifierArgument<"Parameter">];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+}
+
+def CilkMask : InheritableAttr {
+  let Spellings = [CXX11<"_Cilk_elemental", "mask">];
+  let Args = [SourceLocArgument<"Group">, BoolArgument<"Mask">];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+}
+
+def CilkNoMask : InheritableAttr {
+  let Spellings = [CXX11<"_Cilk_elemental", "nomask">];
+  let Args = [SourceLocArgument<"Group">];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+}
+
+def CilkElemental : InheritableAttr {
+  let Spellings = [Declspec<"vector">,
+                   GNU<"vector">,
+                   CXX11<"", "vector">];
+  let Args = [SourceLocArgument<"Group">];
+  let Subjects = [Function];
+  let TemplateDependent = 1;
+}

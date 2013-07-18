@@ -137,4 +137,3 @@ unsigned AttributeList::getAttributeSpellingListIndex() const {
 #include "clang/Sema/AttrSpellingListIndex.inc"
 
 }
-

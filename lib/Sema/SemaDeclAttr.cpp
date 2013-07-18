@@ -2835,6 +2835,254 @@ static void handleVecTypeHint(Sema &S, Decl *D, const AttributeList &Attr) {
                                                ParmType, Attr.getLoc()));
 }
 
+static void handleCilkElementalAttr(Sema &S, Decl *D,
+                                    const AttributeList &Attr) {
+  assert(Attr.getKind() == AttributeList::AT_CilkElemental);
+  D->addAttr(::new (S.Context) CilkElementalAttr(Attr.getLoc(), S.Context,
+                                                 Attr.getScopeLoc()));
+}
+
+static void handleCilkMaskAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+  if (!checkAttributeNumArgs(S, Attr, 0))
+    return;
+  bool Mask = false;
+  switch (Attr.getKind()) {
+  case AttributeList::AT_CilkMask:
+    Mask = true;
+    break;
+  case AttributeList::AT_CilkNoMask:
+    Mask = false;
+    break;
+  default:
+    llvm_unreachable("attribute is not 'mask' or 'nomask'");
+  }
+  D->addAttr(::new (S.Context) CilkMaskAttr(Attr.getLoc(), S.Context,
+                                            Attr.getScopeLoc(), Mask));
+}
+
+template<typename A>
+A *getGroupAttr(Decl *D, SourceLocation Loc) {
+  for (specific_attr_iterator<A>
+        I = D->specific_attr_begin<A>(),
+        E = D->specific_attr_end<A>(); I != E; ++I)
+    if ((*I)->getGroup() == Loc)
+      return *I;
+  return 0;
+}
+
+static void handleCilkProcessorAttr(Sema &S, Decl *D,
+                                    const AttributeList &Attr) {
+  assert(Attr.getKind() == AttributeList::AT_CilkProcessor);
+  unsigned NumArgs = Attr.getNumArgs();
+  StringRef SR;
+  if (NumArgs == 0) {
+    // Argument as identifier.
+    IdentifierInfo *ProcessorName = Attr.getParameterName();
+    if (!ProcessorName) {
+      S.Diag(Attr.getLoc(), diag::err_attribute_missing_parameter_name);
+      return;
+    }
+    SR = ProcessorName->getName();
+  } else if (NumArgs == 1) {
+    // Argument as string.
+    Expr *ArgExpr = Attr.getArg(0);
+    StringLiteral *SE = dyn_cast<StringLiteral>(ArgExpr);
+    if (!SE) {
+      S.Diag(ArgExpr->getLocStart(),
+             diag::err_attribute_not_string) << "processor";
+      return;
+    }
+    SR = SE->getString();
+  } else {
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
+    return;
+  }
+  CilkProcessorAttr::CilkProcessor Processor = CilkProcessorAttr::getValue(SR);
+
+  // Check for multiple different processor attributes in one vector().
+  CilkProcessorAttr *ExistingAttr =
+    getGroupAttr<CilkProcessorAttr>(D, Attr.getScopeLoc());
+  if (ExistingAttr && ExistingAttr->getProcessor() != Processor) {
+    // CodeGen does actually allow this, so we just warn and continue.
+    S.Diag(Attr.getParameterLoc(),
+           diag::warn_cilk_elemental_inconsistent_processor);
+    S.Diag(ExistingAttr->getLocation(), diag::note_previous_attribute);
+  }
+  if (Processor == CilkProcessorAttr::Unspecified) {
+    S.Diag(Attr.getParameterLoc(),
+           diag::err_cilk_elemental_unrecognized_processor);
+    return;
+  }
+  D->addAttr(::new (S.Context)
+             CilkProcessorAttr(Attr.getRange(), S.Context,
+                               Attr.getScopeLoc(), Processor));
+}
+
+static void handleCilkVecLengthAttr(Sema &S, Decl *D,
+                                    const AttributeList &Attr) {
+  assert(Attr.getKind() == AttributeList::AT_CilkVecLength);
+  unsigned NumArgs = Attr.getNumArgs();
+  if (!NumArgs) {
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
+    return;
+  }
+  // We can handle more than one length (each as a separate CilkVecLengthAttr,
+  // which results in a multiplication of metadata sets), so we just warn.
+  if (NumArgs > 1)
+    S.Diag(Attr.getLoc(), diag::warn_attribute_wrong_number_arguments) << 1;
+  // Check for multiple different vectorlength attributes in one vector().
+  // CodeGen does support this, so we just warn and continue.
+  CilkVecLengthAttr *ExistingAttr =
+    getGroupAttr<CilkVecLengthAttr>(D, Attr.getScopeLoc());
+  if (ExistingAttr) {
+    S.Diag(Attr.getLoc(),
+           diag::warn_cilk_elemental_inconsistent_vectorlength);
+    S.Diag(ExistingAttr->getLocation(), diag::note_previous_attribute);
+  }
+
+  for (unsigned I = 0; I < NumArgs; ++I) {
+    Expr *LengthExpr = Attr.getArg(I);
+    llvm::APSInt LengthValue;
+    if (LengthExpr->isTypeDependent() || LengthExpr->isValueDependent() ||
+        !LengthExpr->isIntegerConstantExpr(LengthValue, S.Context)) {
+      S.Diag(Attr.getLoc(), diag::err_attribute_argument_not_int)
+        << "vectorlength" << LengthExpr->getSourceRange();
+      Attr.setInvalid();
+      return;
+    }
+    if (!LengthValue.isStrictlyPositive()) {
+      S.Diag(Attr.getLoc(), diag::err_cilk_elemental_vectorlength);
+      return;
+    }
+    D->addAttr(::new (S.Context)
+               CilkVecLengthAttr(Attr.getRange(), S.Context,
+                                 Attr.getScopeLoc(),
+                                 LengthValue.getZExtValue()));
+  }
+}
+
+static void handleCilkVecLengthForAttr(Sema &S, Decl *D,
+                                       const AttributeList &Attr) {
+  assert(Attr.getKind() == AttributeList::AT_CilkVecLengthFor);
+  if (!checkAttributeNumArgs(S, Attr, 1))
+    return;
+
+  QualType ParmType = S.GetTypeFromParser(Attr.getTypeArg());
+
+  // Check for multiple different vectorlengthfor attributes in one vector().
+  // CodeGen does support this, so we just warn and continue.
+  CilkVecLengthForAttr *ExistingAttr =
+    getGroupAttr<CilkVecLengthForAttr>(D, Attr.getScopeLoc());
+  if (ExistingAttr && ExistingAttr->getTypeHint() != ParmType) {
+    S.Diag(Attr.getLoc(),
+           diag::warn_cilk_elemental_inconsistent_vectorlengthfor);
+    S.Diag(ExistingAttr->getLocation(), diag::note_previous_attribute);
+  }
+
+  D->addAttr(::new (S.Context)
+             CilkVecLengthForAttr(Attr.getLoc(), S.Context,
+                                  Attr.getScopeLoc(), ParmType));
+}
+
+static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+  IdentifierInfo *ParameterName = Attr.getParameterName();
+  if (!ParameterName) {
+    S.Diag(Attr.getLoc(), diag::err_attribute_missing_parameter_name);
+    return;
+  }
+  const ParmVarDecl *Parm = 0;
+  unsigned i = 0, NumParams = 0;
+  const FunctionDecl *FD = dyn_cast<FunctionDecl>(D);
+  if (FD) {
+    NumParams = FD->getNumParams();
+    for (; i != NumParams; ++i)
+      if ((Parm = FD->getParamDecl(i))->getName() == ParameterName->getName())
+        break;
+  }
+  if (i == NumParams) {
+    S.Diag(Attr.getParameterLoc(),
+           diag::err_cilk_elemental_not_function_parameter);
+    return;
+  }
+
+  unsigned NumArgs = Attr.getNumArgs();
+  int64_t Step = 0;
+  IdentifierInfo *StepId = 0;
+  switch (Attr.getKind()) {
+  case AttributeList::AT_CilkLinear:
+    if (Attr.isDeclspecPropertyAttribute()) {
+      StepId = Attr.getPropertyData().GetterId;
+      for (i = 0; i != NumParams; ++i)
+        if ((Parm = FD->getParamDecl(i))->getName() == StepId->getName())
+          break;
+      if (i == NumParams) {
+        S.Diag(Attr.getLoc(),
+              diag::err_cilk_elemental_not_function_parameter);
+        return;
+      }
+    } else if (NumArgs == 0)
+      Step = 1;
+    else if (NumArgs == 1) {
+      Expr *StepExpr = Attr.getArg(0);
+      llvm::APSInt StepValue;
+      if (StepExpr->isTypeDependent() || StepExpr->isValueDependent() ||
+          !StepExpr->isIntegerConstantExpr(StepValue, S.Context)) {
+        S.Diag(Attr.getLoc(), diag::err_attribute_argument_not_int)
+        << "linear" << StepExpr->getSourceRange();
+        Attr.setInvalid();
+        return;
+      }
+      Step = StepValue.getSExtValue();
+    } else {
+      S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
+      return;
+    }
+    break;
+  case AttributeList::AT_CilkUniform:
+    if (NumArgs) {
+      S.Diag(Attr.getLoc(),
+             diag::err_attribute_wrong_number_arguments) << NumArgs;
+      return;
+    }
+    // Check that the parameter is a pointer or integer.
+    if (!Parm->getType()->isIntegralType(D->getASTContext()) &&
+        !Parm->getType()->isPointerType())
+      S.Diag(Attr.getParameterLoc(),
+            diag::warn_cilk_elemental_uniform_parameter_type);
+    // A uniform(x) attribute is represented as linear(x:0).
+    Step = 0;
+    break;
+  default:
+    assert(0 && "attribute is not 'linear' or 'uniform'");
+    break;
+  }
+
+  // Check for contradictory step specifications.
+  specific_attr_iterator<CilkLinearAttr>
+      AI = D->specific_attr_begin<CilkLinearAttr>(),
+      AE = D->specific_attr_end<CilkLinearAttr>();
+  for (; AI != AE; ++AI) {
+    if (((*AI)->getGroup() == Attr.getScopeLoc()) &&
+        ((*AI)->getParameter()->getName() == ParameterName->getName())) {
+      if ((Step != (*AI)->getStepValue()) ||
+          (StepId != (*AI)->getStepParameter())) {
+        S.Diag(Attr.getParameterLoc(),
+               diag::err_cilk_elemental_inconsistent_step) <<
+                ((Step || StepId) ? 1 : 0) <<
+                (((*AI)->getStepValue() || (*AI)->getStepParameter())? 1 : 0);
+        S.Diag((*AI)->getLocation(), diag::note_previous_attribute);
+        return;
+      }
+      break;
+    }
+  }
+
+  D->addAttr(::new (S.Context) CilkLinearAttr(Attr.getLoc(),
+                                              S.Context,
+                                              Attr.getScopeLoc(),
+                                              ParameterName, Step, StepId));
+}
+
 static void handleEndianAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   if (!dyn_cast<VarDecl>(D))
     S.Diag(Attr.getLoc(), diag::warn_attribute_wrong_decl_type) << "endian"
@@ -5041,6 +5289,28 @@ static void ProcessInheritableDeclAttr(Sema &S, Scope *scope, Decl *D,
     break;
   case AttributeList::AT_TypeTagForDatatype:
     handleTypeTagForDatatypeAttr(S, D, Attr);
+    break;
+
+  // Cilk Plus attributes.
+  case AttributeList::AT_CilkElemental:
+    handleCilkElementalAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkMask:
+  case AttributeList::AT_CilkNoMask:
+    handleCilkMaskAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkProcessor:
+    handleCilkProcessorAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkLinear:
+  case AttributeList::AT_CilkUniform:
+    handleCilkStepAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkVecLength:
+    handleCilkVecLengthAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkVecLengthFor:
+    handleCilkVecLengthForAttr(S, D, Attr);
     break;
 
   default:

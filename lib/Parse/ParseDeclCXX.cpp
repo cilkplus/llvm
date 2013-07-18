@@ -3211,7 +3211,10 @@ void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
 
     // Parse attribute arguments
     if (Tok.is(tok::l_paren)) {
-      if (ScopeName && ScopeName->getName() == "gnu") {
+      if ((ScopeName && ScopeName->isStr("gnu")) ||
+          (getLangOpts().CilkPlus &&
+           (!ScopeName || ScopeName->isStr("cilkplus")) &&
+           AttrName->isStr("vector"))) {
         ParseGNUAttributeArgs(AttrName, AttrLoc, attrs, endLoc,
                               ScopeName, ScopeLoc, AttributeList::AS_CXX11);
         AttrParsed = true;

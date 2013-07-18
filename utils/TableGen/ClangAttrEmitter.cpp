@@ -18,6 +18,7 @@
 #include "llvm/TableGen/TableGenBackend.h"
 #include <algorithm>
 #include <cctype>
+#include <set>
 
 using namespace llvm;
 
@@ -1447,6 +1448,7 @@ void EmitClangAttrParsedAttrKinds(RecordKeeper &Records, raw_ostream &OS) {
     bool DistinctSpellings = Attr.getValueAsBit("DistinctSpellings");
     if (SemaHandler || Ignored) {
       std::vector<Record*> Spellings = Attr.getValueAsListOfDefs("Spellings");
+      std::set<StringRef> MatchSpellings;
 
       for (std::vector<Record*>::const_iterator I = Spellings.begin(),
            E = Spellings.end(); I != E; ++I) {
@@ -1462,7 +1464,9 @@ void EmitClangAttrParsedAttrKinds(RecordKeeper &Records, raw_ostream &OS) {
         }
         Spelling += NormalizeAttrSpelling(RawSpelling);
 
-        if (SemaHandler)
+        if (MatchSpellings.find(StringRef(Spelling)) != MatchSpellings.end())
+          ; // duplicate spelling (e.g. both Declspec and GNU)
+        else if (SemaHandler)
           Matches.push_back(
             StringMatcher::StringPair(
               StringRef(Spelling),
@@ -1472,6 +1476,7 @@ void EmitClangAttrParsedAttrKinds(RecordKeeper &Records, raw_ostream &OS) {
             StringMatcher::StringPair(
               StringRef(Spelling),
               "return AttributeList::IgnoredAttribute;"));
+        MatchSpellings.insert(StringRef(Spelling));
       }
     }
   }

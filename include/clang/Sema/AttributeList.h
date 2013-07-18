@@ -252,7 +252,8 @@ private:
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
 
-  /// Constructor for microsoft __declspec(property) attribute.
+  /// Constructor for microsoft __declspec(property) attribute and Cilk Plus
+  /// elemental linear attribute with a function parameter step size.
   AttributeList(IdentifierInfo *attrName, SourceRange attrRange,
                 IdentifierInfo *scopeName, SourceLocation scopeLoc,
                 IdentifierInfo *parmName, SourceLocation parmLoc,
@@ -418,7 +419,9 @@ public:
   }
 
   const ParsedType &getTypeArg() const {
-    assert(getKind() == AT_VecTypeHint && "Not a type attribute");
+    assert((getKind() == AT_VecTypeHint ||
+            getKind() == AT_CilkVecLengthFor) &&
+           "Not a type attribute");
     return getTypeBuffer();
   }
 
