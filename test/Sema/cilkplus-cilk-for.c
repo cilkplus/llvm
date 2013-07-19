@@ -455,10 +455,10 @@ void test_wrap_around() {
   extern int foo();
   unsigned x;
   _Cilk_for(x = 0; x != 10; x--); // expected-warning {{negative stride causes unsigned wraparound}} \
-                                  // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
+                                  // expected-note {{wraparounds cause undefined behavior in Cilk for}}
 
   _Cilk_for(unsigned i = 0; i != 10; i -= 3); // expected-warning {{negative stride causes unsigned wraparound}} \
-                                              // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
+                                              // expected-note {{wraparounds cause undefined behavior in Cilk for}}
 
   _Cilk_for(unsigned i = foo(); i != 10; --i); // OK
 
@@ -467,20 +467,20 @@ void test_wrap_around() {
   _Cilk_for(unsigned i = foo(); i != foo() + 0; ++i); // OK
 
   _Cilk_for(unsigned i = 100; i != 10; i++); // expected-warning {{positive stride causes unsigned wraparound}} \
-                                             // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
+                                             // expected-note {{wraparounds cause undefined behavior in Cilk for}}
 
   _Cilk_for(unsigned i = 0; i != 10; i += 3); // expected-warning {{positive stride causes unsigned wraparound}} \
-                                              // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
+                                              // expected-note {{wraparounds cause undefined behavior in Cilk for}}
 
   int y;
   _Cilk_for(y = 0; y != 10; y--); // expected-warning {{negative stride causes signed wraparound}} \
-                                  // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
+                                  // expected-note {{wraparounds cause undefined behavior in Cilk for}}
 
   _Cilk_for(int i = 0; i != -10; i++); // expected-warning {{positive stride causes signed wraparound}} \
-                                       // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
+                                       // expected-note {{wraparounds cause undefined behavior in Cilk for}}
 
   _Cilk_for(int i = 0; i != 10; i += 3); // expected-warning {{positive stride causes signed wraparound}} \
-                                         // expected-note {{Wraparounds cause undefined behavior in Cilk for}}
+                                         // expected-note {{wraparounds cause undefined behavior in Cilk for}}
 }
 
 void test_cilk_spawn_in_cilk_for() {
