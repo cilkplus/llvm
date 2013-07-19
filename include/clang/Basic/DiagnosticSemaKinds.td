@@ -6649,9 +6649,6 @@ def warn_cilk_elemental_inconsistent_vectorlength: Warning<
 def warn_cilk_elemental_inconsistent_processor: Warning<
   "inconsistent processor attribute">,
   InGroup<SourceUsesCilkPlus>, DefaultWarn;
-def warn_attribute_wrong_number_arguments : Warning<
-  "attribute %plural{0:takes no arguments|1:takes one argument|"
-  ":requires exactly %0 arguments}0">;
 def err_cilk_elemental_exception_spec : Error<
   "exception specifications are not allowed on elemental functions">;
 

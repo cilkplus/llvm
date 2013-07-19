@@ -2926,10 +2926,8 @@ static void handleCilkVecLengthAttr(Sema &S, Decl *D,
     S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
     return;
   }
-  // We can handle more than one length (each as a separate CilkVecLengthAttr,
-  // which results in a multiplication of metadata sets), so we just warn.
   if (NumArgs > 1)
-    S.Diag(Attr.getLoc(), diag::warn_attribute_wrong_number_arguments) << 1;
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
   // Check for multiple different vectorlength attributes in one vector().
   // CodeGen does support this, so we just warn and continue.
   CilkVecLengthAttr *ExistingAttr =

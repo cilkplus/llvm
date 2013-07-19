@@ -1448,7 +1448,7 @@ void EmitClangAttrParsedAttrKinds(RecordKeeper &Records, raw_ostream &OS) {
     bool DistinctSpellings = Attr.getValueAsBit("DistinctSpellings");
     if (SemaHandler || Ignored) {
       std::vector<Record*> Spellings = Attr.getValueAsListOfDefs("Spellings");
-      std::set<StringRef> MatchSpellings;
+      std::set<std::string> MatchSpellings;
 
       for (std::vector<Record*>::const_iterator I = Spellings.begin(),
            E = Spellings.end(); I != E; ++I) {
@@ -1456,7 +1456,6 @@ void EmitClangAttrParsedAttrKinds(RecordKeeper &Records, raw_ostream &OS) {
         StringRef AttrName = NormalizeAttrName(DistinctSpellings
                                                  ? StringRef(RawSpelling)
                                                  : StringRef(Attr.getName()));
-
         SmallString<64> Spelling;
         if ((*I)->getValueAsString("Variety") == "CXX11") {
           Spelling += (*I)->getValueAsString("Namespace");
