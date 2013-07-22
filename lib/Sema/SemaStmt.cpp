@@ -3293,6 +3293,7 @@ StmtResult Sema::BuildCilkForStmt(SourceLocation CilkForLoc,
       Expr *Step = StepExpr.get();
       Step = ImplicitCastExpr::Create(Context, SpanType, CK_IntegralCast, Step,
                                       0, VK_LValue);
+      Step = DefaultLvalueConversion(Step).get();
 
       VarDecl *InnerVar = FSI->InnerLoopControlVar;
       ExprResult InnerVarExpr

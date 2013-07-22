@@ -358,3 +358,18 @@ namespace ptr_conversion {
     _Cilk_for(int *r = p; r != q; r += x); // OK, should not crash.
   }
 }
+
+namespace adjust_expression {
+
+struct C { };
+
+C &operator+= (const C&, const int&);
+bool operator< (const C&, const C&);
+int operator- (const C&, const C&);
+void operator++ (C&);
+
+void foo(const C& limit) {
+  _Cilk_for (C c;  c < limit; ++c); // OK, should not crash.
+}
+
+} // namespace
