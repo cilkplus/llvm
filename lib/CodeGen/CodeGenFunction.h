@@ -2009,6 +2009,9 @@ public:
   void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);
   void EmitCilkForHelperBody(const Stmt *S);
   void EmitSIMDForStmt(const SIMDForStmt &S);
+  void EmitSIMDForHelperCall(const SIMDForStmt &S, llvm::Function *BodyFunc,
+                             LValue CapStruct, llvm::Value *LoopIndex,
+                             bool IsLastIter);
   void EmitSIMDForHelperBody(const Stmt *S);
   void EmitCilkSpawnExpr(const CilkSpawnExpr *E);
   void EmitCilkSpawnDecl(const CilkSpawnDecl *D);

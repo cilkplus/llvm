@@ -114,15 +114,12 @@ void test_lastprivate() {
   }
   anchor(502);
   // CHECK: call void @_Z6anchori(i32 501)
-  // CHECK: icmp eq i32
-  // CHECK-NEXT: br {{.+}}, label %[[UPDATE_BODY1:[_A-Za-z0-9\.]+]], label %[[HELPER_EXIT1:[_A-Za-z0-9\.]+]]
-  // CHECK: [[UPDATE_BODY1]]
-  // CHECK-NEXT: load double*
+  // CHECK: icmp ne i8 %{{.+}}, 0
+  // CHECK: call void @_Z6anchori(i32 501)
+  // CHECK: load double*
   // CHECK-NEXT: getelementptr
   // CHECK-NEXT: load double**
   // CHECK-NEXT: store double
-  // CHECK-NEXT: br label %[[HELPER_EXIT1]]
-  // CHECK: [[HELPER_EXIT1]]
   // CHECK: call void @_Z6anchori(i32 502)
 
   // Check that local x being copied into x, x destructor being called
@@ -134,7 +131,8 @@ void test_lastprivate() {
   }
   anchor(512);
   // CHECK: call void @_Z6anchori(i32 511)
-  // CHECK: icmp eq i32
+  // CHECK: icmp ne i8 %{{.+}}, 0
+  // CHECK: call void @_Z6anchori(i32 511)
   // CHECK: call void @llvm.memcpy
   // CHECK: call void @llvm.memcpy
   // CHECK: call void @_Z6anchori(i32 512)
@@ -148,7 +146,8 @@ void test_lastprivate() {
   }
   anchor(522);
   // CHECK: call void @_Z6anchori(i32 521)
-  // CHECK: icmp eq i32
+  // CHECK: icmp ne i8 %{{.+}}, 0
+  // CHECK: call void @_Z6anchori(i32 521)
   // CHECK: call void @_ZN1SaSES_
   // CHECK-NEXT: call void @_ZN1SD1Ev
   // CHECK: call void @_Z6anchori(i32 522)
@@ -163,7 +162,8 @@ void test_lastprivate() {
   }
   anchor(532);
   // CHECK: call void @_Z6anchori(i32 531)
-  // CHECK: icmp eq i32
+  // CHECK: icmp ne i8 %{{.+}}, 0
+  // CHECK: call void @_Z6anchori(i32 531)
   // CHECK: store double
   // CHECK: call void @llvm.memcpy
   // CHECK: call void @llvm.memcpy

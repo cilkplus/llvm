@@ -3350,15 +3350,15 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
   if (!IsDependent) {
     assert(CD->getNumParams() == 3);
     QualType IndexType = LoopCount->getType();
-    ImplicitParamDecl *Index = 0, *Count = 0;
+    ImplicitParamDecl *Index = 0, *LastIter = 0;
     Index = ImplicitParamDecl::Create(getASTContext(), DC, SourceLocation(),
                                       /*IdInfo*/ 0, IndexType);
     DC->addDecl(Index);
     CD->setParam(1, Index);
-    Count = ImplicitParamDecl::Create(getASTContext(), DC, SourceLocation(),
-                                      /*IdInfo*/ 0, IndexType);
-    DC->addDecl(Count);
-    CD->setParam(2, Count);
+    LastIter = ImplicitParamDecl::Create(getASTContext(), DC, SourceLocation(),
+                                         /*IdInfo*/ 0, Context.BoolTy);
+    DC->addDecl(LastIter);
+    CD->setParam(2, LastIter);
   }
 
   // If there are any references to variables used as linear step, these need to

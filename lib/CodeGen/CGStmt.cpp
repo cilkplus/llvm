@@ -2146,10 +2146,33 @@ CodeGenFunction::CGCilkSpawnInfo::EmitBody(CodeGenFunction &CGF, Stmt *S) {
   CGCapturedStmtInfo::EmitBody(CGF, S);
 }
 
+void CodeGenFunction::EmitSIMDForHelperCall(const SIMDForStmt &S,
+                                            llvm::Function *BodyFunc,
+                                            LValue CapStruct,
+                                            llvm::Value *LoopIndex,
+                                            bool IsLastIter) {
+  // Emit call to the helper function.
+  SmallVector<llvm::Value *, 3> HelperArgs;
+  HelperArgs.push_back(CapStruct.getAddress());
+  HelperArgs.push_back(Builder.CreateLoad(LoopIndex));
+
+  llvm::Value *LastIter = 0;
+  if (IsLastIter)
+    LastIter = llvm::ConstantInt::getTrue(BodyFunc->getContext());
+  else
+    LastIter = llvm::ConstantInt::getFalse(BodyFunc->getContext());
+  HelperArgs.push_back(LastIter);
+
+  disableExceptions();
+  EmitCallOrInvoke(BodyFunc, HelperArgs);
+  enableExceptions();
+}
+
 void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   RunCleanupsScope SIMDForScope(*this);
 
   // Emit all SIMD clauses.
+  bool SeparateLastIter = false;
   const ArrayRef<Attr *> &Attrs = S.getSIMDAttrs();
   for (unsigned i = 0, e = Attrs.size(); i < e; ++i) {
     switch (Attrs[i]->getKind()) {
@@ -2167,128 +2190,146 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
     } break;
     case clang::attr::SIMDLengthFor:
       break;
+    case clang::attr::SIMDLastPrivate:
+    case clang::attr::SIMDLinear:
+      SeparateLastIter = true;
+      break;
     default:
       // Not yet handled
       ;
     }
   }
 
-  // Emit the for loop.
-  JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
-  RunCleanupsScope ForScope(*this);
-
   CGDebugInfo *DI = getDebugInfo();
   if (DI)
     DI->EmitLexicalBlockStart(Builder, S.getForLoc());
 
-  // Evaluate the first part before the loop.
+  // Evaluate the first part before the condition.
   EmitStmt(S.getInit());
 
+  // Only run the SIMD loop if the loop condition is true
+  llvm::BasicBlock *ThenBlock = createBasicBlock("if.then");
+  llvm::BasicBlock *ContBlock = createBasicBlock("if.end");
+  EmitBranchOnBoolExpr(S.getCond(), ThenBlock, ContBlock);
+
+  EmitBlock(ThenBlock);
+
+  // Emit the for loop.
   llvm::Value *LoopCount = EmitAnyExpr(S.getLoopCount()).getScalarVal();
   llvm::Value *LoopIndex = CreateTempAlloca(LoopCount->getType(),
                                             "__index.addr");
-  Builder.CreateStore(llvm::ConstantInt::get(LoopCount->getType(), 0),
-                      LoopIndex);
-
-  // Start the loop with a block that tests the condition.
-  // If there's an increment, the continue scope will be overwritten
-  // later.
-  JumpDest Continue = getJumpDestInCurrentScope("for.cond");
-  llvm::BasicBlock *CondBlock = Continue.getBlock();
-  EmitBlock(CondBlock);
-  LoopStack.Push(CondBlock);
-
-  // Create a cleanup scope for the condition variable cleanups.
-  RunCleanupsScope ConditionScope(*this);
-
-  llvm::Value *BoolCondVal = 0;
+  llvm::Function *BodyFunction = 0;
+  LValue CapStruct;
   {
-    // If the for statement has a condition scope, emit the local variable
-    // declaration.
-    llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
+    JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
+    RunCleanupsScope ForScope(*this);
 
-    // If there are any cleanups between here and the loop-exit scope,
-    // create a block to stage a loop exit along.
-    if (ForScope.requiresCleanups())
-      ExitBlock = createBasicBlock("for.cond.cleanup");
+    Builder.CreateStore(llvm::ConstantInt::get(LoopCount->getType(), 0),
+                        LoopIndex);
+    if (SeparateLastIter)
+      // Lastprivate or linear variable present, remove last iteration.
+      LoopCount = Builder.CreateSub(
+          LoopCount, llvm::ConstantInt::get(LoopCount->getType(), 1));
 
-    // As long as the condition is true, iterate the loop.
-    llvm::BasicBlock *ForBody = createBasicBlock("for.body");
+    // Start the loop with a block that tests the condition.
+    // If there's an increment, the continue scope will be overwritten
+    // later.
+    JumpDest Continue = getJumpDestInCurrentScope("for.cond");
+    llvm::BasicBlock *CondBlock = Continue.getBlock();
+    EmitBlock(CondBlock);
+    LoopStack.Push(CondBlock);
 
-    // C99 6.8.5p2/p4: The first substatement is executed if the expression
-    // compares unequal to 0.  The condition must be a scalar type.
-    BoolCondVal = EvaluateExprAsBool(S.getCond());
-    Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock);
+    llvm::Value *BoolCondVal = 0;
+    {
+      // If the for statement has a condition scope, emit the local variable
+      // declaration.
+      llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
 
-    if (ExitBlock != LoopExit.getBlock()) {
-      EmitBlock(ExitBlock);
-      EmitBranchThroughCleanup(LoopExit);
+      // If there are any cleanups between here and the loop-exit scope,
+      // create a block to stage a loop exit along.
+      if (ForScope.requiresCleanups())
+        ExitBlock = createBasicBlock("for.cond.cleanup");
+
+      // As long as the condition is true, iterate the loop.
+      llvm::BasicBlock *ForBody = createBasicBlock("for.body");
+
+      // Use LoopCount and LoopIndex for iteration.
+      BoolCondVal = Builder.CreateICmpULT(Builder.CreateLoad(LoopIndex),
+                                          LoopCount);
+
+      // C99 6.8.5p2/p4: The first substatement is executed if the expression
+      // compares unequal to 0.  The condition must be a scalar type.
+      Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock);
+
+      if (ExitBlock != LoopExit.getBlock()) {
+        EmitBlock(ExitBlock);
+        EmitBranchThroughCleanup(LoopExit);
+      }
+
+      EmitBlock(ForBody);
     }
 
-    EmitBlock(ForBody);
-  }
+    Continue = getJumpDestInCurrentScope("for.inc");
 
-  Continue = getJumpDestInCurrentScope("for.inc");
-
-  // Store the blocks to use for break and continue.
-  BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
-
-  {
-    RunCleanupsScope BodyScope(*this);
+    // Store the blocks to use for break and continue.
+    BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
 
     // Emit the call to the loop body.
     const CapturedStmt &CS = *S.getBody();
-    CapturedDecl *CD = const_cast<CapturedDecl *>(CS.getCapturedDecl());
-    const RecordDecl *RD = CS.getCapturedRecordDecl();
+    {
+      CapturedDecl *CD = const_cast<CapturedDecl *>(CS.getCapturedDecl());
+      const RecordDecl *RD = CS.getCapturedRecordDecl();
 
-    CGSIMDForStmtInfo CSInfo(S, LoopStack.GetCurLoopID());
-    CodeGenFunction CGF(CGM, true);
-    CGF.CapturedStmtInfo = &CSInfo;
+      CGSIMDForStmtInfo CSInfo(S, LoopStack.GetCurLoopID());
+      CodeGenFunction CGF(CGM, true);
+      CGF.CapturedStmtInfo = &CSInfo;
 
-    CGF.disableExceptions();
-    llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
-    CGF.enableExceptions();
+      CGF.disableExceptions();
+      BodyFunction = CGF.GenerateCapturedStmtFunction(CD, RD);
+      CGF.enableExceptions();
 
-    // Always inline this function back to the call site.
-    F->addFnAttr(llvm::Attribute::AlwaysInline);
+      // Always inline this function back to the call site.
+      BodyFunction->addFnAttr(llvm::Attribute::AlwaysInline);
+
+    }
 
     // Initialize the captured struct.
-    LValue CapStruct = InitCapturedStruct(CS);
+    CapStruct = InitCapturedStruct(CS);
+    EmitSIMDForHelperCall(S, BodyFunction, CapStruct, LoopIndex, false);
 
-    // Emit call to the helper function.
-    SmallVector<llvm::Value*, 3> HelperArgs;
-    HelperArgs.push_back(CapStruct.getAddress());
-    HelperArgs.push_back(Builder.CreateLoad(LoopIndex));
-    HelperArgs.push_back(LoopCount);
-    disableExceptions();
-    EmitCallOrInvoke(F, HelperArgs);
-    enableExceptions();
+    // Emit the increment block.
+    EmitBlock(Continue.getBlock());
+    EmitStmt(S.getInc());
+
+    {
+      llvm::Value *NewLoopIndex = 
+        Builder.CreateAdd(Builder.CreateLoad(LoopIndex),
+                          llvm::ConstantInt::get(LoopCount->getType(), 1));
+      Builder.CreateStore(NewLoopIndex, LoopIndex);
+    }
+
+    BreakContinueStack.pop_back();
+
+    EmitBranch(CondBlock);
+
+    ForScope.ForceCleanup();
+
+    if (DI)
+      DI->EmitLexicalBlockEnd(Builder, S.getSourceRange().getEnd());
+
+    LoopStack.Pop();
+
+    // Emit the fall-through block.
+    EmitBlock(LoopExit.getBlock(), true);
   }
 
-  EmitBlock(Continue.getBlock());
-  EmitStmt(S.getInc());
-
-  {
-    llvm::Value *NewLoopIndex = 
-      Builder.CreateAdd(Builder.CreateLoad(LoopIndex),
-                        llvm::ConstantInt::get(LoopCount->getType(), 1));
-    Builder.CreateStore(NewLoopIndex, LoopIndex);
+  if (SeparateLastIter) {
+    EmitSIMDForHelperCall(S, BodyFunction, CapStruct, LoopIndex, true);
+    // Increment again, for last iteration.
+    EmitStmt(S.getInc());
   }
 
-  BreakContinueStack.pop_back();
-
-  ConditionScope.ForceCleanup();
-  EmitBranch(CondBlock);
-
-  ForScope.ForceCleanup();
-
-  if (DI)
-    DI->EmitLexicalBlockEnd(Builder, S.getSourceRange().getEnd());
-
-  LoopStack.Pop();
-
-  // Emit the fall-through block.
-  EmitBlock(LoopExit.getBlock(), true);
+  EmitBlock(ContBlock, true);
 }
 
 static Expr *GetLinearStep(const SIMDForStmt &SS, VarDecl *SIMDVar) {
@@ -2396,7 +2437,7 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
     const SIMDForStmt &SS = Info->getSIMDForStmt();
     const CapturedDecl *CD = SS.getBody()->getCapturedDecl();
     llvm::Value *LoopIndex = LocalDeclMap.lookup(CD->getParam(1));
-    llvm::Value *LoopCount = LocalDeclMap.lookup(CD->getParam(2));
+    llvm::Value *IsLastIter = LocalDeclMap.lookup(CD->getParam(2));
 
     bool RequiresUpdate = false;
 
@@ -2460,20 +2501,22 @@ void CodeGenFunction::EmitSIMDForHelperBody(const Stmt *S) {
       // If an update is required, emit those update expressions to be run on
       // the last iteration of the loop.
       //
-      // if (LoopIndex == (LoopCount - 1)) {
+      // if (IsLastIter) {
       //   [[ Update Expressions ]]
       // }
+      //
+      // IsLastIter will only be true if this is a second output of the helper
+      // body, after the intial for-loop.
+      // Since IsLastIter is constant, it will be optimized out, and the if
+      // statement will not be a part of the SIMD For loop, thus allowing
+      // vectorization.
       if (RequiresUpdate) {
         RunCleanupsScope UpdateScope(*this);
         llvm::BasicBlock *UpdateBody = createBasicBlock("update.body");
         llvm::BasicBlock *UpdateExit = createBasicBlock("update.exit");
-        llvm::Value *Index = Builder.CreateLoad(LoopIndex);
-        llvm::Value *High = Builder.CreateLoad(LoopCount);
 
-        High =
-            Builder.CreateSub(High, llvm::ConstantInt::get(High->getType(), 1));
-        llvm::Value *Cond = Builder.CreateICmpEQ(Index, High);
-        Builder.CreateCondBr(Cond, UpdateBody, UpdateExit);
+        IsLastIter = Builder.CreateIsNotNull(Builder.CreateLoad(IsLastIter));
+        Builder.CreateCondBr(IsLastIter, UpdateBody, UpdateExit);
 
         EmitBlock(UpdateBody);
         // Update expressions update a SIMD variable, do not replace those uses
