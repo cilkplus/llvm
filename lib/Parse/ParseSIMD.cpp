@@ -245,11 +245,17 @@ struct SIMDReductionItemParser {
 static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
                              SmallVectorImpl<Attr *> &AttrList) {
   const Token &Tok = P.getCurToken();
-
+  // # pragma simd simd-clauses
+  // simd-clauses:
+  //   simd-clause
+  //   simd-clauses simd-clause
   while (Tok.isNot(tok::annot_pragma_simd_end)) {
     const SourceLocation ILoc = Tok.getLocation();
     const IdentifierInfo *II = Tok.getIdentifierInfo();
+
     if (!II) {
+      P.Diag(Tok, diag::err_expected_ident);
+      P.SkipUntil(tok::annot_pragma_simd_end, false, true);
       return false;
     }
 

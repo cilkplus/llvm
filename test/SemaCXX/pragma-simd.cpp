@@ -110,13 +110,13 @@ void test_default_ctor(MultipleDefalutCtor MD, NoDefalutCtor ND, DeletedDefalutC
   // expected-error@+3 {{variable in private clause has ambiguous default constructors}}
   // expected-error@+2 {{variable in private clause has no default constructor or it is deleted}}
   // expected-error@+1 {{variable in private clause has no default constructor or it is deleted}}
-  #pragma simd private(u, MD, ND, DD);
+  #pragma simd private(u, MD, ND, DD)
   for (int i = 0; i < 10; ++i);
 
   // expected-error@+3 {{variable in lastprivate clause has ambiguous default constructors}}
   // expected-error@+2 {{variable in lastprivate clause has no default constructor or it is deleted}}
   // expected-error@+1 {{variable in lastprivate clause has no default constructor or it is deleted}}
-  #pragma simd lastprivate(u, MD, ND, DD);
+  #pragma simd lastprivate(u, MD, ND, DD)
   for (int i = 0; i < 10; ++i);
 }
 

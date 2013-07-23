@@ -24,6 +24,23 @@ void test_invalid_clause()
   for (i = 0; i < 16; ++i) ;
 }
 
+void test_non_identifiers()
+{
+  int i, x;
+
+  // expected-error@+1 {{expected identifier}}
+  #pragma simd;
+  for (i = 0; i < 16; ++i) ;
+
+  // expected-error@+1 {{expected identifier}}
+  #pragma simd private(x);
+  for (i = 0; i < 16; ++i) ;
+
+  // expected-error@+1 {{expected identifier}}
+  #pragma simd , private(x);
+  for (i = 0; i < 16; ++i) ;
+}
+
 void test_vectorlength()
 {
   int i;
@@ -339,8 +356,20 @@ void test_multiple_clauses()
 {
   int i;
   float x = 0, y = 0, z = 0;
-  #pragma simd vectorlength(4) reduction(+:x, y) reduction(-:z)
-  for (i = 0; i < 16; ++i) ;
+  #pragma simd vectorlength(4) reduction(+:x, y) reduction(-:z) // OK
+  for (i = 0; i < 16; ++i);
+
+  // expected-error@+1 {{expected identifier}}
+  #pragma simd firstprivate(x), lastprivate(x)
+  for (i = 0; i < 16; ++i);
+
+  // expected-error@+1 {{expected identifier}}
+  #pragma simd vectorlength(4) reduction(+:x, y), reduction(-:z)
+  for (i = 0; i < 16; ++i);
+
+  // expected-error@+1 {{expected identifier}}
+  #pragma simd reduction(+:x, y); reduction(-:z)
+  for (i = 0; i < 16; ++i);
 }
 
 void test_for()
