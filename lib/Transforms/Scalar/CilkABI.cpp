@@ -58,8 +58,7 @@ enum ParamKind {
   PK_Vector,
   PK_LinearConst,
   PK_Linear,
-  PK_Uniform,
-  PK_Mask
+  PK_Uniform
 };
 
 struct ParamInfo {
@@ -206,7 +205,6 @@ FunctionType *encodeParameters(Function *Func,
   if (ArgName->getNumOperands() != 1 + ArgSize ||
       ArgStep->getNumOperands() != 1 + ArgSize)
     return 0;
-
   
   if (!CharacteristicTy && !Func->getReturnType()->isVoidTy())
     CharacteristicTy = getVectorType(Func->getReturnType(), ISA);
@@ -227,11 +225,8 @@ FunctionType *encodeParameters(Function *Func,
       if (!CharacteristicTy)
         CharacteristicTy = ArgVTy;
       MangledParams << "v";
-      unsigned NumArgs = CharacteristicTy->getVectorNumElements() /
-                         ArgVTy->getVectorNumElements();
-      NumArgs = NumArgs < 1 ? 1 : NumArgs;
-      for (unsigned j = 0; j < NumArgs; ++j)
-        Tys.push_back(ArgVTy);
+      Tys.push_back(VectorType::get(Arg->getType(),
+                                    CharacteristicTy->getVectorNumElements()));
       Info.push_back(ParamInfo(PK_Vector));
     } else if (ConstantInt *C = dyn_cast<ConstantInt>(Step)) {
       if (C->isZero()) {
@@ -250,15 +245,8 @@ FunctionType *encodeParameters(Function *Func,
     }
   }
 
-  if (Mask) {
-    Type *Ty = getVectorType(CharacteristicTy->getVectorElementType(), ISA);
-    unsigned N = CharacteristicTy->getVectorNumElements(),
-             M = Ty->getVectorNumElements();
-    Type *MaskIntTy = Type::getIntNTy(Context, Ty->getScalarSizeInBits());
-    Type *MaskVTy = VectorType::get(MaskIntTy, M);
-    for (unsigned i = 0; i < N / M; ++i)
-      Tys.push_back(MaskVTy);
-  }
+  if (Mask)
+    Tys.push_back(CharacteristicTy);
   
   Type *RetTy = Func->getReturnType();
   RetTy = RetTy->isVoidTy() ? RetTy : CharacteristicTy;
@@ -323,41 +311,12 @@ void createVectorVariantWrapper(Function *ScalarFunc,
          IE = Info.end(); I != IE; ++I) {
       Value *Arg = VI++;
       switch (I->Kind) {
-      case PK_Vector: {
+      case PK_Vector:
         assert(Arg->getType()->isVectorTy() && "Not a vector");
-        unsigned NumElements = Arg->getType()->getVectorNumElements();
-        if (NumElements == VLen)
-          VectorArgs.push_back(Arg);
-        else if (NumElements > VLen) {
-          Value *Mask = getIndicesVector(Builder.getInt32Ty(), VLen);
-          VectorArgs.push_back(Builder.CreateShuffleVector(Arg, Arg, Mask));
-        } else {
-          VI--;
-          unsigned NumArgs = VLen / NumElements;
-          // Copy NumArgs into temporary array for shuffling (Advancing VI by
-          // NumArgs).
-          SmallVector<Value*, 4> ShuffleArgs;
-          for (unsigned j = 0; j < NumArgs; ++j) {
-            assert(VI->getType()->getVectorNumElements() == NumElements &&
-                   "different vector sizes");
-            ShuffleArgs.push_back(VI++);
-          }
-          // Join all the vector arguments collected in ShuffleArgs into a
-          // single vector of size VLen.
-          for (unsigned Size = NumElements; Size < VLen; Size *= 2) {
-            Value *Mask = getIndicesVector(Builder.getInt32Ty(), Size * 2);
-            for (unsigned k = 0, ke = VLen / Size - 1; k < ke; ++k) {
-              ShuffleArgs[k] = Builder.CreateShuffleVector(ShuffleArgs[k*2],
-                                                           ShuffleArgs[k*2+1],
-                                                           Mask);
-        
-            }
-          }
-          assert(ShuffleArgs[0]->getType()->getVectorNumElements() == VLen &&
-                 "final shuffled vector has incorrect num elements");
-          VectorArgs.push_back(ShuffleArgs[0]);
-        }
-      } break;
+        assert(VLen == Arg->getType()->getVectorNumElements() &&
+               "Wrong number of elements");
+        VectorArgs.push_back(Arg);
+        break;
       case PK_LinearConst:
         VectorArgs.push_back(buildLinearArg(Builder, VLen, Arg, I->Step));
         break;
@@ -366,8 +325,6 @@ void createVectorVariantWrapper(Function *ScalarFunc,
         break;
       case PK_Uniform:
         VectorArgs.push_back(Builder.CreateVectorSplat(VLen, Arg));
-        break;
-      case PK_Mask:
         break;
       }
     }
@@ -504,7 +461,10 @@ static bool createVectorVariant(Module &M, MDNode *Root) {
   if (VecTypeHint) {
     if (VecTypeHint->getNumOperands() != 3)
       return false;
-    // TODO
+    Type *HintTy = VecTypeHint->getOperand(1)->getType();
+    if (HintTy->isVectorTy())
+      CharacteristicTy = HintTy;
+    // sign (operand 2) is ignored.
   }
 
   SmallVector<ParamInfo, 4> Info;
