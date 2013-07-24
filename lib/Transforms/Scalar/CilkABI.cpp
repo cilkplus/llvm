@@ -54,7 +54,7 @@ enum ISAClass {
   IC_ZMM
 };
 
-enum ParameterKind {
+enum ParamKind {
   PK_Vector,
   PK_LinearConst,
   PK_Linear,
@@ -62,15 +62,15 @@ enum ParameterKind {
   PK_Mask
 };
 
-struct ParameterInfo {
-  ParameterKind Kind;
+struct ParamInfo {
+  ParamKind Kind;
   Value *Step;
 
-  ParameterInfo(ParameterKind Kind)
+  ParamInfo(ParamKind Kind)
   : Kind(Kind), Step(0)
   {}
 
-  ParameterInfo(ParameterKind Kind, Value *Step)
+  ParamInfo(ParamKind Kind, Value *Step)
   : Kind(Kind), Step(Step)
   {}
 };
@@ -103,66 +103,68 @@ char encodeISAClass(ISAClass ISA) {
   case IC_YMM2: return 'Y';
   case IC_ZMM: return 'z';
   }
-  assert(false && "unkown isa");
+  assert(false && "unknown isa");
   return 0;
 }
 
 static
-unsigned getVectorLength(Type *Ty, ISAClass ISA) {
+Type *getVectorType(Type *Ty, ISAClass ISA) {
   if (Ty->isAggregateType())
     Ty = Type::getInt32Ty(Ty->getContext());
 
+  unsigned NumElements = 1;
   if (Ty->isIntegerTy(8))
     switch (ISA) {
-    case IC_XMM: return 16;
-    case IC_YMM1: assert(false && "incomplete");
-    case IC_YMM2: assert(false && "incomplete");
+    case IC_XMM:
+    case IC_YMM1:
+    case IC_YMM2: NumElements = 16; break;
     case IC_ZMM: assert(false && "incomplete");
     }
   else if (Ty->isIntegerTy(16))
     switch (ISA) {
-    case IC_XMM: return 8;
-    case IC_YMM1: assert(false && "incomplete");
-    case IC_YMM2: assert(false && "incomplete");
+    case IC_XMM:
+    case IC_YMM1: NumElements = 8; break;
+    case IC_YMM2: NumElements = 16; break;
     case IC_ZMM: assert(false && "incomplete");
     }
   else if (Ty->isIntegerTy(32))
     switch (ISA) {
-    case IC_XMM: return 4;
-    case IC_YMM1: assert(false && "incomplete");
-    case IC_YMM2: assert(false && "incomplete");
+    case IC_XMM:
+    case IC_YMM1: NumElements = 4; break;
+    case IC_YMM2: NumElements = 8; break;
     case IC_ZMM: assert(false && "incomplete");
     }
   else if (Ty->isIntegerTy(64))
     switch (ISA) {
-    case IC_XMM: return 2;
-    case IC_YMM1: assert(false && "incomplete");
-    case IC_YMM2: assert(false && "incomplete");
+    case IC_XMM:
+    case IC_YMM1: NumElements = 2; break;
+    case IC_YMM2: NumElements = 4; break;
     case IC_ZMM: assert(false && "incomplete");
     }
   else if (Ty->isFloatTy())
     switch (ISA) {
-    case IC_XMM: return 4;
-    case IC_YMM1: assert(false && "incomplete");
-    case IC_YMM2: assert(false && "incomplete");
+    case IC_XMM: NumElements =  4; break;
+    case IC_YMM1:
+    case IC_YMM2: NumElements = 8; break;
     case IC_ZMM: assert(false && "incomplete");
     }
   else if (Ty->isDoubleTy())
     switch (ISA) {
-    case IC_XMM: return 2;
-    case IC_YMM1: assert(false && "incomplete");
-    case IC_YMM2: assert(false && "incomplete");
+    case IC_XMM: NumElements = 2; break;
+    case IC_YMM1:
+    case IC_YMM2: NumElements = 4; break;
     case IC_ZMM: assert(false && "incomplete");
     }
   else if (Ty->isPointerTy())
     switch (ISA) {
-    case IC_XMM: return 2; // TODO 32bit vs. 64bit
+    case IC_XMM: NumElements = 2; break; // TODO 32bit vs. 64bit
     case IC_YMM1: assert(false && "incomplete");
     case IC_YMM2: assert(false && "incomplete");
     case IC_ZMM: assert(false && "incomplete");
     }
     
-  assert(false && "unexpected type");
+  assert(NumElements > 1 && "invalid NumElements");
+  return VectorType::get(Ty, NumElements);
 }
 
 // Return a constant vector <0, 1, ..., N - 1>
@@ -193,18 +195,21 @@ FunctionType *encodeParameters(Function *Func,
                                MDNode *ArgStep,
                                bool Mask,
                                ISAClass ISA,
-                               unsigned &VLen,
-                               SmallVectorImpl<ParameterInfo> &Info,
+                               Type *&CharacteristicTy,
+                               SmallVectorImpl<ParamInfo> &Info,
                                std::ostringstream &MangledParams) {
   assert(Func && "Func is null");
   unsigned ArgSize = Func->arg_size();
+
+  LLVMContext &Context = Func->getContext();
 
   if (ArgName->getNumOperands() != 1 + ArgSize ||
       ArgStep->getNumOperands() != 1 + ArgSize)
     return 0;
 
-  if (VLen == 0 && !Func->getReturnType()->isVoidTy())
-    VLen = getVectorLength(Func->getReturnType(), ISA);
+  
+  if (!CharacteristicTy && !Func->getReturnType()->isVoidTy())
+    CharacteristicTy = getVectorType(Func->getReturnType(), ISA);
 
   SmallVector<Type*, 4> Tys;
 
@@ -215,37 +220,48 @@ FunctionType *encodeParameters(Function *Func,
       return 0;
 
     Value *Step = ArgStep->getOperand(i);
-    if (Step->getType() != Type::getInt32Ty(Func->getContext()))
+    if (Step->getType() != Type::getInt32Ty(Context))
       return 0;
-
     if (dyn_cast<UndefValue>(Step)) {
-      unsigned ArgVLen = getVectorLength(Arg->getType(), ISA);
-      if (VLen == 0)
-        VLen = ArgVLen;
+      Type *ArgVTy = getVectorType(Arg->getType(), ISA);
+      if (!CharacteristicTy)
+        CharacteristicTy = ArgVTy;
       MangledParams << "v";
-      for (unsigned j = 0; j < VLen; j += ArgVLen)
-        Tys.push_back(VectorType::get(Arg->getType(), ArgVLen));
-      Info.push_back(ParameterInfo(PK_Vector));
+      unsigned NumArgs = CharacteristicTy->getVectorNumElements() /
+                         ArgVTy->getVectorNumElements();
+      NumArgs = NumArgs < 1 ? 1 : NumArgs;
+      for (unsigned j = 0; j < NumArgs; ++j)
+        Tys.push_back(ArgVTy);
+      Info.push_back(ParamInfo(PK_Vector));
     } else if (ConstantInt *C = dyn_cast<ConstantInt>(Step)) {
       if (C->isZero()) {
         MangledParams << "u";
         Tys.push_back(Arg->getType());
-        Info.push_back(ParameterInfo(PK_Uniform));
+        Info.push_back(ParamInfo(PK_Uniform));
       } else {
         MangledParams << "l";
         Tys.push_back(Arg->getType());
-        Info.push_back(ParameterInfo(PK_LinearConst, C));
+        Info.push_back(ParamInfo(PK_LinearConst, C));
       }
     } else {
       MangledParams << "s";
       Tys.push_back(Arg->getType());
-      //Info.push_back(PK_Linear, Arg);
+      assert(false && "Variable step linear arguments incomplete");
     }
   }
 
+  if (Mask) {
+    Type *Ty = getVectorType(CharacteristicTy->getVectorElementType(), ISA);
+    unsigned N = CharacteristicTy->getVectorNumElements(),
+             M = Ty->getVectorNumElements();
+    Type *MaskIntTy = Type::getIntNTy(Context, Ty->getScalarSizeInBits());
+    Type *MaskVTy = VectorType::get(MaskIntTy, M);
+    for (unsigned i = 0; i < N / M; ++i)
+      Tys.push_back(MaskVTy);
+  }
   
   Type *RetTy = Func->getReturnType();
-  RetTy = RetTy->isVoidTy() ? RetTy : VectorType::get(RetTy, VLen);
+  RetTy = RetTy->isVoidTy() ? RetTy : CharacteristicTy;
   return FunctionType::get(RetTy, Tys, false);
 }
 
@@ -279,7 +295,7 @@ static
 void createVectorVariantWrapper(Function *ScalarFunc,
                                 Function *VectorFunc,
                                 unsigned VLen,
-                                const SmallVectorImpl<ParameterInfo> &Info) {
+                                const SmallVectorImpl<ParamInfo> &Info) {
   assert(ScalarFunc->arg_size() == Info.size() &&
          "Wrong number of parameter infos");
   assert((VLen & (VLen - 1)) == 0 &&
@@ -303,9 +319,10 @@ void createVectorVariantWrapper(Function *ScalarFunc,
       VectorRet = Builder.CreateAlloca(VectorFunc->getReturnType());
 
     Function::arg_iterator VI = VectorFunc->arg_begin();
-    for (unsigned i = 0, ie = Info.size(); i < ie; ++i) {
+    for (SmallVectorImpl<ParamInfo>::const_iterator I = Info.begin(),
+         IE = Info.end(); I != IE; ++I) {
       Value *Arg = VI++;
-      switch (Info[i].Kind) {
+      switch (I->Kind) {
       case PK_Vector: {
         assert(Arg->getType()->isVectorTy() && "Not a vector");
         unsigned NumElements = Arg->getType()->getVectorNumElements();
@@ -342,7 +359,7 @@ void createVectorVariantWrapper(Function *ScalarFunc,
         }
       } break;
       case PK_LinearConst:
-        VectorArgs.push_back(buildLinearArg(Builder, VLen, Arg, Info[i].Step));
+        VectorArgs.push_back(buildLinearArg(Builder, VLen, Arg, I->Step));
         break;
       case PK_Linear:
         assert(false && "non-const linear feature incomplete");
@@ -358,6 +375,15 @@ void createVectorVariantWrapper(Function *ScalarFunc,
     Index = Builder.CreateAlloca(IndexTy, 0, "index");
     Builder.CreateStore(ConstantInt::get(IndexTy, 0), Index);
     Builder.CreateBr(LoopCond);
+  }
+
+  // Copy the names from the scalar args to the vector args.
+  {
+    Function::arg_iterator SI = ScalarFunc->arg_begin(),
+                           SE = ScalarFunc->arg_end();
+    SmallVectorImpl<Value*>::iterator VI = VectorArgs.begin();
+    for ( ; SI != SE; ++SI, ++VI)
+      (*VI)->setName(SI->getName());
   }
 
   Builder.SetInsertPoint(LoopCond);
@@ -474,24 +500,26 @@ static bool createVectorVariant(Module &M, MDNode *Root) {
     IsMasked = C->isOne();
   }
 
-  unsigned VLen = 0;
+  Type *CharacteristicTy = 0;
   if (VecTypeHint) {
     if (VecTypeHint->getNumOperands() != 3)
       return false;
     // TODO
   }
 
-  SmallVector<ParameterInfo, 4> Info;
+  SmallVector<ParamInfo, 4> Info;
   std::ostringstream MangledParams;
   FunctionType *NewFuncTy = encodeParameters(Func,
                                              ArgName, ArgStep,
                                              IsMasked,
                                              ISA,
-                                             VLen,
+                                             CharacteristicTy,
                                              Info,
                                              MangledParams);
   if (!NewFuncTy)
     return false;
+
+  unsigned VLen = CharacteristicTy->getVectorNumElements();
 
   // Generate the mangled name.
   std::ostringstream MangledName;
