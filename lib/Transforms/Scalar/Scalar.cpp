@@ -29,6 +29,7 @@ using namespace llvm;
 void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeADCEPass(Registry);
   initializeBlockPlacementPass(Registry);
+  initializeCilkABIPass(Registry);
   initializeCilkStackFrameLateInitPass(Registry);
   initializeCodeGenPreparePass(Registry);
   initializeConstantPropagationPass(Registry);

@@ -20,6 +20,7 @@ namespace llvm {
 class FunctionPass;
 class Pass;
 class GetElementPtrInst;
+class ModulePass;
 class PassInfo;
 class TerminatorInst;
 class TargetLowering;
@@ -358,6 +359,7 @@ extern char &InstructionSimplifierID;
 // "block_weights" metadata.
 FunctionPass *createLowerExpectIntrinsicPass();
 
+ModulePass *createCilkABIPass();
 
 } // End llvm namespace
 

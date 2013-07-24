@@ -1,6 +1,7 @@
 add_llvm_library(LLVMScalarOpts
   ADCE.cpp
   BasicBlockPlacement.cpp
+  CilkABI.cpp
   CilkPlus.cpp
   CilkStackFrameInit.cpp
   CilkSync.cpp
