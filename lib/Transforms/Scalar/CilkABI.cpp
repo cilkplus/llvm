@@ -46,7 +46,8 @@ enum ISAClass {
   IC_XMM,
   IC_YMM1,
   IC_YMM2,
-  IC_ZMM
+  IC_ZMM,
+  IC_Unknown
 };
 
 enum ParamKind {
@@ -86,7 +87,8 @@ ISAClass getISAClass(StringRef Processor) {
     // AVX2
     .Case("core_4th_gen_avx", IC_YMM2)
     // MIC
-    .Case("mic", IC_ZMM);
+    .Case("mic", IC_ZMM)
+    .Default(IC_Unknown);
 }
 
 static
@@ -96,6 +98,7 @@ char encodeISAClass(ISAClass ISA) {
   case IC_YMM1: return 'y';
   case IC_YMM2: return 'Y';
   case IC_ZMM: return 'z';
+  case IC_Unknown: llvm_unreachable("ISA unknwon");
   }
   assert(false && "unknown isa");
   return 0;
@@ -113,6 +116,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     case IC_YMM1:
     case IC_YMM2: NumElements = 16; break;
     case IC_ZMM: assert(false && "incomplete");
+    case IC_Unknown: llvm_unreachable("ISA unknwon");
     }
   else if (Ty->isIntegerTy(16))
     switch (ISA) {
@@ -120,6 +124,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     case IC_YMM1: NumElements = 8; break;
     case IC_YMM2: NumElements = 16; break;
     case IC_ZMM: assert(false && "incomplete");
+    case IC_Unknown: llvm_unreachable("ISA unknwon");
     }
   else if (Ty->isIntegerTy(32))
     switch (ISA) {
@@ -127,6 +132,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     case IC_YMM1: NumElements = 4; break;
     case IC_YMM2: NumElements = 8; break;
     case IC_ZMM: assert(false && "incomplete");
+    case IC_Unknown: llvm_unreachable("ISA unknwon");
     }
   else if (Ty->isIntegerTy(64))
     switch (ISA) {
@@ -134,6 +140,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     case IC_YMM1: NumElements = 2; break;
     case IC_YMM2: NumElements = 4; break;
     case IC_ZMM: assert(false && "incomplete");
+    case IC_Unknown: llvm_unreachable("ISA unknwon");
     }
   else if (Ty->isFloatTy())
     switch (ISA) {
@@ -141,6 +148,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     case IC_YMM1:
     case IC_YMM2: NumElements = 8; break;
     case IC_ZMM: assert(false && "incomplete");
+    case IC_Unknown: llvm_unreachable("ISA unknwon");
     }
   else if (Ty->isDoubleTy())
     switch (ISA) {
@@ -148,6 +156,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     case IC_YMM1:
     case IC_YMM2: NumElements = 4; break;
     case IC_ZMM: assert(false && "incomplete");
+    case IC_Unknown: llvm_unreachable("ISA unknwon");
     }
   else if (Ty->isPointerTy()) {
     switch (ISA) {
@@ -155,6 +164,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     case IC_YMM1: 
     case IC_YMM2: NumElements = 8; break;
     case IC_ZMM: assert(false && "incomplete");
+    case IC_Unknown: llvm_unreachable("ISA unknwon");
     }
     if (DL && DL->getPointerSizeInBits() == 64)
       NumElements /= 2;
@@ -448,6 +458,8 @@ static bool createVectorVariant(Module &M, MDNode *Root,
     ProcessorName = Name->getString().str();
   }
   ISAClass ISA = getISAClass(ProcessorName);
+  if (ISA == IC_Unknown)
+    return false;
 
   bool IsMasked = true;
   if (Mask) {
