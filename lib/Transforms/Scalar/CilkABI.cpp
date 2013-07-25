@@ -235,6 +235,8 @@ FunctionType *encodeParameters(Function *Func,
         Info.push_back(ParamInfo(PK_Uniform));
       } else {
         MangledParams << "l";
+        if (!C->isOne())
+          MangledParams << C->getZExtValue();
         Tys.push_back(Arg->getType());
         Info.push_back(ParamInfo(PK_LinearConst, C));
       }
