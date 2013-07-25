@@ -325,6 +325,17 @@ void createVectorVariantWrapper(Function *ScalarFunc,
   Type *IndexTy = Type::getInt32Ty(Context);
   Value *Index = 0;
 
+  // Copy the names from the scalar args to the vector args.
+  {
+    Function::arg_iterator SI = ScalarFunc->arg_begin(),
+                           SE = ScalarFunc->arg_end(),
+                           VI = VectorFunc->arg_begin();
+    for ( ; SI != SE; ++SI, ++VI)
+      VI->setName(SI->getName());
+    if (VI != VectorFunc->arg_end())
+      VI->setName("mask");
+  }
+
   IRBuilder<> Builder(Entry);
   {
     if (!VectorFunc->getReturnType()->isVoidTy())
@@ -332,43 +343,37 @@ void createVectorVariantWrapper(Function *ScalarFunc,
 
     Function::arg_iterator VI = VectorFunc->arg_begin();
     for (SmallVectorImpl<ParamInfo>::const_iterator I = Info.begin(),
-         IE = Info.end(); I != IE; ++I) {
-      Value *Arg = VI++;
+         IE = Info.end(); I != IE; ++I, ++VI) {
+      Value *Arg = VI;
       switch (I->Kind) {
       case PK_Vector:
         assert(Arg->getType()->isVectorTy() && "Not a vector");
         assert(VLen == Arg->getType()->getVectorNumElements() &&
                "Wrong number of elements");
-        VectorArgs.push_back(Arg);
         break;
       case PK_LinearConst:
-        VectorArgs.push_back(buildLinearArg(Builder, VLen, Arg, I->Step));
+        Arg = buildLinearArg(Builder, VLen, Arg, I->Step);
+        Arg->setName(VI->getName() + ".linear");
         break;
       case PK_Linear: {
         unsigned Number = cast<ConstantInt>(I->Step)->getZExtValue();
         Function::arg_iterator ArgI = VectorFunc->arg_begin();
         std::advance(ArgI, Number);
         Value *Step = ArgI;
-        VectorArgs.push_back(buildLinearArg(Builder, VLen, Arg, Step));
+        Arg = buildLinearArg(Builder, VLen, Arg, Step);
+        Arg->setName(VI->getName() + ".linear");
       } break;
       case PK_Uniform:
-        VectorArgs.push_back(Builder.CreateVectorSplat(VLen, Arg));
+        Arg = Builder.CreateVectorSplat(VLen, Arg);
+        Arg->setName(VI->getName() + ".uniform");
         break;
       }
+      VectorArgs.push_back(Arg);
     }
 
     Index = Builder.CreateAlloca(IndexTy, 0, "index");
     Builder.CreateStore(ConstantInt::get(IndexTy, 0), Index);
     Builder.CreateBr(LoopCond);
-  }
-
-  // Copy the names from the scalar args to the vector args.
-  {
-    Function::arg_iterator SI = ScalarFunc->arg_begin(),
-                           SE = ScalarFunc->arg_end();
-    SmallVectorImpl<Value*>::iterator VI = VectorArgs.begin();
-    for ( ; SI != SE; ++SI, ++VI)
-      (*VI)->setName(SI->getName());
   }
 
   Builder.SetInsertPoint(LoopCond);
