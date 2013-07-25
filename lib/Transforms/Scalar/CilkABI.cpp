@@ -107,7 +107,7 @@ char encodeISAClass(ISAClass ISA) {
 }
 
 static
-Type *getVectorType(Type *Ty, ISAClass ISA) {
+Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
   if (Ty->isAggregateType())
     Ty = Type::getInt32Ty(Ty->getContext());
 
@@ -154,13 +154,16 @@ Type *getVectorType(Type *Ty, ISAClass ISA) {
     case IC_YMM2: NumElements = 4; break;
     case IC_ZMM: assert(false && "incomplete");
     }
-  else if (Ty->isPointerTy())
+  else if (Ty->isPointerTy()) {
     switch (ISA) {
-    case IC_XMM: NumElements = 2; break; // TODO 32bit vs. 64bit
-    case IC_YMM1: assert(false && "incomplete");
-    case IC_YMM2: assert(false && "incomplete");
+    case IC_XMM: NumElements = 4; break;
+    case IC_YMM1: 
+    case IC_YMM2: NumElements = 8; break;
     case IC_ZMM: assert(false && "incomplete");
     }
+    if (DL && DL->getPointerSizeInBits() == 64)
+      NumElements /= 2;
+  }
     
   assert(NumElements > 1 && "invalid NumElements");
   return VectorType::get(Ty, NumElements);
@@ -196,7 +199,8 @@ FunctionType *encodeParameters(Function *Func,
                                ISAClass ISA,
                                Type *&CharacteristicTy,
                                SmallVectorImpl<ParamInfo> &Info,
-                               std::ostringstream &MangledParams) {
+                               std::ostringstream &MangledParams,
+                               DataLayout *DL) {
   assert(Func && "Func is null");
   unsigned ArgSize = Func->arg_size();
 
@@ -207,7 +211,7 @@ FunctionType *encodeParameters(Function *Func,
     return 0;
   
   if (!CharacteristicTy && !Func->getReturnType()->isVoidTy())
-    CharacteristicTy = getVectorType(Func->getReturnType(), ISA);
+    CharacteristicTy = getVectorType(Func->getReturnType(), ISA, DL);
 
   SmallVector<Type*, 4> Tys;
 
@@ -221,7 +225,7 @@ FunctionType *encodeParameters(Function *Func,
     if (Step->getType() != Type::getInt32Ty(Context))
       return 0;
     if (dyn_cast<UndefValue>(Step)) {
-      Type *ArgVTy = getVectorType(Arg->getType(), ISA);
+      Type *ArgVTy = getVectorType(Arg->getType(), ISA, DL);
       if (!CharacteristicTy)
         CharacteristicTy = ArgVTy;
       MangledParams << "v";
@@ -393,7 +397,8 @@ void createVectorVariantWrapper(Function *ScalarFunc,
   }
 }
 
-static bool createVectorVariant(Module &M, MDNode *Root) {
+static bool createVectorVariant(Module &M, MDNode *Root,
+                                DataLayout *DL) {
   if (Root->getNumOperands() == 0)
     return false;
   Function *Func = dyn_cast<Function>(Root->getOperand(0));
@@ -471,13 +476,9 @@ static bool createVectorVariant(Module &M, MDNode *Root) {
 
   SmallVector<ParamInfo, 4> Info;
   std::ostringstream MangledParams;
-  FunctionType *NewFuncTy = encodeParameters(Func,
-                                             ArgName, ArgStep,
-                                             IsMasked,
-                                             ISA,
-                                             CharacteristicTy,
-                                             Info,
-                                             MangledParams);
+  FunctionType *NewFuncTy = encodeParameters(Func, ArgName, ArgStep, IsMasked,
+                                             ISA, CharacteristicTy, Info,
+                                             MangledParams, DL);
   if (!NewFuncTy)
     return false;
 
@@ -514,11 +515,13 @@ bool CilkABI::runOnModule(Module &M) {
   if (!Root)
     return false;
 
+  DataLayout *DL = getAnalysisIfAvailable<DataLayout>();
+
   // Generate a vector variant for each function in cilk.functions.
   bool ModuleChanged = false;
   for (unsigned i = 0, ie = Root->getNumOperands(); i < ie; ++i) {
     MDNode *Node = Root->getOperand(i);
-    ModuleChanged |= createVectorVariant(M, Node);
+    ModuleChanged |= createVectorVariant(M, Node, DL);
   }
   return ModuleChanged;
 }
