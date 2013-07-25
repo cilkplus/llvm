@@ -1,4 +1,4 @@
-//===- SCCP.cpp - Sparse Conditional Constant Propagation -----------------===//
+//===- CilkABI.cpp - Cilk Plus Vector Function ABI ------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,13 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements sparse conditional constant propagation and merging:
-//
-// Specifically, this:
-//   * Assumes values are constant unless proven otherwise
-//   * Assumes BasicBlocks are dead unless proven otherwise
-//   * Proves values to be constant, and replaces them with constants
-//   * Proves conditional branches to be unconditional
+// This file implements a module pass which generates Cilk Plus Vector
+// Function ABI conformant variants of elemental functions.
 //
 //===----------------------------------------------------------------------===//
 
@@ -531,7 +526,7 @@ char CilkABI::ID = 0;
 INITIALIZE_PASS_BEGIN(CilkABI, "cilkabi", "Cilk ABI", false, false)
 INITIALIZE_PASS_END(CilkABI, "cilkabi", "Cilk ABI", false, false)
 
-// createIPSCCPPass - This is the public interface to this file.
+// createCilkABIPass - This is the public interface to this file.
 ModulePass *llvm::createCilkABIPass() {
   return new CilkABI();
 }
