@@ -23,6 +23,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Scalar.h"
+#include <iterator>
 #include <sstream>
 
 using namespace llvm;
@@ -228,8 +229,6 @@ FunctionType *encodeParameters(Function *Func,
       return 0;
 
     Value *Step = ArgStep->getOperand(i);
-    if (Step->getType() != Type::getInt32Ty(Context))
-      return 0;
     if (dyn_cast<UndefValue>(Step)) {
       Type *ArgVTy = getVectorType(Arg->getType(), ISA, DL);
       if (!CharacteristicTy)
@@ -250,10 +249,23 @@ FunctionType *encodeParameters(Function *Func,
         Tys.push_back(Arg->getType());
         Info.push_back(ParamInfo(PK_LinearConst, C));
       }
-    } else {
-      MangledParams << "s";
+    } else if (MDString *StepName = dyn_cast<MDString>(Step)) {
+      // Search Func parameters for StepName to determine the index.
+      unsigned Number = 0;
+      for (Function::arg_iterator I = Func->arg_begin(), IE = Func->arg_end();
+           I != IE; ++I, ++Number) {
+        if (I->getName().equals(StepName->getString()))
+          break;
+      }
+      if (Number >= Func->arg_size())
+        return 0; // Metadata is broken.
+      MangledParams << "s" << Number;
       Tys.push_back(Arg->getType());
-      assert(false && "Variable step linear arguments incomplete");
+      Step = ConstantInt::get(Type::getInt32Ty(Context), Number);
+      Info.push_back(ParamInfo(PK_Linear, Step));
+    } else {
+      // Unknown Step type.
+      return 0;
     }
   }
 
@@ -332,9 +344,13 @@ void createVectorVariantWrapper(Function *ScalarFunc,
       case PK_LinearConst:
         VectorArgs.push_back(buildLinearArg(Builder, VLen, Arg, I->Step));
         break;
-      case PK_Linear:
-        assert(false && "non-const linear feature incomplete");
-        break;
+      case PK_Linear: {
+        unsigned Number = cast<ConstantInt>(I->Step)->getZExtValue();
+        Function::arg_iterator ArgI = VectorFunc->arg_begin();
+        std::advance(ArgI, Number);
+        Value *Step = ArgI;
+        VectorArgs.push_back(buildLinearArg(Builder, VLen, Arg, Step));
+      } break;
       case PK_Uniform:
         VectorArgs.push_back(Builder.CreateVectorSplat(VLen, Arg));
         break;
