@@ -188,12 +188,13 @@ Constant *getIndicesVector(Type *Ty, unsigned N) {
 static
 Value *buildLinearArg(IRBuilder<> &B, unsigned VLen, Value *Arg, Value *Step) {
   Type *Ty = Arg->getType();
-  return        
-    B.CreateAdd(
-      B.CreateVectorSplat(VLen, Arg),
-      B.CreateMul(
-        getIndicesVector(Ty, VLen),
-        B.CreateVectorSplat(VLen, B.CreateIntCast(Step, Ty, true))));
+  Value *Base = B.CreateVectorSplat(VLen, Arg);
+  Value *Offset = B.CreateMul(getIndicesVector(Step->getType(), VLen),
+                              B.CreateVectorSplat(VLen, Step));
+  if (Ty->isPointerTy())
+    return B.CreateGEP(Base, Offset);
+  assert(Ty->isIntegerTy() && "expected an integer type");
+  return B.CreateAdd(Base, B.CreateIntCast(Offset, Base->getType(), false));
 }
 
 static
