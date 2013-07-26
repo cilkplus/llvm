@@ -199,6 +199,23 @@ Value *buildLinearArg(IRBuilder<> &B, unsigned VLen, Value *Arg, Value *Step) {
 }
 
 static
+Value *buildMask(IRBuilder<> &B, unsigned VLen, Value *Mask) {
+  Type *MaskTy = Mask->getType();
+  assert(MaskTy->isVectorTy() && "Mask should be a vector");
+  Type *Ty = MaskTy->getVectorElementType();
+  if (Ty->isFloatTy())
+    Mask = B.CreateBitCast(Mask, VectorType::get(B.getInt32Ty(), VLen));
+  else if (Ty->isDoubleTy())
+    Mask = B.CreateBitCast(Mask, VectorType::get(B.getInt64Ty(), VLen));
+  else
+    assert(Ty->isIntegerTy() && "expected an integer type");
+
+  Constant *Zero = ConstantInt::get(Mask->getType()->getVectorElementType(), 0);
+  Zero = ConstantVector::getSplat(VLen, Zero);
+  return B.CreateICmpNE(Mask, Zero);
+}
+
+static
 FunctionType *encodeParameters(Function *Func,
                                MDNode *ArgName,
                                MDNode *ArgStep,
@@ -313,17 +330,26 @@ void createVectorVariantWrapper(Function *ScalarFunc,
   assert((VLen & (VLen - 1)) == 0 &&
          "VLen must be a power-of-2");
 
+  bool IsMasked = VectorFunc->arg_size() == ScalarFunc->arg_size() + 1;
+
   LLVMContext &Context = ScalarFunc->getContext();
-  BasicBlock *Entry = BasicBlock::Create(Context, "entry", VectorFunc),
-             *LoopCond = BasicBlock::Create(Context, "loop.cond", VectorFunc),
-             *LoopBody = BasicBlock::Create(Context, "loop.body", VectorFunc),
-             *LoopEnd = BasicBlock::Create(Context, "loop.end", VectorFunc);
+  BasicBlock
+    *Entry = BasicBlock::Create(Context, "entry", VectorFunc),
+     *LoopCond = BasicBlock::Create(Context, "loop.cond", VectorFunc),
+     *LoopBody = BasicBlock::Create(Context, "loop.body", VectorFunc),
+     *LoopBodyOn = IsMasked ?
+       BasicBlock::Create(Context, "loop.body_on", VectorFunc) : 0,
+     *LoopBodyOff = IsMasked ?
+       BasicBlock::Create(Context, "loop.body_off", VectorFunc) : 0,
+     *LoopStep = BasicBlock::Create(Context, "loop.step", VectorFunc),
+     *LoopEnd = BasicBlock::Create(Context, "loop.end", VectorFunc);
 
   Value *VectorRet = 0;
   SmallVector<Value*, 4> VectorArgs;
   // The loop counter.
   Type *IndexTy = Type::getInt32Ty(Context);
   Value *Index = 0;
+  Value *Mask = 0;
 
   // Copy the names from the scalar args to the vector args.
   {
@@ -332,7 +358,7 @@ void createVectorVariantWrapper(Function *ScalarFunc,
                            VI = VectorFunc->arg_begin();
     for ( ; SI != SE; ++SI, ++VI)
       VI->setName(SI->getName());
-    if (VI != VectorFunc->arg_end())
+    if (IsMasked)
       VI->setName("mask");
   }
 
@@ -371,6 +397,9 @@ void createVectorVariantWrapper(Function *ScalarFunc,
       VectorArgs.push_back(Arg);
     }
 
+    if (IsMasked)
+      Mask = buildMask(Builder, VLen, VI);
+
     Index = Builder.CreateAlloca(IndexTy, 0, "index");
     Builder.CreateStore(ConstantInt::get(IndexTy, 0), Index);
     Builder.CreateBr(LoopCond);
@@ -383,10 +412,19 @@ void createVectorVariantWrapper(Function *ScalarFunc,
     Builder.CreateCondBr(Cond, LoopBody, LoopEnd);
   }
 
+  Value *VecIndex = 0;
+
   Builder.SetInsertPoint(LoopBody);
   {
-    Value *VecIndex = Builder.CreateLoad(Index);
+    VecIndex = Builder.CreateLoad(Index);
+    if (IsMasked) {
+      Value *ScalarMask = Builder.CreateExtractElement(Mask, VecIndex);
+      Builder.CreateCondBr(ScalarMask, LoopBodyOn, LoopBodyOff);
+    }
+  }
 
+  Builder.SetInsertPoint(IsMasked ? LoopBodyOn : LoopBody);
+  {
     // Build the argument list for the scalar function by extracting element
     // 'VecIndex' from the vector arguments.
     SmallVector<Value*, 4> ScalarArgs;
@@ -407,13 +445,27 @@ void createVectorVariantWrapper(Function *ScalarFunc,
       Builder.CreateStore(V, VectorRet);
     }
 
+    Builder.CreateBr(LoopStep);
+  }
+
+  if (IsMasked) {
+    Builder.SetInsertPoint(LoopBodyOff);
+    if (VectorRet) {
+      Value *V = Builder.CreateLoad(VectorRet);
+      Value *Zero = Constant::getNullValue(ScalarFunc->getReturnType());
+      V = Builder.CreateInsertElement(V, Zero, VecIndex);
+      Builder.CreateStore(V, VectorRet);
+    }
+    Builder.CreateBr(LoopStep);
+  }
+
+  Builder.SetInsertPoint(LoopStep);
+  {
     // Index = Index + 1
     VecIndex = Builder.CreateAdd(VecIndex, ConstantInt::get(IndexTy, 1));
     Builder.CreateStore(VecIndex , Index);
     Builder.CreateBr(LoopCond);
   }
-
-  // TODO: handle masks
 
   Builder.SetInsertPoint(LoopEnd);
   {
@@ -424,8 +476,8 @@ void createVectorVariantWrapper(Function *ScalarFunc,
   }
 }
 
-static bool createVectorVariant(Module &M, MDNode *Root,
-                                DataLayout *DL) {
+static
+bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
   if (Root->getNumOperands() == 0)
     return false;
   Function *Func = dyn_cast<Function>(Root->getOperand(0));
