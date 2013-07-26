@@ -1,6 +1,6 @@
 // RUN: %clang_cc1 -fcilkplus -emit-llvm %s -o - | FileCheck %s
 
-__attribute__((vector(processor(core_2_duo_sse_4_1),
+__attribute__((vector(processor(core_2_duo_sse4_1),
                       vectorlengthfor(float),
                       vectorlength(8),
                       uniform(w),
@@ -20,7 +20,7 @@ void f(int w, int x, int y, int z)
 // CHECK-DAG: [[FN:![0-9]+]] = metadata !{metadata !"arg_name", metadata !"w", metadata !"x", metadata !"y", metadata !"z"}
 // CHECK-DAG: [[FS:![0-9]+]] = metadata !{metadata !"arg_step", i32 0, metadata !"w", i32 2, i32 undef}
 // CHECK-DAG: [[FT:![0-9]+]] = metadata !{metadata !"vec_type_hint", <8 x float> undef, i32 0}
-// CHECK-DAG: [[FP:![0-9]+]] = metadata !{metadata !"processor", metadata !"core_2_duo_sse_4_1"}
+// CHECK-DAG: [[FP:![0-9]+]] = metadata !{metadata !"processor", metadata !"core_2_duo_sse4_1"}
 // CHECK-DAG: {{![0-9]+}} = metadata !{void (i32, i32, i32, i32)* @f, metadata [[E]], metadata [[FN]], metadata [[FS]], metadata [[FT]], metadata [[M1]], metadata [[FP]]}
 
 __attribute__((vector))

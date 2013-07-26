@@ -1096,36 +1096,53 @@ def CilkProcessor : InheritableAttr {
   let Args = [SourceLocArgument<"Group">,
               EnumArgument<"Processor", "CilkProcessor",
                            ["<unspecified>",
-                            "pentium_4", "pentium_4_sse3", "core2_duo_sse3",
-                            "core_2_duo_sse_4_1", "core_i7_sse4_2"],
+                            "pentium_4",
+                            "pentium_4_sse3",
+                            "core_2_duo_sse3",
+                            "core_2_duo_ssse3",
+                            "core_2_duo_sse4_1",
+                            "core_i7_sse4_2",
+                            "core_2nd_gen_avx",
+                            "core_3rd_gen_avx",
+                            "core_4th_gen_avx"],
                            ["Unspecified",
-                            "Pentium_4", "Pentium_4_sse3", "Core2_duo_sse3",
-                            "Core_2_duo_sse_4_1", "Core_i7_sse4_2"]>];
+                            "Pentium_4",
+                            "Pentium_4_sse3",
+                            "Core_2_duo_sse3",
+                            "Core_2_duo_ssse3",
+                            "Core_2_duo_sse4_1",
+                            "Core_i7_sse4_2",
+                            "Core_2nd_gen_avx",
+                            "Core_3rd_gen_avx",
+                            "Core_4th_gen_avx"]>];
   let Subjects = [Function];
   let TemplateDependent = 1;
   let AdditionalMembers =
     [{
       static CilkProcessor getValue(llvm::StringRef Processor) {
         return llvm::StringSwitch<CilkProcessor>(Processor)
-          .Case("pentium_4", Pentium_4)
-          .Case("pentium_4_sse3", Pentium_4_sse3)
-          .Case("core2_duo_sse3", Core2_duo_sse3)
-          .Case("core_2_duo_sse_4_1", Core_2_duo_sse_4_1)
-          .Case("core_i7_sse4_2", Core_i7_sse4_2)
+          .Case("pentium_4",         Pentium_4)
+          .Case("pentium_4_sse3",    Pentium_4_sse3)
+          .Case("core_2_duo_sse3",   Core_2_duo_sse3)
+          .Case("core_2_duo_ssse3",  Core_2_duo_ssse3)
+          .Case("core_2_duo_sse4_1", Core_2_duo_sse4_1)
+          .Case("core_i7_sse4_2",    Core_i7_sse4_2)
+          .Case("core_2nd_gen_avx",  Core_2nd_gen_avx)
+          .Case("core_3rd_gen_avx",  Core_3rd_gen_avx)
+          .Case("core_4th_gen_avx",  Core_4th_gen_avx)
           .Default(Unspecified);
       }
       static StringRef getProcessorString(CilkProcessor Processor) {
         switch (Processor) {
-        case Pentium_4:
-          return "pentium_4";
-        case Pentium_4_sse3:
-          return "pentium_4_sse3";
-        case Core2_duo_sse3:
-          return "core2_duo_sse3";
-        case Core_2_duo_sse_4_1:
-          return "core_2_duo_sse_4_1";
-        case Core_i7_sse4_2:
-          return "core_i7_sse4_2";
+        case Pentium_4:         return "pentium_4";
+        case Pentium_4_sse3:    return "pentium_4_sse3";
+        case Core_2_duo_sse3:   return "core_2_duo_sse3";
+        case Core_2_duo_ssse3:  return "core_2_duo_ssse3";
+        case Core_2_duo_sse4_1: return "core_2_duo_sse4_1";
+        case Core_i7_sse4_2:    return "core_i7_sse4_2";
+        case Core_2nd_gen_avx:  return "core_2nd_gen_avx";
+        case Core_3rd_gen_avx:  return "core_3rd_gen_avx";
+        case Core_4th_gen_avx:  return "core_4th_gen_avx";
         default:
           return "";
         }
@@ -1137,10 +1154,15 @@ def CilkProcessor : InheritableAttr {
         switch (Proc) {
         case Pentium_4:
         case Pentium_4_sse3:
-        case Core2_duo_sse3:
-        case Core_2_duo_sse_4_1:
+        case Core_2_duo_sse3:
+        case Core_2_duo_ssse3:
+        case Core_2_duo_sse4_1:
         case Core_i7_sse4_2:
           return 16;
+        case Core_2nd_gen_avx:
+        case Core_3rd_gen_avx:
+        case Core_4th_gen_avx:
+          return 32;
         default:
           return 1;
         }
