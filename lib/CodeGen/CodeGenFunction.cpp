@@ -502,9 +502,53 @@ struct CilkElementalGroup {
   MaskVector Mask;
 };
 
+static bool CheckElementalArguments(CodeGenModule &CGM, const FunctionDecl *FD,
+                                    llvm::Function *Fn, bool &HasThis) {
+  // Check the return type.
+  QualType RetTy = FD->getResultType();
+  if (RetTy->isAggregateType()) {
+    CGM.Error(FD->getLocation(), "the return type for this elemental "
+                                 "function is not supported yet");
+    return false;
+  }
+
+  // Check each parameter type.
+  for (unsigned I = 0, E = FD->param_size(); I < E; ++I) {
+    const ParmVarDecl *VD = FD->getParamDecl(I);
+    QualType Ty = VD->getType();
+    assert(!Ty->isIncompleteType() && "incomplete type");
+    if (Ty->isAggregateType()) {
+      CGM.Error(VD->getLocation(), "the parameter type for this elemental "
+                                   "function is not supported yet");
+      return false;
+    }
+  }
+
+  HasThis = isa<CXXConstructorDecl>(FD) || isa<CXXDestructorDecl>(FD) ||
+    (isa<CXXMethodDecl>(FD) && cast<CXXMethodDecl>(FD)->isInstance());
+
+  // At this point, no passing struct arguments by value.
+  unsigned NumArgs = FD->param_size();
+  unsigned NumLLVMArgs = Fn->arg_size();
+
+  // There is a single implicit 'this' parameter.
+  if (HasThis && (NumArgs + 1 == NumLLVMArgs))
+    return true;
+
+  return NumArgs == NumLLVMArgs;
+}
+
 void CodeGenFunction::EmitCilkElementalMetadata(const FunctionDecl *FD,
                                                 llvm::Function *Fn) {
   if (!FD->hasAttr<CilkElementalAttr>())
+    return;
+
+  if (FD->isVariadic())
+    return;
+
+  // Do not emit any vector variant if there is an unsupported feature.
+  bool HasImplicitThis = false;
+  if (!CheckElementalArguments(CGM, FD, Fn, HasImplicitThis))
     return;
 
   llvm::LLVMContext &Context = getLLVMContext();
@@ -565,6 +609,14 @@ void CodeGenFunction::EmitCilkElementalMetadata(const FunctionDecl *FD,
     const ParmVarDecl *FirstNonStepParm = 0;
     SmallVector<llvm::Value*, 8> StepArgs;
     StepArgs.push_back(llvm::MDString::get(Context, "arg_step"));
+
+    // Push implicit 'this' argument if necessary. This assumes that 
+    // 'uniform(this)' or 'linear(this)' is not a valid clause.
+    if (HasImplicitThis) {
+      ParameterNameArgs.push_back(llvm::MDString::get(Context, "this"));
+      StepArgs.push_back(UndefStep);
+    }
+
     for (unsigned I = 0; I != FD->getNumParams(); ++I) {
       const ParmVarDecl *Parm = FD->getParamDecl(I);
       StringRef ParmName = Parm->getName();
@@ -594,6 +646,29 @@ void CodeGenFunction::EmitCilkElementalMetadata(const FunctionDecl *FD,
     // If there is no vectorlengthfor() in this group, determine the
     // characteristic type. This can depend on the linear/uniform attributes,
     // so it can differ between groups.
+    //
+    // The rules for computing the characteristic type are:
+    //
+    // a) For a non‐void function, the characteristic data type is the
+    //    return type.
+    //
+    // b) If the function has any non‐uniform, non‐linear parameters, the
+    //    the characteristic data type is the type of the first such parameter.
+    //
+    // c) If the characteristic data type determined by a) or b) above is
+    //    struct, union, or class type which is pass‐by‐value (except fo
+    //    the type that maps to the built‐in complex data type)
+    //    the characteristic data type is int.
+    //
+    // d) If none of the above three cases is applicable, 
+    //    the characteristic data type is int.
+    //
+    // e) For Intel Xeon Phi native and offload compilation, if the resulting
+    //    characteristic data type is 8-bit or 16‐bit integer data type
+    //    the characteristic data type is int.
+    // 
+    // These rules missed the reference types and we use their pointer types.
+    //
     if (G.VecLengthFor.empty()) {
       QualType CharacteristicType;
       if (!FnRetTy->isVoidType())
@@ -602,6 +677,13 @@ void CodeGenFunction::EmitCilkElementalMetadata(const FunctionDecl *FD,
         CharacteristicType = FirstNonStepParm->getType().getCanonicalType();
       else
         CharacteristicType = C.IntTy;
+
+      if (CharacteristicType->isReferenceType()) {
+        QualType BaseTy = CharacteristicType.getNonReferenceType();
+        CharacteristicType = C.getPointerType(BaseTy);
+      } else if (CharacteristicType->isAggregateType())
+        CharacteristicType = C.IntTy;
+      // FIXME: handle Xeon Phi targets.
       G.VecLengthFor.push_back(CharacteristicType);
     }
 
