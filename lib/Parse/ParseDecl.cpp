@@ -1296,22 +1296,22 @@ void Parser::ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
 ///    uniform-param-list:
 ///      parameter-name
 ///      uniform-param-list , parameter-name
-///    
+///
 ///    elemental-linear-param-list:
 ///      elemental-linear-param
 ///      elemental-linear-param-list , elemental-linear-param
-///    
+///
 ///    elemental-linear-param:
 ///      parameter-name
 ///      parameter-name : elemental-linear-step
-///    
+///
 ///    elemental-linear-step:
 ///      constant-expression
 ///      parameter-name
-///    
+///
 ///    parameter-name:
 ///      identifier
-///    
+///
 void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
                                              SourceLocation AttrNameLoc,
                                              ParsedAttributes &Attrs,
@@ -1324,7 +1324,7 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
   T.consumeOpen();
 
   // Now parse the list of identifiers.
-  while (Tok.isNot(tok::r_paren)) {
+  do {
     if (Tok.isNot(tok::identifier)) {
       Diag(Tok, diag::err_expected_ident);
       T.skipToEnd();
@@ -1343,11 +1343,8 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
         ConsumeToken();
         // This behaviour matches current icc (13.1.2) but may need to change.
         if (Tok.is(tok::identifier)) {
-          // const Token &T = PP.LookAhead(0);
-          // if (T.is(tok::comma) || T.is(tok::r_paren)) {
-            StepName = Tok.getIdentifierInfo();
-            ConsumeToken();
-          // }
+          StepName = Tok.getIdentifierInfo();
+          ConsumeToken();
         }
         if (!StepName) {
           ExprResult StepExpr = ParseConstantExpression();
@@ -1372,7 +1369,8 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
     if (Tok.isNot(tok::comma))
       break;
     ConsumeToken(); // Eat the comma, move to the next argument
-  }
+  } while (Tok.isNot(tok::r_paren));
+
   // Match the ')'.
   T.consumeClose();
   if (EndLoc)
