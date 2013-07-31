@@ -3075,10 +3075,11 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     }
   }
 
-  D->addAttr(::new (S.Context) CilkLinearAttr(Attr.getLoc(),
-                                              S.Context,
-                                              Attr.getScopeLoc(),
-                                              ParameterName, Step, StepId));
+  CilkLinearAttr *LinearAttr = ::new (S.Context) CilkLinearAttr(
+      Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
+  LinearAttr->SetStepValue(Step);
+  LinearAttr->SetStepParameter(StepId);
+  D->addAttr(LinearAttr);
 }
 
 static void handleEndianAttr(Sema &S, Decl *D, const AttributeList &Attr) {

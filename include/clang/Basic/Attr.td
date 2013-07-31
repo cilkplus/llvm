@@ -1190,10 +1190,18 @@ def CilkVecLengthFor : InheritableAttr {
 def CilkLinear : InheritableAttr {
   let Spellings = [CXX11<"_Cilk_elemental", "linear">];
   let Args = [SourceLocArgument<"Group">,
-              IdentifierArgument<"Parameter">,
-              IntArgument<"StepValue">, IdentifierArgument<"StepParameter">];
+              IdentifierArgument<"Parameter">];
   let Subjects = [Function];
   let TemplateDependent = 1;
+  let AdditionalMembers =
+    [{
+      IdentifierInfo *StepParameter;
+      int StepValue;
+      void SetStepParameter(IdentifierInfo *ID) { StepParameter = ID; }
+      void SetStepValue(int Value) { StepValue = Value; }
+      int getStepValue() { return StepValue; }
+      IdentifierInfo *getStepParameter() { return StepParameter; }
+    }];
 }
 
 def CilkUniform : InheritableAttr {
