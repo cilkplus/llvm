@@ -226,7 +226,12 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
     return;
   }
   // Cilk Plus elemental function attributes have their own grammar.
-  if (getLangOpts().CilkPlus && AttrName->isStr("vector")) {
+  if (AttrName->isStr("vector")) {
+    if (!getLangOpts().CilkPlus) {
+      Diag(Tok, diag::err_cilkplus_disable);
+      SkipUntil(tok::r_paren, true, true);
+      return;
+    }
     ParseCilkPlusElementalAttribute(*AttrName, AttrNameLoc, Attrs, EndLoc,
                                     Syntax);
     return;
