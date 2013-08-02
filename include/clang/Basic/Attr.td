@@ -1098,7 +1098,6 @@ def CilkProcessor : InheritableAttr {
                            ["<unspecified>",
                             "pentium_4",
                             "pentium_4_sse3",
-                            "core_2_duo_sse3",
                             "core_2_duo_ssse3",
                             "core_2_duo_sse4_1",
                             "core_i7_sse4_2",
@@ -1108,7 +1107,6 @@ def CilkProcessor : InheritableAttr {
                            ["Unspecified",
                             "Pentium_4",
                             "Pentium_4_sse3",
-                            "Core_2_duo_sse3",
                             "Core_2_duo_ssse3",
                             "Core_2_duo_sse4_1",
                             "Core_i7_sse4_2",
@@ -1123,7 +1121,6 @@ def CilkProcessor : InheritableAttr {
         return llvm::StringSwitch<CilkProcessor>(Processor)
           .Case("pentium_4",         Pentium_4)
           .Case("pentium_4_sse3",    Pentium_4_sse3)
-          .Case("core_2_duo_sse3",   Core_2_duo_sse3)
           .Case("core_2_duo_ssse3",  Core_2_duo_ssse3)
           .Case("core_2_duo_sse4_1", Core_2_duo_sse4_1)
           .Case("core_i7_sse4_2",    Core_i7_sse4_2)
@@ -1136,7 +1133,6 @@ def CilkProcessor : InheritableAttr {
         switch (Processor) {
         case Pentium_4:         return "pentium_4";
         case Pentium_4_sse3:    return "pentium_4_sse3";
-        case Core_2_duo_sse3:   return "core_2_duo_sse3";
         case Core_2_duo_ssse3:  return "core_2_duo_ssse3";
         case Core_2_duo_sse4_1: return "core_2_duo_sse4_1";
         case Core_i7_sse4_2:    return "core_i7_sse4_2";
@@ -1154,7 +1150,6 @@ def CilkProcessor : InheritableAttr {
         switch (Proc) {
         case Pentium_4:
         case Pentium_4_sse3:
-        case Core_2_duo_sse3:
         case Core_2_duo_ssse3:
         case Core_2_duo_sse4_1:
         case Core_i7_sse4_2:

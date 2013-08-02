@@ -17,6 +17,15 @@ ATTR(vector(processor)) // expected-error {{attribute requires unquoted paramete
 ATTR(vector(processor(ceci_nest_pas_un_processor))) // expected-error {{unrecognized processor}}
 ATTR(vector(processor(pentium_4), processor(pentium_4_sse3))) // expected-warning {{inconsistent processor attribute}} \
                                                             // expected-note {{previous attribute is here}}
+ATTR(vector(processor(pentium_4)))         // OK
+ATTR(vector(processor(pentium_4_sse3)))    // OK
+ATTR(vector(processor(core_2_duo_ssse3)))  // OK
+ATTR(vector(processor(core_2_duo_sse4_1))) // OK
+ATTR(vector(processor(core_i7_sse4_2)))    // OK
+ATTR(vector(processor(core_2nd_gen_avx)))  // OK
+ATTR(vector(processor(core_3rd_gen_avx)))  // OK
+ATTR(vector(processor(core_4th_gen_avx)))  // OK
+
 int test_processor_1(int x);
 
 // vectorlengthfor clause
