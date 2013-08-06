@@ -458,6 +458,10 @@ public:
     return *CilkPlusRuntime;
   }
 
+  /// Add an elemental function metadata node to the named metadata node
+  /// 'cilk.functions'.
+  void EmitCilkElementalMetadata(const FunctionDecl *FD, llvm::Function *Fn);
+
   ARCEntrypoints &getARCEntrypoints() const {
     assert(getLangOpts().ObjCAutoRefCount && ARCData != 0);
     return *ARCData;

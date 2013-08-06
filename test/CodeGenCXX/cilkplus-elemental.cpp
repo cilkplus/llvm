@@ -55,3 +55,39 @@ __attribute__((vector)) void func1(char) { }
 // FIXME: Enable this test.
 // __attribute__((vector)) void func2(char&) { }
 // define void @_ZGVxN2v__Z5func2Rc
+
+namespace ns_check_declaration {
+
+__attribute__((vector)) float f0(float a, float b);
+__attribute__((vector)) float f1(float a, float b);
+
+void caller() {
+  f0(1, 2);
+}
+
+// CHECK: declare {{.*}} @_ZGVxN4vv__ZN20ns_check_declaration2f0Eff
+// CHECK-NOT: declare {{.*}} @_ZGVxN4vv__ZN20ns_check_declaration2f1Eff
+
+void func() {
+  extern __attribute__((vector)) float f2(float a, float b);
+  f2(1, 2);
+}
+
+// CHECK: declare {{.*}} @_ZGVxN4vv__ZN20ns_check_declaration2f2Eff
+
+struct X {
+  __attribute__((vector))        void called_mem();
+  __attribute__((vector))        void not_called_mem();
+  __attribute__((vector)) static void static_mem();
+};
+
+void caller_mem(X *x) {
+  x->called_mem();
+  x->static_mem();
+}
+
+// CHECK: declare void @_ZGVxN4v__ZN20ns_check_declaration1X10called_memEv
+// CHECK-NOT: declare void @_ZGVxN4v__ZN20ns_check_declaration1X14not_called_memEv
+// CHECK: declare void @_ZGVxN4__ZN20ns_check_declaration1X10static_memEv
+
+} // namespace ns_check_declaration
