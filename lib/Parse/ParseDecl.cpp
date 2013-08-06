@@ -164,6 +164,10 @@ void Parser::ParseGNUAttributes(ParsedAttributes &attrs,
                                 0, SourceLocation(), AttributeList::AS_GNU);
         }
       } else {
+        if (AttrName->isStr("vector") && !getLangOpts().CilkPlus) {
+          Diag(Tok, diag::err_cilkplus_disable);
+          SkipUntil(tok::r_paren, true, true);
+        }
         attrs.addNew(AttrName, AttrNameLoc, 0, AttrNameLoc,
                      0, SourceLocation(), 0, 0, AttributeList::AS_GNU);
       }
