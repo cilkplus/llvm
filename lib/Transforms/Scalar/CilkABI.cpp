@@ -162,7 +162,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
   else if (Ty->isPointerTy()) {
     switch (ISA) {
     case IC_XMM: NumElements = 4; break;
-    case IC_YMM1: 
+    case IC_YMM1:
     case IC_YMM2: NumElements = 8; break;
     case IC_ZMM: assert(false && "incomplete");
     case IC_Unknown: llvm_unreachable("ISA unknwon");
@@ -170,7 +170,7 @@ Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
     if (DL && DL->getPointerSizeInBits() == 64)
       NumElements /= 2;
   }
-    
+
   assert(NumElements > 1 && "invalid NumElements");
   return VectorType::get(Ty, NumElements);
 }
@@ -198,21 +198,16 @@ Value *buildLinearArg(IRBuilder<> &B, unsigned VLen, Value *Arg, Value *Step) {
   return B.CreateAdd(Base, B.CreateIntCast(Offset, Base->getType(), false));
 }
 
-static
-Value *buildMask(IRBuilder<> &B, unsigned VLen, Value *Mask) {
-  Type *MaskTy = Mask->getType();
-  assert(MaskTy->isVectorTy() && "Mask should be a vector");
-  Type *Ty = MaskTy->getVectorElementType();
+static Value *buildMask(IRBuilder<> &B, unsigned VLen, Value *Mask) {
+  Type *Ty = Mask->getType()->getVectorElementType();
   if (Ty->isFloatTy())
     Mask = B.CreateBitCast(Mask, VectorType::get(B.getInt32Ty(), VLen));
   else if (Ty->isDoubleTy())
     Mask = B.CreateBitCast(Mask, VectorType::get(B.getInt64Ty(), VLen));
   else
-    assert(Ty->isIntegerTy() && "expected an integer type");
+    assert((Ty->isIntegerTy()|| Ty->isPointerTy()) && "unexpected type");
 
-  Constant *Zero = ConstantInt::get(Mask->getType()->getVectorElementType(), 0);
-  Zero = ConstantVector::getSplat(VLen, Zero);
-  return B.CreateICmpNE(Mask, Zero);
+  return B.CreateICmpNE(Mask, Constant::getNullValue(Mask->getType()));
 }
 
 static
@@ -233,7 +228,7 @@ FunctionType *encodeParameters(Function *Func,
   if (ArgName->getNumOperands() != 1 + ArgSize ||
       ArgStep->getNumOperands() != 1 + ArgSize)
     return 0;
-  
+
   if (!CharacteristicTy && !Func->getReturnType()->isVoidTy())
     CharacteristicTy = getVectorType(Func->getReturnType(), ISA, DL);
 
@@ -288,7 +283,7 @@ FunctionType *encodeParameters(Function *Func,
 
   if (Mask)
     Tys.push_back(CharacteristicTy);
-  
+
   Type *RetTy = Func->getReturnType();
   RetTy = RetTy->isVoidTy() ? RetTy : CharacteristicTy;
   return FunctionType::get(RetTy, Tys, false);
@@ -327,8 +322,7 @@ void createVectorVariantWrapper(Function *ScalarFunc,
                                 const SmallVectorImpl<ParamInfo> &Info) {
   assert(ScalarFunc->arg_size() == Info.size() &&
          "Wrong number of parameter infos");
-  assert((VLen & (VLen - 1)) == 0 &&
-         "VLen must be a power-of-2");
+  assert((VLen & (VLen - 1)) == 0 && "VLen must be a power-of-2");
 
   bool IsMasked = VectorFunc->arg_size() == ScalarFunc->arg_size() + 1;
 
@@ -367,6 +361,9 @@ void createVectorVariantWrapper(Function *ScalarFunc,
     if (!VectorFunc->getReturnType()->isVoidTy())
       VectorRet = Builder.CreateAlloca(VectorFunc->getReturnType());
 
+    Index = Builder.CreateAlloca(IndexTy, 0, "index");
+    Builder.CreateStore(ConstantInt::get(IndexTy, 0), Index);
+
     Function::arg_iterator VI = VectorFunc->arg_begin();
     for (SmallVectorImpl<ParamInfo>::const_iterator I = Info.begin(),
          IE = Info.end(); I != IE; ++I, ++VI) {
@@ -400,8 +397,6 @@ void createVectorVariantWrapper(Function *ScalarFunc,
     if (IsMasked)
       Mask = buildMask(Builder, VLen, VI);
 
-    Index = Builder.CreateAlloca(IndexTy, 0, "index");
-    Builder.CreateStore(ConstantInt::get(IndexTy, 0), Index);
     Builder.CreateBr(LoopCond);
   }
 
@@ -485,10 +480,10 @@ bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
     return false;
 
   bool Elemental = false;
-   
+
   MDNode *ArgName = 0,
          *ArgStep = 0,
-         *VecTypeHint = 0,
+         *VecLength = 0,
          *Processor = 0,
          *Mask = 0;
 
@@ -506,8 +501,8 @@ bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
       ArgName = Node;
     } else if (Name->getString() == "arg_step") {
       ArgStep = Node;
-    } else if (Name->getString() == "vec_type_hint") {
-      VecTypeHint = Node;
+    } else if (Name->getString() == "vec_length") {
+      VecLength = Node;
     } else if (Name->getString() == "processor") {
       Processor = Node;
     } else if (Name->getString() == "mask") {
@@ -546,13 +541,18 @@ bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
   }
 
   Type *CharacteristicTy = 0;
-  if (VecTypeHint) {
-    if (VecTypeHint->getNumOperands() != 3)
+  uint64_t VLen = 0;
+  if (VecLength) {
+    if (VecLength->getNumOperands() != 3)
       return false;
-    Type *HintTy = VecTypeHint->getOperand(1)->getType();
-    if (HintTy->isVectorTy())
-      CharacteristicTy = HintTy;
-    // sign (operand 2) is ignored.
+    Type *Ty = VecLength->getOperand(1)->getType();
+    if (!VectorType::isValidElementType(Ty))
+      return false;
+
+    Value *VL = VecLength->getOperand(2);
+    assert(isa<ConstantInt>(VL) && "vector length constant expected");
+    VLen = cast<ConstantInt>(VL)->getZExtValue();
+    CharacteristicTy = VectorType::get(Ty, VLen);
   }
 
   SmallVector<ParamInfo, 4> Info;
@@ -562,8 +562,6 @@ bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
                                              MangledParams, DL);
   if (!NewFuncTy)
     return false;
-
-  unsigned VLen = CharacteristicTy->getVectorNumElements();
 
   // Generate the mangled name.
   std::ostringstream MangledName;
