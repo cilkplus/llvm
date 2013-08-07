@@ -1406,12 +1406,12 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
     Constant.setIsUnsigned(true);
     if (!VectorLengthExpr->EvaluateAsInt(Constant, Context)) {
       Diag(VectorLengthExpr->getLocStart(),
-           diag::err_pragma_simd_invalid_vectorlength_expr) << 0;
+           diag::err_invalid_vectorlength_expr) << 0;
       return AttrError();
     }
     if (!Constant.isPowerOf2()) {
       Diag(VectorLengthExpr->getLocStart(),
-           diag::err_pragma_simd_invalid_vectorlength_expr) << 1;
+           diag::err_invalid_vectorlength_expr) << 1;
       return AttrError();
     }
     E = Owned(IntegerLiteral::Create(

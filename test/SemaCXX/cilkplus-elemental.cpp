@@ -38,6 +38,7 @@ int test_vectorlengthfor_1(int x);
 ATTR(vector(vectorlength))      // expected-error {{attribute takes one argument}}
 ATTR(vector(vectorlength(-1)))  // expected-error {{vectorlength must be positive}}
 ATTR(vector(vectorlength(0)))   // expected-error {{vectorlength must be positive}}
+ATTR(vector(vectorlength(3)))   // expected-error {{vectorlength expression must be a power of 2}}
 ATTR(vector(vectorlength(int))) // expected-error {{attribute takes one argument}}
 ATTR(vector(vectorlength(4), vectorlength(8))) // expected-warning {{repeated vectorlength attribute}} \
                                                // expected-note {{previous attribute is here}}

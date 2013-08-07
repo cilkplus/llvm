@@ -6486,7 +6486,7 @@ def err_pragma_simd_vectorlength_multiple : Error<
   "cannot specify multiple vectorlength%select{for|}0 clauses">;
 def note_pragma_simd_specified_here : Note<
   "vectorlength%select{for|}0 first specified here">;
-def err_pragma_simd_invalid_vectorlength_expr : Error<
+def err_invalid_vectorlength_expr : Error<
   "vectorlength expression must be %select{an integer constant|a power of 2}0">;
 def err_pragma_simd_invalid_linear_step : Error<
   "invalid linear step: expected integral constant or variable reference">;

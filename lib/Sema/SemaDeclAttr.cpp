@@ -2948,10 +2948,17 @@ static void handleCilkVecLengthAttr(Sema &S, Decl *D,
       Attr.setInvalid();
       return;
     }
+
     if (!LengthValue.isStrictlyPositive()) {
       S.Diag(Attr.getLoc(), diag::err_cilk_elemental_vectorlength);
       return;
     }
+
+    if (!LengthValue.isPowerOf2()) {
+      S.Diag(Attr.getLoc(), diag::err_invalid_vectorlength_expr) << 1;
+      return;
+    }
+
     D->addAttr(::new (S.Context)
                CilkVecLengthAttr(Attr.getRange(), S.Context,
                                  Attr.getScopeLoc(),
