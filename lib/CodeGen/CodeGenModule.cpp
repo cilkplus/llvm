@@ -3110,21 +3110,13 @@ struct CilkElementalGroup {
   MaskVector Mask;
 };
 
-// Construct a metadata node expressing a type in the form defined
-// by SPIR 'vec_type_hint'.
-llvm::MDNode *MakeVecTypeHintMetadata(CodeGenModule &CGM, StringRef Name,
-                                      const QualType &T) {
+static llvm::MDNode *MakeVecLengthMetadata(CodeGenModule &CGM, StringRef Name,
+                                           QualType T, uint64_t VL) {
   llvm::LLVMContext &Context = CGM.getLLVMContext();
-  const ExtVectorType *EVTy = T->getAs<ExtVectorType>();
-  const VectorType *VTy = T->getAs<VectorType>();
-  bool isSignedInteger =
-    T->isSignedIntegerType() ||
-    (EVTy && EVTy->getElementType()->isSignedIntegerType()) ||
-    (VTy && VTy->getElementType()->isSignedIntegerType());
   llvm::Value *attrMDArgs[] = {
     llvm::MDString::get(Context, Name),
     llvm::UndefValue::get(CGM.getTypes().ConvertType(T)),
-    llvm::ConstantInt::get(CGM.Int32Ty, isSignedInteger ? 1 : 0)
+    llvm::ConstantInt::get(CGM.Int32Ty, VL)
   };
   return llvm::MDNode::get(Context, attrMDArgs);
 }
@@ -3376,14 +3368,12 @@ void CodeGenModule::EmitCilkElementalMetadata(const FunctionDecl *FD,
              LI != LE;
              ++LI) {
 
-          uint64_t VectorLength = *LI ? *LI :
+          uint64_t VL = *LI ? *LI :
             (CharUnits::fromQuantity(VectorRegisterBytes)
              / C.getTypeSizeInChars(*TI));
-          QualType VecType = C.getVectorType(*TI,
-                                             VectorLength ? VectorLength : 1,
-                                             VectorType::GenericVector);
+
           llvm::MDNode *VecTypeNode
-            = MakeVecTypeHintMetadata(*this, "vec_type_hint", VecType);
+            = MakeVecLengthMetadata(*this, "vec_length", *TI, VL);
 
           for (CilkElementalGroup::MaskVector::iterator
                 MI = G.Mask.begin(),
