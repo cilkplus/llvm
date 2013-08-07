@@ -44,9 +44,6 @@ void test_non_identifiers()
 void test_vectorlength()
 {
   int i;
-  /* expected-error@+1 {{invalid vectorlength expression: must be a power of two}} */
-  #pragma simd vectorlength(3)
-  for (i = 0; i < 16; ++i) ;
   /* expected-error@+1 {{expected '('}} */
   #pragma simd vectorlength
   for (i = 0; i < 16; ++i) ;

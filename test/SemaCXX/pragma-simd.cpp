@@ -153,7 +153,7 @@ namespace ConstExprCheck {
   void test() {
     #pragma simd vectorlength(ce(2))
     for (int i = 0; i < 10; ++i) ;
-    /* expected-error@+1 {{invalid vectorlength expression: must be a power of two}} */
+    /* expected-error@+1 {{vectorlength expression must be a power of 2}} */
     #pragma simd vectorlength(ce_bad(4))
     for (int i = 0; i < 10; ++i) ;
 
@@ -363,10 +363,10 @@ void test_simd_multiple_clauses2() {
 
 void templated_tests() {
   test_simd_length<2>(); // OK
-  test_simd_length<-2>(); // expected-error@244 {{invalid vectorlength expression: must be a power of two}} \
+  test_simd_length<-2>(); // expected-error@244 {{vectorlength expression must be a power of 2}} \
                           // expected-note {{in instantiation of function template specialization}}
 
-  test_simd_length2(2); // expected-error@250 {{invalid vectorlength expression: must be an integer constant}} \
+  test_simd_length2(2); // expected-error@250 {{vectorlength expression must be an integer constant}} \
                         // expected-note {{in instantiation of function template specialization}}
 
   test_simd_length_for<long>(); // OK
@@ -410,7 +410,7 @@ void templated_tests() {
 
   test_simd_multiple_clauses2<float>(); // expected-error@360 {{private variable shall not appear in multiple simd clauses}} \
                                         // expected-note@360 {{first used here}} \
-                                        // expected-error@360 {{invalid vectorlength expression: must be an integer constant}} \
+                                        // expected-error@360 {{vectorlength expression must be an integer constant}} \
                                         // expected-note {{in instantiation of function template specialization}}
 }
 

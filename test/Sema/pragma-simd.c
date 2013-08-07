@@ -20,15 +20,15 @@ void test_vectorlength() {
   #pragma simd vectorlength(C2+C2)
   for (i = 0; i < 10; ++i) ;
 
-  /* expected-error@+1 {{invalid vectorlength expression: must be a power of two}} */
+  /* expected-error@+1 {{vectorlength expression must be a power of 2}} */
   #pragma simd vectorlength(3)
-  /* expected-error@+1 {{invalid vectorlength expression: must be a power of two}} */
+  /* expected-error@+1 {{vectorlength expression must be a power of 2}} */
   #pragma simd vectorlength(C1+C2)
-  /* expected-error@+1 {{invalid vectorlength expression: must be an integer constant}} */
+  /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(j)
-  /* expected-error@+1 {{invalid vectorlength expression: must be an integer constant}} */
+  /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(C1+j)
-  /* expected-error@+1 {{invalid vectorlength expression: must be an integer constant}} */
+  /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(I())
 }
 
