@@ -647,6 +647,24 @@ namespace {
     void writeHasChildren(raw_ostream &OS) const { OS << "true"; }
   };
 
+  class TypeArgument : public SimpleArgument {
+  public:
+    TypeArgument(Record &Arg, StringRef Attr)
+      : SimpleArgument(Arg, Attr, "QualType")
+    {}
+
+    void writeTemplateInstantiationArgs(raw_ostream &OS) const {
+      OS << "tempInst" << getUpperName();
+    }
+
+    void writeTemplateInstantiation(raw_ostream &OS) const {
+      OS << "      " << getType() << " tempInst" << getUpperName() << ";\n";
+      OS << "      tempInst" << getUpperName() << " = S.SubstType("
+         << "A->get" << getUpperName() << "(), TemplateArgs, "
+         << "A->getLocation(), DeclarationName());\n";
+    }
+  };
+
   class VariadicExprArgument : public VariadicArgument {
   public:
     VariadicExprArgument(Record &Arg, StringRef Attr)
@@ -718,7 +736,7 @@ static Argument *createArgument(Record &Arg, StringRef Attr,
   else if (ArgName == "IntArgument") Ptr = new SimpleArgument(Arg, Attr, "int");
   else if (ArgName == "StringArgument") Ptr = new StringArgument(Arg, Attr);
   else if (ArgName == "TypeArgument")
-    Ptr = new SimpleArgument(Arg, Attr, "QualType");
+    Ptr = new TypeArgument(Arg, Attr);
   else if (ArgName == "UnsignedArgument")
     Ptr = new SimpleArgument(Arg, Attr, "unsigned");
   else if (ArgName == "SourceLocArgument")
