@@ -35,6 +35,7 @@ ATTR(vector(vectorlengthfor(int), vectorlengthfor(float))) // expected-warning {
 int test_vectorlengthfor_1(int x);
 
 // vectorlength clause
+const int VL = 2;
 ATTR(vector(vectorlength))      // expected-error {{attribute takes one argument}}
 ATTR(vector(vectorlength(-1)))  // expected-error {{vectorlength must be positive}}
 ATTR(vector(vectorlength(0)))   // expected-error {{vectorlength must be positive}}
@@ -42,6 +43,8 @@ ATTR(vector(vectorlength(3)))   // expected-error {{vectorlength expression must
 ATTR(vector(vectorlength(int))) // expected-error {{attribute takes one argument}}
 ATTR(vector(vectorlength(4), vectorlength(8))) // expected-warning {{repeated vectorlength attribute}} \
                                                // expected-note {{previous attribute is here}}
+ATTR(vector(vectorlength(VL)))      // OK
+ATTR(vector(vectorlength(VL + 2)))  // OK
 int test_vectorlength_1(int x);
 
 // uniform clause
