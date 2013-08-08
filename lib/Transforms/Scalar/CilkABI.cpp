@@ -31,9 +31,6 @@ using namespace llvm;
 namespace {
 
 struct CilkABI : public ModulePass {
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-    //AU.addRequired<TargetLibraryInfo>();
-  }
 
   static char ID;
   CilkABI() : ModulePass(ID) {
@@ -101,83 +98,12 @@ char encodeISAClass(ISAClass ISA) {
   case IC_ZMM: return 'z';
   case IC_Unknown: llvm_unreachable("ISA unknwon");
   }
-  assert(false && "unknown isa");
+  llvm_unreachable("unknown isa");
   return 0;
 }
 
-static
-Type *getVectorType(Type *Ty, ISAClass ISA, DataLayout *DL) {
-  if (Ty->isAggregateType())
-    Ty = Type::getInt32Ty(Ty->getContext());
-
-  unsigned NumElements = 1;
-  if (Ty->isIntegerTy(8))
-    switch (ISA) {
-    case IC_XMM:
-    case IC_YMM1:
-    case IC_YMM2: NumElements = 16; break;
-    case IC_ZMM: assert(false && "incomplete");
-    case IC_Unknown: llvm_unreachable("ISA unknwon");
-    }
-  else if (Ty->isIntegerTy(16))
-    switch (ISA) {
-    case IC_XMM:
-    case IC_YMM1: NumElements = 8; break;
-    case IC_YMM2: NumElements = 16; break;
-    case IC_ZMM: assert(false && "incomplete");
-    case IC_Unknown: llvm_unreachable("ISA unknwon");
-    }
-  else if (Ty->isIntegerTy(32))
-    switch (ISA) {
-    case IC_XMM:
-    case IC_YMM1: NumElements = 4; break;
-    case IC_YMM2: NumElements = 8; break;
-    case IC_ZMM: assert(false && "incomplete");
-    case IC_Unknown: llvm_unreachable("ISA unknwon");
-    }
-  else if (Ty->isIntegerTy(64))
-    switch (ISA) {
-    case IC_XMM:
-    case IC_YMM1: NumElements = 2; break;
-    case IC_YMM2: NumElements = 4; break;
-    case IC_ZMM: assert(false && "incomplete");
-    case IC_Unknown: llvm_unreachable("ISA unknwon");
-    }
-  else if (Ty->isFloatTy())
-    switch (ISA) {
-    case IC_XMM: NumElements =  4; break;
-    case IC_YMM1:
-    case IC_YMM2: NumElements = 8; break;
-    case IC_ZMM: assert(false && "incomplete");
-    case IC_Unknown: llvm_unreachable("ISA unknwon");
-    }
-  else if (Ty->isDoubleTy())
-    switch (ISA) {
-    case IC_XMM: NumElements = 2; break;
-    case IC_YMM1:
-    case IC_YMM2: NumElements = 4; break;
-    case IC_ZMM: assert(false && "incomplete");
-    case IC_Unknown: llvm_unreachable("ISA unknwon");
-    }
-  else if (Ty->isPointerTy()) {
-    switch (ISA) {
-    case IC_XMM: NumElements = 4; break;
-    case IC_YMM1:
-    case IC_YMM2: NumElements = 8; break;
-    case IC_ZMM: assert(false && "incomplete");
-    case IC_Unknown: llvm_unreachable("ISA unknwon");
-    }
-    if (DL && DL->getPointerSizeInBits() == 64)
-      NumElements /= 2;
-  }
-
-  assert(NumElements > 1 && "invalid NumElements");
-  return VectorType::get(Ty, NumElements);
-}
-
 // Return a constant vector <0, 1, ..., N - 1>
-static
-Constant *getIndicesVector(Type *Ty, unsigned N) {
+static Constant *getIndicesVector(Type *Ty, unsigned N) {
   SmallVector<Constant*, 4> Indices;
   for (unsigned i = 0; i < N; ++i)
     Indices.push_back(ConstantInt::get(Ty, i));
@@ -210,30 +136,22 @@ static Value *buildMask(IRBuilder<> &B, unsigned VLen, Value *Mask) {
   return B.CreateICmpNE(Mask, Constant::getNullValue(Mask->getType()));
 }
 
-static
-FunctionType *encodeParameters(Function *Func,
-                               MDNode *ArgName,
-                               MDNode *ArgStep,
-                               bool Mask,
-                               ISAClass ISA,
-                               Type *&CharacteristicTy,
-                               SmallVectorImpl<ParamInfo> &Info,
-                               std::ostringstream &MangledParams,
-                               DataLayout *DL) {
+static FunctionType *encodeParameters(Function *Func,
+                                      MDNode *ArgName,
+                                      MDNode *ArgStep,
+                                      bool Mask,
+                                      ISAClass ISA,
+                                      Type *VectorDataTy,
+                                      SmallVectorImpl<ParamInfo> &Info,
+                                      std::ostringstream &MangledParams) {
   assert(Func && "Func is null");
   unsigned ArgSize = Func->arg_size();
-
-  LLVMContext &Context = Func->getContext();
 
   if (ArgName->getNumOperands() != 1 + ArgSize ||
       ArgStep->getNumOperands() != 1 + ArgSize)
     return 0;
 
-  if (!CharacteristicTy && !Func->getReturnType()->isVoidTy())
-    CharacteristicTy = getVectorType(Func->getReturnType(), ISA, DL);
-
   SmallVector<Type*, 4> Tys;
-
   Function::const_arg_iterator Arg = Func->arg_begin();
   for (unsigned i = 1, ie = 1 + ArgSize; i < ie; ++i, ++Arg) {
     MDString *Name = dyn_cast<MDString>(ArgName->getOperand(i));
@@ -242,12 +160,9 @@ FunctionType *encodeParameters(Function *Func,
 
     Value *Step = ArgStep->getOperand(i);
     if (dyn_cast<UndefValue>(Step)) {
-      Type *ArgVTy = getVectorType(Arg->getType(), ISA, DL);
-      if (!CharacteristicTy)
-        CharacteristicTy = ArgVTy;
       MangledParams << "v";
       Tys.push_back(VectorType::get(Arg->getType(),
-                                    CharacteristicTy->getVectorNumElements()));
+                                    VectorDataTy->getVectorNumElements()));
       Info.push_back(ParamInfo(PK_Vector));
     } else if (ConstantInt *C = dyn_cast<ConstantInt>(Step)) {
       if (C->isZero()) {
@@ -273,6 +188,8 @@ FunctionType *encodeParameters(Function *Func,
         return 0; // Metadata is broken.
       MangledParams << "s" << Number;
       Tys.push_back(Arg->getType());
+
+      LLVMContext &Context = Func->getContext();
       Step = ConstantInt::get(Type::getInt32Ty(Context), Number);
       Info.push_back(ParamInfo(PK_Linear, Step));
     } else {
@@ -282,10 +199,10 @@ FunctionType *encodeParameters(Function *Func,
   }
 
   if (Mask)
-    Tys.push_back(CharacteristicTy);
+    Tys.push_back(VectorDataTy);
 
   Type *RetTy = Func->getReturnType();
-  RetTy = RetTy->isVoidTy() ? RetTy : CharacteristicTy;
+  RetTy = RetTy->isVoidTy() ? RetTy : VectorDataTy;
   return FunctionType::get(RetTy, Tys, false);
 }
 
@@ -471,8 +388,7 @@ void createVectorVariantWrapper(Function *ScalarFunc,
   }
 }
 
-static
-bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
+static bool createVectorVariant(Module &M, MDNode *Root) {
   if (Root->getNumOperands() == 0)
     return false;
   Function *Func = dyn_cast<Function>(Root->getOperand(0));
@@ -513,8 +429,10 @@ bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
     }
   }
 
-  if (!Elemental || !ArgName || !ArgStep)
+  if (!Elemental || !ArgName || !ArgStep || !VecLength) {
+    DEBUG(dbgs() << "Missing necessary metadata node" << "\n");
     return false;
+  }
 
   // The default processor is pentium_4.
   std::string ProcessorName = "pentium_4";
@@ -540,26 +458,29 @@ bool createVectorVariant(Module &M, MDNode *Root, DataLayout *DL) {
     IsMasked = C->isOne();
   }
 
-  Type *CharacteristicTy = 0;
+  Type *VectorDataTy = 0;
   uint64_t VLen = 0;
-  if (VecLength) {
+  {
     if (VecLength->getNumOperands() != 3)
       return false;
     Type *Ty = VecLength->getOperand(1)->getType();
-    if (!VectorType::isValidElementType(Ty))
+    if (!VectorType::isValidElementType(Ty)) {
+      DEBUG(dbgs() << "Invalid characteristic type" << "\n");
       return false;
+    }
 
     Value *VL = VecLength->getOperand(2);
     assert(isa<ConstantInt>(VL) && "vector length constant expected");
     VLen = cast<ConstantInt>(VL)->getZExtValue();
-    CharacteristicTy = VectorType::get(Ty, VLen);
+    // FIXME: handle builtin complex floats
+    VectorDataTy = VectorType::get(Ty, VLen);
   }
 
   SmallVector<ParamInfo, 4> Info;
   std::ostringstream MangledParams;
   FunctionType *NewFuncTy = encodeParameters(Func, ArgName, ArgStep, IsMasked,
-                                             ISA, CharacteristicTy, Info,
-                                             MangledParams, DL);
+                                             ISA, VectorDataTy, Info,
+                                             MangledParams);
   if (!NewFuncTy)
     return false;
 
@@ -594,13 +515,11 @@ bool CilkABI::runOnModule(Module &M) {
   if (!Root)
     return false;
 
-  DataLayout *DL = getAnalysisIfAvailable<DataLayout>();
-
   // Generate a vector variant for each function in cilk.functions.
   bool ModuleChanged = false;
   for (unsigned i = 0, ie = Root->getNumOperands(); i < ie; ++i) {
     MDNode *Node = Root->getOperand(i);
-    ModuleChanged |= createVectorVariant(M, Node, DL);
+    ModuleChanged |= createVectorVariant(M, Node);
   }
   return ModuleChanged;
 }
