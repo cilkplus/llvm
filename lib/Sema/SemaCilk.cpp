@@ -1215,14 +1215,18 @@ static void CheckElementalFunctionBody(Sema &S, FunctionDecl *F, Stmt *Body) {
   D.TraverseStmt(Body);
 }
 
-
 /// Enforce restrictions on Cilk Plus elemental functions.
 void Sema::DiagnoseCilkElemental(FunctionDecl *F, Stmt *Body) {
   // An elemental function must not have an exception specification.
   const FunctionProtoType *FPT = dyn_cast<FunctionProtoType>(F->getType());
-  if (FPT && FPT->hasExceptionSpec()) {
-    // FIXME: Is the location available of the 'throw' keyword available?
-    Diag(F->getLocation(), diag::err_cilk_elemental_exception_spec);
+  if (FPT) {
+    // C++11 allows an implementation to mark a destructor noexcept implicitly.
+    // We allow all functions without an exception specification or with a
+    // basic noexcept aka 'noexcept(true)'.
+    ExceptionSpecificationType SpecTy = FPT->getExceptionSpecType();
+    if (SpecTy != EST_None && SpecTy != EST_BasicNoexcept)
+      // FIXME: Is the location available of the 'throw' keyword available?
+      Diag(F->getLocation(), diag::err_cilk_elemental_exception_spec);
   }
   CheckElementalFunctionBody(*this, F, Body);
 }

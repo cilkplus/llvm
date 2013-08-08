@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -fcilkplus -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -triple x86_64-unknown-unknown -std=c++11 -fcilkplus -emit-llvm %s -o - | FileCheck %s
 
 struct X {
   __attribute__((vector)) X();
@@ -91,3 +91,73 @@ void caller_mem(X *x) {
 // CHECK: declare void @_ZGVxN4__ZN20ns_check_declaration1X10static_memEv
 
 } // namespace ns_check_declaration
+
+namespace characteristic_type {
+
+template <typename T>
+__attribute__((vector))
+T simple_return();
+
+void test1() {
+  simple_return<char>();
+  simple_return<short>();
+  simple_return<int>();
+  simple_return<long>();
+  simple_return<float>();
+  simple_return<double>();
+  simple_return<void *>();
+}
+
+// CHECK: declare <16 x i8> @_ZGVxM16__ZN19characteristic_type13simple_returnIcEET_v
+// CHECK: declare <8 x i16> @_ZGVxM8__ZN19characteristic_type13simple_returnIsEET_v
+// CHECK: declare <4 x i32> @_ZGVxM4__ZN19characteristic_type13simple_returnIiEET_v
+// CHECK: declare <2 x i64> @_ZGVxM2__ZN19characteristic_type13simple_returnIlEET_v
+// CHECK: declare <4 x float> @_ZGVxM4__ZN19characteristic_type13simple_returnIfEET_v
+// CHECK: declare <2 x double> @_ZGVxM2__ZN19characteristic_type13simple_returnIdEET_v
+// CHECK: declare <2 x i8*> @_ZGVxM2__ZN19characteristic_type13simple_returnIPvEET_v
+
+template <typename... Ts>
+__attribute__((vector))
+void void_return(Ts... args);
+
+void test2() {
+  void_return();
+  void_return('a');
+  void_return('a', 1.0f);
+}
+
+// CHECK: declare void @_ZGVxM4__ZN19characteristic_type11void_returnIJEEEvDpT_(<4 x i32>
+// CHECK: declare void @_ZGVxM16v__ZN19characteristic_type11void_returnIJcEEEvDpT_(<16 x i8>
+// CHECK: declare void @_ZGVxM16vv__ZN19characteristic_type11void_returnIJcfEEEvDpT_(<16 x i8>
+
+template <typename... Ts>
+__attribute__((vector(uniform(x))))
+void uniform(char x, Ts... args);
+
+template <typename... Ts>
+__attribute__((vector(linear(x))))
+void linear(char x, Ts... args);
+
+void test3() {
+  uniform('a');
+  uniform('a', 'a');
+  uniform('a', 1.0);
+  uniform('a', nullptr);
+
+  linear('a');
+  linear('a', 'a');
+  linear('a', 1.0);
+  linear('a', nullptr);
+}
+
+// CHECK: declare void @_ZGVxM4u__ZN19characteristic_type7uniformIJEEEvcDpT_
+// CHECK: declare void @_ZGVxM16uv__ZN19characteristic_type7uniformIJcEEEvcDpT_
+// CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type7uniformIJdEEEvcDpT_
+// CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type7uniformIJDnEEEvcDpT_
+//
+// CHECK: declare void @_ZGVxM4u__ZN19characteristic_type6linearIJEEEvcDpT_
+// CHECK: declare void @_ZGVxM16uv__ZN19characteristic_type6linearIJcEEEvcDpT_
+// CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type6linearIJdEEEvcDpT_
+// CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type6linearIJDnEEEvcDpT_
+
+} // namespace characteristic_type
