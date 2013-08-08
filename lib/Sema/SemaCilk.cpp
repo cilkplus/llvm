@@ -1403,10 +1403,11 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
   ExprResult E;
   if (!VectorLengthExpr->isInstantiationDependent()) {
     llvm::APSInt Constant;
+    SourceLocation BadConstantLoc;
     Constant.setIsUnsigned(true);
-    if (!VectorLengthExpr->EvaluateAsInt(Constant, Context)) {
-      Diag(VectorLengthExpr->getLocStart(),
-           diag::err_invalid_vectorlength_expr) << 0;
+    if (!VectorLengthExpr->isIntegerConstantExpr(Constant, Context,
+                                                 &BadConstantLoc)) {
+      Diag(BadConstantLoc, diag::err_invalid_vectorlength_expr) << 0;
       return AttrError();
     }
     if (!Constant.isPowerOf2()) {

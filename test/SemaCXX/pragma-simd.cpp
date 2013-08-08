@@ -448,4 +448,31 @@ void test_private() {
     }();
   }
 }
+
 } // namespace
+
+namespace test_vectorlength
+{
+const int C0 = 0;
+const int C1 = 1;
+const int C2 = 2;
+const char CC = (char)32;
+const short CS = (short)32;
+
+void test() {
+  int j;
+  #pragma simd vectorlength(CC)
+  for (int i = 0; i < 10; ++i) ;
+  #pragma simd vectorlength(CS)
+  for (int i = 0; i < 10; ++i) ;
+  #pragma simd vectorlength(C1)
+  for (int i = 0; i < 10; ++i) ;
+  #pragma simd vectorlength(C2+C2)
+  for (int i = 0; i < 10; ++i) ;
+
+  /* expected-error@+1 {{vectorlength expression must be a power of 2}} */
+  #pragma simd vectorlength(C1+C2)
+  /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
+  #pragma simd vectorlength(C1+j)
+}
+} //namespace
