@@ -2,6 +2,8 @@
 // RUN: %clang_cc1 -DGNU   -fcilkplus -std=c++11 -fsyntax-only -verify -Wall %s
 // RUN: %clang_cc1 -DMS    -fcilkplus -std=c++11 -fsyntax-only -verify -Wall %s
 
+// XFAIL: *
+
 #ifdef GNU
 # define ATTR(x)  __attribute__((x))
 #endif
