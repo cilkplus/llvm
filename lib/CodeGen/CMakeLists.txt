@@ -16,6 +16,7 @@ add_clang_library(clangCodeGen
   CGBuiltin.cpp
   CGCall.cpp
   CGCilkPlusRuntime.cpp
+  CGElementalFunction.cpp
   CGClass.cpp
   CGCUDANV.cpp
   CGCUDARuntime.cpp

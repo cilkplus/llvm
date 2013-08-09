@@ -262,6 +262,25 @@ class CodeGenModule : public CodeGenTypeCache {
   llvm::MDNode *NoObjCARCExceptionsMetadata;
   RREntrypoints *RRData;
 
+  struct ElementalVariantInfo {
+    /// \brief The CodeGen infomation of this function.
+    const CGFunctionInfo *FnInfo;
+    /// \brief The elemental function declaration.
+    const FunctionDecl *FD;
+    /// \brief The LLVM function of this declaration.
+    llvm::Function *Fn;
+    /// \brief The metadata describing this elemental function.
+    llvm::MDNode *KernelMD;
+
+    ElementalVariantInfo(const CGFunctionInfo *FnInfo, const FunctionDecl *FD,
+                         llvm::Function *Fn, llvm::MDNode *KernelMD)
+    : FnInfo(FnInfo), FD(FD), Fn(Fn), KernelMD(KernelMD) { }
+  };
+
+  /// ElementalVariantToEmit - This contains all Cilk Plus elemental function
+  /// variants to be emitted.
+  llvm::SmallVector<ElementalVariantInfo, 8> ElementalVariantToEmit;
+
   // WeakRefReferences - A set of references that have only been seen via
   // a weakref so far. This is used to remove the weak of the reference if we
   // ever see a direct reference or a definition.
@@ -460,7 +479,11 @@ public:
 
   /// Add an elemental function metadata node to the named metadata node
   /// 'cilk.functions'.
-  void EmitCilkElementalMetadata(const FunctionDecl *FD, llvm::Function *Fn);
+  void EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
+                                 const FunctionDecl *FD, llvm::Function *Fn);
+
+  /// Emit all elemental function vector variants in this module.
+  void EmitCilkElementalVariants();
 
   ARCEntrypoints &getARCEntrypoints() const {
     assert(getLangOpts().ObjCAutoRefCount && ARCData != 0);
