@@ -359,8 +359,6 @@ extern char &InstructionSimplifierID;
 // "block_weights" metadata.
 FunctionPass *createLowerExpectIntrinsicPass();
 
-ModulePass *createCilkABIPass();
-
 } // End llvm namespace
 
 #endif
