@@ -6650,6 +6650,8 @@ def warn_cilk_elemental_inconsistent_processor: Warning<
   InGroup<SourceUsesCilkPlus>, DefaultWarn;
 def err_cilk_elemental_exception_spec : Error<
   "exception specifications are not allowed on elemental functions">;
+def err_cilk_elemental_step_not_uniform : Error<
+  "linear step parameter must also be uniform">;
 
 // simd for
 def err_simd_for_body_no_construct: Error<

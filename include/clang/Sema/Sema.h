@@ -2909,6 +2909,7 @@ public:
 
   void DiagnoseCilkSpawn(Stmt *S);
   void DiagnoseCilkElemental(FunctionDecl *D, Stmt *S);
+  bool DiagnoseElementalAttributes(FunctionDecl *FD);
 
   StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
   ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);

@@ -6890,6 +6890,11 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
   // Filter out any non-conflicting previous declarations.
   filterNonConflictingPreviousDecls(Context, NewFD, Previous);
 
+  // Check that Cilk elemental function requirements are met
+  if (getLangOpts().CilkPlus && NewFD->hasAttr<CilkElementalAttr>() &&
+      !DiagnoseElementalAttributes(NewFD))
+    return false;
+
   bool Redeclaration = false;
   NamedDecl *OldDecl = 0;
 

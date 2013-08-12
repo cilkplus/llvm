@@ -13,3 +13,12 @@ const int VL = 2;
 ATTR(vector(vectorlength(VL)))      // expected-error {{'vectorlength' attribute requires integer constant}}
 ATTR(vector(vectorlength(VL + 2)))  // expected-error {{'vectorlength' attribute requires integer constant}}
 int test_vectorlength_1(int x);
+
+ATTR(vector(linear(x:y))) // expected-error {{linear step parameter must also be uniform}}
+ATTR(vector(uniform(y)))
+int test_step_1(int x, int y);
+
+ATTR(vector(uniform(y), linear(x:y)))
+ATTR(vector(linear(x:y))) // expected-error {{linear step parameter must also be uniform}}
+ATTR(vector(linear(x:y), uniform(y)))
+int test_step_1(int x, int y);

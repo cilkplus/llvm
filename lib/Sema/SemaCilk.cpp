@@ -2459,3 +2459,57 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
     break;
   }
 }
+
+bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
+  // Group elemental function attributes by vector() declaration.
+  typedef llvm::SmallVector<Attr *, 4> AttrVec;
+  typedef llvm::SmallDenseMap<unsigned, AttrVec, 4> GroupMap;
+  GroupMap Groups;
+  for (Decl::attr_iterator AI = FD->attr_begin(), AE = FD->attr_end();
+       AI != AE; ++AI) {
+    if (CilkElementalAttr *A = dyn_cast<CilkElementalAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups.FindAndConstruct(key);
+    } else if (CilkProcessorAttr *A = dyn_cast<CilkProcessorAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].push_back(A);
+    } else if (CilkVecLengthForAttr *A = dyn_cast<CilkVecLengthForAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].push_back(A);
+    } else if (CilkVecLengthAttr *A = dyn_cast<CilkVecLengthAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].push_back(A);
+    } else if (CilkMaskAttr *A = dyn_cast<CilkMaskAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].push_back(A);
+    } else if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].push_back(A);
+    }
+  }
+
+  bool Valid = true;
+  for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end();
+       GI != GE; ++GI) {
+    llvm::SmallDenseMap<IdentifierInfo *, CilkLinearAttr *> UniformNames;
+    AttrVec &Attrs = GI->second;
+    // Collect parameters.
+    for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
+      if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*I)) {
+        IdentifierInfo *P = A->getParameter();
+        if (P && A->getStepValue() == 0) UniformNames[P] = A;
+      }
+    }
+    // Enforce constraints.
+    for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
+      if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*I))
+        if (IdentifierInfo *Step = A->getStepParameter())
+          if (UniformNames.find(Step) == UniformNames.end()) {
+            // FIXME: Use the location of the Step parameter.
+            Diag(A->getLocation(), diag::err_cilk_elemental_step_not_uniform);
+            Valid = false;
+          }
+    }
+  }
+  return Valid;
+}
