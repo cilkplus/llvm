@@ -2485,19 +2485,22 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
     } else if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*AI)) {
       unsigned key = A->getGroup().getRawEncoding();
       Groups[key].push_back(A);
+    } else if (CilkUniformAttr *A = dyn_cast<CilkUniformAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].push_back(A);
     }
   }
 
   bool Valid = true;
   for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end();
        GI != GE; ++GI) {
-    llvm::SmallDenseMap<IdentifierInfo *, CilkLinearAttr *> UniformNames;
+    llvm::SmallDenseMap<IdentifierInfo *, CilkUniformAttr *> UniformNames;
     AttrVec &Attrs = GI->second;
     // Collect parameters.
     for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
-      if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*I)) {
+      if (CilkUniformAttr *A = dyn_cast<CilkUniformAttr>(*I)) {
         IdentifierInfo *P = A->getParameter();
-        if (P && A->getStepValue() == 0) UniformNames[P] = A;
+        UniformNames[P] = A;
       }
     }
     // Enforce constraints.

@@ -3019,7 +3019,7 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   int64_t Step = 0;
   IdentifierInfo *StepId = 0;
   switch (Attr.getKind()) {
-  case AttributeList::AT_CilkLinear:
+  case AttributeList::AT_CilkLinear: {
     if (Attr.isDeclspecPropertyAttribute()) {
       StepId = Attr.getPropertyData().GetterId;
       for (i = 0; i != NumParams; ++i)
@@ -3047,8 +3047,15 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
       S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
       return;
     }
+    // Add the linear attribute to the function
+    CilkLinearAttr *LinearAttr = ::new (S.Context) CilkLinearAttr(
+        Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
+    LinearAttr->SetStepValue(Step);
+    LinearAttr->SetStepParameter(StepId);
+    D->addAttr(LinearAttr);
     break;
-  case AttributeList::AT_CilkUniform:
+  }
+  case AttributeList::AT_CilkUniform: {
     if (NumArgs) {
       S.Diag(Attr.getLoc(),
              diag::err_attribute_wrong_number_arguments) << NumArgs;
@@ -3059,9 +3066,13 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
         !Parm->getType()->isPointerType())
       S.Diag(Attr.getParameterLoc(),
             diag::warn_cilk_elemental_uniform_parameter_type);
-    // A uniform(x) attribute is represented as linear(x:0).
-    Step = 0;
+
+    // Add the uniform attribute to the function
+    CilkUniformAttr *UniformAttr = ::new (S.Context) CilkUniformAttr(
+        Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
+    D->addAttr(UniformAttr);
     break;
+  }
   default:
     assert(0 && "attribute is not 'linear' or 'uniform'");
     break;
@@ -3086,12 +3097,6 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
       break;
     }
   }
-
-  CilkLinearAttr *LinearAttr = ::new (S.Context) CilkLinearAttr(
-      Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
-  LinearAttr->SetStepValue(Step);
-  LinearAttr->SetStepParameter(StepId);
-  D->addAttr(LinearAttr);
 }
 
 static void handleEndianAttr(Sema &S, Decl *D, const AttributeList &Attr) {

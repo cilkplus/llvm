@@ -25,11 +25,13 @@ struct CilkElementalGroup {
   typedef SmallVector<QualType, 1> VecLengthForVector;
   typedef SmallVector<unsigned, 1> VecLengthVector;
   typedef SmallVector<CilkLinearAttr*, 8> LinearVector;
+  typedef SmallVector<CilkUniformAttr*, 8> UniformVector;
   typedef SmallVector<llvm::MDNode*, 2> MaskVector;
   ProcessorVector Processor;
   VecLengthVector VecLength;
   VecLengthForVector VecLengthFor;
   LinearVector Linear;
+  UniformVector Uniform;
   MaskVector Mask;
 };
 
@@ -147,6 +149,9 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
     } else if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*AI)) {
       unsigned key = A->getGroup().getRawEncoding();
       Groups[key].Linear.push_back(A);
+    } else if (CilkUniformAttr *A = dyn_cast<CilkUniformAttr>(*AI)) {
+      unsigned key = A->getGroup().getRawEncoding();
+      Groups[key].Uniform.push_back(A);
     }
   }
 
@@ -172,16 +177,28 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
       StringRef ParmName = Parm->getName();
       if (!ParameterNameNode)
         ParameterNameArgs.push_back(llvm::MDString::get(Context, ParmName));
-      // Look for a uniform/linear attribute for this parameter.
+      // Look for a linear attribute for this parameter.
       CilkElementalGroup::LinearVector::iterator SI = G.Linear.begin(),
                                                  SE = G.Linear.end();
       for (; SI != SE; ++SI)
         if ((*SI)->getParameter()->getName() == ParmName)
           break;
       if (SI == SE) {
-        StepArgs.push_back(UndefStep);
-        if (!FirstNonStepParm)
-          FirstNonStepParm = Parm;
+        CilkElementalGroup::UniformVector::iterator UI = G.Uniform.begin(),
+                                                    UE = G.Uniform.end();
+        for (; UI != UE; ++UI)
+          if ((*UI)->getParameter()->getName() == ParmName)
+            break;
+        if (UI != UE)
+          // This is uniform, give this paramater a step of 0 as placeholder.
+          StepArgs.push_back(llvm::ConstantInt::get(IntTy, 0));
+        else {
+          // Not linear/uniform, give this parameter an undefined step as
+          // placeholder.
+          StepArgs.push_back(UndefStep);
+          if (!FirstNonStepParm)
+            FirstNonStepParm = Parm;
+        }
       } else if (IdentifierInfo *S = (*SI)->getStepParameter()) {
         StepArgs.push_back(llvm::MDString::get(Context, S->getName()));
       } else {
