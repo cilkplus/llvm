@@ -142,7 +142,10 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
       Groups[key].VecLengthFor.push_back(A->getTypeHint());
     } else if (CilkVecLengthAttr *A = dyn_cast<CilkVecLengthAttr>(*AI)) {
       unsigned key = A->getGroup().getRawEncoding();
-      Groups[key].VecLength.push_back(A->getLength());
+      const Expr *LengthExpr = A->getLength();
+      assert(isa<IntegerLiteral>(LengthExpr) && "integeral literal expected");
+      unsigned VLen = cast<IntegerLiteral>(LengthExpr)->getValue().getZExtValue();
+      Groups[key].VecLength.push_back(VLen);
     } else if (CilkMaskAttr *A = dyn_cast<CilkMaskAttr>(*AI)) {
       unsigned key = A->getGroup().getRawEncoding();
       Groups[key].Mask.push_back(A->getMask() ? MaskNode : NoMaskNode);

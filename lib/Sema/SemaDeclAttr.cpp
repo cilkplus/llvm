@@ -2940,34 +2940,16 @@ static void handleCilkVecLengthAttr(Sema &S, Decl *D,
 
   for (unsigned I = 0; I < NumArgs; ++I) {
     Expr *LengthExpr = Attr.getArg(I);
-    llvm::APSInt LengthValue;
-    SourceLocation BadLengthValueLoc;
-
-    if (LengthExpr->isTypeDependent() || LengthExpr->isValueDependent() ||
-        !LengthExpr->isIntegerConstantExpr(LengthValue, S.Context,
-                                           &BadLengthValueLoc)) {
-      S.Diag(BadLengthValueLoc, diag::err_attribute_argument_not_int)
-        << "vectorlength" << LengthExpr->getSourceRange();
+    ExprResult Result = S.CheckCilkVecLengthArg(LengthExpr);
+    if (Result.isInvalid()) {
       Attr.setInvalid();
-      return;
-    }
-
-    if (!LengthValue.isStrictlyPositive()) {
-      S.Diag(LengthExpr->getLocStart(), diag::err_cilk_elemental_vectorlength)
-        << LengthExpr->getSourceRange();
-      return;
-    }
-
-    if (!LengthValue.isPowerOf2()) {
-      S.Diag(LengthExpr->getLocStart(), diag::err_invalid_vectorlength_expr)
-        << 1 << LengthExpr->getSourceRange();
       return;
     }
 
     D->addAttr(::new (S.Context)
                CilkVecLengthAttr(Attr.getRange(), S.Context,
                                  Attr.getScopeLoc(),
-                                 LengthValue.getZExtValue()));
+                                 Result.get()));
   }
 }
 

@@ -57,6 +57,7 @@ class UnsignedArgument<string name> : Argument<name>;
 class SourceLocArgument<string name> : Argument<name>;
 class VariadicUnsignedArgument<string name> : Argument<name>;
 class VariadicExprArgument<string name> : Argument<name>;
+class CheckedExprArgument<string name> : Argument<name>;
 
 // A version of the form major.minor[.subminor].
 class VersionArgument<string name> : Argument<name>;
@@ -1170,9 +1171,16 @@ def CilkProcessor : InheritableAttr {
 
 def CilkVecLength : InheritableAttr {
   let Spellings = [CXX11<"_Cilk_elemental", "vectorlength">];
-  let Args = [SourceLocArgument<"Group">, UnsignedArgument<"Length">];
+  let Args = [SourceLocArgument<"Group">, CheckedExprArgument<"Length">];
   let Subjects = [Function];
   let TemplateDependent = 1;
+  let AdditionalMembers =
+    [{
+      template <typename SemaMemberPtr>
+      Expr *CheckArgument(Sema &S, Expr *E, SemaMemberPtr Fn) const {
+        return (S.*Fn)(E);
+      }
+    }];
 }
 
 def CilkVecLengthFor : InheritableAttr {

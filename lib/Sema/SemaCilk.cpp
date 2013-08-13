@@ -2516,3 +2516,50 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   }
   return Valid;
 }
+
+Expr *Sema::CheckCilkVecLengthArg(Expr *E) {
+  if (!E)
+    return E;
+
+  SourceLocation ExprLoc = E->getLocStart();
+  QualType Ty = E->getType().getNonReferenceType();
+
+  // Check type.
+  if (!E->isTypeDependent()) {
+    if (!Ty->isIntegralOrEnumerationType()) {
+      Diag(ExprLoc, diag::err_attribute_argument_not_int)
+        << "vectorlength" << E->getSourceRange();
+      return 0;
+    }
+  }
+
+  // Check value if it is not inside a template.
+  if (!E->isInstantiationDependent()) {
+    llvm::APSInt Val;
+    SourceLocation BadExprLoc;
+
+    if (!E->isIntegerConstantExpr(Val, Context, &BadExprLoc)) {
+      Diag(BadExprLoc, diag::err_attribute_argument_not_int)
+        << "vectorlength" << E->getSourceRange();
+      return 0;
+    }
+
+    if (!Val.isStrictlyPositive()) {
+      Diag(ExprLoc, diag::err_cilk_elemental_vectorlength)
+        << E->getSourceRange();
+      return 0;
+    }
+
+    if (!Val.isPowerOf2()) {
+      Diag(ExprLoc, diag::err_invalid_vectorlength_expr)
+        << 1 << E->getSourceRange();
+      return 0;
+    }
+
+    // Create an integeral literal for the final attribute.
+    return IntegerLiteral::Create(Context, Val, Ty, ExprLoc);
+  }
+
+  // Cannot evaluate this expression yet.
+  return E;
+}

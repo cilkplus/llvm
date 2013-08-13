@@ -647,6 +647,40 @@ namespace {
     void writeHasChildren(raw_ostream &OS) const { OS << "true"; }
   };
 
+  class CheckedExprArgument : public SimpleArgument {
+  public:
+    CheckedExprArgument(Record &Arg, StringRef Attr)
+      : SimpleArgument(Arg, Attr, "Expr *")
+    {}
+
+    void writeTemplateInstantiationArgs(raw_ostream &OS) const {
+      OS << "tempInst" << getUpperName();
+    }
+
+    void writeTemplateInstantiation(raw_ostream &OS) const {
+      OS << "      " << getType() << " tempInst" << getUpperName() << ";\n";
+      OS << "      {\n";
+      OS << "        EnterExpressionEvaluationContext "
+         << "Unevaluated(S, Sema::Unevaluated);\n";
+      OS << "        ExprResult " << "Result = S.SubstExpr("
+         << "A->get" << getUpperName() << "(), TemplateArgs);\n";
+      OS << "        Result = A->CheckArgument(S, Result.get(), &Sema::Check"
+         << getAttrName() << "Arg);\n";
+      OS << "        tempInst" << getUpperName() << " = "
+         << "Result.takeAs<Expr>();\n";
+      OS << "      }\n";
+    }
+
+    void writeDump(raw_ostream &OS) const {
+    }
+
+    void writeDumpChildren(raw_ostream &OS) const {
+      OS << "    lastChild();\n";
+      OS << "    dumpStmt(SA->get" << getUpperName() << "());\n";
+    }
+    void writeHasChildren(raw_ostream &OS) const { OS << "true"; }
+  };
+
   class TypeArgument : public SimpleArgument {
   public:
     TypeArgument(Record &Arg, StringRef Attr)
@@ -747,6 +781,8 @@ static Argument *createArgument(Record &Arg, StringRef Attr,
     Ptr = new VariadicExprArgument(Arg, Attr);
   else if (ArgName == "VersionArgument")
     Ptr = new VersionArgument(Arg, Attr);
+  else if (ArgName == "CheckedExprArgument")
+    Ptr = new CheckedExprArgument(Arg, Attr);
 
   if (!Ptr) {
     std::vector<Record*> Bases = Search->getSuperClasses();
