@@ -54,10 +54,12 @@ ATTR(vector(uniform))    // expected-error {{attribute requires unquoted paramet
 ATTR(vector(uniform()))  // expected-error {{expected identifier}}
 ATTR(vector(uniform(1))) // expected-error {{expected identifier}}
 ATTR(vector(uniform(w))) // expected-error {{not a function parameter}}
-ATTR(vector(uniform(z))) // expected-warning {{uniform parameter must have integral or pointer type}}
-int test_uniform_1(int x, float z);
+ATTR(vector(uniform(z))) // OK
+ATTR(vector(uniform(y))) // OK
+int test_uniform_1(int x, int &y, float z);
 
 // linear clause
+ATTR(vector(linear(x))) // OK
 ATTR(vector(linear))    // expected-error {{attribute requires unquoted parameter}}
 ATTR(vector(linear()))  // expected-error {{expected identifier}}
 ATTR(vector(linear(1))) // expected-error {{expected identifier}}
@@ -68,8 +70,10 @@ ATTR(vector(linear(x), linear(x:2))) // expected-error {{linear attribute incons
 ATTR(vector(linear(x), uniform(x)))  // expected-error {{linear attribute inconsistent with previous uniform attribute}} \
                                      // expected-note {{previous attribute is here}}
 ATTR(vector(linear(x:w)))            // expected-error {{not a function parameter}}
-ATTR(vector(linear(x:z)))            // expected-error {{step parameter must be the subject of a uniform clause}}
-int test_linear_1(int x, int y, float z);
+ATTR(vector(linear(x:y)))            // expected-error {{linear step parameter must also be uniform}}
+ATTR(vector(linear(z))) // expected-error {{linear parameter must have integral or pointer type}}
+ATTR(vector(linear(r))) // expected-error {{linear parameter must have integral or pointer type}}
+int test_linear_1(int &r, int x, int y, float z);
 
 // mask clause
 ATTR(vector(mask(1))) // expected-error {{attribute takes no arguments}}

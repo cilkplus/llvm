@@ -22,3 +22,9 @@ ATTR(vector(uniform(y), linear(x:y)))
 ATTR(vector(linear(x:y))) // expected-error {{linear step parameter must also be uniform}}
 ATTR(vector(linear(x:y), uniform(y)))
 int test_step_1(int x, int y);
+
+struct S {};
+ATTR(vector(uniform(s))) //OK
+ATTR(vector(linear(s)))  // expected-error {{linear parameter must have integral or pointer type}}
+ATTR(vector(linear(i)))  // OK
+int test_int_ptr(struct S s, int i);

@@ -3005,7 +3005,7 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     if (Attr.isDeclspecPropertyAttribute()) {
       StepId = Attr.getPropertyData().GetterId;
       for (i = 0; i != NumParams; ++i)
-        if ((Parm = FD->getParamDecl(i))->getName() == StepId->getName())
+        if (FD->getParamDecl(i)->getName() == StepId->getName())
           break;
       if (i == NumParams) {
         S.Diag(Attr.getLoc(),
@@ -3020,7 +3020,7 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
       if (StepExpr->isTypeDependent() || StepExpr->isValueDependent() ||
           !StepExpr->isIntegerConstantExpr(StepValue, S.Context)) {
         S.Diag(Attr.getLoc(), diag::err_attribute_argument_not_int)
-        << "linear" << StepExpr->getSourceRange();
+            << "linear" << StepExpr->getSourceRange();
         Attr.setInvalid();
         return;
       }
@@ -3029,6 +3029,12 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
       S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
       return;
     }
+    // Check that the parameter is a pointer or integer.
+    if (!Parm->getType()->isIntegralType(D->getASTContext()) &&
+        !Parm->getType()->isPointerType())
+      S.Diag(Attr.getParameterLoc(),
+             diag::err_cilk_elemental_linear_parameter_type);
+
     // Add the linear attribute to the function
     CilkLinearAttr *LinearAttr = ::new (S.Context) CilkLinearAttr(
         Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
@@ -3043,12 +3049,6 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
              diag::err_attribute_wrong_number_arguments) << NumArgs;
       return;
     }
-    // Check that the parameter is a pointer or integer.
-    if (!Parm->getType()->isIntegralType(D->getASTContext()) &&
-        !Parm->getType()->isPointerType())
-      S.Diag(Attr.getParameterLoc(),
-            diag::warn_cilk_elemental_uniform_parameter_type);
-
     // Add the uniform attribute to the function
     CilkUniformAttr *UniformAttr = ::new (S.Context) CilkUniformAttr(
         Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
