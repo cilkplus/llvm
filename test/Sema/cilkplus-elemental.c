@@ -10,8 +10,8 @@
 
 // vectorlength clause
 const int VL = 2;
-ATTR(vector(vectorlength(VL)))      // expected-error {{'vectorlength' attribute requires integer constant}}
-ATTR(vector(vectorlength(VL + 2)))  // expected-error {{'vectorlength' attribute requires integer constant}}
+ATTR(vector(vectorlength(VL)))      // expected-error {{vectorlength attribute requires an integer constant}}
+ATTR(vector(vectorlength(VL + 2)))  // expected-error {{vectorlength attribute requires an integer constant}}
 int test_vectorlength_1(int x);
 
 ATTR(vector(linear(x:y))) // expected-error {{linear step parameter must also be uniform}}

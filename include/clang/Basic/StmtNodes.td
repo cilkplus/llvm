@@ -182,3 +182,7 @@ def CilkForGrainsizeStmt : Stmt;
 def CilkForStmt : Stmt;
 def SIMDForStmt : Stmt;
 def CilkSpawnExpr : DStmt<Expr>;
+
+// OpenMP Directives.
+def OMPExecutableDirective : Stmt<1>;
+def OMPParallelDirective : DStmt<OMPExecutableDirective>;

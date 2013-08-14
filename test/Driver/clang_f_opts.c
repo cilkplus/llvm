@@ -37,17 +37,23 @@
 // FP-CONTRACT-FAST-CHECK: -ffp-contract=fast
 // FP-CONTRACT-OFF-CHECK: -ffp-contract=off
 
-// RUN: %clang -fcilkplus -target x86_64-unknown-linux %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS3 %s
-// CHECK-OPTIONS3: -fcilkplus
+// RUN: %clang -fcilkplus -target x86_64-unknown-linux %s -### 2>&1 | FileCheck -check-prefix=CHECK-CILKPLUS %s
+// RUN: %clang -fcilkplus -target x86_64-apple-darwin %s -### 2>&1 | FileCheck -check-prefix=CHECK-CILKPLUS %s
+// CHECK-CILKPLUS: -fcilkplus
 
-// RUN: %clang -fcilkplus -target x86_64-apple-darwin %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS4 %s
-// CHECK-OPTIONS4: -fcilkplus
+// DISABLED R U N: %clang -x objective-c -fcilkplus %s 2>&1 | FileCheck -check-prefix=CHECK-CILK-OBJC %s
+// CHECK-CILK-OBJC: error: Cilk Plus does not support Objective-C
 
-// RUN: %clang -x objective-c -fcilkplus %s 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS5 %s
-// CHECK-OPTIONS5: error: Cilk Plus does not support Objective-C
+// RUN: %clang -fcilkplus -target x86_64-unknown-freebsd %s -### 2>&1 | FileCheck -check-prefix=CHECK-TARGET %s
+// CHECK-TARGET: error: Cilk Plus not yet supported for this target
 
-// RUN: %clang -fcilkplus -target x86_64-unknown-freebsd %s -### 2>&1 | FileCheck -check-prefix=CHECK-OPTIONS6 %s
-// CHECK-OPTIONS6: error: Cilk Plus not yet supported for this target
+
+// RUN: %clang -### -S -funroll-loops %s 2>&1 | FileCheck -check-prefix=CHECK-UNROLL-LOOPS %s
+// RUN: %clang -### -S -fno-unroll-loops %s 2>&1 | FileCheck -check-prefix=CHECK-NO-UNROLL-LOOPS %s
+// RUN: %clang -### -S -fno-unroll-loops -funroll-loops %s 2>&1 | FileCheck -check-prefix=CHECK-UNROLL-LOOPS %s
+// RUN: %clang -### -S -funroll-loops -fno-unroll-loops %s 2>&1 | FileCheck -check-prefix=CHECK-NO-UNROLL-LOOPS %s
+// CHECK-UNROLL-LOOPS: "-funroll-loops"
+// CHECK-NO-UNROLL-LOOPS: "-fno-unroll-loops"
 
 // RUN: %clang -### -S -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
 // RUN: %clang -### -S -fno-vectorize -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
@@ -57,6 +63,18 @@
 // RUN: %clang -### -S -fno-tree-vectorize -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
 // RUN: %clang -### -S -fno-tree-vectorize %s 2>&1 | FileCheck -check-prefix=CHECK-NO-VECTORIZE %s
 // RUN: %clang -### -S -ftree-vectorize -fno-vectorize %s 2>&1 | FileCheck -check-prefix=CHECK-NO-VECTORIZE %s
+// RUN: %clang -### -S -O %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S -O2 %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S -Os %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S -O3 %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S -O4 %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S -fno-vectorize -O3 %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S -O1 -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S -Ofast %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
+// RUN: %clang -### -S %s 2>&1 | FileCheck -check-prefix=CHECK-NO-VECTORIZE %s
+// RUN: %clang -### -S -O0 %s 2>&1 | FileCheck -check-prefix=CHECK-NO-VECTORIZE %s
+// RUN: %clang -### -S -O1 %s 2>&1 | FileCheck -check-prefix=CHECK-NO-VECTORIZE %s
+// RUN: %clang -### -S -Oz %s 2>&1 | FileCheck -check-prefix=CHECK-NO-VECTORIZE %s
 // CHECK-VECTORIZE: "-vectorize-loops"
 // CHECK-NO-VECTORIZE-NOT: "-vectorize-loops"
 
@@ -83,3 +101,9 @@
 // CHECK-EXTENDED-IDENTIFIERS: "-cc1"
 // CHECK-EXTENDED-IDENTIFIERS-NOT: "-fextended-identifiers"
 // CHECK-NO-EXTENDED-IDENTIFIERS: error: unsupported option '-fno-extended-identifiers'
+
+// RUN: %clang -### -S -fno-pascal-strings -mpascal-strings %s 2>&1 | FileCheck -check-prefix=CHECK-M-PASCAL-STRINGS %s
+// CHECK-M-PASCAL-STRINGS: "-fpascal-strings"
+
+// RUN: %clang -### -S -fpascal-strings -mno-pascal-strings %s 2>&1 | FileCheck -check-prefix=CHECK-NO-M-PASCAL-STRINGS %s
+// CHECK-NO-M-PASCAL-STRINGS-NOT: "-fpascal-strings"

@@ -102,8 +102,8 @@ void test_simd_reduction() {
 }
 
 template <typename T1, typename T2, typename T3>
-void test_multiple_clauses() {
-// CHECK: test_multiple_clauses
+void test_simd_multiple_clauses() {
+// CHECK: test_simd_multiple_clauses
   T1 x, x2;
   const T2 y = 4;
   T3 z;

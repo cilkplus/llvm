@@ -328,11 +328,8 @@ Retry:
   case tok::annot_pragma_cilk_grainsize_begin:
     return ParsePragmaCilkGrainsize();
 
-  case tok::annot_pragma_openmp: {
-    SourceLocation DeclStart = Tok.getLocation();
-    DeclGroupPtrTy Res = ParseOpenMPDeclarativeDirective();
-    return Actions.ActOnDeclStmt(Res, DeclStart, Tok.getLocation());
-  }
+  case tok::annot_pragma_openmp:
+    return ParseOpenMPDeclarativeOrExecutableDirective();
 
   case tok::annot_pragma_simd:
     ProhibitAttributes(Attrs);

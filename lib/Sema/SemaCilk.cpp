@@ -2527,8 +2527,8 @@ Expr *Sema::CheckCilkVecLengthArg(Expr *E) {
   // Check type.
   if (!E->isTypeDependent()) {
     if (!Ty->isIntegralOrEnumerationType()) {
-      Diag(ExprLoc, diag::err_attribute_argument_not_int)
-        << "vectorlength" << E->getSourceRange();
+      Diag(ExprLoc, diag::err_attribute_argument_type)
+        << "vectorlength" << AANT_ArgumentIntegerConstant << E->getSourceRange();
       return 0;
     }
   }
@@ -2539,8 +2539,8 @@ Expr *Sema::CheckCilkVecLengthArg(Expr *E) {
     SourceLocation BadExprLoc;
 
     if (!E->isIntegerConstantExpr(Val, Context, &BadExprLoc)) {
-      Diag(BadExprLoc, diag::err_attribute_argument_not_int)
-        << "vectorlength" << E->getSourceRange();
+      Diag(BadExprLoc, diag::err_attribute_argument_type)
+        << "vectorlength" << AANT_ArgumentIntegerConstant << E->getSourceRange();
       return 0;
     }
 

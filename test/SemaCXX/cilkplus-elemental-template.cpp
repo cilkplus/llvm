@@ -29,7 +29,7 @@ void constant(); // expected-note 3{{here}}
 extern const int E;
 
 template <int C>
-__attribute__((vector(vectorlength(E + C)))) // expected-error {{'vectorlength' attribute requires integer constant}}
+__attribute__((vector(vectorlength(E + C)))) // expected-error {{vectorlength attribute requires an integer constant}}
 void extern_constant(); // expected-note {{here}}
 
 void test1() {
