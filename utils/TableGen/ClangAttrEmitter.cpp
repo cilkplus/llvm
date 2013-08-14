@@ -190,8 +190,9 @@ namespace {
         OS << "    OS << \" \";\n";
         OS << "    dumpBareDeclRef(SA->get" << getUpperName() << "());\n"; 
       } else if (type == "IdentifierInfo *") {
-        OS << "    OS << \" \" << SA->get" << getUpperName()
-           << "()->getName();\n";
+        OS << "    OS << \" \" << (SA->get" << getUpperName() << "() ? "
+           << "SA->get" << getUpperName() << "()->getName()"
+           << " : \"(null)\"); \n";
       } else if (type == "QualType") {
         OS << "    OS << \" \" << SA->get" << getUpperName()
            << "().getAsString();\n";
