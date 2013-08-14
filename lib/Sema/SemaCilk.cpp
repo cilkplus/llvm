@@ -2460,10 +2460,22 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
   }
 }
 
+static IdentifierInfo *GetElementalStepParameterName(Attr *Attr) {
+  assert((isa<CilkLinearAttr>(Attr) || isa<CilkUniformAttr>(Attr)) &&
+         "Attr is not CilkLinear or CilkUniform!");
+  if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(Attr))
+    return A->getParameter();
+  else if (CilkUniformAttr *A = dyn_cast<CilkUniformAttr>(Attr))
+    return A->getParameter();
+  return 0;
+}
+
 bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   // Group elemental function attributes by vector() declaration.
   typedef llvm::SmallVector<Attr *, 4> AttrVec;
   typedef llvm::SmallDenseMap<unsigned, AttrVec, 4> GroupMap;
+  typedef std::map<StringRef, Attr*> ParamAttrMap;
+
   GroupMap Groups;
   for (Decl::attr_iterator AI = FD->attr_begin(), AE = FD->attr_end();
        AI != AE; ++AI) {
@@ -2495,21 +2507,56 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end();
        GI != GE; ++GI) {
     llvm::SmallDenseMap<IdentifierInfo *, CilkUniformAttr *> UniformNames;
+    ParamAttrMap StepSizes;
     AttrVec &Attrs = GI->second;
+
     // Collect parameters.
     for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
       if (CilkUniformAttr *A = dyn_cast<CilkUniformAttr>(*I)) {
         IdentifierInfo *P = A->getParameter();
         UniformNames[P] = A;
       }
+
+      // Check for contradictory or duplicate step specifications
+      if (isa<CilkLinearAttr>(*I) || isa<CilkUniformAttr>(*I)) {
+        IdentifierInfo *ParameterName = GetElementalStepParameterName(*I);
+
+        ParamAttrMap::iterator SI = StepSizes.find(ParameterName->getName());
+        if (SI != StepSizes.end()) {
+          CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(*I);
+          Attr *ExistingAttr = SI->second;
+          CilkLinearAttr *OtherLinear = dyn_cast<CilkLinearAttr>(ExistingAttr);
+          CilkUniformAttr *OtherUniform = dyn_cast<CilkUniformAttr>(ExistingAttr);
+
+          SourceLocation Loc = OtherLinear ? OtherLinear->getLocation()
+                                           : OtherUniform->getLocation();
+
+          // Found another linear or uniform attribute for this parameter.
+          // Check for inconsistency (one uniform and one linear, or both
+          // linear but with different steps). Everything else is a duplicate.
+          if ((*I)->getKind() != ExistingAttr->getKind() ||
+              (OtherLinear && LA &&
+               (LA->getStepParameter() != OtherLinear->getStepParameter() ||
+                LA->getStepValue() != OtherLinear->getStepValue())))
+            Diag(Loc, diag::err_cilk_elemental_inconsistent_step) <<
+              isa<CilkLinearAttr>(*I) << isa<CilkLinearAttr>(ExistingAttr);
+          else
+            Diag(Loc, diag::err_cilk_elemental_duplicate_step) <<
+              isa<CilkLinearAttr>(*I) << ParameterName->getName();
+
+          Diag(ExistingAttr->getLocation(), diag::note_previous_attribute);
+          Valid = false;
+        } else
+          StepSizes[ParameterName->getName()] = *I;
+      }
     }
+
     // Enforce constraints.
     for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
       if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*I))
         if (IdentifierInfo *Step = A->getStepParameter())
           if (UniformNames.find(Step) == UniformNames.end()) {
-            // FIXME: Use the location of the Step parameter.
-            Diag(A->getLocation(), diag::err_cilk_elemental_step_not_uniform);
+            Diag(A->getStepLoc(), diag::err_cilk_elemental_step_not_uniform);
             Valid = false;
           }
     }

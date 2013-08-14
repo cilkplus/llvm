@@ -2994,10 +2994,14 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   unsigned NumArgs = Attr.getNumArgs();
   int64_t Step = 0;
   IdentifierInfo *StepId = 0;
+  SourceLocation StepLoc;
+
   switch (Attr.getKind()) {
   case AttributeList::AT_CilkLinear: {
     if (Attr.isDeclspecPropertyAttribute()) {
       StepId = Attr.getPropertyData().GetterId;
+      // FIXME: use the location of the step instead of the attribute
+      StepLoc = Attr.getLoc();
       for (i = 0; i != NumParams; ++i)
         if (FD->getParamDecl(i)->getName() == StepId->getName())
           break;
@@ -3019,6 +3023,7 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
         return;
       }
       Step = StepValue.getSExtValue();
+      StepLoc = StepExpr->getExprLoc();
     } else {
       S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
       return;
@@ -3030,10 +3035,9 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
              diag::err_cilk_elemental_linear_parameter_type);
 
     // Add the linear attribute to the function
-    CilkLinearAttr *LinearAttr = ::new (S.Context) CilkLinearAttr(
-        Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
-    LinearAttr->SetStepValue(Step);
-    LinearAttr->SetStepParameter(StepId);
+    CilkLinearAttr *LinearAttr = ::new (S.Context) CilkLinearAttr(Attr.getLoc(),
+        S.Context, Attr.getScopeLoc(), ParameterName, Attr.getParameterLoc(),
+        StepId, Step, StepLoc);
     D->addAttr(LinearAttr);
     break;
   }
@@ -3045,33 +3049,14 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     }
     // Add the uniform attribute to the function
     CilkUniformAttr *UniformAttr = ::new (S.Context) CilkUniformAttr(
-        Attr.getLoc(), S.Context, Attr.getScopeLoc(), ParameterName);
+        Attr.getLoc(), S.Context, Attr.getScopeLoc(),
+        ParameterName, Attr.getParameterLoc());
     D->addAttr(UniformAttr);
     break;
   }
   default:
     assert(0 && "attribute is not 'linear' or 'uniform'");
     break;
-  }
-
-  // Check for contradictory step specifications.
-  specific_attr_iterator<CilkLinearAttr>
-      AI = D->specific_attr_begin<CilkLinearAttr>(),
-      AE = D->specific_attr_end<CilkLinearAttr>();
-  for (; AI != AE; ++AI) {
-    if (((*AI)->getGroup() == Attr.getScopeLoc()) &&
-        ((*AI)->getParameter()->getName() == ParameterName->getName())) {
-      if ((Step != (*AI)->getStepValue()) ||
-          (StepId != (*AI)->getStepParameter())) {
-        S.Diag(Attr.getParameterLoc(),
-               diag::err_cilk_elemental_inconsistent_step) <<
-                ((Step || StepId) ? 1 : 0) <<
-                (((*AI)->getStepValue() || (*AI)->getStepParameter())? 1 : 0);
-        S.Diag((*AI)->getLocation(), diag::note_previous_attribute);
-        return;
-      }
-      break;
-    }
   }
 }
 

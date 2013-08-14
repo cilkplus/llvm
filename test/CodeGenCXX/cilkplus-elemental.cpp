@@ -155,9 +155,9 @@ void test3() {
 // CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type7uniformIJdEEEvcDpT_
 // CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type7uniformIJDnEEEvcDpT_
 //
-// CHECK: declare void @_ZGVxM4u__ZN19characteristic_type6linearIJEEEvcDpT_
-// CHECK: declare void @_ZGVxM16uv__ZN19characteristic_type6linearIJcEEEvcDpT_
-// CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type6linearIJdEEEvcDpT_
-// CHECK: declare void @_ZGVxM2uv__ZN19characteristic_type6linearIJDnEEEvcDpT_
+// CHECK: declare void @_ZGVxM4l__ZN19characteristic_type6linearIJEEEvcDpT_
+// CHECK: declare void @_ZGVxM16lv__ZN19characteristic_type6linearIJcEEEvcDpT_
+// CHECK: declare void @_ZGVxM2lv__ZN19characteristic_type6linearIJdEEEvcDpT_
+// CHECK: declare void @_ZGVxM2lv__ZN19characteristic_type6linearIJDnEEEvcDpT_
 
 } // namespace characteristic_type

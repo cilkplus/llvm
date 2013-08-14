@@ -6744,6 +6744,11 @@ def err_cilk_elemental_inconsistent_step: Error<
   "%select{uniform|linear}0 attribute inconsistent with previous %select{uniform|linear}1 attribute">;
 def err_cilk_elemental_linear_parameter_type: Error<
   "linear parameter must have integral or pointer type">;
+def err_cilk_elemental_duplicate_step: Error<
+ "%select{uniform|linear}0 attribute already specified for parameter '%1'">;
+def warn_cilk_elemental_uniform_parameter_type: Warning<
+  "uniform parameter must have integral or pointer type">,
+  InGroup<SourceUsesCilkPlus>, DefaultWarn;
 def warn_cilk_elemental_inconsistent_vectorlengthfor: Warning<
   "inconsistent vectorlengthfor attribute">,
   InGroup<SourceUsesCilkPlus>, DefaultWarn;
