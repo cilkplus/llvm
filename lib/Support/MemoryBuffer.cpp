@@ -41,7 +41,6 @@
 #define S_ISBLK(x) (0)
 #endif
 #endif
-#include <fcntl.h>
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -249,20 +248,22 @@ error_code MemoryBuffer::getFile(StringRef Filename,
                                RequiresNullTerminator);
 }
 
+static error_code getOpenFileImpl(int FD, const char *Filename,
+                                  OwningPtr<MemoryBuffer> &Result,
+                                  uint64_t FileSize, uint64_t MapSize,
+                                  int64_t Offset, bool RequiresNullTerminator);
+
 error_code MemoryBuffer::getFile(const char *Filename,
                                  OwningPtr<MemoryBuffer> &result,
                                  int64_t FileSize,
                                  bool RequiresNullTerminator) {
-  int OpenFlags = O_RDONLY;
-#ifdef O_BINARY
-  OpenFlags |= O_BINARY;  // Open input file in binary mode on win32.
-#endif
-  int FD = ::open(Filename, OpenFlags);
-  if (FD == -1)
-    return error_code(errno, posix_category());
+  int FD;
+  error_code EC = sys::fs::openFileForRead(Filename, FD);
+  if (EC)
+    return EC;
 
-  error_code ret = getOpenFile(FD, Filename, result, FileSize, FileSize,
-                               0, RequiresNullTerminator);
+  error_code ret = getOpenFileImpl(FD, Filename, result, FileSize, FileSize, 0,
+                                   RequiresNullTerminator);
   close(FD);
   return ret;
 }
@@ -287,12 +288,11 @@ static bool shouldUseMmap(int FD,
   // FIXME: this chunk of code is duplicated, but it avoids a fstat when
   // RequiresNullTerminator = false and MapSize != -1.
   if (FileSize == size_t(-1)) {
-    struct stat FileInfo;
-    // TODO: This should use fstat64 when available.
-    if (fstat(FD, &FileInfo) == -1) {
-      return error_code(errno, posix_category());
-    }
-    FileSize = FileInfo.st_size;
+    sys::fs::file_status Status;
+    error_code EC = sys::fs::status(FD, Status);
+    if (EC)
+      return EC;
+    FileSize = Status.getSize();
   }
 
   // If we need a null terminator and the end of the map is inside the file,
@@ -310,11 +310,10 @@ static bool shouldUseMmap(int FD,
   return true;
 }
 
-error_code MemoryBuffer::getOpenFile(int FD, const char *Filename,
-                                     OwningPtr<MemoryBuffer> &result,
-                                     uint64_t FileSize, uint64_t MapSize,
-                                     int64_t Offset,
-                                     bool RequiresNullTerminator) {
+static error_code getOpenFileImpl(int FD, const char *Filename,
+                                  OwningPtr<MemoryBuffer> &result,
+                                  uint64_t FileSize, uint64_t MapSize,
+                                  int64_t Offset, bool RequiresNullTerminator) {
   static int PageSize = sys::process::get_self()->page_size();
 
   // Default is to map the full file.
@@ -322,20 +321,20 @@ error_code MemoryBuffer::getOpenFile(int FD, const char *Filename,
     // If we don't know the file size, use fstat to find out.  fstat on an open
     // file descriptor is cheaper than stat on a random path.
     if (FileSize == uint64_t(-1)) {
-      struct stat FileInfo;
-      // TODO: This should use fstat64 when available.
-      if (fstat(FD, &FileInfo) == -1) {
-        return error_code(errno, posix_category());
-      }
+      sys::fs::file_status Status;
+      error_code EC = sys::fs::status(FD, Status);
+      if (EC)
+        return EC;
 
       // If this not a file or a block device (e.g. it's a named pipe
       // or character device), we can't trust the size. Create the memory
       // buffer by copying off the stream.
-      if (!S_ISREG(FileInfo.st_mode) && !S_ISBLK(FileInfo.st_mode)) {
+      sys::fs::file_type Type = Status.type();
+      if (Type != sys::fs::file_type::regular_file &&
+          Type != sys::fs::file_type::block_file)
         return getMemoryBufferForStream(FD, Filename, result);
-      }
 
-      FileSize = FileInfo.st_size;
+      FileSize = Status.getSize();
     }
     MapSize = FileSize;
   }
@@ -389,6 +388,20 @@ error_code MemoryBuffer::getOpenFile(int FD, const char *Filename,
 
   result.swap(SB);
   return error_code::success();
+}
+
+error_code MemoryBuffer::getOpenFile(int FD, const char *Filename,
+                                     OwningPtr<MemoryBuffer> &Result,
+                                     uint64_t FileSize,
+                                     bool RequiresNullTerminator) {
+  return getOpenFileImpl(FD, Filename, Result, FileSize, FileSize, 0,
+                         RequiresNullTerminator);
+}
+
+error_code MemoryBuffer::getOpenFileSlice(int FD, const char *Filename,
+                                          OwningPtr<MemoryBuffer> &Result,
+                                          uint64_t MapSize, int64_t Offset) {
+  return getOpenFileImpl(FD, Filename, Result, -1, MapSize, Offset, false);
 }
 
 //===----------------------------------------------------------------------===//

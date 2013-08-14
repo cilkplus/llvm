@@ -92,12 +92,44 @@ def az_extload : PatFrag<(ops node:$ptr), (unindexedload node:$ptr), [{
          L->getExtensionType() == ISD::EXTLOAD;
 }]>;
 
-def zextloadi8_global : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
+def az_extloadi8 : PatFrag<(ops node:$ptr), (az_extload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i8;
+}]>;
+
+def sextloadi8_global : PatFrag<(ops node:$ptr), (sextloadi8 node:$ptr), [{
     return isGlobalLoad(dyn_cast<LoadSDNode>(N));
 }]>;
 
-def zextloadi8_constant : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
+def az_extloadi8_constant : PatFrag<(ops node:$ptr), (az_extloadi8 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def sextloadi8_constant : PatFrag<(ops node:$ptr), (sextloadi8 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def az_extloadi8_global : PatFrag<(ops node:$ptr), (az_extloadi8 node:$ptr), [{
     return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def az_extloadi16 : PatFrag<(ops node:$ptr), (az_extload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i16;
+}]>;
+
+def az_extloadi16_global : PatFrag<(ops node:$ptr), (az_extloadi16 node:$ptr), [{
+    return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def sextloadi16_global : PatFrag<(ops node:$ptr), (sextloadi16 node:$ptr), [{
+    return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def az_extloadi16_constant : PatFrag<(ops node:$ptr), (az_extloadi16 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def sextloadi16_constant : PatFrag<(ops node:$ptr), (sextloadi16 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
 }]>;
 
 def az_extloadi32 : PatFrag<(ops node:$ptr), (az_extload node:$ptr), [{
@@ -140,6 +172,9 @@ def FP_ONE : PatLeaf <
   (fpimm),
   [{return N->isExactlyValue(1.0);}]
 >;
+
+def U24 : ComplexPattern<i32, 1, "SelectU24", [], []>;
+def I24 : ComplexPattern<i32, 1, "SelectI24", [], []>;
 
 let isCodeGenOnly = 1, isPseudo = 1 in {
 
@@ -333,6 +368,16 @@ class ROTRPattern <Instruction BIT_ALIGN> : Pat <
   (rotr i32:$src0, i32:$src1),
   (BIT_ALIGN $src0, $src0, $src1)
 >;
+
+// 24-bit arithmetic patterns
+def umul24 : PatFrag <(ops node:$x, node:$y), (mul node:$x, node:$y)>;
+
+/*
+class UMUL24Pattern <Instruction UMUL24> : Pat <
+  (mul U24:$x, U24:$y),
+  (UMUL24 $x, $y)
+>;
+*/
 
 include "R600Instructions.td"
 
