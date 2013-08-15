@@ -61,7 +61,7 @@ endif
 # Build runtime libraries for x86_64.
 ifeq ($(call contains,$(SupportedArches),x86_64),true)
 Configs += full-x86_64 profile-x86_64 san-x86_64 asan-x86_64 tsan-x86_64 \
-           msan-x86_64 ubsan-x86_64 ubsan_cxx-x86_64 cilk-x86_64
+           msan-x86_64 ubsan-x86_64 ubsan_cxx-x86_64 dfsan-x86_64 cilk-x86_64
 Arch.full-x86_64 := x86_64
 Arch.profile-x86_64 := x86_64
 Arch.san-x86_64 := x86_64
@@ -70,6 +70,7 @@ Arch.tsan-x86_64 := x86_64
 Arch.msan-x86_64 := x86_64
 Arch.ubsan-x86_64 := x86_64
 Arch.ubsan_cxx-x86_64 := x86_64
+Arch.dfsan-x86_64 := x86_64
 Arch.cilk-x86_64 := x86_64
 endif
 
@@ -102,10 +103,12 @@ CFLAGS.ubsan-i386 := $(CFLAGS) -m32 $(SANITIZER_CFLAGS) -fno-rtti
 CFLAGS.ubsan-x86_64 := $(CFLAGS) -m64 $(SANITIZER_CFLAGS) -fno-rtti
 CFLAGS.ubsan_cxx-i386 := $(CFLAGS) -m32 $(SANITIZER_CFLAGS)
 CFLAGS.ubsan_cxx-x86_64 := $(CFLAGS) -m64 $(SANITIZER_CFLAGS)
+CFLAGS.dfsan-x86_64 := $(CFLAGS) -m64 $(SANITIZER_CFLAGS)
 CFLAGS.cilk-x86_64 := -O3 -m64 -fcilkplus -fPIC \
                       -I$(ProjSrcRoot)/lib/cilk/include \
                       -D__CILKRTS_ABI_VERSION=1 -DIN_CILK_RUNTIME=1 \
                       -DBUILD_HOST=\"Linux\" -DBUILD_USER=\"anonymous\"
+
 
 SHARED_LIBRARY.asan-arm-android := 1
 SHARED_LIBRARY.cilk-x86_64 := 1
@@ -145,6 +148,7 @@ FUNCTIONS.ubsan-i386 := $(UbsanFunctions)
 FUNCTIONS.ubsan-x86_64 := $(UbsanFunctions)
 FUNCTIONS.ubsan_cxx-i386 := $(UbsanCXXFunctions)
 FUNCTIONS.ubsan_cxx-x86_64 := $(UbsanCXXFunctions)
+FUNCTIONS.dfsan-x86_64 := $(DfsanFunctions) $(SanitizerCommonFunctions)
 FUNCTIONS.cilk-x86_64 := $(CilkrtsFunctions)
 
 Headers.cilk-x86_64 := $(CilkHeaders)

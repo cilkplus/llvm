@@ -124,7 +124,6 @@ static void ParseFlagsFromString(Flags *f, const char *str) {
   ParseFlag(str, &f->use_stack_depot, "use_stack_depot");
   ParseFlag(str, &f->strict_memcmp, "strict_memcmp");
   ParseFlag(str, &f->strict_init_order, "strict_init_order");
-  ParseFlag(str, &f->detect_leaks, "detect_leaks");
 }
 
 void InitializeFlags(Flags *f, const char *env) {
@@ -137,6 +136,8 @@ void InitializeFlags(Flags *f, const char *env) {
   cf->strip_path_prefix = "";
   cf->handle_ioctl = false;
   cf->log_path = 0;
+  cf->detect_leaks = false;
+  cf->leak_check_at_exit = true;
 
   internal_memset(f, 0, sizeof(*f));
   f->quarantine_size = (ASAN_LOW_MEMORY) ? 1UL << 26 : 1UL << 28;
@@ -173,7 +174,6 @@ void InitializeFlags(Flags *f, const char *env) {
   f->use_stack_depot = true;
   f->strict_memcmp = true;
   f->strict_init_order = false;
-  f->detect_leaks = false;
 
   // Override from compile definition.
   ParseFlagsFromString(f, MaybeUseAsanDefaultOptionsCompileDefiniton());
@@ -189,17 +189,17 @@ void InitializeFlags(Flags *f, const char *env) {
   ParseFlagsFromString(f, env);
 
 #if !CAN_SANITIZE_LEAKS
-  if (f->detect_leaks) {
+  if (cf->detect_leaks) {
     Report("%s: detect_leaks is not supported on this platform.\n",
            SanitizerToolName);
-    f->detect_leaks = false;
+    cf->detect_leaks = false;
   }
 #endif
 
-  if (f->detect_leaks && !f->use_stack_depot) {
+  if (cf->detect_leaks && !f->use_stack_depot) {
     Report("%s: detect_leaks is ignored (requires use_stack_depot).\n",
            SanitizerToolName);
-    f->detect_leaks = false;
+    cf->detect_leaks = false;
   }
 }
 
@@ -395,7 +395,7 @@ using namespace __asan;  // NOLINT
 
 #if !SANITIZER_SUPPORTS_WEAK_HOOKS
 extern "C" {
-SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
 const char* __asan_default_options() { return ""; }
 }  // extern "C"
 #endif
@@ -557,7 +557,7 @@ void __asan_init() {
 
 #if CAN_SANITIZE_LEAKS
   __lsan::InitCommonLsan();
-  if (flags()->detect_leaks) {
+  if (common_flags()->detect_leaks && common_flags()->leak_check_at_exit) {
     Atexit(__lsan::DoLeakCheck);
   }
 #endif  // CAN_SANITIZE_LEAKS
