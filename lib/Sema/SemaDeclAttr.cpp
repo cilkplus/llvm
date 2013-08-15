@@ -2872,7 +2872,7 @@ static void handleCilkProcessorAttr(Sema &S, Decl *D,
     IdentifierInfo *ProcessorName = Attr.getParameterName();
     if (!ProcessorName) {
       S.Diag(Attr.getLoc(), diag::err_attribute_argument_type)
-        << AANT_ArgumentIdentifier ;
+        << AANT_ArgumentString;
       return;
     }
     SR = ProcessorName->getName();

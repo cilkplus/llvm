@@ -2,8 +2,6 @@
 // RUN: %clang_cc1 -DGNU   -fcilkplus -std=c++11 -fsyntax-only -verify -Wall %s
 // RUN: %clang_cc1 -DMS    -fcilkplus -std=c++11 -fsyntax-only -verify -Wall %s
 
-// XFAIL: *
-
 #ifdef GNU
 # define ATTR(x)  __attribute__((x))
 #endif
@@ -54,13 +52,11 @@ ATTR(vector(uniform))    // expected-error {{attribute requires unquoted paramet
 ATTR(vector(uniform()))  // expected-error {{expected identifier}}
 ATTR(vector(uniform(1))) // expected-error {{expected identifier}}
 ATTR(vector(uniform(w))) // expected-error {{not a function parameter}}
-<<<<<<< HEAD
 ATTR(vector(uniform(z))) // OK
 ATTR(vector(uniform(y))) // OK
-ATTR(vector(uniform(z))) // expected-warning {{uniform parameter must have integral or pointer type}}
 ATTR(vector(uniform(x), uniform(x))) // expected-error {{uniform attribute already specified for parameter 'x'}} \
                                      // expected-note {{previous attribute is here}}
-int test_uniform_1(int x, float z);
+int test_uniform_1(int x, int &y, float z);
 
 // linear clause
 ATTR(vector(linear(x))) // OK
