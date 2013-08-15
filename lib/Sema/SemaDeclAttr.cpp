@@ -2872,7 +2872,7 @@ static void handleCilkProcessorAttr(Sema &S, Decl *D,
     IdentifierInfo *ProcessorName = Attr.getParameterName();
     if (!ProcessorName) {
       S.Diag(Attr.getLoc(), diag::err_attribute_argument_type)
-        << AANT_ArgumentString;
+        << Attr.getName() << AANT_ArgumentIdentifier;
       return;
     }
     SR = ProcessorName->getName();
@@ -2882,7 +2882,7 @@ static void handleCilkProcessorAttr(Sema &S, Decl *D,
     StringLiteral *SE = dyn_cast<StringLiteral>(ArgExpr);
     if (!SE) {
       S.Diag(ArgExpr->getLocStart(), diag::err_attribute_argument_type)
-        << "processor" << AANT_ArgumentString;
+        << Attr.getName() << AANT_ArgumentString;
       return;
     }
     SR = SE->getString();
@@ -2916,11 +2916,13 @@ static void handleCilkVecLengthAttr(Sema &S, Decl *D,
   assert(Attr.getKind() == AttributeList::AT_CilkVecLength);
   unsigned NumArgs = Attr.getNumArgs();
   if (!NumArgs) {
-    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
+      << Attr.getName() << 1;
     return;
   }
   if (NumArgs > 1)
-    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
+      << Attr.getName() << 1;
   // Check for multiple different vectorlength attributes in one vector().
   // CodeGen does support this, so we just warn and continue.
   CilkVecLengthAttr *ExistingAttr =
@@ -3025,7 +3027,8 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
       Step = StepValue.getSExtValue();
       StepLoc = StepExpr->getExprLoc();
     } else {
-      S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments) << 1;
+      S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
+        << Attr.getName() << 1;
       return;
     }
     // Check that the parameter is a pointer or integer.
@@ -3043,8 +3046,8 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   }
   case AttributeList::AT_CilkUniform: {
     if (NumArgs) {
-      S.Diag(Attr.getLoc(),
-             diag::err_attribute_wrong_number_arguments) << NumArgs;
+      S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
+        << Attr.getName() << NumArgs;
       return;
     }
     // Add the uniform attribute to the function
