@@ -1361,6 +1361,17 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
         }
       }
     }
+
+    if (Tok.is(tok::ellipsis)) {
+      SourceLocation EllipsisLoc = ConsumeToken();
+      if (getLangOpts().CPlusPlus11) {
+        Diag(EllipsisLoc, diag::err_elemental_parameter_pack_unsupported)
+          << AttrName.getName();
+        SkipUntil(tok::r_paren);
+        return;
+      }
+    }
+
     if (StepName)
       Attrs.addNewPropertyAttr(&AttrName, AttrNameLoc, &ScopeName, ScopeLoc,
                                ParmName, ParmLoc, StepName, 0,

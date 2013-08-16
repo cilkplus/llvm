@@ -871,6 +871,10 @@ def err_simd_invalid_clause: Error<
 def err_simd_expected_reduction_operator: Error<
   "expected reduction operator">;
 
+// Cilk elemental functions
+def err_elemental_parameter_pack_unsupported: Error<
+  "template parameter pack is not supported in '%0' attribute">;
+
 // OpenMP support.
 def warn_pragma_omp_ignored : Warning <
   "unexpected '#pragma omp ...' in program">, InGroup<SourceUsesOpenMP>, DefaultIgnore;
