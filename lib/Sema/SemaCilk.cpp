@@ -2460,21 +2460,17 @@ void Sema::DiagnoseCilkSpawn(Stmt *S) {
   }
 }
 
-static IdentifierInfo *GetElementalStepParameterName(Attr *Attr) {
-  assert((isa<CilkLinearAttr>(Attr) || isa<CilkUniformAttr>(Attr)) &&
-         "Attr is not CilkLinear or CilkUniform!");
-  if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(Attr))
-    return A->getParameter();
-  else if (CilkUniformAttr *A = dyn_cast<CilkUniformAttr>(Attr))
-    return A->getParameter();
-  return 0;
-}
-
 bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
+  // Cache the function parameter with names.
+  llvm::SmallDenseMap<IdentifierInfo *, const ParmVarDecl *, 8> Params;
+  for (FunctionDecl::param_iterator I = FD->param_begin(), E = FD->param_end();
+      I != E; ++I)
+    if (IdentifierInfo *II = (*I)->getIdentifier())
+      Params[II] = *I;
+
   // Group elemental function attributes by vector() declaration.
   typedef llvm::SmallVector<Attr *, 4> AttrVec;
   typedef llvm::SmallDenseMap<unsigned, AttrVec, 4> GroupMap;
-  typedef std::map<StringRef, Attr*> ParamAttrMap;
 
   GroupMap Groups;
   for (Decl::attr_iterator AI = FD->attr_begin(), AE = FD->attr_end();
@@ -2503,64 +2499,80 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
     }
   }
 
+  // Within an attribute group, check the following:
+  //
+  // (1) No parameter of an elemental function shall be the subject of more
+  //     than one uniform or linear clause;
+  //
+  // (2) A parameter referenced as an elemental linear step shall be the
+  //     subject of a uniform clause.
+  //
   bool Valid = true;
   for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end();
        GI != GE; ++GI) {
-    llvm::SmallDenseMap<IdentifierInfo *, CilkUniformAttr *> UniformNames;
-    ParamAttrMap StepSizes;
     AttrVec &Attrs = GI->second;
 
-    // Collect parameters.
+    typedef llvm::SmallDenseMap<IdentifierInfo *, Attr *> SubjectAttrMapTy;
+    SubjectAttrMapTy SubjectNames;
+
+    // Check (1).
     for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
-      if (CilkUniformAttr *A = dyn_cast<CilkUniformAttr>(*I)) {
-        IdentifierInfo *P = A->getParameter();
-        UniformNames[P] = A;
-      }
+      IdentifierInfo *II = 0;
+      SourceLocation SubjectLoc;
 
-      // Check for contradictory or duplicate step specifications
-      if (isa<CilkLinearAttr>(*I) || isa<CilkUniformAttr>(*I)) {
-        IdentifierInfo *ParameterName = GetElementalStepParameterName(*I);
+      Attr *CurA = *I;
+      if (CilkUniformAttr *UA = dyn_cast<CilkUniformAttr>(CurA)) {
+        II = UA->getParameter();
+        SubjectLoc = UA->getParameterLoc();
+      } else if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(CurA)) {
+        II = LA->getParameter();
+        SubjectLoc = LA->getParameterLoc();
+      } else
+        continue;
 
-        ParamAttrMap::iterator SI = StepSizes.find(ParameterName->getName());
-        if (SI != StepSizes.end()) {
-          CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(*I);
-          Attr *ExistingAttr = SI->second;
-          CilkLinearAttr *OtherLinear = dyn_cast<CilkLinearAttr>(ExistingAttr);
-          CilkUniformAttr *OtherUniform = dyn_cast<CilkUniformAttr>(ExistingAttr);
+      // If this is the subject of a linear or uniform attribute, check if
+      // this is already the subject of a previous linear or uniform attribute.
+      if (Attr *PrevA = SubjectNames.lookup(II)) {
+        const ParmVarDecl *VD = Params[II];
+        assert(VD && "not a parameter name");
 
-          SourceLocation Loc = OtherLinear ? OtherLinear->getLocation()
-                                           : OtherUniform->getLocation();
+        Valid = false;
+        Diag(SubjectLoc, diag::err_cilk_elemental_subject) << VD;
 
-          // Found another linear or uniform attribute for this parameter.
-          // Check for inconsistency (one uniform and one linear, or both
-          // linear but with different steps). Everything else is a duplicate.
-          if ((*I)->getKind() != ExistingAttr->getKind() ||
-              (OtherLinear && LA &&
-               (LA->getStepParameter() != OtherLinear->getStepParameter() ||
-                LA->getStepValue() != OtherLinear->getStepValue())))
-            Diag(Loc, diag::err_cilk_elemental_inconsistent_step) <<
-              isa<CilkLinearAttr>(*I) << isa<CilkLinearAttr>(ExistingAttr);
-          else
-            Diag(Loc, diag::err_cilk_elemental_duplicate_step) <<
-              isa<CilkLinearAttr>(*I) << ParameterName->getName();
-
-          Diag(ExistingAttr->getLocation(), diag::note_previous_attribute);
-          Valid = false;
-        } else
-          StepSizes[ParameterName->getName()] = *I;
-      }
+        if (CilkUniformAttr *UA = dyn_cast<CilkUniformAttr>(PrevA))
+          Diag(UA->getParameterLoc(), diag::note_cilk_elemental_subject_clause)
+            << 0;
+        else if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(PrevA))
+          Diag(LA->getParameterLoc(), diag::note_cilk_elemental_subject_clause)
+            << 1;
+        Diag(VD->getLocation(), diag::note_cilk_elemental_subject_parameter);
+       } else
+         SubjectNames[II] = CurA;
     }
 
-    // Enforce constraints.
-    for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
-      if (CilkLinearAttr *A = dyn_cast<CilkLinearAttr>(*I))
-        if (IdentifierInfo *Step = A->getStepParameter())
-          if (UniformNames.find(Step) == UniformNames.end()) {
-            Diag(A->getStepLoc(), diag::err_cilk_elemental_step_not_uniform);
+    // Check (2).
+    for (SubjectAttrMapTy::iterator I = SubjectNames.begin(),
+                                    E = SubjectNames.end(); I != E; ++I) {
+      Attr *CurA = I->second;
+      if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(CurA)) {
+        if (IdentifierInfo *Step = LA->getStepParameter()) {
+          // If this is not a parameter name, then skip this check since
+          // it must be a compile time constant.
+          if (!Params.count(Step))
+            continue;
+
+          // Otherwise, this is referencing a parameter name, which shall be
+          // the subject of a uniform clause in this group.
+          Attr *A = SubjectNames.lookup(Step);
+          if (!A || !isa<CilkUniformAttr>(A)) {
+            Diag(LA->getStepLoc(), diag::err_cilk_elemental_step_not_uniform);
             Valid = false;
           }
+        }
+      }
     }
   }
+
   return Valid;
 }
 

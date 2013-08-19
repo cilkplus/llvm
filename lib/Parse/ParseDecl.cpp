@@ -1345,11 +1345,23 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
     if (AttrName.isStr("linear")) {
       if (Tok.is(tok::colon)) {
         ConsumeToken();
-        // This behaviour matches current icc (13.1.2) but may need to change.
-        if (Tok.is(tok::identifier)) {
+        // The grammar is ambiguous for the linear step, which could be a
+        // parameter name or a reference of a variable. To disambiguate it,
+        // we do a one token look ahead and perform a name lookup when all
+        // parameter names are available.
+        //
+        // If the linear step starts with an identifier and the following token
+        // is ')' or ',', then the step could be a parameter name or a reference
+        // to a declared variable. The second case will be left to Sema.
+        const Token &Next = GetLookAheadToken(1);
+        if (Tok.is(tok::identifier) && (Next.is(tok::r_paren) ||
+                                        Next.is(tok::comma))) {
           StepName = Tok.getIdentifierInfo();
           ConsumeToken();
         }
+
+        // If StepName is not null, then the step must be a compile time
+        // integer constant.
         if (!StepName) {
           ExprResult StepExpr = ParseConstantExpression();
           if (StepExpr.isInvalid()) {

@@ -6740,12 +6740,8 @@ def err_cilk_elemental_vectorlength: Error<
   "vectorlength must be positive">;
 def err_cilk_elemental_unrecognized_processor: Error<
   "unrecognized processor">;
-def err_cilk_elemental_inconsistent_step: Error<
-  "%select{uniform|linear}0 attribute inconsistent with previous %select{uniform|linear}1 attribute">;
 def err_cilk_elemental_linear_parameter_type: Error<
   "linear parameter must have integral or pointer type">;
-def err_cilk_elemental_duplicate_step: Error<
- "%select{uniform|linear}0 attribute already specified for parameter '%1'">;
 def warn_cilk_elemental_uniform_parameter_type: Warning<
   "uniform parameter must have integral or pointer type">,
   InGroup<SourceUsesCilkPlus>, DefaultWarn;
@@ -6762,6 +6758,12 @@ def err_cilk_elemental_exception_spec : Error<
   "exception specifications are not allowed on elemental functions">;
 def err_cilk_elemental_step_not_uniform : Error<
   "linear step parameter must also be uniform">;
+def err_cilk_elemental_subject: Error<
+ "parameter %0 cannot be the subject of two elemental clauses">;
+def note_cilk_elemental_subject_clause: Note<
+ "another %select{uniform|linear}0 clause here">;
+def note_cilk_elemental_subject_parameter: Note<
+ "parameter here">;
 
 // simd for
 def err_simd_for_body_no_construct: Error<

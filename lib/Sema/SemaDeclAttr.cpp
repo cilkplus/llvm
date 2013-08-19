@@ -2983,9 +2983,11 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   const FunctionDecl *FD = dyn_cast<FunctionDecl>(D);
   if (FD) {
     NumParams = FD->getNumParams();
-    for (; i != NumParams; ++i)
-      if ((Parm = FD->getParamDecl(i))->getName() == ParameterName->getName())
+    for (; i != NumParams; ++i) {
+      Parm = FD->getParamDecl(i);
+      if (Parm->getName().equals(ParameterName->getName()))
         break;
+    }
   }
   if (i == NumParams) {
     S.Diag(Attr.getParameterLoc(),
@@ -3001,16 +3003,49 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   switch (Attr.getKind()) {
   case AttributeList::AT_CilkLinear: {
     if (Attr.isDeclspecPropertyAttribute()) {
+      // Find the declaration that linear step is referencing, which could
+      // be a parameter name (ParmVarDecl), a template parameter
+      // (NonTypeTemplateParm) or a regular variable, etc.
+      const ValueDecl *StepDecl = 0;
       StepId = Attr.getPropertyData().GetterId;
       // FIXME: use the location of the step instead of the attribute
       StepLoc = Attr.getLoc();
-      for (i = 0; i != NumParams; ++i)
-        if (FD->getParamDecl(i)->getName() == StepId->getName())
+
+      // First, check if linear step is a parameter name.
+      assert(StepId && "null step name unexpected");
+      for (i = 0; i != NumParams; ++i) {
+        const ParmVarDecl *StepParm = FD->getParamDecl(i);
+        if (StepParm->getName().equals(StepId->getName())) {
+          StepDecl = StepParm;
           break;
-      if (i == NumParams) {
-        S.Diag(Attr.getLoc(),
-              diag::err_cilk_elemental_not_function_parameter);
-        return;
+        }
+      }
+
+      // If linear step is not a parameter, we perform a lookup to find
+      // the declaration which the step identifier is referencing to.
+      if (!StepDecl) {
+        DeclarationNameInfo Name(StepId, StepLoc);
+        LookupResult Result(S, Name, Sema::LookupOrdinaryName);
+        S.LookupName(Result, S.getCurScope());
+
+        if (Result.empty()) {
+          S.Diag(StepLoc, diag::err_undeclared_var_use) << StepId;
+          return;
+        } else if (Result.isSingleResult()) {
+          const NamedDecl *ND = Result.getFoundDecl();
+          assert(ND && "declaration not found");
+          if (const ValueDecl *VD = dyn_cast<ValueDecl>(ND)) {
+            StepDecl = VD;
+            // FIXME: check type of this found declaration.
+          } else {
+            S.Diag(StepLoc, diag::err_ref_non_value) << StepId;
+            S.Diag(ND->getLocation(), diag::note_declared_at);
+            return;
+          }
+        } else {
+          S.Diag(StepLoc, diag::err_cilk_elemental_not_function_parameter);
+          return;
+        }
       }
     } else if (NumArgs == 0)
       Step = 1;

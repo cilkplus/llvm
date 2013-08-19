@@ -54,9 +54,9 @@ ATTR(vector(uniform(1))) // expected-error {{expected identifier}}
 ATTR(vector(uniform(w))) // expected-error {{not a function parameter}}
 ATTR(vector(uniform(z))) // OK
 ATTR(vector(uniform(y))) // OK
-ATTR(vector(uniform(x), uniform(x))) // expected-error {{uniform attribute already specified for parameter 'x'}} \
-                                     // expected-note {{previous attribute is here}}
-int test_uniform_1(int x, int &y, float z);
+ATTR(vector(uniform(x), uniform(x))) // expected-error {{parameter 'x' cannot be the subject of two elemental clauses}} \
+                                     // expected-note {{another uniform clause here}}
+int test_uniform_1(int x, int &y, float z); // expected-note {{parameter here}}
 
 // linear clause
 ATTR(vector(linear(x))) // OK
@@ -65,17 +65,41 @@ ATTR(vector(linear()))  // expected-error {{expected identifier}}
 ATTR(vector(linear(1))) // expected-error {{expected identifier}}
 ATTR(vector(linear(w))) // expected-error {{not a function parameter}}
 ATTR(vector(linear(x:)))             // expected-error {{expected expression}}
-ATTR(vector(linear(x), linear(x)))   // expected-error {{linear attribute already specified for parameter 'x'}} \
-                                     // expected-note {{previous attribute is here}}
-ATTR(vector(linear(x), linear(x:2))) // expected-error {{linear attribute inconsistent with previous linear attribute}} \
-                                     // expected-note {{previous attribute is here}}
-ATTR(vector(linear(x), uniform(x)))  // expected-error {{linear attribute inconsistent with previous uniform attribute}} \
-                                     // expected-note {{previous attribute is here}}
-ATTR(vector(linear(x:w)))            // expected-error {{not a function parameter}}
+ATTR(vector(linear(x), linear(x)))   // expected-error {{parameter 'x' cannot be the subject of two elemental clauses}} \
+                                     // expected-note {{clause here}}
+ATTR(vector(linear(x), linear(x:2))) // expected-error {{parameter 'x' cannot be the subject of two elemental clauses}} \
+                                     // expected-note {{another linear clause here}}
+ATTR(vector(linear(x), uniform(x)))  // expected-error {{parameter 'x' cannot be the subject of two elemental clauses}} \
+                                     // expected-note {{here}}
+ATTR(vector(linear(x:w)))            // expected-error {{use of undeclared identifier 'w'}}
 ATTR(vector(linear(x:y)))            // expected-error {{linear step parameter must also be uniform}}
 ATTR(vector(linear(z))) // expected-error {{linear parameter must have integral or pointer type}}
 ATTR(vector(linear(r))) // expected-error {{linear parameter must have integral or pointer type}}
-int test_linear_1(int &r, int x, int y, float z);
+int test_linear_1(int &r, int x, int y, float z); // expected-note 3{{parameter here}}
+
+const int s = 1;
+ATTR(vector(linear(x:s)))           // OK
+ATTR(vector(linear(x:ss)))          // expected-error {{use of undeclared identifier}}
+ATTR(vector(linear(x:s, y:ss)))     // expected-error {{use of undeclared identifier}}
+ATTR(vector(linear(x:s+1, y:1+s)))  // OK
+int test_linear_step(int x, int y);
+
+template <int N>
+ATTR(vector(linear(x:N)))           // OK
+int test_linear_step(int x);
+
+struct Class {};                    // expected-note {{declared here}}
+ATTR(vector(linear(x:Class)))       // expected-error {{does not refer to a value}}
+int test_linear_step(int x);
+
+struct Class2 {
+  static const int ss = 2;
+  enum { sss = 3 };
+  ATTR(vector(linear(x:s)))         // OK
+  ATTR(vector(linear(x:ss)))        // OK  
+  ATTR(vector(linear(x:sss)))       // OK  
+  int test_linear_step(int x);
+};
 
 // mask clause
 ATTR(vector(mask(1))) // expected-error {{attribute takes no arguments}}
