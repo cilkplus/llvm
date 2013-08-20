@@ -2936,7 +2936,7 @@ static void handleCilkVecLengthAttr(Sema &S, Decl *D,
   for (unsigned I = 0; I < NumArgs; ++I) {
     Expr *LengthExpr = Attr.getArg(I);
     ExprResult Result = S.CheckCilkVecLengthArg(LengthExpr);
-    if (Result.isInvalid()) {
+    if (!Result.isUsable()) {
       Attr.setInvalid();
       return;
     }
@@ -2971,134 +2971,141 @@ static void handleCilkVecLengthForAttr(Sema &S, Decl *D,
                                   Attr.getScopeLoc(), ParmType));
 }
 
-static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
-  IdentifierInfo *ParameterName = Attr.getParameterName();
-  if (!ParameterName) {
+static bool diagnoseCilkAttrSubject(Sema &S, const FunctionDecl *FD,
+                                    const AttributeList &Attr) {
+  assert(FD && "null function declaration");
+  IdentifierInfo *SubjectName = Attr.getParameterName();
+  if (!SubjectName) {
     S.Diag(Attr.getLoc(), diag::err_attribute_argument_type)
       << Attr.getName() << AANT_ArgumentIdentifier;
-    return;
+    return false;
   }
-  const ParmVarDecl *Parm = 0;
-  unsigned i = 0, NumParams = 0;
-  const FunctionDecl *FD = dyn_cast<FunctionDecl>(D);
-  if (FD) {
-    NumParams = FD->getNumParams();
-    for (; i != NumParams; ++i) {
-      Parm = FD->getParamDecl(i);
-      if (Parm->getName().equals(ParameterName->getName()))
-        break;
+
+  // Check the subject is a function parameter name.
+  const VarDecl *Param = 0;
+  StringRef Name = SubjectName->getName();
+  for (FunctionDecl::param_const_iterator I = FD->param_begin(),
+                                          E = FD->param_end();
+                                          I != E; ++I)
+    if ((*I)->getName().equals(Name)) {
+      Param = *I;
+      break;
     }
-  }
-  if (i == NumParams) {
+
+  if (!Param) {
     S.Diag(Attr.getParameterLoc(),
            diag::err_cilk_elemental_not_function_parameter);
+    return false;
+  }
+
+  return true;
+}
+
+static void handleCilkUniformAttr(Sema &S, Decl *D,
+                                  const AttributeList &Attr) {
+  const FunctionDecl *FD = dyn_cast<FunctionDecl>(D);
+  if (!FD || FD->isInvalidDecl())
+    return;
+
+  if (!diagnoseCilkAttrSubject(S, FD, Attr))
+    return;
+
+  if (unsigned NumArgs = Attr.getNumArgs()) {
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
+      << Attr.getName() << NumArgs;
     return;
   }
 
+  // Add the uniform attribute to the function.
+  CilkUniformAttr *UniformAttr = ::new (S.Context) CilkUniformAttr(
+      Attr.getLoc(), S.Context, Attr.getScopeLoc(),
+      Attr.getParameterName(), Attr.getParameterLoc());
+  D->addAttr(UniformAttr);
+}
+
+static void handleCilkLinearAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+  FunctionDecl *FD = dyn_cast<FunctionDecl>(D);
+  if (!FD || FD->isInvalidDecl())
+    return;
+
+  if (!diagnoseCilkAttrSubject(S, FD, Attr))
+    return;
+
+  Expr *StepExpr = 0;
   unsigned NumArgs = Attr.getNumArgs();
-  int64_t Step = 0;
-  IdentifierInfo *StepId = 0;
-  SourceLocation StepLoc;
 
-  switch (Attr.getKind()) {
-  case AttributeList::AT_CilkLinear: {
-    if (NumArgs == 0)
-      Step = 1;
-    else if (NumArgs == 1) {
-      if (Attr.hasIdentifierArgs()) {
-        // Find the declaration that the linear step is referencing, which
-        // could be a parameter name (ParmVarDecl), a template parameter
-        // (NonTypeTemplateParm) or a regular variable.
-        const ValueDecl *StepDecl = 0;
-        StepId = Attr.getIdArg(0).Id;
-        StepLoc = Attr.getIdArg(0).Loc;
+  if (Attr.hasIdentifierArgs()) {
+    assert((NumArgs == 1) && "one argument expected");
+    IdentifierInfo *StepId = Attr.getIdArg(0).Id;
+    SourceLocation StepLoc = Attr.getIdArg(0).Loc;
 
-        // First, check if linear step is a parameter name.
-        assert(StepId && "null step name unexpected");
-        for (i = 0; i != NumParams; ++i) {
-          const ParmVarDecl *StepParm = FD->getParamDecl(i);
-          if (StepParm->getName().equals(StepId->getName())) {
-            StepDecl = StepParm;
-            break;
-          }
-        }
+    // First, check if linear step is a parameter name.
+    assert(StepId && "null step name unexpected");
+    for (unsigned i = 0, NumParams = FD->getNumParams(); i < NumParams; ++i) {
+      ParmVarDecl *StepParm = FD->getParamDecl(i);
+      if (StepParm->getName().equals(StepId->getName())) {
+        Sema::ContextRAII SavedContext(S, StepParm->getDeclContext());
+        QualType Ty = StepParm->getType().getNonReferenceType();
+        ExprResult Ref = S.BuildDeclRefExpr(StepParm, Ty, VK_LValue, StepLoc);
+        assert(Ref.isUsable() && "reference cannot fail");
+        StepExpr = Ref.release();
+        break;
+      }
+    }
 
-        // If linear step is not a parameter, we perform a lookup to find
-        // the declaration which the step identifier is referencing to.
-        if (!StepDecl) {
-          DeclarationNameInfo Name(StepId, StepLoc);
-          LookupResult Result(S, Name, Sema::LookupOrdinaryName);
-          S.LookupName(Result, S.getCurScope());
+    // If linear step is not a parameter, we perform a lookup to find
+    // the declaration which the step identifier is referencing to.
+    if (!StepExpr) {
+      DeclarationNameInfo Name(StepId, StepLoc);
+      LookupResult Result(S, Name, Sema::LookupOrdinaryName);
+      S.LookupName(Result, S.getCurScope());
 
-          if (Result.empty()) {
-            S.Diag(StepLoc, diag::err_undeclared_var_use) << StepId;
-            return;
-          } else if (Result.isSingleResult()) {
-            const NamedDecl *ND = Result.getFoundDecl();
-            assert(ND && "declaration not found");
-            if (const ValueDecl *VD = dyn_cast<ValueDecl>(ND)) {
-              StepDecl = VD;
-              // FIXME: check type of this found declaration.
-            } else {
-              S.Diag(StepLoc, diag::err_ref_non_value) << StepId;
-              S.Diag(ND->getLocation(), diag::note_declared_at);
-              return;
-            }
-          } else {
-            S.Diag(StepLoc, diag::err_cilk_elemental_not_function_parameter);
-            return;
-          }
-        }
-      } else {
-        Expr *StepExpr = Attr.getArg(0);
-        llvm::APSInt StepValue;
-        if (StepExpr->isTypeDependent() || StepExpr->isValueDependent() ||
-            !StepExpr->isIntegerConstantExpr(StepValue, S.Context)) {
-          S.Diag(Attr.getLoc(), diag::err_attribute_argument_type)
-            << Attr.getName() << AANT_ArgumentIntegerConstant
-            << StepExpr->getSourceRange();
-          Attr.setInvalid();
+      if (Result.empty()) {
+        S.Diag(StepLoc, diag::err_undeclared_var_use) << StepId;
+        return;
+      } else if (Result.isSingleResult()) {
+        NamedDecl *ND = Result.getFoundDecl();
+        assert(ND && "declaration not found");
+        if (!isa<ValueDecl>(ND)) {
+          S.Diag(StepLoc, diag::err_ref_non_value) << StepId;
+          S.Diag(ND->getLocation(), diag::note_declared_at);
           return;
         }
-        Step = StepValue.getSExtValue();
-        StepLoc = StepExpr->getExprLoc();
+        CXXScopeSpec SS;
+        ExprResult Ref = S.BuildDeclarationNameExpr(SS, Result, /*ADL*/false);
+        if (!Ref.isUsable())
+          return;
+        StepExpr = Ref.release();
+      } else {
+        S.Diag(StepLoc, diag::err_cilk_elemental_not_function_parameter);
+        return;
       }
-    } else {
-      S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
-        << Attr.getName() << 1;
-      return;
     }
+  } else if (NumArgs == 0) {
+    // By default, the step is 1.
+    SourceLocation StepLoc = Attr.getParameterLoc();
+    StepExpr = IntegerLiteral::Create(S.Context, llvm::APInt(32, 1),
+                                      S.Context.IntTy, StepLoc);
+  } else if (NumArgs == 1) {
+    assert(!Attr.hasIdentifierArgs() && "non-identifier argument expected");
+    StepExpr = Attr.getArg(0);
+  } else {
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
+      << Attr.getName() << 1;
+    return;
+  }
 
-    // Check that the parameter is a pointer or integer.
-    if (!Parm->getType()->isIntegralType(D->getASTContext()) &&
-        !Parm->getType()->isPointerType())
-      S.Diag(Attr.getParameterLoc(),
-             diag::err_cilk_elemental_linear_parameter_type);
+  StepExpr = S.CheckCilkLinearArg(StepExpr);
+  if (!StepExpr)
+    return;
 
-    // Add the linear attribute to the function
-    CilkLinearAttr *LinearAttr = ::new (S.Context) CilkLinearAttr(Attr.getLoc(),
-        S.Context, Attr.getScopeLoc(), ParameterName, Attr.getParameterLoc(),
-        StepId, Step, StepLoc);
-    D->addAttr(LinearAttr);
-    break;
-  }
-  case AttributeList::AT_CilkUniform: {
-    if (NumArgs) {
-      S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
-        << Attr.getName() << NumArgs;
-      return;
-    }
-    // Add the uniform attribute to the function
-    CilkUniformAttr *UniformAttr = ::new (S.Context) CilkUniformAttr(
-        Attr.getLoc(), S.Context, Attr.getScopeLoc(),
-        ParameterName, Attr.getParameterLoc());
-    D->addAttr(UniformAttr);
-    break;
-  }
-  default:
-    assert(0 && "attribute is not 'linear' or 'uniform'");
-    break;
-  }
+  // Add the linear attribute to the function.
+  CilkLinearAttr *LinearAttr =
+    ::new (S.Context) CilkLinearAttr(Attr.getLoc(), S.Context,
+                                     Attr.getScopeLoc(),
+                                     Attr.getParameterName(),
+                                     Attr.getParameterLoc(), StepExpr);
+  D->addAttr(LinearAttr);
 }
 
 static void handleEndianAttr(Sema &S, Decl *D, const AttributeList &Attr) {
@@ -5323,8 +5330,10 @@ static void ProcessInheritableDeclAttr(Sema &S, Scope *scope, Decl *D,
     handleCilkProcessorAttr(S, D, Attr);
     break;
   case AttributeList::AT_CilkLinear:
+    handleCilkLinearAttr(S, D, Attr);
+    break;
   case AttributeList::AT_CilkUniform:
-    handleCilkStepAttr(S, D, Attr);
+    handleCilkUniformAttr(S, D, Attr);
     break;
   case AttributeList::AT_CilkVecLength:
     handleCilkVecLengthAttr(S, D, Attr);

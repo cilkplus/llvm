@@ -65,37 +65,30 @@ void test2() {
 
 } // test_vectorlength
 
-
 namespace test_no_instantiation {
-#if 0
 template <class C>
 ATTR(vector(linear(linear_var))) // OK
 void test_template_linear0(C linear_var);
 
 // spec issue (linear step)
 template <int *Step>
-ATTR(vector(linear(linear_var:Step))) // expected-error {{linear-step must be an integer constant expression}}
+ATTR(vector(linear(linear_var:Step))) // expected-error {{linear step has non-integer type 'int *'}}
 void test_template_step1(int linear_var);
-#endif
 
 template <class C, int *Step>
 struct Y {
-  ATTR(vector(linear(linear_var))) // expected-error {{linear parameter must have integral or pointer type}}
+  ATTR(vector(linear(linear_var)))
   void test_template_struct1(C linear_var);
 
-#if 0
   // Spec issue (linear step)
-  ATTR(vector(linear(linear_var:Step))) // expected-error {{linear-step must be an integer constant expression}}
+  ATTR(vector(linear(linear_var:Step))) // expected-error {{linear step has non-integer type 'int *'}}
   void test_template_step1(int linear_var);
 
-  ATTR(vector(vectorlength(Step)))  // expected-error {{'vectorlength' attribute requires integer constant}}
+  ATTR(vector(vectorlength(Step)))  // expected-error {{vectorlength attribute requires an integer constant}}
   void test_template_vectorlength1();
-#endif
 };
 } // test_no_instantiation
 
-// disabled tests - re-enable when features are implemented
-#if 0
 // tests with instantiation
 template <typename T>
 ATTR(vector(vectorlengthfor(T))) // OK
@@ -114,8 +107,8 @@ ATTR(vector(linear(linear_var:I))) // OK
 void test_template_linear1(int linear_var);
 
 template <typename T>
-ATTR(vector(linear(linear_var)))
-void test_template_linear2(T linear_var);
+ATTR(vector(linear(linear_var))) // expected-error{{linear parameter type 'X' is not an integer or pointer type}}
+void test_template_linear2(T linear_var); // expected-note {{here}}
 
 template <typename T, int I, typename N>
 ATTR(vector(linear(linear_var), vectorlength(I), uniform(uniform_var)))
@@ -126,7 +119,7 @@ struct S {
   ATTR(vector(vectorlengthfor(T), uniform(uniform_var)))
   void test_template_struct1(T uniform_var);
 
-  ATTR(vector(vectorlength(I), linear(linear_var:I))) // expected-error {{linear parameter must have integral or pointer type}}
+  ATTR(vector(vectorlength(I), linear(linear_var:I))) // expected-error {{linear parameter type 'X' is not an integer or pointer type}}
   void test_template_struct2(T linear_var);
 
   ATTR(vector(vectorlength(I)))
@@ -136,7 +129,6 @@ struct S {
   ATTR(vector(vectorlengthfor(N)))
   void test_template_struct4(T arg);
 };
-#endif // template tests
 
 // parameter packs
 template <typename T, typename... Ts>
@@ -155,6 +147,7 @@ void test_template_parameterpack3(Ts... args);
 template <typename... Ts>
 ATTR(vector(vectorlengthfor(Ts...))) // expected-error {{parameter pack not allowed in vectorlengthfor}}
 void test_template_parameterpack4(Ts... args);
+#endif
 
 // SFINAE
 template <typename T>
@@ -197,7 +190,7 @@ void template_tests() {
   test_template_linear1<sizeof(X)>(i);  // OK
 
   test_template_linear2<int>(i); // OK
-  test_template_linear2<X>(x);   // OK
+  test_template_linear2<X>(x);   // Not OK
   test_template_linear2<X*>(&x); // OK
   test_template_linear2<decltype(i)>(i); // OK
 
@@ -206,7 +199,7 @@ void template_tests() {
 
   S<int, 8> s1; // OK
   s1.test_template_struct1(i); // OK
-  s1.test_template_struct2(i); // OK
+  s1.test_template_struct2(i); // Not OK
   s1.test_template_struct3();  // OK
   s1.test_template_struct4<X>(i); // OK
 
@@ -215,13 +208,65 @@ void template_tests() {
   S<int, CC> s3; // OK
   (void)s3;
 
-  S<X, 4> s4;
+  S<X, 4> s4; // expected-note {{here}}
 
   test_template_parameterpack1<int, int*, char*>(i, &i, c); // OK
-  test_template_parameterpack2<int, X, int*, char*, E>(i, x, &i, c, e); // OK
-  test_template_parameterpack3<int, int*, char*, E>(i, &i, c, e); // OK
+  test_template_parameterpack2<int, X, int*, char*, E>(i, x, &i, c, e); // Not OK
+  test_template_parameterpack3<int, int*, char*, E>(i, &i, c, e); // Not OK
 
   sfinae1<int>(8); // OK
 }
 
-#endif //template tests
+namespace test_linear_step {
+
+constexpr int ConstVal() { return 5; }
+
+template <int I>
+__attribute__((vector(linear(linear_var:I)))) // OK
+void integer1(int linear_var);
+
+template <int I>
+__attribute__((vector(linear(linear_var:2+I)))) // OK
+void integer2(int linear_var);
+
+template <int I, int J>
+__attribute__((vector(linear(linear_var:I+J)))) // OK
+void integer3(int linear_var);
+
+template <typename T>
+__attribute__((vector(linear(linear_var:step), uniform(step)))) // expected-error 2{{linear step has non-integer type}}
+void typed(int linear_var, T step); // expected-note 2{{here}}
+
+void test1() {
+  int x, y;
+  char *c;
+  integer1<4>(x); // OK
+  integer1<ConstVal()>(x); // OK
+  integer1<sizeof(x)>(x); // OK
+
+  integer2<7>(x); // OK
+  integer2<ConstVal()>(x); // OK
+  integer2<sizeof(x)>(x); // OK
+
+  integer3<7, 11>(x); // OK
+  integer3<ConstVal(), 64>(x); // OK
+  integer3<sizeof(x), ConstVal()>(x); // OK
+
+  typed<int>(x, y); // OK
+  typed<void*>(x, c); // Not OK
+  typed<decltype(c)>(x, c); // Not OK
+}
+
+const int s = 1;
+template <int ssss>
+struct Class {
+  static const int ss = 2;
+  enum { sss = 3 };
+  __attribute__((vector(linear(x:s))))       // OK  
+  __attribute__((vector(linear(x:ss))))      // OK  
+  __attribute__((vector(linear(x:sss))))     // OK  
+  __attribute__((vector(linear(x:ssss))))    // OK  
+  int foo(int x);
+};
+
+} // test_linear_step

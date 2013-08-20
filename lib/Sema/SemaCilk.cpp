@@ -2504,7 +2504,9 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   // (1) No parameter of an elemental function shall be the subject of more
   //     than one uniform or linear clause;
   //
-  // (2) A parameter referenced as an elemental linear step shall be the
+  // (2) An elemental linear variable shall have integeral or pointer type;
+  //
+  // (3) A parameter referenced as an elemental linear step shall be the
   //     subject of a uniform clause.
   //
   bool Valid = true;
@@ -2550,11 +2552,24 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
          SubjectNames[II] = CurA;
     }
 
-    // Check (2).
     for (SubjectAttrMapTy::iterator I = SubjectNames.begin(),
                                     E = SubjectNames.end(); I != E; ++I) {
       Attr *CurA = I->second;
       if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(CurA)) {
+        // Check (2)
+        // FIXME: This does not handle 'linear(this)'.
+        IdentifierInfo *Subject = LA->getParameter();
+        const ParmVarDecl *Param = Params.lookup(Subject);
+        assert(Param && "invalid linear clause");
+        QualType Ty = Param->getType();
+        if (!Ty->isDependentType() && !Ty->isIntegralType(Context)
+                                   && !Ty->isPointerType()) {
+          Diag(LA->getParameterLoc(),
+               diag::err_cilk_elemental_linear_parameter_type) << Ty;
+          Valid = false;
+        }
+
+        // Check (3)
         if (IdentifierInfo *Step = LA->getStepParameter()) {
           // If this is not a parameter name, then skip this check since
           // it must be a compile time constant.
@@ -2580,7 +2595,7 @@ Expr *Sema::CheckCilkVecLengthArg(Expr *E) {
   if (!E)
     return E;
 
-  SourceLocation ExprLoc = E->getLocStart();
+  SourceLocation ExprLoc = E->getExprLoc();
   QualType Ty = E->getType().getNonReferenceType();
 
   // Check type.
@@ -2594,7 +2609,7 @@ Expr *Sema::CheckCilkVecLengthArg(Expr *E) {
 
   // Check value if it is not inside a template.
   if (!E->isInstantiationDependent()) {
-    llvm::APSInt Val;
+    llvm::APSInt Val(Context.getTypeSize(Ty), /*isUnsigned*/false);
     SourceLocation BadExprLoc;
 
     if (!E->isIntegerConstantExpr(Val, Context, &BadExprLoc)) {
@@ -2620,5 +2635,40 @@ Expr *Sema::CheckCilkVecLengthArg(Expr *E) {
   }
 
   // Cannot evaluate this expression yet.
+  return E;
+}
+
+Expr *Sema::CheckCilkLinearArg(Expr *E) {
+  if (!E)
+    return E;
+
+  SourceLocation ExprLoc = E->getExprLoc();
+  QualType Ty = E->getType().getNonReferenceType();
+
+  // Check type.
+  if (!E->isTypeDependent() && !Ty->isIntegralOrEnumerationType()) {
+    Diag(ExprLoc, diag::err_cilk_elemental_linear_step_not_integral)
+      << E->getType() << E->getSourceRange();
+    return 0;
+  }
+
+  if (!E->isInstantiationDependent()) {
+    // If this is a parameter name, then return itself. Otherwise, make
+    // sure it is an integer constant.
+    if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E))
+      if (isa<ParmVarDecl>(DRE->getDecl()))
+        return E;
+
+    llvm::APSInt Val(Context.getTypeSize(Ty), /*isUnsigned*/false);
+    if (!E->isIntegerConstantExpr(Val, Context)) {
+      Diag(ExprLoc, diag::err_cilk_elemental_linear_step_not_constant)
+        << E->getSourceRange();
+      return 0;
+    }
+
+    // Create an integeral literal for the final attribute.
+    return IntegerLiteral::Create(Context, Val, Ty, ExprLoc);
+  }
+
   return E;
 }

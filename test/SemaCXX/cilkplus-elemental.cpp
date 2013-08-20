@@ -73,8 +73,8 @@ ATTR(vector(linear(x), uniform(x)))  // expected-error {{parameter 'x' cannot be
                                      // expected-note {{here}}
 ATTR(vector(linear(x:w)))            // expected-error {{use of undeclared identifier 'w'}}
 ATTR(vector(linear(x:y)))            // expected-error {{linear step parameter must also be uniform}}
-ATTR(vector(linear(z))) // expected-error {{linear parameter must have integral or pointer type}}
-ATTR(vector(linear(r))) // expected-error {{linear parameter must have integral or pointer type}}
+ATTR(vector(linear(z))) // expected-error {{linear parameter type 'float' is not an integer or pointer type}}
+ATTR(vector(linear(r))) // expected-error {{linear parameter type 'int &' is not an integer or pointer type}}
 int test_linear_1(int &r, int x, int y, float z); // expected-note 3{{parameter here}}
 
 const int s = 1;

@@ -204,10 +204,12 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
         }
       } else if (IdentifierInfo *S = (*SI)->getStepParameter()) {
         StepArgs.push_back(llvm::MDString::get(Context, S->getName()));
-      } else {
-        StepArgs.push_back(llvm::ConstantInt::get(IntTy,
-                                                  (*SI)->getStepValue()));
-      }
+      } else if (IntegerLiteral *E
+          = dyn_cast<IntegerLiteral>((*SI)->getStepExpr())) {
+        int Val = E->getValue().getSExtValue();
+	      StepArgs.push_back(llvm::ConstantInt::get(IntTy, Val));
+      } else
+        ErrorUnsupported((*SI)->getStepExpr(), "unexpected step expression");
     }
     llvm::MDNode *StepNode = llvm::MDNode::get(Context, StepArgs);
     if (!ParameterNameNode)

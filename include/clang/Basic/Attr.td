@@ -1217,11 +1217,24 @@ def CilkLinear : InheritableAttr {
   let Args = [SourceLocArgument<"Group">,
               IdentifierArgument<"Parameter">,
               SourceLocArgument<"ParameterLoc">,
-              IdentifierArgument<"StepParameter">,
-              IntArgument<"StepValue">,
-              SourceLocArgument<"StepLoc">];
+              CheckedExprArgument<"StepExpr">];
   let Subjects = [Function];
   let TemplateDependent = 1;
+  let AdditionalMembers =
+    [{
+      IdentifierInfo *getStepParameter() const {
+        DeclRefExpr *E = dyn_cast_or_null<DeclRefExpr>(getStepExpr());
+        return E ? E->getDecl()->getIdentifier() : 0;
+      }
+      SourceLocation getStepLoc() const {
+        Expr *E = getStepExpr();
+        return E ? E->getExprLoc() : SourceLocation();
+      }
+      template <typename SemaMemberPtr>
+        Expr *CheckArgument(Sema &S, Expr *E, SemaMemberPtr Fn) const {
+        return (S.*Fn)(E);
+      }
+    }];
 }
 
 def CilkUniform : InheritableAttr {

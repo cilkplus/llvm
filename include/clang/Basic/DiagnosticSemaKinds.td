@@ -6741,10 +6741,7 @@ def err_cilk_elemental_vectorlength: Error<
 def err_cilk_elemental_unrecognized_processor: Error<
   "unrecognized processor">;
 def err_cilk_elemental_linear_parameter_type: Error<
-  "linear parameter must have integral or pointer type">;
-def warn_cilk_elemental_uniform_parameter_type: Warning<
-  "uniform parameter must have integral or pointer type">,
-  InGroup<SourceUsesCilkPlus>, DefaultWarn;
+  "linear parameter type %0 is not an integer or pointer type">;
 def warn_cilk_elemental_inconsistent_vectorlengthfor: Warning<
   "inconsistent vectorlengthfor attribute">,
   InGroup<SourceUsesCilkPlus>, DefaultWarn;
@@ -6759,11 +6756,15 @@ def err_cilk_elemental_exception_spec : Error<
 def err_cilk_elemental_step_not_uniform : Error<
   "linear step parameter must also be uniform">;
 def err_cilk_elemental_subject: Error<
- "parameter %0 cannot be the subject of two elemental clauses">;
+  "parameter %0 cannot be the subject of two elemental clauses">;
 def note_cilk_elemental_subject_clause: Note<
- "another %select{uniform|linear}0 clause here">;
+  "another %select{uniform|linear}0 clause here">;
 def note_cilk_elemental_subject_parameter: Note<
- "parameter here">;
+  "parameter here">;
+def err_cilk_elemental_linear_step_not_integral : Error<
+  "linear step has non-integer type %0">;
+def err_cilk_elemental_linear_step_not_constant : Error<
+  "linear step is not constant">;
 
 // simd for
 def err_simd_for_body_no_construct: Error<
