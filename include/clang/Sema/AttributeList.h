@@ -100,6 +100,9 @@ private:
   /// Microsoft __delcspec(property) attribute.
   unsigned IsProperty : 1;
 
+  /// True if this has extra IdentifierData arguments associated with it.
+  unsigned HasIdentifierDataArgs : 1;
+
   unsigned AttrKind : 8;
 
   /// \brief The location of the 'unavailable' keyword in an
@@ -115,10 +118,10 @@ private:
   AttributeList *NextInPool;
 
   Expr **getArgsBuffer() {
-    return reinterpret_cast<Expr**>(this+1);
+    return reinterpret_cast<Expr**>(this + 1);
   }
   Expr * const *getArgsBuffer() const {
-    return reinterpret_cast<Expr* const *>(this+1);
+    return reinterpret_cast<Expr* const *>(this + 1);
   }
 
   enum AvailabilitySlot {
@@ -142,6 +145,13 @@ public:
     IdentifierInfo *GetterId, *SetterId;
     PropertyData(IdentifierInfo *getterId, IdentifierInfo *setterId)
     : GetterId(getterId), SetterId(setterId) {}
+  };
+
+  struct IdentifierData {
+    IdentifierInfo *Id;
+    SourceLocation Loc;
+    IdentifierData(IdentifierInfo *id, const SourceLocation &loc)
+    : Id(id), Loc(loc) {}
   };
 
 private:
@@ -171,6 +181,14 @@ private:
     return *reinterpret_cast<const PropertyData*>(this + 1);
   }
 
+  IdentifierData *getIdArgsBuffer() {
+    return reinterpret_cast<IdentifierData*>(this+1);
+  }
+
+  const IdentifierData *getIdArgsBuffer() const {
+    return reinterpret_cast<const IdentifierData*>(this+1);
+  }
+
   AttributeList(const AttributeList &) LLVM_DELETED_FUNCTION;
   void operator=(const AttributeList &) LLVM_DELETED_FUNCTION;
   void operator delete(void *) LLVM_DELETED_FUNCTION;
@@ -188,9 +206,27 @@ private:
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
       EllipsisLoc(ellipsisLoc), NumArgs(numArgs), SyntaxUsed(syntaxUsed),
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
-      IsTypeTagForDatatype(false), IsProperty(false), NextInPosition(0),
-      NextInPool(0) {
+      IsTypeTagForDatatype(false), IsProperty(false), HasIdentifierDataArgs(false),
+      NextInPosition(0), NextInPool(0) {
     if (numArgs) memcpy(getArgsBuffer(), args, numArgs * sizeof(Expr*));
+    AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
+  }
+
+  /// Constructor for attributes with identifier and source location arguments.
+  AttributeList(IdentifierInfo *attrName, SourceRange attrRange,
+                IdentifierInfo *scopeName, SourceLocation scopeLoc,
+                IdentifierInfo *parmName, SourceLocation parmLoc,
+                IdentifierData *args, unsigned numArgs,
+                Syntax syntaxUsed)
+    : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
+      AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
+      EllipsisLoc(SourceLocation()), NumArgs(numArgs), SyntaxUsed(syntaxUsed),
+      Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
+      IsTypeTagForDatatype(false), IsProperty(false), HasIdentifierDataArgs(true),
+      NextInPosition(0), NextInPool(0) {
+
+    if (numArgs)
+      memcpy(getArgsBuffer(), args, numArgs * sizeof(IdentifierData));
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
 
@@ -208,7 +244,7 @@ private:
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc), EllipsisLoc(),
       NumArgs(0), SyntaxUsed(syntaxUsed),
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(true),
-      IsTypeTagForDatatype(false), IsProperty(false),
+      IsTypeTagForDatatype(false), IsProperty(false), HasIdentifierDataArgs(false),
       UnavailableLoc(unavailable), MessageExpr(messageExpr),
       NextInPosition(0), NextInPool(0) {
     new (&getAvailabilitySlot(IntroducedSlot)) AvailabilityChange(introduced);
@@ -228,8 +264,8 @@ private:
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(argumentKindLoc),
       EllipsisLoc(), NumArgs(0), SyntaxUsed(syntaxUsed),
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
-      IsTypeTagForDatatype(true), IsProperty(false), NextInPosition(NULL),
-      NextInPool(NULL) {
+      IsTypeTagForDatatype(true), IsProperty(false), HasIdentifierDataArgs(false),
+      NextInPosition(NULL), NextInPool(NULL) {
     TypeTagForDatatypeData &ExtraData = getTypeTagForDatatypeDataSlot();
     new (&ExtraData.MatchingCType) ParsedType(matchingCType);
     ExtraData.LayoutCompatible = layoutCompatible;
@@ -246,8 +282,8 @@ private:
         AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
         EllipsisLoc(), NumArgs(1), SyntaxUsed(syntaxUsed), Invalid(false),
         UsedAsTypeAttr(false), IsAvailability(false),
-        IsTypeTagForDatatype(false), IsProperty(false), NextInPosition(0),
-        NextInPool(0) {
+        IsTypeTagForDatatype(false), IsProperty(false), HasIdentifierDataArgs(false),
+        NextInPosition(0), NextInPool(0) {
     new (&getTypeBuffer()) ParsedType(typeArg);
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
@@ -263,8 +299,8 @@ private:
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
       SyntaxUsed(syntaxUsed),
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
-      IsTypeTagForDatatype(false), IsProperty(true), NextInPosition(0),
-      NextInPool(0) {
+      IsTypeTagForDatatype(false), IsProperty(true), HasIdentifierDataArgs(false),
+      NextInPosition(0), NextInPool(0) {
     new (&getPropertyDataBuffer()) PropertyData(getterId, setterId);
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
@@ -295,6 +331,10 @@ public:
   /// Is this the Microsoft __declspec(property) attribute?
   bool isDeclspecPropertyAttribute() const  {
     return IsProperty;
+  }
+
+  bool hasIdentifierArgs() const {
+    return HasIdentifierDataArgs;
   }
 
   bool isAlignasAttribute() const {
@@ -333,8 +373,16 @@ public:
 
   /// getArg - Return the specified argument.
   Expr *getArg(unsigned Arg) const {
+    assert(!HasIdentifierDataArgs && "Stored arg is not Expr!");
     assert(Arg < NumArgs && "Arg access out of range!");
     return getArgsBuffer()[Arg];
+  }
+
+  /// getIdArg - Return the specified IdentifierData argument.
+  const IdentifierData &getIdArg(unsigned Arg) const {
+    assert(HasIdentifierDataArgs && "Stored arg is not IdentiferData!");
+    assert(Arg < NumArgs && "Arg access out of range!");
+    return getIdArgsBuffer()[Arg];
   }
 
   class arg_iterator {
@@ -557,6 +605,20 @@ public:
                                           ellipsisLoc));
   }
 
+  AttributeList *createWithIdArgs(
+                    IdentifierInfo *attrName, SourceRange attrRange,
+                    IdentifierInfo *scopeName, SourceLocation scopeLoc,
+                    IdentifierInfo *parmName, SourceLocation parmLoc,
+                    AttributeList::IdentifierData *args, unsigned numArgs,
+                    AttributeList::Syntax syntax) {
+    void *memory = allocate(sizeof(AttributeList)
+                            + numArgs * sizeof(AttributeList::IdentifierData));
+    return add(new (memory) AttributeList(attrName, attrRange,
+                                          scopeName, scopeLoc,
+                                          parmName, parmLoc,
+                                          args, numArgs, syntax));
+  }
+
   AttributeList *create(IdentifierInfo *attrName, SourceRange attrRange,
                         IdentifierInfo *scopeName, SourceLocation scopeLoc,
                         IdentifierInfo *parmName, SourceLocation parmLoc,
@@ -768,6 +830,21 @@ public:
     AttributeList *attr =
         pool.createTypeAttribute(attrName, attrRange, scopeName, scopeLoc,
                                  parmName, parmLoc, typeArg, syntaxUsed);
+    add(attr);
+    return attr;
+  }
+
+  /// Add attribute with identifer and source location arguments.
+  AttributeList *addNewIdArgs(
+                        IdentifierInfo *attrName, SourceRange attrRange,
+                        IdentifierInfo *scopeName, SourceLocation scopeLoc,
+                        IdentifierInfo *parmName, SourceLocation parmLoc,
+                        AttributeList::IdentifierData *args, unsigned numArgs,
+                        AttributeList::Syntax syntax) {
+    AttributeList *attr =
+      pool.createWithIdArgs(attrName, attrRange, scopeName, scopeLoc,
+                            parmName, parmLoc, args, numArgs,
+                            syntax);
     add(attr);
     return attr;
   }

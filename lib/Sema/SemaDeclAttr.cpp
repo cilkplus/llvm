@@ -3002,70 +3002,73 @@ static void handleCilkStepAttr(Sema &S, Decl *D, const AttributeList &Attr) {
 
   switch (Attr.getKind()) {
   case AttributeList::AT_CilkLinear: {
-    if (Attr.isDeclspecPropertyAttribute()) {
-      // Find the declaration that linear step is referencing, which could
-      // be a parameter name (ParmVarDecl), a template parameter
-      // (NonTypeTemplateParm) or a regular variable, etc.
-      const ValueDecl *StepDecl = 0;
-      StepId = Attr.getPropertyData().GetterId;
-      // FIXME: use the location of the step instead of the attribute
-      StepLoc = Attr.getLoc();
-
-      // First, check if linear step is a parameter name.
-      assert(StepId && "null step name unexpected");
-      for (i = 0; i != NumParams; ++i) {
-        const ParmVarDecl *StepParm = FD->getParamDecl(i);
-        if (StepParm->getName().equals(StepId->getName())) {
-          StepDecl = StepParm;
-          break;
-        }
-      }
-
-      // If linear step is not a parameter, we perform a lookup to find
-      // the declaration which the step identifier is referencing to.
-      if (!StepDecl) {
-        DeclarationNameInfo Name(StepId, StepLoc);
-        LookupResult Result(S, Name, Sema::LookupOrdinaryName);
-        S.LookupName(Result, S.getCurScope());
-
-        if (Result.empty()) {
-          S.Diag(StepLoc, diag::err_undeclared_var_use) << StepId;
-          return;
-        } else if (Result.isSingleResult()) {
-          const NamedDecl *ND = Result.getFoundDecl();
-          assert(ND && "declaration not found");
-          if (const ValueDecl *VD = dyn_cast<ValueDecl>(ND)) {
-            StepDecl = VD;
-            // FIXME: check type of this found declaration.
-          } else {
-            S.Diag(StepLoc, diag::err_ref_non_value) << StepId;
-            S.Diag(ND->getLocation(), diag::note_declared_at);
-            return;
-          }
-        } else {
-          S.Diag(StepLoc, diag::err_cilk_elemental_not_function_parameter);
-          return;
-        }
-      }
-    } else if (NumArgs == 0)
+    if (NumArgs == 0)
       Step = 1;
     else if (NumArgs == 1) {
-      Expr *StepExpr = Attr.getArg(0);
-      llvm::APSInt StepValue;
-      if (StepExpr->isTypeDependent() || StepExpr->isValueDependent() ||
-          !StepExpr->isIntegerConstantExpr(StepValue, S.Context)) {
-        S.Diag(Attr.getLoc(), diag::err_attribute_argument_type) << "linear"
-          << AANT_ArgumentIntegerConstant << StepExpr->getSourceRange();
-        Attr.setInvalid();
-        return;
+      if (Attr.hasIdentifierArgs()) {
+        // Find the declaration that the linear step is referencing, which
+        // could be a parameter name (ParmVarDecl), a template parameter
+        // (NonTypeTemplateParm) or a regular variable.
+        const ValueDecl *StepDecl = 0;
+        StepId = Attr.getIdArg(0).Id;
+        StepLoc = Attr.getIdArg(0).Loc;
+
+        // First, check if linear step is a parameter name.
+        assert(StepId && "null step name unexpected");
+        for (i = 0; i != NumParams; ++i) {
+          const ParmVarDecl *StepParm = FD->getParamDecl(i);
+          if (StepParm->getName().equals(StepId->getName())) {
+            StepDecl = StepParm;
+            break;
+          }
+        }
+
+        // If linear step is not a parameter, we perform a lookup to find
+        // the declaration which the step identifier is referencing to.
+        if (!StepDecl) {
+          DeclarationNameInfo Name(StepId, StepLoc);
+          LookupResult Result(S, Name, Sema::LookupOrdinaryName);
+          S.LookupName(Result, S.getCurScope());
+
+          if (Result.empty()) {
+            S.Diag(StepLoc, diag::err_undeclared_var_use) << StepId;
+            return;
+          } else if (Result.isSingleResult()) {
+            const NamedDecl *ND = Result.getFoundDecl();
+            assert(ND && "declaration not found");
+            if (const ValueDecl *VD = dyn_cast<ValueDecl>(ND)) {
+              StepDecl = VD;
+              // FIXME: check type of this found declaration.
+            } else {
+              S.Diag(StepLoc, diag::err_ref_non_value) << StepId;
+              S.Diag(ND->getLocation(), diag::note_declared_at);
+              return;
+            }
+          } else {
+            S.Diag(StepLoc, diag::err_cilk_elemental_not_function_parameter);
+            return;
+          }
+        }
+      } else {
+        Expr *StepExpr = Attr.getArg(0);
+        llvm::APSInt StepValue;
+        if (StepExpr->isTypeDependent() || StepExpr->isValueDependent() ||
+            !StepExpr->isIntegerConstantExpr(StepValue, S.Context)) {
+          S.Diag(Attr.getLoc(), diag::err_attribute_argument_type)
+            << Attr.getName() << AANT_ArgumentIntegerConstant
+            << StepExpr->getSourceRange();
+          Attr.setInvalid();
+          return;
+        }
+        Step = StepValue.getSExtValue();
+        StepLoc = StepExpr->getExprLoc();
       }
-      Step = StepValue.getSExtValue();
-      StepLoc = StepExpr->getExprLoc();
     } else {
       S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
         << Attr.getName() << 1;
       return;
     }
+
     // Check that the parameter is a pointer or integer.
     if (!Parm->getType()->isIntegralType(D->getASTContext()) &&
         !Parm->getType()->isPointerType())

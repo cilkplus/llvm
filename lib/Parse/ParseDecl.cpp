@@ -1341,6 +1341,7 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
     IdentifierInfo *StepName = 0;
     SourceLocation ParmLoc = ConsumeToken();
     ExprVector ArgExprs;
+    AttributeList::IdentifierData IdArg(0, SourceLocation());
     unsigned NumArgs = 0;
     if (AttrName.isStr("linear")) {
       if (Tok.is(tok::colon)) {
@@ -1357,6 +1358,7 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
         if (Tok.is(tok::identifier) && (Next.is(tok::r_paren) ||
                                         Next.is(tok::comma))) {
           StepName = Tok.getIdentifierInfo();
+          IdArg = AttributeList::IdentifierData(StepName, Tok.getLocation());
           ConsumeToken();
         }
 
@@ -1385,9 +1387,8 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
     }
 
     if (StepName)
-      Attrs.addNewPropertyAttr(&AttrName, AttrNameLoc, &ScopeName, ScopeLoc,
-                               ParmName, ParmLoc, StepName, 0,
-                               AttributeList::AS_CXX11);
+      Attrs.addNewIdArgs(&AttrName, AttrNameLoc, &ScopeName, ScopeLoc,
+                         ParmName, ParmLoc, &IdArg, 1, AttributeList::AS_CXX11);
     else
       Attrs.addNew(&AttrName, AttrNameLoc, &ScopeName, ScopeLoc,
                    ParmName, ParmLoc, ArgExprs.data(), NumArgs,
