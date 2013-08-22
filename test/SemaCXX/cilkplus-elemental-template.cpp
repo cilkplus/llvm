@@ -143,11 +143,10 @@ template <typename... Ts>
 ATTR(vector(linear(args...))) // expected-error {{template parameter pack is not supported in 'linear' attribute}}
 void test_template_parameterpack3(Ts... args);
 
-#if 0
+
 template <typename... Ts>
-ATTR(vector(vectorlengthfor(Ts...))) // expected-error {{parameter pack not allowed in vectorlengthfor}}
+ATTR(vector(vectorlengthfor(Ts...))) // expected-error {{template parameter pack is not supported in 'vectorlengthfor' attribute}}
 void test_template_parameterpack4(Ts... args);
-#endif
 
 // SFINAE
 template <typename T>

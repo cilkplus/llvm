@@ -190,14 +190,17 @@ static bool attributeHasExprArgs(const IdentifierInfo &II) {
            .Default(false);
 }
 
+/// \brief Determine whether the scope is a Cilk Plus elemental function scope
+static bool isCilkElementalScope(const IdentifierInfo *ScopeName) {
+  return ScopeName && ScopeName->isStr("_Cilk_elemental");
+}
+
 /// \brief Determine whether the attribute takes a type argument.
 static bool attributeHasTypeArg(const IdentifierInfo *ScopeName,
                                 const IdentifierInfo *AttrName) {
   return AttrName &&
     (AttrName->isStr("vec_type_hint") ||
-     (ScopeName &&
-      ScopeName->isStr("_Cilk_elemental") &&
-      AttrName->isStr("vectorlengthfor")));
+     (isCilkElementalScope(ScopeName) && AttrName->isStr("vectorlengthfor")));
 }
 
 
@@ -278,6 +281,17 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
   case tok::identifier:
     if (HasTypeArgument) {
       T = ParseTypeName(&TypeRange);
+      if (Tok.is(tok::ellipsis) && isCilkElementalScope(ScopeName) &&
+          AttrName->isStr("vectorlengthfor")) {
+        SourceLocation EllipsisLoc = ConsumeToken();
+        if (getLangOpts().CPlusPlus11) {
+          Diag(EllipsisLoc, diag::err_elemental_parameter_pack_unsupported)
+            << AttrName->getName();
+          SkipUntil(tok::r_paren);
+          return;
+        }
+      }
+
       TypeParsed = true;
       break;
     }
