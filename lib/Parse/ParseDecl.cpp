@@ -1311,24 +1311,25 @@ void Parser::ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
 /// may appear as attribute arguments before they appear as parameters
 /// in a function declaration.
 ///
-///    uniform-param-list:
-///      parameter-name
-///      uniform-param-list , parameter-name
+/// uniform-param-list:
+///   parameter-name
+///   uniform-param-list , parameter-name
 ///
-///    elemental-linear-param-list:
-///      elemental-linear-param
-///      elemental-linear-param-list , elemental-linear-param
+/// elemental-linear-param-list:
+///   elemental-linear-param
+///   elemental-linear-param-list , elemental-linear-param
 ///
-///    elemental-linear-param:
-///      parameter-name
-///      parameter-name : elemental-linear-step
+/// elemental-linear-param:
+///   parameter-name
+///   parameter-name : elemental-linear-step
 ///
-///    elemental-linear-step:
-///      constant-expression
-///      parameter-name
+/// elemental-linear-step:
+///   constant-expression
+///   parameter-name
 ///
-///    parameter-name:
-///      identifier
+/// parameter-name:
+///   identifier
+///   this
 ///
 void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
                                              SourceLocation AttrNameLoc,
@@ -1341,19 +1342,28 @@ void Parser::ParseFunctionParameterAttribute(IdentifierInfo &AttrName,
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
 
-  // Now parse the list of identifiers.
+  // Now parse the list of identifiers or this.
   do {
-    if (Tok.isNot(tok::identifier)) {
-      Diag(Tok, diag::err_expected_ident);
+    // Create a separate attribute for each identifier or this, in order to
+    // be able to use the Parm field.
+    IdentifierInfo *ParmName = 0;
+    SourceLocation ParmLoc;
+
+    if (getLangOpts().CPlusPlus && Tok.is(tok::kw_this)) {
+      // Create a 'this' identifier if the current token is keyword 'this'.
+      ParmName = PP.getIdentifierInfo("this");
+      ParmLoc = ConsumeToken();
+    } else if (Tok.isNot(tok::identifier)) {
+      Diag(Tok, getLangOpts().CPlusPlus ? diag::err_expected_ident_or_this
+                                        : diag::err_expected_ident);
       T.skipToEnd();
       return;
+    } else {
+      ParmName = Tok.getIdentifierInfo();
+      ParmLoc = ConsumeToken();
     }
-    // Create a separate attribute for each identifier, in order to be able
-    // to use the Parm field, and not have to shoehorn not-yet-declared
-    // identifiers into an Expr list.
-    IdentifierInfo *ParmName = Tok.getIdentifierInfo();
+
     IdentifierInfo *StepName = 0;
-    SourceLocation ParmLoc = ConsumeToken();
     ExprVector ArgExprs;
     AttributeList::IdentifierData IdArg(0, SourceLocation());
     unsigned NumArgs = 0;

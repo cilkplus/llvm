@@ -17,14 +17,14 @@ int X::f1(int a) { return a + v; }
 int X::f2(int a, int b) { return a + b + v; }
 int X::sf(int a, int b) { return a + b; }
 
-// CHECK: define void @_ZGVxM4v__ZN1XC1Ev
-// CHECK: define void @_ZGVxN4v__ZN1XC1Ev
+// CHECK: define void @_ZGVxM2v__ZN1XC1Ev
+// CHECK: define void @_ZGVxN2v__ZN1XC1Ev
 //
-// CHECK: define void @_ZGVxN4v__ZN1XC2Ev
+// CHECK: define void @_ZGVxN2v__ZN1XC2Ev
 //
-// CHECK: define void @_ZGVxN4v__ZN1XD1Ev
+// CHECK: define void @_ZGVxN2v__ZN1XD1Ev
 //
-// CHECK: define void @_ZGVxN4v__ZN1XD2Ev
+// CHECK: define void @_ZGVxN2v__ZN1XD2Ev
 //
 // CHECK: define <4 x i32> @_ZGVxN4v__ZN1X2f0Ev
 //
@@ -86,8 +86,8 @@ void caller_mem(X *x) {
   x->static_mem();
 }
 
-// CHECK: declare void @_ZGVxN4v__ZN20ns_check_declaration1X10called_memEv
-// CHECK-NOT: declare void @_ZGVxN4v__ZN20ns_check_declaration1X14not_called_memEv
+// CHECK: declare void @_ZGVxN2v__ZN20ns_check_declaration1X10called_memEv
+// CHECK-NOT: declare void @_ZGVxN2v__ZN20ns_check_declaration1X14not_called_memEv
 // CHECK: declare void @_ZGVxN4__ZN20ns_check_declaration1X10static_memEv
 
 } // namespace ns_check_declaration
@@ -161,3 +161,32 @@ void test3() {
 // CHECK: declare void @_ZGVxM2lv__ZN19characteristic_type6linearIJDnEEEvcDpT_
 
 } // namespace characteristic_type
+
+namespace uniform_linear_this {
+
+struct S {
+  __attribute__((vector(uniform(this))))
+  float m1();
+
+  __attribute__((vector(linear(this))))
+  float m2();
+
+  __attribute__((vector(linear(this:7))))
+  float m3();
+
+  __attribute__((vector(linear(this:a), uniform(a))))
+  float m4(int a);
+};
+
+void test(S *p) {
+  p->m1();
+  p->m2();
+  p->m3();
+  p->m4(4); // FIXME: Variable step codegen is not supported yet
+}
+
+// CHECK: declare <4 x float> @_ZGVxN4u__ZN19uniform_linear_this1S2m1Ev
+// CHECK: declare <4 x float> @_ZGVxN4l__ZN19uniform_linear_this1S2m2Ev
+// CHECK: declare <4 x float> @_ZGVxN4l7__ZN19uniform_linear_this1S2m3Ev
+
+} // namespace uniform_linear_this

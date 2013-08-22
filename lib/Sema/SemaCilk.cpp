@@ -2535,11 +2535,16 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
       // If this is the subject of a linear or uniform attribute, check if
       // this is already the subject of a previous linear or uniform attribute.
       if (Attr *PrevA = SubjectNames.lookup(II)) {
-        const ParmVarDecl *VD = Params[II];
-        assert(VD && "not a parameter name");
-
         Valid = false;
-        Diag(SubjectLoc, diag::err_cilk_elemental_subject) << VD;
+
+        const ParmVarDecl *VD = Params[II];
+        if (!VD) {
+          // If II is not a parameter name, then it is "this".
+          assert(getLangOpts().CPlusPlus && II->getName().equals("this")
+                                         && "invalid attribute");
+          Diag(SubjectLoc, diag::err_cilk_elemental_this_subject);
+        } else
+          Diag(SubjectLoc, diag::err_cilk_elemental_subject) << VD;
 
         if (CilkUniformAttr *UA = dyn_cast<CilkUniformAttr>(PrevA))
           Diag(UA->getParameterLoc(), diag::note_cilk_elemental_subject_clause)
@@ -2547,7 +2552,10 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
         else if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(PrevA))
           Diag(LA->getParameterLoc(), diag::note_cilk_elemental_subject_clause)
             << 1;
-        Diag(VD->getLocation(), diag::note_cilk_elemental_subject_parameter);
+
+        // Only emit a note if II is a parameter name.
+        if (VD)
+          Diag(VD->getLocation(), diag::note_cilk_elemental_subject_parameter);
        } else
          SubjectNames[II] = CurA;
     }
@@ -2556,17 +2564,20 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
                                     E = SubjectNames.end(); I != E; ++I) {
       Attr *CurA = I->second;
       if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(CurA)) {
-        // Check (2)
-        // FIXME: This does not handle 'linear(this)'.
+        // Check (2).
+        //
+        // No need to check 'linear(this)'. Only check if the subject is an
+        // explicit parameter name.
+        //
         IdentifierInfo *Subject = LA->getParameter();
-        const ParmVarDecl *Param = Params.lookup(Subject);
-        assert(Param && "invalid linear clause");
-        QualType Ty = Param->getType();
-        if (!Ty->isDependentType() && !Ty->isIntegralType(Context)
-                                   && !Ty->isPointerType()) {
-          Diag(LA->getParameterLoc(),
-               diag::err_cilk_elemental_linear_parameter_type) << Ty;
-          Valid = false;
+        if (const ParmVarDecl *Param = Params.lookup(Subject)) {
+          QualType Ty = Param->getType();
+          if (!Ty->isDependentType() && !Ty->isIntegralType(Context)
+                                     && !Ty->isPointerType()) {
+            Diag(LA->getParameterLoc(),
+                 diag::err_cilk_elemental_linear_parameter_type) << Ty;
+            Valid = false;
+          }
         }
 
         // Check (3)

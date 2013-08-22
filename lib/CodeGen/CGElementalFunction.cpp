@@ -33,6 +33,22 @@ struct CilkElementalGroup {
   LinearVector Linear;
   UniformVector Uniform;
   MaskVector Mask;
+
+  CilkUniformAttr *getUniformAttr(StringRef Name) const {
+    for (UniformVector::const_iterator I = Uniform.begin(), E = Uniform.end();
+        I != E; ++I)
+      if ((*I)->getParameter()->getName().equals(Name))
+        return *I;
+    return 0;
+  }
+
+  CilkLinearAttr *getLinearAttr(StringRef Name) const {
+    for (LinearVector::const_iterator I = Linear.begin(), E = Linear.end();
+        I != E; ++I)
+      if ((*I)->getParameter()->getName().equals(Name))
+        return *I;
+    return 0;
+  }
 };
 
 static llvm::MDNode *MakeVecLengthMetadata(CodeGenModule &CGM, StringRef Name,
@@ -68,8 +84,7 @@ static bool CheckElementalArguments(CodeGenModule &CGM, const FunctionDecl *FD,
     }
   }
 
-  HasThis = isa<CXXConstructorDecl>(FD) || isa<CXXDestructorDecl>(FD) ||
-    (isa<CXXMethodDecl>(FD) && cast<CXXMethodDecl>(FD)->isInstance());
+  HasThis = isa<CXXMethodDecl>(FD) && cast<CXXMethodDecl>(FD)->isInstance();
 
   // At this point, no passing struct arguments by value.
   unsigned NumArgs = FD->param_size();
@@ -80,6 +95,33 @@ static bool CheckElementalArguments(CodeGenModule &CGM, const FunctionDecl *FD,
     return true;
 
   return NumArgs == NumLLVMArgs;
+}
+
+/// \brief Generates a properstep argument for each function parameter.
+/// Returns true if this is a non-linear and non-uniform variable.
+/// Otherwise returns false.
+static bool handleParameter(CodeGenModule &CGM, CilkElementalGroup &G,
+                            StringRef ParmName,
+                            SmallVectorImpl<llvm::Value *> &StepArgs) {
+  if (G.getUniformAttr(ParmName)) {
+    // If this is uniform, then use step 0 as placeholder.
+    StepArgs.push_back(llvm::ConstantInt::get(CGM.IntTy, 0));
+    return false;
+  } else if (CilkLinearAttr *LA = G.getLinearAttr(ParmName)) {
+    if (IdentifierInfo *S = LA->getStepParameter())
+      StepArgs.push_back(llvm::MDString::get(CGM.getLLVMContext(),
+                         S->getName()));
+    else if (IntegerLiteral *E = dyn_cast<IntegerLiteral>(LA->getStepExpr())) {
+      int Val = E->getValue().getSExtValue();
+      StepArgs.push_back(llvm::ConstantInt::get(CGM.IntTy, Val));
+    } else
+      CGM.ErrorUnsupported(LA->getStepExpr(), "unexpected step expression");
+    return false;
+  }
+
+  // If this is non-linear and non-uniform, use undefined step as placeholder.
+  StepArgs.push_back(llvm::UndefValue::get(CGM.IntTy));
+  return true;
 }
 
 void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
@@ -113,7 +155,6 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
   llvm::MDNode *MaskNode = llvm::MDNode::get(Context, MaskMDArgs);
   MaskMDArgs[1] = llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(Context), 0);
   llvm::MDNode *NoMaskNode = llvm::MDNode::get(Context, MaskMDArgs);
-  llvm::Value *UndefStep = llvm::UndefValue::get(IntTy);
   SmallVector<llvm::Value*, 8> ParameterNameArgs;
   ParameterNameArgs.push_back(llvm::MDString::get(Context, "arg_name"));
   llvm::MDNode *ParameterNameNode = 0;
@@ -164,53 +205,31 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
     CilkElementalGroup &G = GI->second;
 
     // Parameter information.
-    const ParmVarDecl *FirstNonStepParm = 0;
+    QualType FirstNonStepParmType;
     SmallVector<llvm::Value*, 8> StepArgs;
     StepArgs.push_back(llvm::MDString::get(Context, "arg_step"));
 
-    // Push implicit 'this' argument if necessary. This assumes that 
-    // 'uniform(this)' or 'linear(this)' is not a valid clause.
+    // Handle implicit 'this' parameter if necessary.
     if (HasImplicitThis) {
       ParameterNameArgs.push_back(llvm::MDString::get(Context, "this"));
-      StepArgs.push_back(UndefStep);
+      bool IsNonStepParm = handleParameter(*this, G, "this", StepArgs);
+      // This implicit 'this' is considered as the first parameter. This
+      // aligns with the icc 13.1 implementation.
+      if (IsNonStepParm)
+        FirstNonStepParmType = cast<CXXMethodDecl>(FD)->getThisType(C);
     }
 
+    // Handle explicit paramenters.
     for (unsigned I = 0; I != FD->getNumParams(); ++I) {
       const ParmVarDecl *Parm = FD->getParamDecl(I);
       StringRef ParmName = Parm->getName();
       if (!ParameterNameNode)
         ParameterNameArgs.push_back(llvm::MDString::get(Context, ParmName));
-      // Look for a linear attribute for this parameter.
-      CilkElementalGroup::LinearVector::iterator SI = G.Linear.begin(),
-                                                 SE = G.Linear.end();
-      for (; SI != SE; ++SI)
-        if ((*SI)->getParameter()->getName() == ParmName)
-          break;
-      if (SI == SE) {
-        CilkElementalGroup::UniformVector::iterator UI = G.Uniform.begin(),
-                                                    UE = G.Uniform.end();
-        for (; UI != UE; ++UI)
-          if ((*UI)->getParameter()->getName() == ParmName)
-            break;
-        if (UI != UE)
-          // This is uniform, give this paramater a step of 0 as placeholder.
-          StepArgs.push_back(llvm::ConstantInt::get(IntTy, 0));
-        else {
-          // Not linear/uniform, give this parameter an undefined step as
-          // placeholder.
-          StepArgs.push_back(UndefStep);
-          if (!FirstNonStepParm)
-            FirstNonStepParm = Parm;
-        }
-      } else if (IdentifierInfo *S = (*SI)->getStepParameter()) {
-        StepArgs.push_back(llvm::MDString::get(Context, S->getName()));
-      } else if (IntegerLiteral *E
-          = dyn_cast<IntegerLiteral>((*SI)->getStepExpr())) {
-        int Val = E->getValue().getSExtValue();
-	      StepArgs.push_back(llvm::ConstantInt::get(IntTy, Val));
-      } else
-        ErrorUnsupported((*SI)->getStepExpr(), "unexpected step expression");
+      bool IsNonStepParm = handleParameter(*this, G, ParmName, StepArgs);
+      if (IsNonStepParm && FirstNonStepParmType.isNull())
+        FirstNonStepParmType = Parm->getType();
     }
+
     llvm::MDNode *StepNode = llvm::MDNode::get(Context, StepArgs);
     if (!ParameterNameNode)
       ParameterNameNode = llvm::MDNode::get(Context, ParameterNameArgs);
@@ -232,13 +251,13 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
     //    the type that maps to the built‐in complex data type)
     //    the characteristic data type is int.
     //
-    // d) If none of the above three cases is applicable, 
+    // d) If none of the above three cases is applicable,
     //    the characteristic data type is int.
     //
     // e) For Intel Xeon Phi native and offload compilation, if the resulting
     //    characteristic data type is 8-bit or 16‐bit integer data type
     //    the characteristic data type is int.
-    // 
+    //
     // These rules missed the reference types and we use their pointer types.
     //
     if (G.VecLengthFor.empty()) {
@@ -246,8 +265,8 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
       QualType CharacteristicType;
       if (!FnRetTy->isVoidType())
         CharacteristicType = FnRetTy;
-      else if (FirstNonStepParm)
-        CharacteristicType = FirstNonStepParm->getType().getCanonicalType();
+      else if (!FirstNonStepParmType.isNull())
+        CharacteristicType = FirstNonStepParmType.getCanonicalType();
       else
         CharacteristicType = C.IntTy;
 

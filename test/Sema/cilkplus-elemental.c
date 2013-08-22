@@ -24,7 +24,15 @@ ATTR(vector(linear(x:y), uniform(y)))
 int test_step_1(int x, int y);
 
 struct S {};
-ATTR(vector(uniform(s))) //OK
+ATTR(vector(uniform(s))) // OK
 ATTR(vector(linear(s)))  // expected-error {{linear parameter type 'struct S' is not an integer or pointer type}}
 ATTR(vector(linear(i)))  // OK
 int test_int_ptr(struct S s, int i);
+
+ATTR(vector(uniform(this)))               // OK
+ATTR(vector(linear(this)))                // OK
+ATTR(vector(uniform(this, this)))         // expected-error {{parameter 'this' cannot be the subject of two elemental clauses}} // expected-note{{here}}
+ATTR(vector(linear(this, this)))          // expected-error {{parameter 'this' cannot be the subject of two elemental clauses}} // expected-note{{here}}
+ATTR(vector(uniform(this), linear(this))) // expected-error {{parameter 'this' cannot be the subject of two elemental clauses}} // expected-note{{here}}
+ATTR(vector(linear(this), uniform(this))) // expected-error {{parameter 'this' cannot be the subject of two elemental clauses}} // expected-note{{here}}
+int test_this(int this); // expected-note 4{{parameter here}}

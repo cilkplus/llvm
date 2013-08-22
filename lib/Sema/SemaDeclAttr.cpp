@@ -2981,9 +2981,21 @@ static bool diagnoseCilkAttrSubject(Sema &S, const FunctionDecl *FD,
     return false;
   }
 
-  // Check the subject is a function parameter name.
-  const VarDecl *Param = 0;
   StringRef Name = SubjectName->getName();
+  SourceLocation Loc = Attr.getParameterLoc();
+
+  // Check uniform(this) and linear(this).
+  if (S.getLangOpts().CPlusPlus && Name.equals("this")) {
+    const CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(FD);
+    if (!Method || !Method->isInstance()) {
+      S.Diag(Loc, diag::err_invalid_this_use);
+      return false;
+    }
+    return true;
+  }
+
+  // Otherwise, check the subject is a function parameter name.
+  const VarDecl *Param = 0;
   for (FunctionDecl::param_const_iterator I = FD->param_begin(),
                                           E = FD->param_end();
                                           I != E; ++I)
@@ -2993,8 +3005,7 @@ static bool diagnoseCilkAttrSubject(Sema &S, const FunctionDecl *FD,
     }
 
   if (!Param) {
-    S.Diag(Attr.getParameterLoc(),
-           diag::err_cilk_elemental_not_function_parameter);
+    S.Diag(Loc, diag::err_cilk_elemental_not_function_parameter);
     return false;
   }
 

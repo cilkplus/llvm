@@ -875,6 +875,9 @@ def err_simd_expected_reduction_operator: Error<
 def err_elemental_parameter_pack_unsupported: Error<
   "template parameter pack is not supported in '%0' attribute">;
 
+def err_expected_ident_or_this : Error<
+  "expected identifier or this">;
+
 // OpenMP support.
 def warn_pragma_omp_ignored : Warning <
   "unexpected '#pragma omp ...' in program">, InGroup<SourceUsesOpenMP>, DefaultIgnore;

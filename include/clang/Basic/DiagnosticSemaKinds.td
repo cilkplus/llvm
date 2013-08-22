@@ -6757,6 +6757,8 @@ def err_cilk_elemental_step_not_uniform : Error<
   "linear step parameter must also be uniform">;
 def err_cilk_elemental_subject: Error<
   "parameter %0 cannot be the subject of two elemental clauses">;
+def err_cilk_elemental_this_subject: Error<
+  "'this' cannot be the subject of two elemental clauses">;
 def note_cilk_elemental_subject_clause: Note<
   "another %select{uniform|linear}0 clause here">;
 def note_cilk_elemental_subject_parameter: Note<

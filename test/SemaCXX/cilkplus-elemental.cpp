@@ -104,3 +104,54 @@ struct Class2 {
 // mask clause
 ATTR(vector(mask(1))) // expected-error {{attribute takes no arguments}}
 int test_mask_1(int x);
+
+// linear and uniform clauses with this
+namespace test_this {
+
+ATTR(vector(uniform(this))) // expected-error {{invalid use of 'this' outside of a non-static member function}}
+ATTR(vector(linear(this)))  // expected-error {{invalid use of 'this' outside of a non-static member function}}
+int f1();
+
+class Class {
+  enum { s = 2 };
+
+  ATTR(vector(uniform(this)))                  // OK
+  ATTR(vector(uniform(this, x)))               // OK
+  ATTR(vector(linear(this)))                   // OK
+  ATTR(vector(linear(x, this)))                // OK
+  ATTR(vector(linear(this:x), uniform(x)))     // OK
+  ATTR(vector(linear(this:s)))                 // OK
+  ATTR(vector(linear(this:4)))                 // OK
+  void f2(int x);
+
+  ATTR(vector(uniform(this), uniform(this))) // expected-error {{'this' cannot be the subject of two elemental clauses}} expected-note {{here}}
+  ATTR(vector(uniform(this), linear(this)))  // expected-error {{'this' cannot be the subject of two elemental clauses}} expected-note {{here}}
+  ATTR(vector(linear(this), uniform(this)))  // expected-error {{'this' cannot be the subject of two elemental clauses}} expected-note {{here}}
+  ATTR(vector(linear(this), linear(this)))   // expected-error {{'this' cannot be the subject of two elemental clauses}} expected-note {{here}}
+  void f3();
+
+  ATTR(vector(uniform(this))) // expected-error {{invalid use of 'this' outside of a non-static member function}}
+  ATTR(vector(linear(this)))  // expected-error {{invalid use of 'this' outside of a non-static member function}}
+  static void f4();
+
+  // Note: "friend [[vector]] void foo();" is invalid.
+  friend
+  __attribute__((vector(linear(this))))  // expected-error {{invalid use of 'this' outside of a non-static member function}}
+  __attribute__((vector(uniform(this)))) // expected-error {{invalid use of 'this' outside of a non-static member function}}
+  void f5();
+};
+
+template <typename T>
+class Class2 {
+public:
+  ATTR(vector(uniform(this)))    // OK
+  ATTR(vector(linear(this)))     // OK
+  void f6() {}
+};
+
+void test() {
+  Class2<float> Obj;
+  Obj.f6();
+}
+
+} // test_this
