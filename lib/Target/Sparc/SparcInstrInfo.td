@@ -286,11 +286,11 @@ let usesCustomInserter = 1, Uses = [FCC] in {
 // Section A.3 - Synthetic Instructions, p. 85
 // special cases of JMPL:
 let isReturn = 1, isTerminator = 1, hasDelaySlot = 1, isBarrier = 1 in {
-  let rd = O7.Num, rs1 = G0.Num in
+  let rd = 0, rs1 = 15 in
     def RETL: F3_2<2, 0b111000, (outs), (ins i32imm:$val),
                    "jmp %o7+$val", [(retflag simm13:$val)]>;
 
-  let rd = I7.Num, rs1 = G0.Num in
+  let rd = 0, rs1 = 31 in
     def RET: F3_2<2, 0b111000, (outs), (ins i32imm:$val),
                   "jmp %i7+$val", []>;
 }
@@ -556,10 +556,7 @@ let Uses = [FCC] in
 // Section B.24 - Call and Link Instruction, p. 125
 // This is the only Format 1 instruction
 let Uses = [O6],
-    hasDelaySlot = 1, isCall = 1,
-    Defs = [O0, O1, O2, O3, O4, O5, O7, G1, G2, G3, G4, G5, G6, G7,
-    D0, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, D14, D15,
-        ICC, FCC, Y] in {
+    hasDelaySlot = 1, isCall = 1 in {
   def CALL : InstSP<(outs), (ins calltarget:$dst, variable_ops),
                     "call $dst", []> {
     bits<30> disp;

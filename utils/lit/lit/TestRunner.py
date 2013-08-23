@@ -198,6 +198,16 @@ def executeShCmd(cmd, cfg, cwd, results):
         if res == -signal.SIGINT:
             raise KeyboardInterrupt
 
+        # Ensure the resulting output is always of string type.
+        try:
+            out = str(out.decode('ascii'))
+        except:
+            out = str(out)
+        try:
+            err = str(err.decode('ascii'))
+        except:
+            err = str(err)
+
         results.append((cmd.commands[i], out, err, res))
         if cmd.pipe_err:
             # Python treats the exit code as a signed char.
@@ -287,23 +297,6 @@ def executeScript(test, litConfig, tmpBase, commands, cwd):
 
     return lit.util.executeCommand(command, cwd=cwd,
                                    env=test.config.environment)
-
-def isExpectedFail(test, xfails):
-    # Check if any of the xfails match an available feature or the target.
-    for item in xfails:
-        # If this is the wildcard, it always fails.
-        if item == '*':
-            return True
-
-        # If this is an exact match for one of the features, it fails.
-        if item in test.config.available_features:
-            return True
-
-        # If this is a part of the target triple, it fails.
-        if item in test.suite.config.target_triple:
-            return True
-
-    return False
 
 def parseIntegratedTestScriptCommands(source_path):
     """
@@ -405,7 +398,6 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
 
     # Collect the test lines from the script.
     script = []
-    xfails = []
     requires = []
     for line_number, command_type, ln in \
             parseIntegratedTestScriptCommands(sourcepath):
@@ -428,7 +420,7 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
             else:
                 script.append(ln)
         elif command_type == 'XFAIL':
-            xfails.extend([s.strip() for s in ln.split(',')])
+            test.xfails.extend([s.strip() for s in ln.split(',')])
         elif command_type == 'REQUIRES':
             requires.extend([s.strip() for s in ln.split(',')])
         elif command_type == 'END':
@@ -470,8 +462,7 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
         return (Test.UNSUPPORTED,
                 "Test requires the following features: %s" % msg)
 
-    isXFail = isExpectedFail(test, xfails)
-    return script,isXFail,tmpBase,execdir
+    return script,tmpBase,execdir
 
 def formatTestOutput(status, out, err, exitCode, script):
     output = """\
@@ -511,7 +502,7 @@ def executeShTest(test, litConfig, useExternalSh,
     if len(res) == 2:
         return res
 
-    script, isXFail, tmpBase, execdir = res
+    script, tmpBase, execdir = res
 
     if litConfig.noExecute:
         return (Test.PASS, '')
@@ -527,20 +518,9 @@ def executeShTest(test, litConfig, useExternalSh,
         return res
 
     out,err,exitCode = res
-    if isXFail:
-        ok = exitCode != 0
-        if ok:
-            status = Test.XFAIL
-        else:
-            status = Test.XPASS
+    if exitCode == 0:
+        status = Test.PASS
     else:
-        ok = exitCode == 0
-        if ok:
-            status = Test.PASS
-        else:
-            status = Test.FAIL
-
-    if ok:
-        return (status,'')
+        status = Test.FAIL
 
     return formatTestOutput(status, out, err, exitCode, script)

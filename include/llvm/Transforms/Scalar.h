@@ -366,6 +366,13 @@ extern char &InstructionSimplifierID;
 // "block_weights" metadata.
 FunctionPass *createLowerExpectIntrinsicPass();
 
+//===----------------------------------------------------------------------===//
+//
+// PartiallyInlineLibCalls - Tries to inline the fast path of library
+// calls such as sqrt.
+//
+FunctionPass *createPartiallyInlineLibCallsPass();
+
 } // End llvm namespace
 
 #endif

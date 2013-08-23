@@ -646,7 +646,7 @@ bool AsmPrinter::needsRelocationsForDwarfStringPool() const {
 }
 
 void AsmPrinter::emitPrologLabel(const MachineInstr &MI) {
-  MCSymbol *Label = MI.getOperand(0).getMCSymbol();
+  const MCSymbol *Label = MI.getOperand(0).getMCSymbol();
 
   if (MAI->getExceptionHandlingType() != ExceptionHandling::DwarfCFI)
     return;
@@ -657,12 +657,12 @@ void AsmPrinter::emitPrologLabel(const MachineInstr &MI) {
   if (MMI->getCompactUnwindEncoding() != 0)
     OutStreamer.EmitCompactUnwindEncoding(MMI->getCompactUnwindEncoding());
 
-  MachineModuleInfo &MMI = MF->getMMI();
-  std::vector<MCCFIInstruction> Instructions = MMI.getFrameInstructions();
+  const MachineModuleInfo &MMI = MF->getMMI();
+  const std::vector<MCCFIInstruction> &Instrs = MMI.getFrameInstructions();
   bool FoundOne = false;
   (void)FoundOne;
-  for (std::vector<MCCFIInstruction>::iterator I = Instructions.begin(),
-         E = Instructions.end(); I != E; ++I) {
+  for (std::vector<MCCFIInstruction>::const_iterator I = Instrs.begin(),
+         E = Instrs.end(); I != E; ++I) {
     if (I->getLabel() == Label) {
       emitCFIInstruction(*I);
       FoundOne = true;
