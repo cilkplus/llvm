@@ -113,6 +113,8 @@ def err_drv_cilk_objc : Error<
   "Cilk Plus does not support Objective-C">;
 def err_drv_cilk_unsupported: Error<
   "Cilk Plus not yet supported for this target">;
+def err_drv_emit_llvm_link : Error<
+   "-emit-llvm cannot be used when linking">;
 
 def warn_c_kext : Warning<
   "ignoring -fapple-kext which is valid for C++ and Objective-C++ only">;

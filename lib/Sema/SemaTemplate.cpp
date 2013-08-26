@@ -2541,7 +2541,9 @@ Sema::CheckVarTemplateId(VarTemplateDecl *Template, SourceLocation TemplateLoc,
   // a placeholder for an incomplete declarative context; which must be
   // complete by instantiation time. Thus, do not search through the partial
   // specializations yet.
-  // FIXME: Unify with InstantiateClassTemplateSpecialization()?
+  // TODO: Unify with InstantiateClassTemplateSpecialization()?
+  //       Perhaps better after unification of DeduceTemplateArguments() and
+  //       getMoreSpecializedPartialSpecialization().
   bool InstantiationDependent = false;
   if (!TemplateSpecializationType::anyDependentTemplateArguments(
           TemplateArgs, InstantiationDependent)) {
@@ -2556,6 +2558,7 @@ Sema::CheckVarTemplateId(VarTemplateDecl *Template, SourceLocation TemplateLoc,
       if (TemplateDeductionResult Result =
               DeduceTemplateArguments(Partial, TemplateArgList, Info)) {
         // Store the failed-deduction information for use in diagnostics, later.
+        // TODO: Actually use the failed-deduction info?
         FailedCandidates.addCandidate()
             .set(Partial, MakeDeductionFailureInfo(Context, Result, Info));
         (void)Result;
@@ -2617,8 +2620,6 @@ Sema::CheckVarTemplateId(VarTemplateDecl *Template, SourceLocation TemplateLoc,
       // InstantiationPattern = Template->getTemplatedDecl();
     }
   }
-
-  // FIXME: Actually use FailedCandidates.
 
   // 2. Create the canonical declaration.
   // Note that we do not instantiate the variable just yet, since
@@ -3527,8 +3528,7 @@ bool Sema::CheckTemplateArgumentList(TemplateDecl *Template,
         // deduced argument and place it on the argument pack. Note that we
         // stay on the same template parameter so that we can deduce more
         // arguments.
-        ArgumentPack.push_back(Converted.back());
-        Converted.pop_back();
+        ArgumentPack.push_back(Converted.pop_back_val());
       } else {
         // Move to the next template parameter.
         ++Param;

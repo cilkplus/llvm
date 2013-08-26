@@ -1258,7 +1258,8 @@ CollectTemplateParams(const TemplateParameterList *TPList,
             cast<MemberPointerType>(T.getTypePtr()), chars);
       }
       llvm::DITemplateValueParameter TVP =
-          DBuilder.createTemplateValueParameter(TheCU, Name, TTy, V);
+          DBuilder.createTemplateValueParameter(TheCU, Name, TTy,
+                                                V->stripPointerCasts());
       TemplateParams.push_back(TVP);
     } break;
     case TemplateArgument::NullPtr: {
@@ -1297,8 +1298,18 @@ CollectTemplateParams(const TemplateParameterList *TPList,
               CollectTemplateParams(NULL, TA.getPackAsArray(), Unit));
       TemplateParams.push_back(TVP);
     } break;
+    case TemplateArgument::Expression: {
+      const Expr *E = TA.getAsExpr();
+      QualType T = E->getType();
+      llvm::Value *V = CGM.EmitConstantExpr(E, T);
+      assert(V && "Expression in template argument isn't constant");
+      llvm::DIType TTy = getOrCreateType(T, Unit);
+      llvm::DITemplateValueParameter TVP =
+          DBuilder.createTemplateValueParameter(TheCU, Name, TTy,
+                                                V->stripPointerCasts());
+      TemplateParams.push_back(TVP);
+    } break;
     // And the following should never occur:
-    case TemplateArgument::Expression:
     case TemplateArgument::TemplateExpansion:
     case TemplateArgument::Null:
       llvm_unreachable(
