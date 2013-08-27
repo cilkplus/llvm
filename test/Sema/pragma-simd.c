@@ -540,11 +540,20 @@ void empty_body() {
 
 void test_LCV() {
   int i;
-  // expected-error@+1 {{the simd loop control variable may not be the subject of a simd clause}}
+  // expected-warning@+1 {{ignoring simd clause applied to simd loop control variable}}
   #pragma simd private(i)
   for (i = 0; i < 10; ++i);
-
-  // expected-error@+1 {{the simd loop control variable may not be the subject of a simd clause}}
+  // expected-warning@+1 {{ignoring simd clause applied to simd loop control variable}}
+  #pragma simd lastprivate(i)
+  for (i = 0; i < 10; ++i);
+  // expected-warning@+1 {{ignoring simd clause applied to simd loop control variable}}
   #pragma simd linear(i)
+  for (i = 0; i < 10; ++i);
+
+  // expected-error@+1{{the simd loop control variable may not be the subject of a firstprivate clause}}
+  #pragma simd firstprivate(i)
+  for (i = 0; i < 10; ++i);
+  // FIXME: should be an error {{the simd loop control variable may not be the subject of a reduction clause}}
+  #pragma simd reduction(+:i)
   for (i = 0; i < 10; ++i);
 }

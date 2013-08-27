@@ -6822,8 +6822,11 @@ def err_simd_for_cannot_return: Error<
   "cannot return from within a simd for loop">;
 def err_simd_for_cannot_break: Error<
   "cannot break from a simd for loop">;
-def err_simd_for_variable_cannot_be_lcv: Error<
-  "the simd loop control variable may not be the subject of a simd clause">;
+def err_simd_for_lcv_invalid_clause: Error<
+  "the simd loop control variable may not be the subject of a %select{reduction|firstprivate}0 clause">;
+def warn_simd_for_variable_lcv: Warning<
+  "ignoring simd clause applied to simd loop control variable">,
+  InGroup<SourceUsesCilkPlus>, DefaultWarn;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {

@@ -1387,8 +1387,13 @@ Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
     SIMDForScopeInfo *FSI = getCurSIMDFor();
     VarDecl *LCV = const_cast<VarDecl *>(getLoopControlVariable(*this, First));
     if (FSI->IsSIMDVariable(LCV)) {
-      Diag(FSI->GetLocation(LCV), diag::err_simd_for_variable_cannot_be_lcv);
-      return StmtError();
+      if (FSI->isReduction(LCV) || FSI->isFirstPrivate(LCV)) {
+        Diag(FSI->GetLocation(LCV), diag::err_simd_for_lcv_invalid_clause)
+          << FSI->isFirstPrivate(LCV);
+        return StmtError();
+      }
+      Diag(FSI->GetLocation(LCV), diag::warn_simd_for_variable_lcv);
+      FSI->SetInvalid(LCV);
     }
   }
 
