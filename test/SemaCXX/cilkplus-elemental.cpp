@@ -103,6 +103,10 @@ struct Class2 {
 
 // mask clause
 ATTR(vector(mask(1))) // expected-error {{attribute takes no arguments}}
+ATTR(vector(mask, nomask)) // expected-error {{elemental function cannot have both mask and nomask attributes}} \
+                           // expected-note {{here}}
+ATTR(vector(nomask, mask)) // expected-error {{elemental function cannot have both mask and nomask attributes}} \
+                           // expected-note {{here}}
 int test_mask_1(int x);
 
 // linear and uniform clauses with this

@@ -2514,6 +2514,9 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   // (3) A parameter referenced as an elemental linear step shall be the
   //     subject of a uniform clause.
   //
+  // (4) A vector attribute shall not have both a mask clause and a
+  //     nomask clause.
+  //
   bool Valid = true;
   for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end();
        GI != GE; ++GI) {
@@ -2521,6 +2524,7 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
 
     typedef llvm::SmallDenseMap<IdentifierInfo *, Attr *> SubjectAttrMapTy;
     SubjectAttrMapTy SubjectNames;
+    CilkMaskAttr *PrevMaskAttr = 0;
 
     // Check (1).
     for (AttrVec::iterator I = Attrs.begin(), E = Attrs.end(); I != E; ++I) {
@@ -2534,6 +2538,18 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
       } else if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(CurA)) {
         II = LA->getParameter();
         SubjectLoc = LA->getParameterLoc();
+      } else if (CilkMaskAttr *MA = dyn_cast<CilkMaskAttr>(CurA)) {
+        // Check (4)
+        if (PrevMaskAttr && PrevMaskAttr->getMask() != MA->getMask()) {
+          Diag(MA->getLocation(), diag::err_cilk_elemental_both_mask_nomask)
+            << MA->getRange();
+          Diag(PrevMaskAttr->getLocation(),
+               diag::note_cilk_elemental_mask_here)
+            << PrevMaskAttr->getMask() << PrevMaskAttr->getRange();
+          Valid = false;
+        } else
+          PrevMaskAttr = MA;
+        continue;
       } else
         continue;
 

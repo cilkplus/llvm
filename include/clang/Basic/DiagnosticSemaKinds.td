@@ -6761,6 +6761,10 @@ def err_cilk_elemental_linear_step_not_constant : Error<
   "linear step is not constant">;
 def err_cilk_elemental_repeated_vectorlength: Error<
   "repeated %select{vectorlength|vectorlengthfor}0 attribute is not allowed">;
+def err_cilk_elemental_both_mask_nomask : Error<
+  "elemental function cannot have both mask and nomask attributes">;
+def note_cilk_elemental_mask_here: Note<
+  "%select{nomask|mask}0 attribute here">;
 
 // simd for
 def err_simd_for_body_no_construct: Error<
