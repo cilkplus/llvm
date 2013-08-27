@@ -6740,12 +6740,6 @@ def err_cilk_elemental_unrecognized_processor: Error<
   "unrecognized processor">;
 def err_cilk_elemental_linear_parameter_type: Error<
   "linear parameter type %0 is not an integer or pointer type">;
-def warn_cilk_elemental_inconsistent_vectorlengthfor: Warning<
-  "inconsistent vectorlengthfor attribute">,
-  InGroup<SourceUsesCilkPlus>, DefaultWarn;
-def warn_cilk_elemental_inconsistent_vectorlength: Warning<
-  "repeated vectorlength attribute">,
-  InGroup<SourceUsesCilkPlus>, DefaultWarn;
 def warn_cilk_elemental_inconsistent_processor: Warning<
   "inconsistent processor attribute">,
   InGroup<SourceUsesCilkPlus>, DefaultWarn;
@@ -6765,6 +6759,8 @@ def err_cilk_elemental_linear_step_not_integral : Error<
   "linear step has non-integer type %0">;
 def err_cilk_elemental_linear_step_not_constant : Error<
   "linear step is not constant">;
+def err_cilk_elemental_repeated_vectorlength: Error<
+  "repeated %select{vectorlength|vectorlengthfor}0 attribute is not allowed">;
 
 // simd for
 def err_simd_for_body_no_construct: Error<

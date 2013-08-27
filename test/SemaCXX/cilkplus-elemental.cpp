@@ -30,7 +30,7 @@ int test_processor_1(int x);
 
 // vectorlengthfor clause
 ATTR(vector(vectorlengthfor)) // expected-error {{attribute takes one argument}}
-ATTR(vector(vectorlengthfor(int), vectorlengthfor(float))) // expected-warning {{inconsistent vectorlengthfor attribute}} \
+ATTR(vector(vectorlengthfor(int), vectorlengthfor(float))) // expected-error {{repeated vectorlengthfor attribute is not allowed}} \
                                                            // expected-note {{previous attribute is here}}
 int test_vectorlengthfor_1(int x);
 
@@ -41,7 +41,7 @@ ATTR(vector(vectorlength(-1)))  // expected-error {{vectorlength must be positiv
 ATTR(vector(vectorlength(0)))   // expected-error {{vectorlength must be positive}}
 ATTR(vector(vectorlength(3)))   // expected-error {{vectorlength expression must be a power of 2}}
 ATTR(vector(vectorlength(int))) // expected-error {{attribute takes one argument}}
-ATTR(vector(vectorlength(4), vectorlength(8))) // expected-warning {{repeated vectorlength attribute}} \
+ATTR(vector(vectorlength(4), vectorlength(8))) // expected-error {{repeated vectorlength attribute is not allowed}} \
                                                // expected-note {{previous attribute is here}}
 ATTR(vector(vectorlength(VL)))      // OK
 ATTR(vector(vectorlength(VL + 2)))  // OK

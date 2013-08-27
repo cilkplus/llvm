@@ -2879,37 +2879,26 @@ static void handleCilkProcessorAttr(Sema &S, Decl *D,
 static void handleCilkVecLengthAttr(Sema &S, Decl *D,
                                     const AttributeList &Attr) {
   assert(Attr.getKind() == AttributeList::AT_CilkVecLength);
-  unsigned NumArgs = Attr.getNumArgs();
-  if (!NumArgs) {
-    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
-      << Attr.getName() << 1;
+  if (!checkAttributeNumArgs(S, Attr, 1))
+    return;
+
+  // Check for multiple vectorlength attributes in one vector attribute.
+  if (CilkVecLengthAttr *Prev =
+        getGroupAttr<CilkVecLengthAttr>(D, Attr.getScopeLoc())) {
+    S.Diag(Attr.getLoc(), diag::err_cilk_elemental_repeated_vectorlength) << 0;
+    S.Diag(Prev->getLocation(), diag::note_previous_attribute);
     return;
   }
-  if (NumArgs > 1)
-    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
-      << Attr.getName() << 1;
-  // Check for multiple different vectorlength attributes in one vector().
-  // CodeGen does support this, so we just warn and continue.
-  CilkVecLengthAttr *ExistingAttr =
-    getGroupAttr<CilkVecLengthAttr>(D, Attr.getScopeLoc());
-  if (ExistingAttr) {
-    S.Diag(Attr.getLoc(),
-           diag::warn_cilk_elemental_inconsistent_vectorlength);
-    S.Diag(ExistingAttr->getLocation(), diag::note_previous_attribute);
-  }
 
-  for (unsigned I = 0; I < NumArgs; ++I) {
+  for (unsigned I = 0, NumArgs = Attr.getNumArgs(); I < NumArgs; ++I) {
     Expr *LengthExpr = Attr.getArg(I);
     ExprResult Result = S.CheckCilkVecLengthArg(LengthExpr);
-    if (!Result.isUsable()) {
-      Attr.setInvalid();
+    if (!Result.isUsable())
       return;
-    }
 
     D->addAttr(::new (S.Context)
                CilkVecLengthAttr(Attr.getRange(), S.Context,
-                                 Attr.getScopeLoc(),
-                                 Result.get()));
+                                 Attr.getScopeLoc(), Result.get()));
   }
 }
 
@@ -2919,20 +2908,17 @@ static void handleCilkVecLengthForAttr(Sema &S, Decl *D,
   if (!checkAttributeNumArgs(S, Attr, 1))
     return;
 
-  QualType ParmType = S.GetTypeFromParser(Attr.getTypeArg());
-
-  // Check for multiple different vectorlengthfor attributes in one vector().
-  // CodeGen does support this, so we just warn and continue.
-  CilkVecLengthForAttr *ExistingAttr =
-    getGroupAttr<CilkVecLengthForAttr>(D, Attr.getScopeLoc());
-  if (ExistingAttr && ExistingAttr->getTypeHint() != ParmType) {
-    S.Diag(Attr.getLoc(),
-           diag::warn_cilk_elemental_inconsistent_vectorlengthfor);
-    S.Diag(ExistingAttr->getLocation(), diag::note_previous_attribute);
+  // Check for multiple vectorlengthfor attributes in one vector attribute.
+  if (CilkVecLengthForAttr *Prev =
+        getGroupAttr<CilkVecLengthForAttr>(D, Attr.getScopeLoc())) {
+    S.Diag(Attr.getLoc(), diag::err_cilk_elemental_repeated_vectorlength) << 1;
+    S.Diag(Prev->getLocation(), diag::note_previous_attribute);
+    return;
   }
 
+  QualType ParmType = S.GetTypeFromParser(Attr.getTypeArg());
   D->addAttr(::new (S.Context)
-             CilkVecLengthForAttr(Attr.getLoc(), S.Context,
+             CilkVecLengthForAttr(Attr.getRange(), S.Context,
                                   Attr.getScopeLoc(), ParmType));
 }
 
