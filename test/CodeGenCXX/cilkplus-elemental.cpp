@@ -52,9 +52,8 @@ int Derived::foo() { return 1; }
 __attribute__((vector)) void func1(char) { }
 // CHECK: define void @_ZGVxN16v__Z5func1c
 
-// FIXME: Enable this test.
-// __attribute__((vector)) void func2(char&) { }
-// define void @_ZGVxN2v__Z5func2Rc
+__attribute__((vector)) void func2(char&) { }
+// CHECK: define void @_ZGVxN2v__Z5func2Rc
 
 namespace ns_check_declaration {
 
@@ -182,11 +181,12 @@ void test(S *p) {
   p->m1();
   p->m2();
   p->m3();
-  p->m4(4); // FIXME: Variable step codegen is not supported yet
+  p->m4(4);
 }
 
 // CHECK: declare <4 x float> @_ZGVxN4u__ZN19uniform_linear_this1S2m1Ev
 // CHECK: declare <4 x float> @_ZGVxN4l__ZN19uniform_linear_this1S2m2Ev
 // CHECK: declare <4 x float> @_ZGVxN4l7__ZN19uniform_linear_this1S2m3Ev
+// CHECK: declare <4 x float> @_ZGVxN4s1u__ZN19uniform_linear_this1S2m4Ei
 
 } // namespace uniform_linear_this

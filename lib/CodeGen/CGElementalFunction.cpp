@@ -476,26 +476,23 @@ static llvm::FunctionType *encodeParameters(llvm::Function *Func,
                                             llvm::MDNode *ArgName,
                                             llvm::MDNode *ArgStep,
                                             bool Mask,
-                                            ISAClass ISA,
                                             llvm::Type *VectorDataTy,
                                             SmallVectorImpl<ParamInfo> &Info,
                                      llvm::raw_svector_ostream &MangledParams) {
   assert(Func && "Func is null");
   unsigned ArgSize = Func->arg_size();
 
-  if (ArgName->getNumOperands() != 1 + ArgSize ||
-      ArgStep->getNumOperands() != 1 + ArgSize)
-    return 0;
+  assert((ArgName->getNumOperands() == 1 + ArgSize) && "invalid metadata");
+  assert((ArgStep->getNumOperands() == 1 + ArgSize) && "invalid metadata");
 
   SmallVector<llvm::Type*, 4> Tys;
   llvm::Function::const_arg_iterator Arg = Func->arg_begin();
   for (unsigned i = 1, ie = 1 + ArgSize; i < ie; ++i, ++Arg) {
     llvm::MDString *Name = dyn_cast<llvm::MDString>(ArgName->getOperand(i));
-    if (!Name)
-      return 0;
+    assert(Name && "invalid metadata");
 
     llvm::Value *Step = ArgStep->getOperand(i);
-    if (dyn_cast<llvm::UndefValue>(Step)) {
+    if (isa<llvm::UndefValue>(Step)) {
       MangledParams << "v";
       unsigned VL = VectorDataTy->getVectorNumElements();
       Tys.push_back(llvm::VectorType::get(Arg->getType(), VL));
@@ -513,26 +510,25 @@ static llvm::FunctionType *encodeParameters(llvm::Function *Func,
         Info.push_back(ParamInfo(PK_LinearConst, C));
       }
     } else if (llvm::MDString *StepName = dyn_cast<llvm::MDString>(Step)) {
-      // Search Func parameters for StepName to determine the index.
-      unsigned Number = 0;
-      for (llvm::Function::arg_iterator I = Func->arg_begin(),
-                                        IE = Func->arg_end();
-           I != IE; ++I, ++Number) {
-        if (I->getName().equals(StepName->getString()))
+      // Search parameter names for StepName to determine the index.
+      unsigned Idx = 0, NumParams = ArgName->getNumOperands() - 1;
+      for (; Idx < NumParams; ++Idx) {
+        // The first operand is the argument name kind metadata.
+        llvm::Value *V = ArgName->getOperand(Idx + 1);
+        assert(isa<llvm::MDString>(V) && "invalid metadata");
+        llvm::MDString *MS = cast<llvm::MDString>(V);
+        if (MS->getString().equals(StepName->getString()))
           break;
       }
-      if (Number >= Func->arg_size())
-        return 0; // Metadata is broken.
-      MangledParams << "s" << Number;
-      Tys.push_back(Arg->getType());
+      assert((Idx < NumParams) && "step parameter not found");
 
+      MangledParams << "s" << Idx;
+      Tys.push_back(Arg->getType());
       llvm::LLVMContext &Context = Func->getContext();
-      Step = llvm::ConstantInt::get(llvm::Type::getInt32Ty(Context), Number);
+      Step = llvm::ConstantInt::get(llvm::Type::getInt32Ty(Context), Idx);
       Info.push_back(ParamInfo(PK_Linear, Step));
-    } else {
-      // Unknown Step type.
-      return 0;
-    }
+    } else
+      llvm_unreachable("invalid step metadata");
   }
 
   if (Mask)
@@ -833,7 +829,7 @@ static bool createVectorVariant(llvm::MDNode *Root,
   SmallString<16> ParamStr;
   llvm::raw_svector_ostream MangledParams(ParamStr);
   llvm::FunctionType *NewFuncTy = encodeParameters(Func, ArgName, ArgStep,
-                                                   IsMasked, ISA, VectorDataTy,
+                                                   IsMasked, VectorDataTy,
                                                    Info, MangledParams);
   if (!NewFuncTy)
     return false;
