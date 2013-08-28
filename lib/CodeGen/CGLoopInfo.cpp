@@ -16,34 +16,33 @@
 using namespace clang;
 using namespace CodeGen;
 
-static llvm::MDNode *MakeMetadata(llvm::LLVMContext &Ctx, 
-                                  llvm::StringRef Name, unsigned V) {
-  using namespace llvm;
-  Value *Args[] = { MDString::get(Ctx, Name),
-                    ConstantInt::get(Type::getInt32Ty(Ctx), V) };
-  return MDNode::get(Ctx, Args);
-}
-
 static llvm::MDNode *CreateMetadata(llvm::LLVMContext &Ctx,
                                     const LoopAttributes &Attrs) {
   using namespace llvm;
 
-  SmallVector<Value*, 4> Args;
-  // Reserve operand 0 for loop id self reference.
-  Args.push_back(0);
-
-  if (Attrs.VectorizerWidth > 0)
-    Args.push_back(MakeMetadata(Ctx, "llvm.vectorizer.width",
-                                Attrs.VectorizerWidth));
-
-  if (!Attrs.IsParallel &&
-      Args.size() < 2)
+  if (!Attrs.IsParallel && Attrs.VectorizerWidth == 0)
     return 0;
 
-  assert(Args.size() > 0);
-  assert(Args[0] == 0);
+  SmallVector<Value *, 4> Args;
+  // Reserve operand 0 for loop id self reference.
+  MDNode *TempNode = MDNode::getTemporary(Ctx, None);
+  Args.push_back(TempNode);
+
+  if (Attrs.VectorizerWidth > 0) {
+    Value *Vals[] = {
+      MDString::get(Ctx, "llvm.vectorizer.width"),
+      ConstantInt::get(Type::getInt32Ty(Ctx), Attrs.VectorizerWidth)
+    };
+    Args.push_back(MDNode::get(Ctx, Vals));
+  }
+
   MDNode *LoopID = MDNode::get(Ctx, Args);
+  assert(LoopID->use_empty() && "LoopID should not be used");
+
+  // Set the first operand to itself.
   LoopID->replaceOperandWith(0, LoopID);
+  MDNode::deleteTemporary(TempNode);
+
   return LoopID;
 }
 
