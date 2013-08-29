@@ -3033,11 +3033,17 @@ static void handleCilkLinearAttr(Sema &S, Decl *D, const AttributeList &Attr) {
           S.Diag(ND->getLocation(), diag::note_declared_at);
           return;
         }
-        CXXScopeSpec SS;
-        ExprResult Ref = S.BuildDeclarationNameExpr(SS, Result, /*ADL*/false);
-        if (!Ref.isUsable())
-          return;
-        StepExpr = Ref.release();
+
+        // Build a DeclRefExpr for this variable and it should be a constant
+        // expression and will be evaluated at compile time.
+        {
+          EnterExpressionEvaluationContext Scope(S, Sema::ConstantEvaluated);
+          CXXScopeSpec SS;
+          ExprResult Ref = S.BuildDeclarationNameExpr(SS, Result, /*ADL*/false);
+          if (!Ref.isUsable())
+            return;
+          StepExpr = Ref.release();
+        }
       } else {
         S.Diag(StepLoc, diag::err_cilk_elemental_not_function_parameter);
         return;

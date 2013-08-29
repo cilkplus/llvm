@@ -159,3 +159,29 @@ void test() {
 }
 
 } // test_this
+
+namespace test_evaluation_linear_step {
+
+const int STEP = 2;
+__attribute__((vector(linear(x:STEP))))
+void f1(int x) { } // OK.
+
+__attribute__((vector(linear(x:step), uniform(step))))
+void f2(int x, int step) { } // OK.
+
+template <typename T, T s>
+__attribute__((vector(linear(x:s))))
+void f3(int x) { }
+
+template <unsigned N>
+struct S {
+  __attribute__((vector(linear(x:N))))
+  void f4(int x) { }
+};
+
+void test() {
+  f3<unsigned int, 4>(0); // OK.
+  S<4>().f4(0); // OK.
+}
+
+} // test_evaluation_linear_step
