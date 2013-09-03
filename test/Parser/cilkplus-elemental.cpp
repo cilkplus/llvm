@@ -22,3 +22,13 @@ class X {
   __attribute__((vector(uniform(goto)))) // expected-error {{expected identifier or this}}
   void member();
 };
+
+__declspec(vector)               // OK
+__declspec(vector())             // OK
+__declspec(vector noinline)      // OK
+__declspec(noinline vector)      // OK
+__attribute__((vector))          // OK
+__attribute__((vector()))        // OK
+__attribute__((vector noinline)) // OK
+__attribute__((noinline vector)) // OK
+void test_vector();

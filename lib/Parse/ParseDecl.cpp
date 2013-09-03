@@ -562,8 +562,14 @@ void Parser::ParseComplexMicrosoftDeclSpec(IdentifierInfo *Ident,
     }
     T.skipToEnd();
   } else if (Ident->isStr("vector")) {
-    ParseCilkPlusElementalAttribute(*Ident, Loc, Attrs, 0,
-                                    AttributeList::AS_Declspec);
+    // The vector declspec may have optional argument clauses. Check for a l-paren
+    // to decide whether we should parse argument clauses or not.
+    if (Tok.getKind() == tok::l_paren)
+      ParseCilkPlusElementalAttribute(*Ident, Loc, Attrs, 0,
+                                      AttributeList::AS_Declspec);
+    else
+      Attrs.addNew(Ident, Loc, 0, Loc, 0, SourceLocation(), 0, 0,
+                   AttributeList::AS_Declspec);
   } else {
     // We don't recognize this as a valid declspec, but instead of creating the
     // attribute and allowing sema to warn about it, we will warn here instead.
@@ -1241,17 +1247,16 @@ void Parser::ParseThreadSafetyAttribute(IdentifierInfo &AttrName,
 /// This drastically simplifies parsing and Sema at the cost of re-grouping
 /// the attributes in CodeGen.
 ///
-///    elemental-clauses:
-///      elemental-clause
-///      elemental-clauses , elemental-clause
-///    
-///    elemental-clause:
-///      processor-clause
-///      vectorlength-clause
-///      elemental-uniform-clause
-///      elemental-linear-clause
-///      mask-clause
-
+/// elemental-clauses:
+///   elemental-clause
+///   elemental-clauses , elemental-clause
+/// 
+/// elemental-clause:
+///   processor-clause
+///   vectorlength-clause
+///   elemental-uniform-clause
+///   elemental-linear-clause
+///   mask-clause
 void Parser::ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
                                              SourceLocation AttrNameLoc,
                                              ParsedAttributes &Attrs,
