@@ -1,4 +1,5 @@
-// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -emit-llvm %s     -o - | FileCheck %s
+// RUN: %clang_cc1 -std=c++11 -fcxx-exceptions -fexceptions -emit-llvm %s -O2 -o - | FileCheck %s --check-prefix=CHECKO2
 
 void anchor(int) throw();
 void touch(float) throw();
@@ -194,4 +195,25 @@ void test2() {
   // CHECK: test2
   // CHECK: call void @_Z7extern1v()
   // CHECK: invoke void @_Z7extern2v()
+}
+
+void test_last_iteration_optimization() {
+  int a = 0;
+  #pragma simd linear(a)
+  for (int i = 0; i < 1; i++) {
+    anchor(700);
+    (void)a;
+  }
+
+  #pragma simd lastprivate(a)
+  for (int i = 0; i < 1; i++) {
+    anchor(701);
+    (void)a;
+  }
+
+  // CHECKO2: define void @_Z32test_last_iteration_optimizationv
+  // CHECKO2: call void @_Z6anchori(i32 700)
+  // CHECKO2-NEXT: call void @_Z6anchori(i32 701)
+  // CHECKO2-NOT: unreachable
+  // CHECKO2: ret void 
 }

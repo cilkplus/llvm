@@ -2215,12 +2215,15 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
 
   EmitBlock(ThenBlock);
 
+  // Initialize the captured struct.
+  const CapturedStmt &CS = *S.getBody();
+  LValue CapStruct = InitCapturedStruct(CS);
+
   // Emit the for loop.
   llvm::Value *LoopCount = EmitAnyExpr(S.getLoopCount()).getScalarVal();
   llvm::Value *LoopIndex = CreateTempAlloca(LoopCount->getType(),
                                             "__index.addr");
   llvm::Function *BodyFunction = 0;
-  LValue CapStruct;
   {
     JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
     RunCleanupsScope ForScope(*this);
@@ -2276,7 +2279,6 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
     BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
 
     // Emit the call to the loop body.
-    const CapturedStmt &CS = *S.getBody();
     {
       CapturedDecl *CD = const_cast<CapturedDecl *>(CS.getCapturedDecl());
       const RecordDecl *RD = CS.getCapturedRecordDecl();
@@ -2291,11 +2293,10 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
 
       // Always inline this function back to the call site.
       BodyFunction->addFnAttr(llvm::Attribute::AlwaysInline);
-
     }
 
-    // Initialize the captured struct.
-    CapStruct = InitCapturedStruct(CS);
+    // This helper call does not require any update to linear or lastprivate
+    // variables.
     EmitSIMDForHelperCall(S, BodyFunction, CapStruct, LoopIndex, false);
 
     // Emit the increment block.
@@ -2303,7 +2304,7 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
     EmitStmt(S.getInc());
 
     {
-      llvm::Value *NewLoopIndex = 
+      llvm::Value *NewLoopIndex =
         Builder.CreateAdd(Builder.CreateLoad(LoopIndex),
                           llvm::ConstantInt::get(LoopCount->getType(), 1));
       Builder.CreateStore(NewLoopIndex, LoopIndex);
@@ -2325,6 +2326,7 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   }
 
   if (SeparateLastIter) {
+    // This helper call requires updates to linear or lastprivate variables.
     EmitSIMDForHelperCall(S, BodyFunction, CapStruct, LoopIndex, true);
     // Increment again, for last iteration.
     EmitStmt(S.getInc());
