@@ -122,7 +122,14 @@ namespace CallingConv {
     /// convention differs from the more common \c X86_64_SysV convention
     /// in a number of ways, most notably in that XMM registers used to pass
     /// arguments are shadowed by GPRs, and vice versa.
-    X86_64_Win64 = 79
+    X86_64_Win64 = 79,
+
+    /// \brief The __regcall convenntion as specified in the Intel Vector
+    /// Function ABI. This calling convention differs from the x86 ABI in
+    /// that scalar arguments are passed in GPRs, the order of GPRs used
+    /// differs from the x86-64 ABI, and all XMM/YMM registers are used for
+    /// vector/FP arguments.
+    X86_RegCall = 80
   };
 } // End CallingConv namespace
 

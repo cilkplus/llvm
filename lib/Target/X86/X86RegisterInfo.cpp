@@ -255,6 +255,10 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     break;
   }
 
+  case CallingConv::X86_RegCall:
+    assert(Is64Bit && "32-bit x86_regcallcc not supported yet!");
+    return CSR_64_RegCall_XMM_SaveList;
+
   case CallingConv::Cold:
     if (Is64Bit)
       return CSR_MostRegs_64_SaveList;

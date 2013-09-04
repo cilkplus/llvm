@@ -500,6 +500,21 @@ def CC_Intel_OCL_BI : CallingConv<[
   CCDelegateTo<CC_X86_32_C>
 ]>;
 
+// 64-bit __regcall calling convention.
+def CC_X86_64_RegCall : CallingConv<[
+  // Promote i8/i16 arguments to i32.
+  CCIfType<[i8, i16], CCPromoteToType<i32>>,
+
+  // Integer arguments are passed in GPR
+  CCIfType<[i32], CCAssignToReg<[EAX, ECX, EDX, EDI, ESI, R8D, R9D,
+                                 R12D, R13D, R14D, R15D]>>,
+  CCIfType<[i64], CCAssignToReg<[RAX, RCX, RDX, RDI, RSI, R8, R9,
+                                 R12, R13, R14, R15]>>,
+
+  // Otherwise, same as everything else.
+  CCDelegateTo<CC_X86_64_C>
+]>;
+
 //===----------------------------------------------------------------------===//
 // X86 Root Argument Calling Conventions
 //===----------------------------------------------------------------------===//
@@ -522,6 +537,7 @@ def CC_X86_64 : CallingConv<[
   CCIfCC<"CallingConv::HiPE", CCDelegateTo<CC_X86_64_HiPE>>,
   CCIfCC<"CallingConv::X86_64_Win64", CCDelegateTo<CC_X86_Win64_C>>,
   CCIfCC<"CallingConv::X86_64_SysV", CCDelegateTo<CC_X86_64_C>>,
+  CCIfCC<"CallingConv::X86_RegCall", CCDelegateTo<CC_X86_64_RegCall>>,
 
   // Mingw64 and native Win64 use Win64 CC
   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<CC_X86_Win64_C>>,
@@ -567,6 +583,8 @@ def CSR_Win64_Intel_OCL_BI_AVX512 : CalleeSavedRegs<(add RBX, RBP, RDI, RSI,
                                                      K4, K5, K6, K7)>;
 //Standard C + XMM 8-15
 def CSR_64_Intel_OCL_BI       : CalleeSavedRegs<(add CSR_64,
+                                                 (sequence "XMM%u", 8, 15))>;
+def CSR_64_RegCall_XMM        : CalleeSavedRegs<(add CSR_64,
                                                  (sequence "XMM%u", 8, 15))>;
 
 //Standard C + YMM 8-15
