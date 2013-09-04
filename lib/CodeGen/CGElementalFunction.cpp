@@ -859,6 +859,7 @@ static bool createVectorVariant(llvm::MDNode *Root,
     return false;
 
   setVectorVariantAttributes(Func, NewFunc, ProcessorName);
+  NewFunc->setCallingConv(llvm::CallingConv::X86_RegCall);
 
   // Define the vector variant if the scalar function is not a declaration.
   if (FD->hasBody())
