@@ -324,6 +324,10 @@ void CodeGenModule::EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
             VectorRegisterBytes = 16;
           else if (Target.hasFeature("mmx") && (*TI)->isIntegerType())
             VectorRegisterBytes = 8;
+          else
+            // The current target has no SSE/MMX support.
+            // FIXME: Issue a warning.
+            return;
         } else {
           llvm::Value *attrMDArgs[] = {
             llvm::MDString::get(Context, "processor"),
