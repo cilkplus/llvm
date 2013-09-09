@@ -321,7 +321,7 @@ entry:
 
 ;
 ; CHECK:       test_float_9:
-; CHECK-FIXME: vcvttss2si %xmm8, %rdi
+; CHECK: vcvttss2si %xmm8, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_float_9(float, float, float, float, float,
@@ -334,7 +334,7 @@ entry:
 
 ;
 ; CHECK:       test_float_13:
-; CHECK-FIXME: vcvttss2si %xmm12, %rdi
+; CHECK: vcvttss2si %xmm12, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_float_13(float, float, float, float, float,
@@ -348,7 +348,7 @@ entry:
 
 ;
 ; CHECK:       test_float_16:
-; CHECK-FIXME: vcvttss2si %xmm15, %rdi
+; CHECK: vcvttss2si %xmm15, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_float_16(float, float, float, float, float,
