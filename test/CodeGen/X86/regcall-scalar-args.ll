@@ -505,3 +505,18 @@ entry:
   call void @func32(i32 %add)
   ret void
 }
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;  Misc tests
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;
+; CHECK:       test_tail_call:
+; CHECK:       movl %edi, %eax
+; CHECK-NEXT:  jmp func32
+;
+define void @test_tail_call(i32 %a) {
+entry:
+  tail call x86_regcallcc void @func32(i32 %a)
+  ret void
+}
