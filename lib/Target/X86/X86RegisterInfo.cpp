@@ -298,6 +298,10 @@ X86RegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
     if (!HasAVX && !IsWin64 && Is64Bit)
       return CSR_64_Intel_OCL_BI_RegMask;
   }
+  if (CC == CallingConv::X86_RegCall) {
+    assert(Is64Bit && "32-bit x86_regcallcc not supported yet!");
+    return CSR_64_RegCall_XMM_RegMask;
+  }
   if (CC == CallingConv::GHC || CC == CallingConv::HiPE)
     return CSR_NoRegs_RegMask;
   if (!Is64Bit)

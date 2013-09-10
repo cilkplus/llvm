@@ -157,7 +157,7 @@ declare x86_regcallcc void @func8(i8)
 
 ;
 ; CHECK:       test8_regcall:
-; CHECK-FIXME: vmovaps
+; CHECK-NOT:   vmovaps
 ; CHECK-NOT:   movl %eax
 ; CHECK:       callq func8_regcall
 ;
@@ -321,7 +321,7 @@ entry:
 
 ;
 ; CHECK:       test_float_9:
-; CHECK: vcvttss2si %xmm8, %rdi
+; CHECK:       vcvttss2si %xmm8, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_float_9(float, float, float, float, float,
@@ -334,7 +334,7 @@ entry:
 
 ;
 ; CHECK:       test_float_13:
-; CHECK: vcvttss2si %xmm12, %rdi
+; CHECK:       vcvttss2si %xmm12, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_float_13(float, float, float, float, float,
@@ -348,7 +348,7 @@ entry:
 
 ;
 ; CHECK:       test_float_16:
-; CHECK: vcvttss2si %xmm15, %rdi
+; CHECK:       vcvttss2si %xmm15, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_float_16(float, float, float, float, float,
@@ -427,7 +427,7 @@ entry:
 
 ;
 ; CHECK:       test_double_10:
-; CHECK-FIXME: vcvttsd2si %xmm9, %rdi
+; CHECKE:      vcvttsd2si %xmm9, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_double_10(double, double, double, double, double,
@@ -440,7 +440,7 @@ entry:
 
 ;
 ; CHECK:       test_double_14:
-; CHECK-FIXME: vcvttsd2si %xmm13, %rdi
+; CHECK:       vcvttsd2si %xmm13, %rdi
 ; CHECK:       callq func32
 ;
 define x86_regcallcc void @test_double_14(double, double, double, double, double,

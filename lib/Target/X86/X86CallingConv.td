@@ -511,12 +511,6 @@ def CC_X86_64_RegCall : CallingConv<[
   CCIfType<[i64], CCAssignToReg<[RAX, RCX, RDX, RDI, RSI, R8, R9,
                                  R12, R13, R14, R15]>>,
 
-  // The first 8 MMX vector arguments are passed in XMM registers on Darwin.
-  CCIfType<[x86mmx],
-            CCIfSubtarget<"isTargetDarwin()",
-            CCIfSubtarget<"hasSSE2()",
-            CCPromoteToType<v2i64>>>>,
-
   // The first 16 FP/Vector arguments are passed in XMM registers.
   CCIfType<[f32, f64, v16i8, v8i16, v4i32, v2i64, v4f32, v2f64],
             CCIfSubtarget<"hasSSE1()",
