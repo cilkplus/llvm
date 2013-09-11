@@ -151,6 +151,32 @@ def RetCC_X86_64_HiPE : CallingConv<[
   CCIfType<[i64], CCAssignToReg<[R15, RBP, RAX, RDX]>>
 ]>;
 
+// X86-64 RegCall return-value convention.
+def RetCC_X86_RegCall_64 : CallingConv<[
+  // Promote i8/i16 types to i32.
+  CCIfType<[i8, i16], CCPromoteToType<i32>>,
+
+  // Return integer values in GPR.
+  CCIfType<[i32], CCAssignToReg<[EAX, ECX, EDX, EDI, ESI, R8D, R9D,
+                                 R12D, R13D, R14D, R15D]>>,
+  CCIfType<[i64], CCAssignToReg<[RAX, RCX, RDX, RDI, RSI, R8, R9,
+                                 R12, R13, R14, R15]>>,
+
+  // Return FP and vector values in XMM0-XMM15 or YMM0-YMM15.
+  CCIfType<[f32, f64, v16i8, v8i16, v4i32, v2i64, v4f32, v2f64],
+            CCAssignToReg<[XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
+                           XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14,
+                           XMM15]>>,
+
+  CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64],
+            CCIfSubtarget<"hasFp256()",
+            CCAssignToReg<[YMM0, YMM1, YMM2, YMM3, YMM4, YMM5, YMM6, YMM7,
+                           YMM8, YMM9, YMM10, YMM11, YMM12, YMM13, YMM14,
+                           YMM15]>>>,
+  
+  CCDelegateTo<RetCC_X86Common>
+]>;
+
 // This is the root return-value convention for the X86-32 backend.
 def RetCC_X86_32 : CallingConv<[
   // If FastCC, use RetCC_X86_32_Fast.
@@ -170,6 +196,7 @@ def RetCC_X86_64 : CallingConv<[
   // Handle explicit CC selection
   CCIfCC<"CallingConv::X86_64_Win64", CCDelegateTo<RetCC_X86_Win64_C>>,
   CCIfCC<"CallingConv::X86_64_SysV", CCDelegateTo<RetCC_X86_64_C>>,
+  CCIfCC<"CallingConv::X86_RegCall", CCDelegateTo<RetCC_X86_RegCall_64>>,
 
   // Mingw64 and native Win64 use Win64 CC
   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<RetCC_X86_Win64_C>>,
