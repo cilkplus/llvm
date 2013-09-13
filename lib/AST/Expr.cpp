@@ -2519,6 +2519,42 @@ Expr *Expr::getSubExprAsWritten() {
   return E;
 }
 
+Expr *Expr::IgnoreImplicitForCilkSpawn() {
+  Expr *E = this;
+  while (E) {
+    if (ImplicitCastExpr *CE = dyn_cast<ImplicitCastExpr>(E))
+      E = CE->getSubExprAsWritten();
+    else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
+      E = EWC->getSubExpr();
+    else if (MaterializeTemporaryExpr *MTE
+        = dyn_cast<MaterializeTemporaryExpr>(E))
+      E = MTE->GetTemporaryExpr();
+    else if (CXXBindTemporaryExpr *BTE = dyn_cast<CXXBindTemporaryExpr>(E))
+      E = BTE->getSubExpr();
+    else if (CXXConstructExpr *CE = dyn_cast<CXXConstructExpr>(E)) {
+      // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
+      // so handle it the same way as CXXFunctionalCastExpr
+      if (isa<CXXTemporaryObjectExpr>(CE))
+        break;
+      if (CE->getNumArgs() >= 1)
+        E = CE->getArg(0);
+      else
+        break;
+    } else
+      break;
+  }
+
+  return E;
+}
+
+bool Expr::isCilkSpawn() const {
+  const Expr *E = IgnoreImplicitForCilkSpawn();
+  if (const CallExpr *CE = dyn_cast_or_null<CallExpr>(E))
+    return CE->isCilkSpawnCall();
+
+  return false;
+}
+
 bool Expr::isDefaultArgument() const {
   const Expr *E = this;
   if (const MaterializeTemporaryExpr *M = dyn_cast<MaterializeTemporaryExpr>(E))

@@ -688,6 +688,16 @@ public:
     return const_cast<Expr*>(this)->IgnoreImplicit();
   }
 
+  /// \brief Skip past any implicit AST nodes and other immediate nodes
+  /// introduced by semantics analysis for a Cilk spawn call.
+  Expr *IgnoreImplicitForCilkSpawn();
+  const Expr *IgnoreImplicitForCilkSpawn() const LLVM_READONLY {
+    return const_cast<Expr*>(this)->IgnoreImplicitForCilkSpawn();
+  }
+  /// \biref Returns true if this is a Cilk spawn call expression, with
+  /// possible implicit AST nodes associated.
+  bool isCilkSpawn() const;
+
   /// IgnoreParens - Ignore parentheses.  If this Expr is a ParenExpr, return
   ///  its subexpression.  If that subexpression is also a ParenExpr,
   ///  then this method recursively returns its subexpression, and so forth.

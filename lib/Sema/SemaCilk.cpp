@@ -2021,33 +2021,6 @@ void Sema::ActOnSIMDForStmtError() {
   ActOnForStmtError(*this, getCurSIMDFor()->TheRecordDecl);
 }
 
-static Expr *IgnoreImplicitNodeForCilkSpawnCall(Expr *E) {
-  while (true) {
-    if (ImplicitCastExpr *CE = dyn_cast<ImplicitCastExpr>(E))
-      E = CE->getSubExprAsWritten();
-    else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
-      E = EWC->getSubExpr();
-    else if (MaterializeTemporaryExpr *MTE
-        = dyn_cast<MaterializeTemporaryExpr>(E))
-      E = MTE->GetTemporaryExpr();
-    else if (CXXBindTemporaryExpr *BTE = dyn_cast<CXXBindTemporaryExpr>(E))
-      E = BTE->getSubExpr();
-    else if (CXXConstructExpr *CE = dyn_cast<CXXConstructExpr>(E)) {
-      // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
-      // so handle it the same way as CXXFunctionalCastExpr
-      if (isa<CXXTemporaryObjectExpr>(CE))
-        break;
-      if (CE->getNumArgs() >= 1)
-        E = CE->getArg(0);
-      else
-        break;
-    } else
-      break;
-  }
-
-  return E;
-}
-
 static bool CheckUnsupportedCall(Sema &S, CallExpr *Call) {
   assert(Call->isCilkSpawnCall() && "Cilk spawn expected");
 
@@ -2068,7 +2041,7 @@ static bool CheckSpawnCallExpr(Sema &S, Expr *E, SourceLocation SpawnLoc) {
   if (isa<CilkSpawnExpr>(E))
     return true;
 
-  E = IgnoreImplicitNodeForCilkSpawnCall(E);
+  E = E->IgnoreImplicitForCilkSpawn();
   Expr *RHS = 0;
 
   // x = _Cilk_spawn f(); // x is a non-class object.
@@ -2101,7 +2074,7 @@ static bool CheckSpawnCallExpr(Sema &S, Expr *E, SourceLocation SpawnLoc) {
   }
 
   // Up to this point, RHS is expected to be '_Cilk_spawn f()'.
-  RHS = IgnoreImplicitNodeForCilkSpawnCall(RHS);
+  RHS = RHS->IgnoreImplicitForCilkSpawn();
 
   CallExpr *Call = dyn_cast<CallExpr>(RHS);
   if (!Call || !Call->isCilkSpawnCall()) {

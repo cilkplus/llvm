@@ -653,11 +653,8 @@ EmitCompoundAssignLValue(const CompoundAssignOperator *E,
   // Cilk Plus needs the LHS evaluated first to handle cases such as
   // array[f()] = _Cilk_spawn foo();
   // This evaluation order requirement implies that _Cilk_spawn cannot
-  // spawn Objective C block calls
-  if (CGF.getLangOpts().CilkPlus) {
-    assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
-           "Cilk Plus does not support Objective-C");
-
+  // spawn Objective C block calls.
+  if (CGF.getLangOpts().CilkPlus &&  E->getRHS()->isCilkSpawn()) {
     LHS = CGF.EmitLValue(E->getLHS());
     OpInfo.RHS = Visit(E->getRHS());
   } else {
@@ -723,11 +720,8 @@ LValue ComplexExprEmitter::EmitBinAssignLValue(const BinaryOperator *E,
   // Cilk Plus needs the LHS evaluated first to handle cases such as
   // array[f()] = _Cilk_spawn foo();
   // This evaluation order requirement implies that _Cilk_spawn cannot
-  // spawn Objective C block calls
-  if (CGF.getLangOpts().CilkPlus) {
-    assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
-           "Cilk Plus does not support Objective-C");
-
+  // spawn Objective C block calls.
+  if (CGF.getLangOpts().CilkPlus && E->getRHS()->isCilkSpawn()) {
     LHS = CGF.EmitLValue(E->getLHS());
     Val = Visit(E->getRHS());
   } else {

@@ -3013,11 +3013,8 @@ LValue CodeGenFunction::EmitBinaryOperatorLValue(const BinaryOperator *E) {
     // Cilk Plus needs the LHS evaluated first to handle cases such as
     // array[f()] = _Cilk_spawn foo();
     // This evaluation order requirement implies that _Cilk_spawn cannot
-    // spawn Objective C block calls
-    if (getLangOpts().CilkPlus) {
-      assert(!getLangOpts().ObjC1 && !getLangOpts().ObjC2 &&
-             "Cilk Plus does not support Objective-C");
-
+    // spawn Objective C block calls.
+    if (getLangOpts().CilkPlus && E->getRHS()->isCilkSpawn()) {
       LV = EmitCheckedLValue(E->getLHS(), TCK_Store);
       RV = EmitAnyExpr(E->getRHS());
     } else {

@@ -2761,11 +2761,8 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
     // Cilk Plus needs the LHS evaluated first to handle cases such as
     // array[f()] = _Cilk_spawn foo();
     // This evaluation order requirement implies that _Cilk_spawn cannot
-    // spawn Objective C block calls
-    if (CGF.getLangOpts().CilkPlus) {
-      assert(!CGF.getLangOpts().ObjC1 && !CGF.getLangOpts().ObjC2 &&
-             "Cilk Plus does not support Objective-C");
-
+    // spawn Objective C block calls.
+    if (CGF.getLangOpts().CilkPlus && E->getRHS()->isCilkSpawn()) {
       LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
       RHS = Visit(E->getRHS());
     } else {
