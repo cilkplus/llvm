@@ -173,7 +173,7 @@ def RetCC_X86_RegCall_64 : CallingConv<[
             CCAssignToReg<[YMM0, YMM1, YMM2, YMM3, YMM4, YMM5, YMM6, YMM7,
                            YMM8, YMM9, YMM10, YMM11, YMM12, YMM13, YMM14,
                            YMM15]>>>,
-  
+
   CCDelegateTo<RetCC_X86Common>
 ]>;
 
@@ -356,6 +356,37 @@ def CC_X86_64_HiPE : CallingConv<[
   CCIfType<[i32, i64, f32, f64], CCAssignToStack<8, 8>>
 ]>;
 
+// 64-bit __regcall calling convention.
+def CC_X86_64_RegCall : CallingConv<[
+  // Promote i8/i16 arguments to i32.
+  CCIfType<[i8, i16], CCPromoteToType<i32>>,
+
+  // Integer arguments are passed in GPR
+  CCIfType<[i32], CCAssignToReg<[EAX, ECX, EDX, EDI, ESI, R8D, R9D,
+                                 R12D, R13D, R14D, R15D]>>,
+  CCIfType<[i64], CCAssignToReg<[RAX, RCX, RDX, RDI, RSI, R8, R9,
+                                 R12, R13, R14, R15]>>,
+
+  // The first 16 FP/Vector arguments are passed in XMM registers.
+  CCIfType<[f32, f64, v16i8, v8i16, v4i32, v2i64, v4f32, v2f64],
+            CCIfSubtarget<"hasSSE1()",
+            CCAssignToReg<[XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
+                           XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14,
+                           XMM15]>>>,
+
+  // The first 8 256-bit vector arguments are passed in YMM registers, unless
+  // this is a vararg function. See comment in CC_X86_64_C.
+  CCIfNotVarArg<CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64],
+                          CCIfSubtarget<"hasFp256()",
+                          CCAssignToReg<[YMM0, YMM1, YMM2, YMM3,
+                                         YMM4, YMM5, YMM6, YMM7,
+                                         YMM8, YMM9, YMM10, YMM11,
+                                         YMM12, YMM13, YMM14, YMM15]>>>>,
+
+  // Otherwise, same as everything else.
+  CCDelegateTo<CC_X86_64_C>
+]>;
+
 //===----------------------------------------------------------------------===//
 // X86 C Calling Convention
 //===----------------------------------------------------------------------===//
@@ -525,37 +556,6 @@ def CC_Intel_OCL_BI : CallingConv<[
   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<CC_X86_Win64_C>>,
   CCIfSubtarget<"is64Bit()",       CCDelegateTo<CC_X86_64_C>>,
   CCDelegateTo<CC_X86_32_C>
-]>;
-
-// 64-bit __regcall calling convention.
-def CC_X86_64_RegCall : CallingConv<[
-  // Promote i8/i16 arguments to i32.
-  CCIfType<[i8, i16], CCPromoteToType<i32>>,
-
-  // Integer arguments are passed in GPR
-  CCIfType<[i32], CCAssignToReg<[EAX, ECX, EDX, EDI, ESI, R8D, R9D,
-                                 R12D, R13D, R14D, R15D]>>,
-  CCIfType<[i64], CCAssignToReg<[RAX, RCX, RDX, RDI, RSI, R8, R9,
-                                 R12, R13, R14, R15]>>,
-
-  // The first 16 FP/Vector arguments are passed in XMM registers.
-  CCIfType<[f32, f64, v16i8, v8i16, v4i32, v2i64, v4f32, v2f64],
-            CCIfSubtarget<"hasSSE1()",
-            CCAssignToReg<[XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
-                           XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14,
-                           XMM15]>>>,
-
-  // The first 8 256-bit vector arguments are passed in YMM registers, unless
-  // this is a vararg function. See comment in CC_X86_64_C.
-  CCIfNotVarArg<CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64],
-                          CCIfSubtarget<"hasFp256()",
-                          CCAssignToReg<[YMM0, YMM1, YMM2, YMM3,
-                                         YMM4, YMM5, YMM6, YMM7,
-                                         YMM8, YMM9, YMM10, YMM11,
-                                         YMM12, YMM13, YMM14, YMM15]>>>>,
-
-  // Otherwise, same as everything else.
-  CCDelegateTo<CC_X86_64_C>
 ]>;
 
 //===----------------------------------------------------------------------===//
