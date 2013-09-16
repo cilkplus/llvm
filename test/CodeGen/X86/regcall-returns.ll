@@ -1,6 +1,7 @@
 ; RUN: llc < %s -march=x86-64 -mcpu=corei7     | FileCheck -check-prefix=SSE %s
 ; RUN: llc < %s -march=x86-64 -mcpu=corei7-avx | FileCheck -check-prefix=AVX %s
 ; RUN: llc < %s -march=x86-64 -mcpu=core-avx2  | FileCheck -check-prefix=AVX2 %s
+; RUN: llc < %s -march=x86    -mcpu=corei7     | FileCheck -check-prefix=X86_SSE %s
 
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;
@@ -75,6 +76,27 @@ define x86_regcallcc i32 @test_ret_i32() {
 define x86_regcallcc i64 @test_ret_i64(i64 %a) {
   %b = add i64 %a, %a
   ret i64 %b
+}
+
+;
+; SSE:       test_ret_struct5:
+; SSE:       movl $1, %eax
+; SSE-NEXT:  movl $2, %ecx
+; SSE-NEXT:  movl $3, %edx
+; SSE-NEXT:  movl $4, %edi
+; SSE-NEXT:  movl $5, %esi
+; SSE-NEXT:  ret
+;
+; X86_SSE:       test_ret_struct5:
+; X86_SSE:       movl $1, %eax
+; X86_SSE-NEXT:  movl $2, %ecx
+; X86_SSE-NEXT:  movl $3, %edx
+; X86_SSE-NEXT:  movl $4, %edi
+; X86_SSE-NEXT:  movl $5, %esi
+; X86_SSE-NEXT:  ret
+;
+define x86_regcallcc {i32, i32, i32, i32, i32} @test_ret_struct5() {
+  ret {i32, i32, i32, i32, i32} {i32 1, i32 2, i32 3, i32 4, i32 5}
 }
 
 ;
@@ -378,6 +400,17 @@ define x86_regcallcc <8 x i64> @test_ret_v8i64() {
 }
 
 ;
+; X86_SSE:      test_ret_v16i64:
+; X86_SSE:      movaps {{.*}}, %xmm0
+; X86_SSE-NEXT: movaps {{.*}}, %xmm1
+; X86_SSE-NEXT: movaps {{.*}}, %xmm2
+; X86_SSE-NEXT: movaps {{.*}}, %xmm3
+; X86_SSE-NEXT: movaps %xmm0, %xmm4
+; X86_SSE-NEXT: movaps %xmm1, %xmm5
+; X86_SSE-NEXT: movaps %xmm2, %xmm6
+; X86_SSE-NEXT: movaps %xmm3, %xmm7
+; X86_SSE-NEXT: ret
+;
 ; SSE:       test_ret_v16i64:
 ; SSE:       movaps {{.*}}(%rip), %xmm0
 ; SSE-NEXT:  movaps {{.*}}(%rip), %xmm1
@@ -589,6 +622,17 @@ define x86_regcallcc <8 x double> @test_ret_v8f64() {
 }
 
 ;
+; X86_SSE:       test_ret_v16f64:
+; X86_SSE:       movaps {{.*}}, %xmm0
+; X86_SSE-NEXT:  movaps {{.*}}, %xmm1
+; X86_SSE-NEXT:  movaps {{.*}}, %xmm2
+; X86_SSE-NEXT:  movaps {{.*}}, %xmm3
+; X86_SSE-NEXT:  movaps %xmm0, %xmm4
+; X86_SSE-NEXT:  movaps %xmm1, %xmm5
+; X86_SSE-NEXT:  movaps %xmm2, %xmm6
+; X86_SSE-NEXT:  movaps %xmm3, %xmm7
+; X86_SSE-NEXT:  ret
+;
 ; SSE:       test_ret_v16f64:
 ; SSE:       movaps {{.*}}(%rip), %xmm0
 ; SSE-NEXT:  movaps {{.*}}(%rip), %xmm1
@@ -710,6 +754,13 @@ define x86_regcallcc <8 x i8*> @test_ret_v8ptr(<8 x i8*> %a) {
 }
 
 ;
+; X86_SSE:       test_ret_v16ptr:
+; X86_SSE:       pshufd $-79, %xmm0, %xmm0
+; X86_SSE-NEXT:  pshufd $-79, %xmm1, %xmm1
+; X86_SSE-NEXT:  pshufd $-79, %xmm2, %xmm2
+; X86_SSE-NEXT:  pshufd $-79, %xmm3, %xmm3
+; X86_SSE-NEXT:  ret
+;
 ; SSE:       test_ret_v16ptr:
 ; SSE:       shufpd $1, %xmm0, %xmm0
 ; SSE-NEXT:  shufpd $1, %xmm1, %xmm1
@@ -753,6 +804,11 @@ define x86_regcallcc <16 x i8*> @test_ret_v16ptr(<16 x i8*> %a) {
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;
+; X86_SSE:       test_csr_i32:
+; X86_SSE-NOT:   pushq
+; X86_SSE-NOT:   popq
+; X86_SSE:       ret
+;
 ; SSE:       test_csr_i32:
 ; SSE-NOT:   pushq
 ; SSE-NOT:   popq
@@ -763,6 +819,11 @@ define x86_regcallcc {i32, i32, i32, i32, i32, i32, i32, i32, i32} @test_csr_i32
       {i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9}
 }
 
+;
+; X86_SSE:       test_csr_i64:
+; X86_SSE-NOT:   pushq
+; X86_SSE-NOT:   popq
+; X86_SSE:       ret
 ;
 ; SSE:       test_csr_i64:
 ; SSE-NOT:   pushq

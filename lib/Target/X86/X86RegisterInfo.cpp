@@ -272,8 +272,9 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   }
 
   case CallingConv::X86_RegCall:
-    assert(Is64Bit && "32-bit x86_regcallcc not supported yet!");
-    return CSR_64_RegCall_XMM_SaveList;
+    assert(!TM.getSubtarget<X86Subtarget>().isTargetWindows() &&
+           "Windows target not supported yet");
+    return Is64Bit ? CSR_64_RegCall_SaveList : CSR_32_RegCall_SaveList;
 
   case CallingConv::Cold:
     if (Is64Bit)
@@ -315,8 +316,9 @@ X86RegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
       return CSR_64_Intel_OCL_BI_RegMask;
   }
   if (CC == CallingConv::X86_RegCall) {
-    assert(Is64Bit && "32-bit x86_regcallcc not supported yet!");
-    return CSR_64_RegCall_XMM_RegMask;
+    assert(!TM.getSubtarget<X86Subtarget>().isTargetWindows() &&
+           "Windows target not supported yet");
+    return Is64Bit ? CSR_64_RegCall_RegMask: CSR_32_RegCall_RegMask;
   }
   if (CC == CallingConv::GHC || CC == CallingConv::HiPE)
     return CSR_NoRegs_RegMask;
