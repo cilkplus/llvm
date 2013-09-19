@@ -107,6 +107,11 @@ public:
   /// register scavenger to determine what registers are free.
   BitVector getReservedRegs(const MachineFunction &MF) const;
 
+  /// isMarkedAsNotPreservedRegister - Returns true if Reg is marked as not
+  /// preserved even if Reg is a callee saved register.
+  virtual bool isMarkedAsNotPreservedRegister(const MachineFunction &MF,
+                                              unsigned Reg) const;
+
   bool hasBasePointer(const MachineFunction &MF) const;
 
   bool canRealignStack(const MachineFunction &MF) const;

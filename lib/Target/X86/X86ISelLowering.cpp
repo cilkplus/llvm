@@ -1788,6 +1788,9 @@ X86TargetLowering::LowerReturn(SDValue Chain,
     SDValue ValToCopy = OutVals[i];
     EVT ValVT = ValToCopy.getValueType();
 
+    // Mark this register used for the return.
+    FuncInfo->addUsedRegister(VA.getLocReg());
+
     // Promote values to the appropriate types
     if (VA.getLocInfo() == CCValAssign::SExt)
       ValToCopy = DAG.getNode(ISD::SIGN_EXTEND, dl, VA.getLocVT(), ValToCopy);
@@ -2217,6 +2220,8 @@ X86TargetLowering::LowerFormalArguments(SDValue Chain,
         else
           ArgValue = DAG.getNode(ISD::TRUNCATE, dl, VA.getValVT(), ArgValue);
       }
+      // Mark this register used for parameter passing.
+      FuncInfo->addUsedRegister(VA.getLocReg());
     } else {
       assert(VA.isMemLoc());
       ArgValue = LowerMemArgument(Chain, CallConv, Ins, dl, DAG, VA, MFI, i);

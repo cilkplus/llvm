@@ -520,3 +520,17 @@ entry:
   tail call x86_regcallcc void @func32(i32 %a)
   ret void
 }
+
+;
+; CHECK:       test_csr:
+; CHECK-NOT:   pushq
+; CHECK-NOT:   popq
+; CHECK:       ret
+;
+define x86_regcallcc void @test_csr({i32, i32, i32, i32, i32, i32, i32, i32, i32} %a) {
+  %a7 = extractvalue {i32, i32, i32, i32, i32, i32, i32, i32, i32} %a, 7
+  call void @func32(i32 %a7)
+  %a8 = extractvalue {i32, i32, i32, i32, i32, i32, i32, i32, i32} %a, 8
+  call void @func32(i32 %a8)
+  ret void
+}

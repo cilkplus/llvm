@@ -228,6 +228,14 @@ void PEI::calculateCalleeSavedRegisters(MachineFunction &F) {
   std::vector<CalleeSavedInfo> CSI;
   for (unsigned i = 0; CSRegs[i]; ++i) {
     unsigned Reg = CSRegs[i];
+
+    // If this register is marked as not preserved for this function, then do
+    // not save this register. This happens if the set of callee saved registers
+    // overlaps with the set of registers that could be used for passing
+    // parameters or returning a value.
+    if (RegInfo->isMarkedAsNotPreservedRegister(F, Reg))
+      continue;
+
     // Functions which call __builtin_unwind_init get all their registers saved.
     if (F.getRegInfo().isPhysRegUsed(Reg) || F.getMMI().callsUnwindInit()) {
       // If the reg is modified, save it!

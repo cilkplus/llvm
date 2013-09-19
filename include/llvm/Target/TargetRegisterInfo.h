@@ -415,6 +415,13 @@ public:
     return false;
   }
 
+  /// isMarkedAsNotPreservedRegister - Returns true if Reg is marked as not
+  /// preserved even if Reg is a callee saved register.
+  virtual bool isMarkedAsNotPreservedRegister(const MachineFunction &MF,
+                                              unsigned Reg) const {
+    return false;
+  }
+
   /// getCalleeSavedRegs - Return a null-terminated list of all of the
   /// callee saved registers on this target. The register should be in the
   /// order of desired callee-save stack frame offset. The first register is

@@ -102,3 +102,12 @@ define x86_regcallcc <16 x i32> @v16i32(<16 x i32> %a, <16 x i32> %b) {
   ; SSE: paddd %xmm7, %xmm3
   ; SSE-NEXT: ret
 }
+
+define x86_regcallcc <16 x i64> @test_csr(<16 x i64> %a, <16 x i64> %b) {
+  %result = add <16 x i64> %a, %b
+  ret <16 x i64> %result
+  ; SSE: test_csr:
+  ; SSE-NOT: pushq
+  ; SSE-NOT: popq
+  ; SSE: ret
+}

@@ -15,6 +15,7 @@
 #define X86MACHINEFUNCTIONINFO_H
 
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/ADT/SmallSet.h"
 
 namespace llvm {
 
@@ -68,6 +69,9 @@ class X86MachineFunctionInfo : public MachineFunctionInfo {
   unsigned ArgumentStackSize;
   /// NumLocalDynamics - Number of local-dynamic TLS accesses.
   unsigned NumLocalDynamics;
+  /// RegInfoForParamOrReturn - Keep track of registers for passing parameters
+  /// or returning a value.
+  SmallSet<unsigned, 16> RegInfoForParamOrReturn;
 
 public:
   X86MachineFunctionInfo() : ForceFramePointer(false),
@@ -138,6 +142,12 @@ public:
   unsigned getNumLocalDynamicTLSAccesses() const { return NumLocalDynamics; }
   void incNumLocalDynamicTLSAccesses() { ++NumLocalDynamics; }
 
+  void addUsedRegister(unsigned Reg) {
+    RegInfoForParamOrReturn.insert(Reg);
+  }
+  bool isUsedRegister(unsigned Reg) const {
+    return RegInfoForParamOrReturn.count(Reg);
+  }
 };
 
 } // End llvm namespace

@@ -745,3 +745,45 @@ define x86_regcallcc <16 x i8*> @test_ret_v16ptr(<16 x i8*> %a) {
                                  i32 9, i32 8, i32 11, i32 10, i32 13, i32 12, i32 15, i32 14>
   ret <16 x i8*> %b
 }
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Check callee saved registers
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;
+; SSE:       test_csr_i32:
+; SSE-NOT:   pushq
+; SSE-NOT:   popq
+; SSE:       ret
+;
+define x86_regcallcc {i32, i32, i32, i32, i32, i32, i32, i32, i32} @test_csr_i32() {
+  ret {i32, i32, i32, i32, i32, i32, i32, i32, i32}
+      {i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9}
+}
+
+;
+; SSE:       test_csr_i64:
+; SSE-NOT:   pushq
+; SSE-NOT:   popq
+; SSE:       ret
+;
+define x86_regcallcc {i64, i64, i64, i64, i64, i64, i64, i64, i64} @test_csr_i64() {
+  ret {i64, i64, i64, i64, i64, i64, i64, i64, i64}
+      {i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7, i64 10000000000, i64 10000000001}
+}
+
+;
+; SSE:       test_csr_v32i64:
+; SSE-NOT:   pushq
+; SSE-NOT:   popq
+; SSE:       ret
+;
+define x86_regcallcc <32 x i64> @test_csr_v32i64() {
+  ret <32 x i64>
+    <i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7, i64 8,
+     i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7, i64 8,
+     i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7, i64 8,
+     i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7, i64 8>
+}
