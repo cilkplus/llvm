@@ -41,7 +41,7 @@ void f2() {
   _Cilk_for (int i = 0; i < 10; i++);
 
   #pragma cilk grainsize = 4
-  for (int i = 0; i < 10; i++); // expected-error {{'#pragma cilk' must be followed by a '_Cilk_for' loop}}
+  for (int i = 0; i < 10; i++); // expected-warning {{'#pragma cilk' ignored}}
 
   #pragma cilk /* expected-warning {{expected identifier in '#pragma cilk' - ignored}} */
   _Cilk_for (int i = 0; i < 10; i++);

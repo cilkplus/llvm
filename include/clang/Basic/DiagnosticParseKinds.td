@@ -847,8 +847,9 @@ def err_cilk_for_expect_grainsize: Error<
 def err_cilk_for_expect_assign: Error<
   "expected '=' in '#pragma cilk'">;
 
-def err_cilk_for_following_grainsize: Error<
-  "'#pragma cilk' must be followed by a '_Cilk_for' loop">;
+def warn_cilk_for_following_grainsize: Warning<
+  "'#pragma cilk' ignored, because it is not followed by a '_Cilk_for' loop">,
+  InGroup<SourceUsesCilkPlus>;
 
 // Pragma SIMD
 def err_simd_for_missing_initialization: Error<

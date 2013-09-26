@@ -378,8 +378,8 @@ StmtResult Parser::ParsePragmaCilkGrainsize() {
   // following statement to be a _Cilk_for.
   if (!isa<CilkForStmt>(FollowingStmt.get())) {
     Diag(FollowingStmt.get()->getLocStart(),
-         diag::err_cilk_for_following_grainsize);
-    return StmtError();
+         diag::warn_cilk_for_following_grainsize);
+    return FollowingStmt;
   }
 
   return Actions.ActOnCilkForGrainsizePragma(E.get(), FollowingStmt.get(), HashLoc);
