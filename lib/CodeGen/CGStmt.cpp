@@ -2169,71 +2169,6 @@ void CodeGenFunction::EmitSIMDForHelperCall(const SIMDForStmt &S,
   enableExceptions();
 }
 
-namespace {
-
-// CodeGen the loop control variable differently. We cache the initial value and
-// the increment value. This allows to emit code without iteration dependency. 
-struct LoopControlVarCG {
-  /// \brief The SIMD for statement.
-  const SIMDForStmt &S;
-
-  /// \brief The address of the loop control variable.
-  llvm::Value *LCVAddr;
-
-  /// \brief The cached loop control variable initial value.
-  llvm::Value *LCVInitVal;
-
-  /// \brief The cached (normalized) loop stride value.
-  llvm::Value *LCVStrideVal;
-
-  explicit LoopControlVarCG(const SIMDForStmt &S)
-    : S(S), LCVAddr(0), LCVInitVal(0), LCVStrideVal(0) { }
-
-  /// \brief Emit the SIMD loop initalization, loop stride expression
-  /// as loop invariants, and cache those values.
-  void EmitInit(CodeGenFunction &CGF);
-
-  /// \brief Emit the loop increment.
-  void EmitIncrement(CodeGenFunction &CGF, llvm::Value *IndexVar);
-};
-
-void LoopControlVarCG::EmitInit(CodeGenFunction &CGF) {
-  // Emit the initialization.
-  CGF.EmitStmt(S.getInit());
-
-  // Load the current value as the initial value and cache the stride value.
-  const VarDecl *LoopControlVar = S.getLoopControlVar();
-  assert(LoopControlVar && "invalid loop control variable");
-  llvm::Value *ControlVarAddr = CGF.GetAddrOfLocalVar(LoopControlVar);
-  assert(ControlVarAddr && "invalid loop control variable address");
-
-  LCVAddr = ControlVarAddr;
-  LCVInitVal = CGF.Builder.CreateLoad(ControlVarAddr, "__init");
-
-  LCVStrideVal = CGF.EmitAnyExpr(S.getLoopStride()).getScalarVal();
-  assert(LCVStrideVal->getType()->isIntegerTy() && "invalid stride type");
-}
-
-void LoopControlVarCG::EmitIncrement(CodeGenFunction &CGF,
-                                     llvm::Value *IndexVar) {
-  llvm::Value *Index = CGF.Builder.CreateLoad(IndexVar, "__index");
-  llvm::Value *Stride
-    = CGF.Builder.CreateSExtOrTrunc(LCVStrideVal, Index->getType());
-  llvm::Value *Delta = CGF.Builder.CreateMul(Index, Stride, "__delta");
-
-  //  lcv = init + index * stride;
-  llvm::Value *NewIndex = 0;
-  if (LCVInitVal->getType()->isPointerTy())
-    NewIndex = CGF.Builder.CreateGEP(LCVInitVal, Delta, "__index.new");
-  else {
-    Delta = CGF.Builder.CreateSExtOrTrunc(Delta, LCVInitVal->getType());
-    NewIndex = CGF.Builder.CreateAdd(LCVInitVal, Delta, "__index.new");
-  }
-  CGF.Builder.CreateStore(NewIndex, LCVAddr);
-}
-
-} // namespace
-
 void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   RunCleanupsScope SIMDForScope(*this);
 
@@ -2270,10 +2205,8 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
   if (DI)
     DI->EmitLexicalBlockStart(Builder, S.getForLoc());
 
-  // Emit the loop control variable and cache its initial value and the
-  // stride value.
-  LoopControlVarCG LoopControlCG(S);
-  LoopControlCG.EmitInit(*this);
+  // Evaluate the first part before the condition.
+  EmitStmt(S.getInit());
 
   // Only run the SIMD loop if the loop condition is true
   llvm::BasicBlock *ThenBlock = createBasicBlock("if.then");
@@ -2368,7 +2301,7 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
 
     // Emit the increment block.
     EmitBlock(Continue.getBlock());
-    LoopControlCG.EmitIncrement(*this, LoopIndex);
+    EmitStmt(S.getInc());
 
     {
       llvm::Value *NewLoopIndex =
@@ -2396,7 +2329,7 @@ void CodeGenFunction::EmitSIMDForStmt(const SIMDForStmt &S) {
     // This helper call requires updates to linear or lastprivate variables.
     EmitSIMDForHelperCall(S, BodyFunction, CapStruct, LoopIndex, true);
     // Increment again, for last iteration.
-    LoopControlCG.EmitIncrement(*this, LoopIndex);
+    EmitStmt(S.getInc());
   }
 
   EmitBlock(ContBlock, true);

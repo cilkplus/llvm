@@ -1383,21 +1383,23 @@ Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
   // SIMD variables capture a local copy inside of the loop, and all
   // modifications are done on that capture. In the case that the LCV is the
   // subject of a SIMD clause, the LCV itself will not be updated.
-  SIMDForScopeInfo *FSI = getCurSIMDFor();
-  VarDecl *LCV = const_cast<VarDecl *>(getLoopControlVariable(*this, First));
-  if (FSI->IsSIMDVariable(LCV)) {
-    if (FSI->isReduction(LCV) || FSI->isFirstPrivate(LCV)) {
-      Diag(FSI->GetLocation(LCV), diag::err_simd_for_lcv_invalid_clause)
-        << FSI->isFirstPrivate(LCV);
-      return StmtError();
+  {
+    SIMDForScopeInfo *FSI = getCurSIMDFor();
+    VarDecl *LCV = const_cast<VarDecl *>(getLoopControlVariable(*this, First));
+    if (FSI->IsSIMDVariable(LCV)) {
+      if (FSI->isReduction(LCV) || FSI->isFirstPrivate(LCV)) {
+        Diag(FSI->GetLocation(LCV), diag::err_simd_for_lcv_invalid_clause)
+          << FSI->isFirstPrivate(LCV);
+        return StmtError();
+      }
+      Diag(FSI->GetLocation(LCV), diag::warn_simd_for_variable_lcv);
+      FSI->SetInvalid(LCV);
     }
-    Diag(FSI->GetLocation(LCV), diag::warn_simd_for_variable_lcv);
-    FSI->SetInvalid(LCV);
   }
 
   return BuildSIMDForStmt(PragmaLoc, Attrs, ForLoc, LParenLoc, First,
                           Second.get(), Third.get(), RParenLoc, Body,
-                          LoopCount.get(), StrideExpr, LCV);
+                          LoopCount.get());
 }
 
 
