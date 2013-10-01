@@ -492,8 +492,7 @@ static llvm::FunctionType *encodeParameters(llvm::Function *Func,
   SmallVector<llvm::Type*, 4> Tys;
   llvm::Function::const_arg_iterator Arg = Func->arg_begin();
   for (unsigned i = 1, ie = 1 + ArgSize; i < ie; ++i, ++Arg) {
-    llvm::MDString *Name = dyn_cast<llvm::MDString>(ArgName->getOperand(i));
-    assert(Name && "invalid metadata");
+    assert(isa<llvm::MDString>(ArgName->getOperand(i)) && "invalid metadata");
 
     llvm::Value *Step = ArgStep->getOperand(i);
     if (isa<llvm::UndefValue>(Step)) {
