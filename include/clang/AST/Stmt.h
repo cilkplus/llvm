@@ -2349,10 +2349,13 @@ public:
 private:
   /// \brief An enumeration for accessing stored statements in a SIMD for
   /// statement.
-  enum { INIT, COND, INC, BODY, LOOP_COUNT, LAST };
+  enum { INIT, COND, INC, BODY, LOOP_COUNT, LOOP_STRIDE, LAST };
 
   Stmt *SubExprs[LAST]; // SubExprs[INIT] is an expression or declstmt.
                         // SubExprs[BODY] is a CapturedStmt.
+
+  /// \brief The control variable of the loop.
+  VarDecl *LoopControlVar;
 
   /// \brief The source location of '#pragma'.
   SourceLocation PragmaLoc;
@@ -2377,8 +2380,9 @@ private:
 
   SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
               ArrayRef<SIMDVariable> SIMDVars, Stmt *Init, Expr *Cond,
-              Expr *Inc, CapturedStmt *Body, Expr *LoopCount,
-              SourceLocation FL, SourceLocation LP, SourceLocation RP);
+              Expr *Inc, CapturedStmt *Body, Expr *LoopCount, Expr *LoopStride,
+              VarDecl *LoopControlVar, SourceLocation FL, SourceLocation LP,
+              SourceLocation RP);
 
   Attr **getStoredSIMDAttrs() const {
     return reinterpret_cast<Attr **>(const_cast<SIMDForStmt *>(this) + 1);
@@ -2392,7 +2396,8 @@ public:
                              ArrayRef<Attr *> SIMDAttrs,
                              ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                              Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                             Expr *LoopCount, SourceLocation FL,
+                             Expr *LoopCount, Expr *LoopStride,
+                             VarDecl *LoopControlVar, SourceLocation FL,
                              SourceLocation LP, SourceLocation RP);
 
   /// \brief Construct an empty SIMD for statement.
@@ -2443,6 +2448,22 @@ public:
   }
   const Expr *getLoopCount() const {
     return reinterpret_cast<Expr *>(SubExprs[LOOP_COUNT]);
+  }
+
+  /// \brief Retrieve the loop control variable stride expression.
+  Expr *getLoopStride() {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_STRIDE]);
+  }
+  const Expr *getLoopStride() const {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_STRIDE]);
+  }
+
+  /// \brief Retrieve the loop control variable.
+  VarDecl *getLoopControlVar() {
+    return LoopControlVar;
+  }
+  const VarDecl *getLoopControlVar() const {
+    return const_cast<SIMDForStmt *>(this)->getLoopControlVar();
   }
 
   SourceLocation getPragmaLoc() const LLVM_READONLY { return PragmaLoc; }

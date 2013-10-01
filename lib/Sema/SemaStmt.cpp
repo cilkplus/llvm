@@ -3484,7 +3484,8 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
                                   SourceLocation LParenLoc,
                                   Stmt *Init, Expr *Cond, Expr *Inc,
                                   SourceLocation RParenLoc, Stmt *Body,
-                                  Expr *LoopCount) {
+                                  Expr *LoopCount, Expr *LoopStride,
+                                  VarDecl *LoopControlVar) {
   SIMDForScopeInfo *FSI = getCurSIMDFor();
   assert(FSI && "SIMDForScopeInfo is out of sync");
   CapturedDecl *CD = FSI->TheCapturedDecl;
@@ -3559,7 +3560,8 @@ StmtResult Sema::BuildSIMDForStmt(SourceLocation PragmaLoc,
   SIMDForStmt *Result = SIMDForStmt::Create(Context, PragmaLoc, Attrs,
                                             SIMDVars, Init,
                                             Cond, Inc, CapturedBody, LoopCount,
-                                            ForLoc, LParenLoc, RParenLoc);
+                                            LoopStride, LoopControlVar, ForLoc,
+                                            LParenLoc, RParenLoc);
 
   ExprNeedsCleanups = FSI->ExprNeedsCleanups;
   PopExpressionEvaluationContext();

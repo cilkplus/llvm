@@ -1181,11 +1181,12 @@ SIMDForStmt::SIMDVariable *SIMDForStmt::getStoredSIMDVars() const {
 SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
                          ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                          Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                         Expr *LoopCount, SourceLocation FL,
+                         Expr *LoopCount, Expr *LoopStride,
+                         VarDecl *LoopControlVar, SourceLocation FL,
                          SourceLocation LP, SourceLocation RP)
-  : Stmt(SIMDForStmtClass), PragmaLoc(PragmaLoc), ForLoc(FL), LParenLoc(LP),
-    RParenLoc(RP), NumSIMDAttrs(SIMDAttrs.size()),
-    NumSIMDVars(SIMDVars.size()) {
+  : Stmt(SIMDForStmtClass), LoopControlVar(LoopControlVar),
+    PragmaLoc(PragmaLoc), ForLoc(FL), LParenLoc(LP), RParenLoc(RP),
+    NumSIMDAttrs(SIMDAttrs.size()), NumSIMDVars(SIMDVars.size()) {
 
   assert(Init && Cond && Inc && Body && "null argument unexpected");
   SubExprs[INIT] = Init;
@@ -1193,6 +1194,7 @@ SIMDForStmt::SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
   SubExprs[INC] = Inc;
   SubExprs[BODY] = Body;
   SubExprs[LOOP_COUNT] = LoopCount;
+  SubExprs[LOOP_STRIDE] = LoopStride;
 
   // Initialize the SIMD clauses.
   std::copy(SIMDAttrs.begin(), SIMDAttrs.end(), getStoredSIMDAttrs());
@@ -1205,7 +1207,8 @@ SIMDForStmt *SIMDForStmt::Create(ASTContext &C, SourceLocation PragmaLoc,
                                  ArrayRef<Attr *> SIMDAttrs,
                                  ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                                  Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                                 Expr *LoopCount, SourceLocation FL,
+                                 Expr *LoopCount, Expr *LoopStride,
+                                 VarDecl *LoopControlVar, SourceLocation FL,
                                  SourceLocation LP, SourceLocation RP) {
   unsigned Size = sizeof(SIMDForStmt) + sizeof(Attr *) * SIMDAttrs.size();
   if (!SIMDVars.empty()) {
@@ -1216,17 +1219,20 @@ SIMDForStmt *SIMDForStmt::Create(ASTContext &C, SourceLocation PragmaLoc,
 
   void *Mem = C.Allocate(Size);
   return new (Mem) SIMDForStmt(PragmaLoc, SIMDAttrs, SIMDVars, Init, Cond, Inc,
-                               Body, LoopCount, FL, LP, RP);
+                               Body, LoopCount, LoopStride, LoopControlVar,
+                               FL, LP, RP);
 }
 
 SIMDForStmt::SIMDForStmt(EmptyShell Empty, unsigned NumSIMDAttrs,
                          unsigned NumSIMDVars)
-  : Stmt(SIMDForStmtClass, Empty), NumSIMDAttrs(NumSIMDAttrs),
-    NumSIMDVars(NumSIMDVars) {
+  : Stmt(SIMDForStmtClass, Empty), LoopControlVar(0),
+    NumSIMDAttrs(NumSIMDAttrs), NumSIMDVars(NumSIMDVars) {
   SubExprs[INIT] = 0;
   SubExprs[COND] = 0;
   SubExprs[INC] = 0;
   SubExprs[BODY] = 0;
+  SubExprs[LOOP_COUNT] = 0;
+  SubExprs[LOOP_STRIDE] = 0;
 }
 
 SIMDForStmt *SIMDForStmt::CreateEmpty(ASTContext &C, unsigned NumSIMDAttrs,
