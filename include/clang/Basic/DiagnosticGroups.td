@@ -441,7 +441,7 @@ def IntToPointerCast : DiagGroup<"int-to-pointer-cast",
                                  [IntToVoidPointerCast]>;
 
 // Cilk Plus warnings.
-def SourceUsesCilkPlus : DiagGroup<"source-uses-cilk-plus">;
+def SourceUsesCilkPlus : DiagGroup<"cilkplus">;
 def CilkPlusLoopControlVarModification : DiagGroup<"cilk-loop-control-var-modification">;
 
 def Extra : DiagGroup<"extra", [

@@ -150,7 +150,7 @@ void test_linear(int arr[]) {
   for (int i = 0; i < 10; ++i);
 
 #pragma clang diagnostic push
-#pragma clang diagnostic warning "-Wsource-uses-cilk-plus"
+#pragma clang diagnostic warning "-Wcilkplus"
   /* expected-warning@+1 {{linear step is zero}} */
   #pragma simd linear(j:0)
   for (int i = 0; i < 10; ++i);

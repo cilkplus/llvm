@@ -2800,8 +2800,6 @@ static void handleCilkElementalAttr(Sema &S, Decl *D,
 }
 
 static void handleCilkMaskAttr(Sema &S, Decl *D, const AttributeList &Attr) {
-  if (!checkAttributeNumArgs(S, Attr, 0))
-    return;
   bool Mask = false;
   switch (Attr.getKind()) {
   case AttributeList::AT_CilkMask:

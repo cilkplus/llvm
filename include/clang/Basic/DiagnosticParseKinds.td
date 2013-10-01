@@ -873,6 +873,12 @@ def err_simd_expected_reduction_operator: Error<
 // Cilk elemental functions
 def err_elemental_parameter_pack_unsupported: Error<
   "template parameter pack is not supported in '%0' attribute">;
+def err_elemental_clause_takes_no_args : Error<
+  "%0 clause takes no arguments">;
+def err_expected_rparen_or_comma : Error<"expected ')' or ','">;
+
+def warn_elemental_attribute_ignored : Warning<
+  "unknown attribute %0 - ignored">, InGroup<SourceUsesCilkPlus>;
 
 def err_expected_ident_or_this : Error<
   "expected identifier or this">;

@@ -90,9 +90,6 @@ struct Y {
 } // test_no_instantiation
 
 // tests with instantiation
-template <typename T>
-ATTR(vector(vectorlengthfor(T))) // OK
-void test_template_vectorlengthfor1();
 
 template <int I>
 ATTR(vector(vectorlength(I))) // OK
@@ -116,18 +113,11 @@ void test_template_mixed1(T linear_var, N uniform_var);
 
 template <typename T, int I>
 struct S {
-  ATTR(vector(vectorlengthfor(T), uniform(uniform_var)))
-  void test_template_struct1(T uniform_var);
-
   ATTR(vector(vectorlength(I), linear(linear_var:I))) // expected-error {{linear parameter type 'X' is not an integer or pointer type}}
-  void test_template_struct2(T linear_var);
+  void test_template_struct1(T linear_var);
 
   ATTR(vector(vectorlength(I)))
-  void test_template_struct3();
-
-  template <typename N>
-  ATTR(vector(vectorlengthfor(N)))
-  void test_template_struct4(T arg);
+  void test_template_struct2();
 };
 
 // parameter packs
@@ -143,10 +133,6 @@ template <typename... Ts>
 ATTR(vector(linear(args...))) // expected-error {{template parameter pack is not supported in 'linear' attribute}}
 void test_template_parameterpack3(Ts... args);
 
-
-template <typename... Ts>
-ATTR(vector(vectorlengthfor(Ts...))) // expected-error {{template parameter pack is not supported in 'vectorlengthfor' attribute}}
-void test_template_parameterpack4(Ts... args);
 
 // SFINAE
 template <typename T>
@@ -167,11 +153,6 @@ void template_tests() {
   int i;
   char *c;
   E e;
-
-  test_template_vectorlengthfor1<int>();         // OK
-  test_template_vectorlengthfor1<decltype(i)>(); // OK
-  test_template_vectorlengthfor1<X>(); // OK
-  test_template_vectorlengthfor1<E>(); // OK
 
   test_template_vectorlength1<1>();  // OK
   test_template_vectorlength1<CC>(); // OK
@@ -197,10 +178,8 @@ void template_tests() {
   test_template_mixed1<decltype(i), sizeof(e), decltype(c)>(i, c); // OK
 
   S<int, 8> s1; // OK
-  s1.test_template_struct1(i); // OK
-  s1.test_template_struct2(i); // Not OK
-  s1.test_template_struct3();  // OK
-  s1.test_template_struct4<X>(i); // OK
+  s1.test_template_struct1(i); // Not OK
+  s1.test_template_struct2();  // OK
 
   S<decltype(i), sizeof(int)> s2; // OK
   (void)s2;

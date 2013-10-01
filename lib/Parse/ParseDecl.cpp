@@ -190,17 +190,10 @@ static bool attributeHasExprArgs(const IdentifierInfo &II) {
            .Default(false);
 }
 
-/// \brief Determine whether the scope is a Cilk Plus elemental function scope
-static bool isCilkElementalScope(const IdentifierInfo *ScopeName) {
-  return ScopeName && ScopeName->isStr("_Cilk_elemental");
-}
-
 /// \brief Determine whether the attribute takes a type argument.
 static bool attributeHasTypeArg(const IdentifierInfo *ScopeName,
                                 const IdentifierInfo *AttrName) {
-  return AttrName &&
-    (AttrName->isStr("vec_type_hint") ||
-     (isCilkElementalScope(ScopeName) && AttrName->isStr("vectorlengthfor")));
+  return AttrName && AttrName->isStr("vec_type_hint");
 }
 
 
@@ -281,17 +274,6 @@ void Parser::ParseGNUAttributeArgs(IdentifierInfo *AttrName,
   case tok::identifier:
     if (HasTypeArgument) {
       T = ParseTypeName(&TypeRange);
-      if (Tok.is(tok::ellipsis) && isCilkElementalScope(ScopeName) &&
-          AttrName->isStr("vectorlengthfor")) {
-        SourceLocation EllipsisLoc = ConsumeToken();
-        if (getLangOpts().CPlusPlus11) {
-          Diag(EllipsisLoc, diag::err_elemental_parameter_pack_unsupported)
-            << AttrName->getName();
-          SkipUntil(tok::r_paren);
-          return;
-        }
-      }
-
       TypeParsed = true;
       break;
     }
@@ -1247,15 +1229,15 @@ void Parser::ParseThreadSafetyAttribute(IdentifierInfo &AttrName,
 /// This drastically simplifies parsing and Sema at the cost of re-grouping
 /// the attributes in CodeGen.
 ///
-/// elemental-clauses:
-///   elemental-clause
-///   elemental-clauses , elemental-clause
-/// 
-/// elemental-clause:
+/// simd-function-clauses:
+///   simd-function-clause
+///   simd-function-clauses , simd-function-clause
+
+/// simd-function-clause:
 ///   processor-clause
 ///   vectorlength-clause
-///   elemental-uniform-clause
-///   elemental-linear-clause
+///   uniform-clause
+///   simd-function-linear-clause
 ///   mask-clause
 void Parser::ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
                                              SourceLocation AttrNameLoc,
@@ -1268,7 +1250,7 @@ void Parser::ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
 
   // Add the 'vector' attribute itself.
   Attrs.addNew(&AttrName, AttrNameLoc, 0, AttrNameLoc,
-               0, SourceLocation(), 0, 0, AttributeList::AS_GNU);
+               0, SourceLocation(), 0, 0, Syntax);
 
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
@@ -1282,28 +1264,98 @@ void Parser::ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
     IdentifierInfo *SubAttrName = Tok.getIdentifierInfo();
     SourceLocation SubAttrNameLoc = ConsumeToken();
 
-    if (Tok.is(tok::l_paren)) {
-      if (SubAttrName->isStr("uniform") || SubAttrName->isStr("linear")) {
-        // These sub-attributes are parsed specially because their
-        // arguments are function parameters not yet declared.
-        ParseFunctionParameterAttribute(*SubAttrName, SubAttrNameLoc,
-                                        Attrs, EndLoc, *CilkScopeName,
-                                        AttrNameLoc);
-      } else {
-        ParseGNUAttributeArgs(SubAttrName, SubAttrNameLoc, Attrs, EndLoc,
-                              CilkScopeName, AttrNameLoc,
-                              AttributeList::AS_CXX11);
+    if (SubAttrName->isStr("linear") || SubAttrName->isStr("uniform")) {
+      // ParseFunctionParameterAttribute() expects first token to be '('.
+      if (!Tok.is(tok::l_paren)) {
+        Diag(Tok, diag::err_argument_required_after_attribute) <<
+          SubAttrName->getNameStart();
+        goto NextClause;
       }
+
+      // Parse uniform and linear clauses need special parsing because their
+      // arguments are function parameters that have not yet been declared.
+      ParseFunctionParameterAttribute(*SubAttrName, SubAttrNameLoc,
+                                      Attrs, EndLoc, *CilkScopeName,
+                                      AttrNameLoc);
+    } else if (SubAttrName->isStr("vectorlength")) {
+      // vectorlength-clause:
+      //   vectorlength ( constant-expression )
+      BalancedDelimiterTracker ParamT(*this, tok::l_paren);
+      if (ParamT.expectAndConsume(diag::err_argument_required_after_attribute,
+                                  SubAttrName->getNameStart()))
+        goto NextClause;
+
+      if (isNotExpressionStart()) {
+        Diag(Tok, diag::err_expected_expression) << Tok.getLocation();
+        ParamT.skipToEnd();
+        goto NextClause;
+      }
+
+      ExprResult ArgExpr(ParseConstantExpression());
+      ParamT.consumeClose();
+
+      if (ArgExpr.isUsable()) {
+        ExprVector ArgExprs;
+        ArgExprs.push_back(ArgExpr.release());
+
+        SourceLocation RParenLoc = Tok.getLocation();
+        Attrs.addNew(SubAttrName, SourceRange(SubAttrNameLoc, RParenLoc),
+                     CilkScopeName, AttrNameLoc, 0, SourceLocation(),
+                     ArgExprs.data(), ArgExprs.size(), Syntax);
+      }
+    } else if (SubAttrName->isStr("processor")) {
+      // processor clause takes one identifier as an argument.
+      BalancedDelimiterTracker ParamT(*this, tok::l_paren);
+      if (ParamT.expectAndConsume(diag::err_argument_required_after_attribute,
+                                  SubAttrName->getNameStart()))
+        goto NextClause;
+
+      if (Tok.isNot(tok::identifier)) {
+        Diag(Tok, diag::err_expected_ident);
+        ParamT.skipToEnd();
+        goto NextClause;
+      }
+
+      IdentifierInfo *ParmIdent = Tok.getIdentifierInfo();
+      SourceLocation ParmIdentLoc = ConsumeToken();
+      ParamT.consumeClose();
+
+      Attrs.addNew(SubAttrName,
+                   SourceRange(SubAttrNameLoc, ParamT.getCloseLocation()),
+                   CilkScopeName, AttrNameLoc, ParmIdent, ParmIdentLoc,
+                   0, 0, Syntax);
+    } else if (SubAttrName->isStr("mask") || SubAttrName->isStr("nomask")) {
+      // mask-clause:
+      //   mask
+      //   nomask
+      if (Tok.is(tok::l_paren)) {
+        Diag(Tok, diag::err_elemental_clause_takes_no_args) << SubAttrName;
+        ConsumeParen();
+        SkipUntil(tok::r_paren);
+      } else
+        Attrs.addNew(SubAttrName, SubAttrNameLoc,
+                     CilkScopeName, AttrNameLoc, 0, SourceLocation(),
+                     0, 0, Syntax);
     } else {
-      Attrs.addNew(SubAttrName, SubAttrNameLoc,
-                   CilkScopeName, AttrNameLoc,
-                   0, SourceLocation(), 0, 0, AttributeList::AS_CXX11);
+      // Not a supported clause.
+      Diag(SubAttrNameLoc, diag::warn_elemental_attribute_ignored)
+        << SubAttrName << SubAttrNameLoc;
+      // Skip to the next clause.
+      SkipUntil(tok::comma, tok::r_paren,
+                /*StopAtSemi=*/true, /*DontConsume=*/true);
     }
 
-    if (Tok.isNot(tok::comma))
-      break;
-    ConsumeToken(); // Eat the comma, move to the next argument
+NextClause:
+    // Next token must be either ',' or ')'.
+    if (Tok.is(tok::comma))
+      ConsumeToken(); // Eat the comma, move to the next clause.
+    else if (Tok.isNot(tok::r_paren)) {
+      Diag(Tok, diag::err_expected_rparen_or_comma);
+      T.skipToEnd();
+      return;
+    }
   }
+
   // Match the ')'.
   T.consumeClose();
   if (EndLoc)
