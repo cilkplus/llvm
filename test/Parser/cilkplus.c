@@ -11,3 +11,4 @@ void keyword() {
 // CilkPlus vector attribute cannot be used without -fcilkplus
 __attribute__((vector(vectorlength(4)))) int vec1(int a) { return a; } // expected-error {{Cilk Plus support disabled}}
 __attribute__((vector)) int vec2(int a) { return a; } // expected-error {{Cilk Plus support disabled}}
+__declspec(vector) int vec3(int a) { return a; } // expected-error {{Cilk Plus support disabled}}

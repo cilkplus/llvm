@@ -544,6 +544,10 @@ void Parser::ParseComplexMicrosoftDeclSpec(IdentifierInfo *Ident,
     }
     T.skipToEnd();
   } else if (Ident->isStr("vector")) {
+    if (!getLangOpts().CilkPlus) {
+      Diag(Tok, diag::err_cilkplus_disable);
+      return;
+    }
     // The vector declspec may have optional argument clauses. Check for a l-paren
     // to decide whether we should parse argument clauses or not.
     if (Tok.getKind() == tok::l_paren)
