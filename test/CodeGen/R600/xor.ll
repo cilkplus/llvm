@@ -1,13 +1,13 @@
 ;RUN: llc < %s -march=r600 -mcpu=redwood | FileCheck --check-prefix=EG-CHECK %s
-;RUN: llc < %s -march=r600 -mcpu=verde | FileCheck --check-prefix=SI-CHECK %s
+;RUN: llc < %s -march=r600 -mcpu=verde -verify-machineinstrs | FileCheck --check-prefix=SI-CHECK %s
 
 ;EG-CHECK: @xor_v2i32
-;EG-CHECK: XOR_INT {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
-;EG-CHECK: XOR_INT {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
+;EG-CHECK: XOR_INT {{\** *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
+;EG-CHECK: XOR_INT {{\** *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
 
 ;SI-CHECK: @xor_v2i32
-;SI-CHECK: V_XOR_B32_e32 VGPR{{[0-9]+, VGPR[0-9]+, VGPR[0-9]+}}
-;SI-CHECK: V_XOR_B32_e32 VGPR{{[0-9]+, VGPR[0-9]+, VGPR[0-9]+}}
+;SI-CHECK: V_XOR_B32_e32 v{{[0-9]+, v[0-9]+, v[0-9]+}}
+;SI-CHECK: V_XOR_B32_e32 v{{[0-9]+, v[0-9]+, v[0-9]+}}
 
 
 define void @xor_v2i32(<2 x i32> addrspace(1)* %out, <2 x i32> addrspace(1)* %in0, <2 x i32> addrspace(1)* %in1) {
@@ -19,16 +19,16 @@ define void @xor_v2i32(<2 x i32> addrspace(1)* %out, <2 x i32> addrspace(1)* %in
 }
 
 ;EG-CHECK: @xor_v4i32
-;EG-CHECK: XOR_INT {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
-;EG-CHECK: XOR_INT {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
-;EG-CHECK: XOR_INT {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
-;EG-CHECK: XOR_INT {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
+;EG-CHECK: XOR_INT {{\** *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
+;EG-CHECK: XOR_INT {{\** *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
+;EG-CHECK: XOR_INT {{\** *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
+;EG-CHECK: XOR_INT {{\** *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
 
 ;SI-CHECK: @xor_v4i32
-;SI-CHECK: V_XOR_B32_e32 VGPR{{[0-9]+, VGPR[0-9]+, VGPR[0-9]+}}
-;SI-CHECK: V_XOR_B32_e32 VGPR{{[0-9]+, VGPR[0-9]+, VGPR[0-9]+}}
-;SI-CHECK: V_XOR_B32_e32 VGPR{{[0-9]+, VGPR[0-9]+, VGPR[0-9]+}}
-;SI-CHECK: V_XOR_B32_e32 VGPR{{[0-9]+, VGPR[0-9]+, VGPR[0-9]+}}
+;SI-CHECK: V_XOR_B32_e32 {{v[0-9]+, v[0-9]+, v[0-9]+}}
+;SI-CHECK: V_XOR_B32_e32 {{v[0-9]+, v[0-9]+, v[0-9]+}}
+;SI-CHECK: V_XOR_B32_e32 {{v[0-9]+, v[0-9]+, v[0-9]+}}
+;SI-CHECK: V_XOR_B32_e32 {{v[0-9]+, v[0-9]+, v[0-9]+}}
 
 define void @xor_v4i32(<4 x i32> addrspace(1)* %out, <4 x i32> addrspace(1)* %in0, <4 x i32> addrspace(1)* %in1) {
   %a = load <4 x i32> addrspace(1) * %in0
@@ -39,10 +39,10 @@ define void @xor_v4i32(<4 x i32> addrspace(1)* %out, <4 x i32> addrspace(1)* %in
 }
 
 ;EG-CHECK: @xor_i1
-;EG-CHECK: XOR_INT {{\*? *}}T{{[0-9]+\.[XYZW], PV\.[XYZW], PV\.[XYZW]}}
+;EG-CHECK: XOR_INT {{\** *}}T{{[0-9]+\.[XYZW], PV\.[XYZW], PS}}
 
 ;SI-CHECK: @xor_i1
-;SI-CHECK: S_XOR_B64 {{SGPR[0-9]+_SGPR[0-9]+, SGPR[0-9]+_SGPR[0-9]+, SGPR[0-9]+_SGPR[0-9]+}}
+;SI-CHECK: S_XOR_B64 s[{{[0-9]+:[0-9]+}}], s[{{[0-9]+:[0-9]+}}], s[{{[0-9]+:[0-9]+}}]
 
 define void @xor_i1(float addrspace(1)* %out, float addrspace(1)* %in0, float addrspace(1)* %in1) {
   %a = load float addrspace(1) * %in0

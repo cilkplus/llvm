@@ -254,6 +254,12 @@ namespace llvm {
       // VSEXT - Vector integer signed-extend.
       VSEXT,
 
+      // VTRUNC - Vector integer truncate.
+      VTRUNC,
+
+      // VTRUNC - Vector integer truncate with mask.
+      VTRUNCM,
+
       // VFPEXT - Vector FP extend.
       VFPEXT,
 
@@ -289,6 +295,8 @@ namespace llvm {
       BLSI,   // BLSI - Extract lowest set isolated bit
       BLSMSK, // BLSMSK - Get mask up to lowest set bit
       BLSR,   // BLSR - Reset lowest set bit
+      BZHI,   // BZHI - Zero high bits
+      BEXTR,  // BEXTR - Bit field extract
 
       UMUL, // LOW, HI, FLAGS = umul LHS, RHS
 
@@ -334,6 +342,7 @@ namespace llvm {
       VBROADCAST,
       // masked broadcast
       VBROADCASTM,
+      VINSERT,
 
       // PMULUDQ - Vector multiply packed unsigned doubleword integers
       PMULUDQ,
@@ -766,6 +775,8 @@ namespace llvm {
     SDValue BuildFILD(SDValue Op, EVT SrcVT, SDValue Chain, SDValue StackSlot,
                       SelectionDAG &DAG) const;
 
+    virtual bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const LLVM_OVERRIDE;
+
     /// \brief Reset the operation actions based on target options.
     virtual void resetOperationActions();
 
@@ -915,6 +926,8 @@ namespace llvm {
                    bool isVarArg,
                    const SmallVectorImpl<ISD::OutputArg> &Outs,
                    LLVMContext &Context) const;
+
+    virtual const uint16_t *getScratchRegisters(CallingConv::ID CC) const;
 
     /// Utility function to emit atomic-load-arith operations (and, or, xor,
     /// nand, max, min, umax, umin). It takes the corresponding instruction to

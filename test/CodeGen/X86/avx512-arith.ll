@@ -74,6 +74,15 @@ entry:
   ret <16 x float> %sub.i
 }
 
+; CHECK-LABEL: imulq512
+; CHECK: vpmuludq
+; CHECK: vpmuludq
+; CHECK: ret
+define <8 x i64> @imulq512(<8 x i64> %y, <8 x i64> %x) {
+  %z = mul <8 x i64>%x, %y
+  ret <8 x i64>%z
+}
+
 ; CHECK-LABEL: mulpd512
 ; CHECK: vmulpd
 ; CHECK: ret
@@ -184,6 +193,43 @@ define <16 x i32> @vpsubd_test(<16 x i32> %i, <16 x i32> %j) nounwind readnone {
 define <16 x i32> @vpmulld_test(<16 x i32> %i, <16 x i32> %j) {
   %x = mul <16 x i32> %i, %j
   ret <16 x i32> %x
+}
+
+; CHECK-LABEL: sqrtA
+; CHECK: vsqrtssz
+; CHECK: ret
+declare float @sqrtf(float) readnone
+define float @sqrtA(float %a) nounwind uwtable readnone ssp {
+entry:
+  %conv1 = tail call float @sqrtf(float %a) nounwind readnone
+  ret float %conv1
+}
+
+; CHECK-LABEL: sqrtB
+; CHECK: vsqrtsdz
+; CHECK: ret
+declare double @sqrt(double) readnone
+define double @sqrtB(double %a) nounwind uwtable readnone ssp {
+entry:
+  %call = tail call double @sqrt(double %a) nounwind readnone
+  ret double %call
+}
+
+; CHECK-LABEL: sqrtC
+; CHECK: vsqrtssz
+; CHECK: ret
+declare float @llvm.sqrt.f32(float)
+define float @sqrtC(float %a) nounwind {
+  %b = call float @llvm.sqrt.f32(float %a)
+  ret float %b
+}
+
+; CHECK-LABEL: fadd_broadcast
+; CHECK: LCP{{.*}}(%rip){1to16}, %zmm0, %zmm0
+; CHECK: ret
+define <16 x float> @fadd_broadcast(<16 x float> %a) nounwind {
+  %b = fadd <16 x float> %a, <float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000, float 0x3FB99999A0000000>
+  ret <16 x float> %b
 }
 
 ; CHECK-LABEL: addq_broadcast

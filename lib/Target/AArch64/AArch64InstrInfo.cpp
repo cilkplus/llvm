@@ -29,7 +29,7 @@
 
 #include <algorithm>
 
-#define GET_INSTRINFO_CTOR
+#define GET_INSTRINFO_CTOR_DTOR
 #include "AArch64GenInstrInfo.inc"
 
 using namespace llvm;
@@ -68,43 +68,71 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     BuildMI(MBB, I, DL, get(AArch64::MRSxi), DestReg)
       .addImm(A64SysReg::NZCV);
   } else if (AArch64::GPR64RegClass.contains(DestReg)) {
-    assert(AArch64::GPR64RegClass.contains(SrcReg));
-    Opc = AArch64::ORRxxx_lsl;
-    ZeroReg = AArch64::XZR;
+    if(AArch64::GPR64RegClass.contains(SrcReg)){
+      Opc = AArch64::ORRxxx_lsl;
+      ZeroReg = AArch64::XZR;
+    } else{
+      assert(AArch64::FPR64RegClass.contains(SrcReg));
+      BuildMI(MBB, I, DL, get(AArch64::FMOVxd), DestReg)
+        .addReg(SrcReg);
+      return;
+    }
   } else if (AArch64::GPR32RegClass.contains(DestReg)) {
-    assert(AArch64::GPR32RegClass.contains(SrcReg));
-    Opc = AArch64::ORRwww_lsl;
-    ZeroReg = AArch64::WZR;
+    if(AArch64::GPR32RegClass.contains(SrcReg)){
+      Opc = AArch64::ORRwww_lsl;
+      ZeroReg = AArch64::WZR;
+    } else{
+      assert(AArch64::FPR32RegClass.contains(SrcReg));
+      BuildMI(MBB, I, DL, get(AArch64::FMOVws), DestReg)
+        .addReg(SrcReg);
+      return;
+    }
   } else if (AArch64::FPR32RegClass.contains(DestReg)) {
-    assert(AArch64::FPR32RegClass.contains(SrcReg));
-    BuildMI(MBB, I, DL, get(AArch64::FMOVss), DestReg)
-      .addReg(SrcReg);
-    return;
+    if(AArch64::FPR32RegClass.contains(SrcReg)){
+      BuildMI(MBB, I, DL, get(AArch64::FMOVss), DestReg)
+        .addReg(SrcReg);
+      return;
+    }
+    else {
+      assert(AArch64::GPR32RegClass.contains(SrcReg));
+      BuildMI(MBB, I, DL, get(AArch64::FMOVsw), DestReg)
+        .addReg(SrcReg);
+      return;
+    }
   } else if (AArch64::FPR64RegClass.contains(DestReg)) {
-    assert(AArch64::FPR64RegClass.contains(SrcReg));
-    BuildMI(MBB, I, DL, get(AArch64::FMOVdd), DestReg)
-      .addReg(SrcReg);
-    return;
+    if(AArch64::FPR64RegClass.contains(SrcReg)){
+      BuildMI(MBB, I, DL, get(AArch64::FMOVdd), DestReg)
+        .addReg(SrcReg);
+      return;
+    }
+    else {
+      assert(AArch64::GPR64RegClass.contains(SrcReg));
+      BuildMI(MBB, I, DL, get(AArch64::FMOVdx), DestReg)
+        .addReg(SrcReg);
+      return;
+    }
   } else if (AArch64::FPR128RegClass.contains(DestReg)) {
     assert(AArch64::FPR128RegClass.contains(SrcReg));
 
-    // FIXME: there's no good way to do this, at least without NEON:
-    //   + There's no single move instruction for q-registers
-    //   + We can't create a spill slot and use normal STR/LDR because stack
-    //     allocation has already happened
-    //   + We can't go via X-registers with FMOV because register allocation has
-    //     already happened.
-    // This may not be efficient, but at least it works.
-    BuildMI(MBB, I, DL, get(AArch64::LSFP128_PreInd_STR), AArch64::XSP)
-      .addReg(SrcReg)
-      .addReg(AArch64::XSP)
-      .addImm(0x1ff & -16);
+    // If NEON is enable, we use ORR to implement this copy.
+    // If NEON isn't available, emit STR and LDR to handle this.
+    if(getSubTarget().hasNEON()) {
+      BuildMI(MBB, I, DL, get(AArch64::ORRvvv_16B), DestReg)
+        .addReg(SrcReg)
+        .addReg(SrcReg);
+      return;
+    } else {
+      BuildMI(MBB, I, DL, get(AArch64::LSFP128_PreInd_STR), AArch64::XSP)
+        .addReg(SrcReg)
+        .addReg(AArch64::XSP)
+        .addImm(0x1ff & -16);
 
-    BuildMI(MBB, I, DL, get(AArch64::LSFP128_PostInd_LDR), DestReg)
-      .addReg(AArch64::XSP, RegState::Define)
-      .addReg(AArch64::XSP)
-      .addImm(16);
-    return;
+      BuildMI(MBB, I, DL, get(AArch64::LSFP128_PostInd_LDR), DestReg)
+        .addReg(AArch64::XSP, RegState::Define)
+        .addReg(AArch64::XSP)
+        .addImm(16);
+      return;
+    }
   } else {
     llvm_unreachable("Unknown register class in copyPhysReg");
   }

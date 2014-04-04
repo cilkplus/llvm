@@ -17,6 +17,7 @@
 #include "X86COFFMachineModuleInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+#include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/Type.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -34,14 +35,12 @@ namespace {
 /// X86MCInstLower - This class is used to lower an MachineInstr into an MCInst.
 class X86MCInstLower {
   MCContext &Ctx;
-  Mangler *Mang;
   const MachineFunction &MF;
   const TargetMachine &TM;
   const MCAsmInfo &MAI;
   X86AsmPrinter &AsmPrinter;
 public:
-  X86MCInstLower(Mangler *mang, const MachineFunction &MF,
-                 X86AsmPrinter &asmprinter);
+  X86MCInstLower(const MachineFunction &MF, X86AsmPrinter &asmprinter);
 
   void Lower(const MachineInstr *MI, MCInst &OutMI) const;
 
@@ -50,13 +49,16 @@ public:
 
 private:
   MachineModuleInfoMachO &getMachOMMI() const;
+  Mangler *getMang() const {
+    return AsmPrinter.Mang;
+  }
 };
 
 } // end anonymous namespace
 
-X86MCInstLower::X86MCInstLower(Mangler *mang, const MachineFunction &mf,
+X86MCInstLower::X86MCInstLower(const MachineFunction &mf,
                                X86AsmPrinter &asmprinter)
-: Ctx(mf.getContext()), Mang(mang), MF(mf), TM(mf.getTarget()),
+: Ctx(mf.getContext()), MF(mf), TM(mf.getTarget()),
   MAI(*TM.getMCAsmInfo()), AsmPrinter(asmprinter) {}
 
 MachineModuleInfoMachO &X86MCInstLower::getMachOMMI() const {
@@ -81,7 +83,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
         MO.getTargetFlags() == X86II::MO_DARWIN_HIDDEN_NONLAZY_PIC_BASE)
       isImplicitlyPrivate = true;
 
-    Mang->getNameWithPrefix(Name, GV, isImplicitlyPrivate);
+    getMang()->getNameWithPrefix(Name, GV, isImplicitlyPrivate);
   } else if (MO.isSymbol()) {
     Name += MAI.getGlobalPrefix();
     Name += MO.getSymbolName();
@@ -110,7 +112,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
       assert(MO.isGlobal() && "Extern symbol not handled yet");
       StubSym =
         MachineModuleInfoImpl::
-        StubValueTy(Mang->getSymbol(MO.getGlobal()),
+        StubValueTy(AsmPrinter.getSymbol(MO.getGlobal()),
                     !MO.getGlobal()->hasInternalLinkage());
     }
     return Sym;
@@ -124,7 +126,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
       assert(MO.isGlobal() && "Extern symbol not handled yet");
       StubSym =
         MachineModuleInfoImpl::
-        StubValueTy(Mang->getSymbol(MO.getGlobal()),
+        StubValueTy(AsmPrinter.getSymbol(MO.getGlobal()),
                     !MO.getGlobal()->hasInternalLinkage());
     }
     return Sym;
@@ -140,7 +142,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
     if (MO.isGlobal()) {
       StubSym =
         MachineModuleInfoImpl::
-        StubValueTy(Mang->getSymbol(MO.getGlobal()),
+        StubValueTy(AsmPrinter.getSymbol(MO.getGlobal()),
                     !MO.getGlobal()->hasInternalLinkage());
     } else {
       Name.erase(Name.end()-5, Name.end());
@@ -591,18 +593,6 @@ ReSimplify:
   case X86::MOVSX64rr32:
     SimplifyMOVSX(OutMI);
     break;
-
-  case X86::MORESTACK_RET:
-    OutMI.setOpcode(X86::RET);
-    break;
-
-  case X86::MORESTACK_RET_RESTORE_R10:
-    OutMI.setOpcode(X86::MOV64rr);
-    OutMI.addOperand(MCOperand::CreateReg(X86::R10));
-    OutMI.addOperand(MCOperand::CreateReg(X86::RAX));
-
-    AsmPrinter.OutStreamer.EmitInstruction(MCInstBuilder(X86::RET));
-    break;
   }
 }
 
@@ -685,8 +675,140 @@ static void LowerTlsAddr(MCStreamer &OutStreamer,
     .addExpr(tlsRef));
 }
 
+static std::pair<StackMaps::Location, MachineInstr::const_mop_iterator>
+parseMemoryOperand(StackMaps::Location::LocationType LocTy, unsigned Size,
+                   MachineInstr::const_mop_iterator MOI,
+                   MachineInstr::const_mop_iterator MOE) {
+
+  typedef StackMaps::Location Location;
+
+  assert(std::distance(MOI, MOE) >= 5 && "Too few operands to encode mem op.");
+
+  const MachineOperand &Base = *MOI;
+  const MachineOperand &Scale = *(++MOI);
+  const MachineOperand &Index = *(++MOI);
+  const MachineOperand &Disp = *(++MOI);
+  const MachineOperand &ZeroReg = *(++MOI);
+
+  // Sanity check for supported operand format.
+  assert(Base.isReg() &&
+         Scale.isImm() && Scale.getImm() == 1 &&
+         Index.isReg() && Index.getReg() == 0 &&
+         Disp.isImm() && ZeroReg.isReg() && (ZeroReg.getReg() == 0) &&
+         "Unsupported x86 memory operand sequence.");
+  (void)Scale;
+  (void)Index;
+  (void)ZeroReg;
+
+  return std::make_pair(
+    Location(LocTy, Size, Base.getReg(), Disp.getImm()), ++MOI);
+}
+
+std::pair<StackMaps::Location, MachineInstr::const_mop_iterator>
+X86AsmPrinter::stackmapOperandParser(MachineInstr::const_mop_iterator MOI,
+                                     MachineInstr::const_mop_iterator MOE,
+                                     const TargetMachine &TM) {
+
+  typedef StackMaps::Location Location;
+
+  const MachineOperand &MOP = *MOI;
+  assert(!MOP.isRegMask() && (!MOP.isReg() || !MOP.isImplicit()) &&
+         "Register mask and implicit operands should not be processed.");
+
+  if (MOP.isImm()) {
+    // Verify anyregcc
+    // [<def>], <id>, <numBytes>, <target>, <numArgs>, <cc>, ...
+
+    switch (MOP.getImm()) {
+    default: llvm_unreachable("Unrecognized operand type.");
+    case StackMaps::DirectMemRefOp: {
+      unsigned Size = TM.getDataLayout()->getPointerSizeInBits();
+      assert((Size % 8) == 0 && "Need pointer size in bytes.");
+      Size /= 8;
+      return parseMemoryOperand(StackMaps::Location::Direct, Size,
+                                llvm::next(MOI), MOE);
+    }
+    case StackMaps::IndirectMemRefOp: {
+      ++MOI;
+      int64_t Size = MOI->getImm();
+      assert(Size > 0 && "Need a valid size for indirect memory locations.");
+      return parseMemoryOperand(StackMaps::Location::Indirect, Size,
+                                llvm::next(MOI), MOE);
+    }
+    case StackMaps::ConstantOp: {
+      ++MOI;
+      assert(MOI->isImm() && "Expected constant operand.");
+      int64_t Imm = MOI->getImm();
+      return std::make_pair(
+        Location(Location::Constant, sizeof(int64_t), 0, Imm), ++MOI);
+    }
+    }
+  }
+
+  // Otherwise this is a reg operand. The physical register number will
+  // ultimately be encoded as a DWARF regno. The stack map also records the size
+  // of a spill slot that can hold the register content. (The runtime can
+  // track the actual size of the data type if it needs to.)
+  assert(MOP.isReg() && "Expected register operand here.");
+  assert(TargetRegisterInfo::isPhysicalRegister(MOP.getReg()) &&
+         "Virtreg operands should have been rewritten before now.");
+  const TargetRegisterClass *RC =
+    TM.getRegisterInfo()->getMinimalPhysRegClass(MOP.getReg());
+  assert(!MOP.getSubReg() && "Physical subreg still around.");
+  return std::make_pair(
+    Location(Location::Register, RC->getSize(), MOP.getReg(), 0), ++MOI);
+}
+
+// Lower a stackmap of the form:
+// <id>, <shadowBytes>, ...
+static void LowerSTACKMAP(MCStreamer &OutStreamer,
+                          StackMaps &SM,
+                          const MachineInstr &MI)
+{
+  unsigned NumNOPBytes = MI.getOperand(1).getImm();
+  SM.recordStackMap(MI);
+  // Emit padding.
+  // FIXME: These nops ensure that the stackmap's shadow is covered by
+  // instructions from the same basic block, but the nops should not be
+  // necessary if instructions from the same block follow the stackmap.
+  for (unsigned i = 0; i < NumNOPBytes; ++i)
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::NOOP));
+}
+
+// Lower a patchpoint of the form:
+// [<def>], <id>, <numBytes>, <target>, <numArgs>, <cc>, ...
+static void LowerPATCHPOINT(MCStreamer &OutStreamer,
+                            StackMaps &SM,
+                            const MachineInstr &MI) {
+  SM.recordPatchPoint(MI);
+
+  PatchPointOpers opers(&MI);
+  unsigned ScratchIdx = opers.getNextScratchIdx();
+  unsigned EncodedBytes = 0;
+  int64_t CallTarget = opers.getMetaOper(PatchPointOpers::TargetPos).getImm();
+  if (CallTarget) {
+    // Emit MOV to materialize the target address and the CALL to target.
+    // This is encoded with 12-13 bytes, depending on which register is used.
+    // We conservatively assume that it is 12 bytes and emit in worst case one
+    // extra NOP byte.
+    EncodedBytes = 12;
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::MOV64ri)
+                                .addReg(MI.getOperand(ScratchIdx).getReg())
+                                .addImm(CallTarget));
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::CALL64r)
+                                .addReg(MI.getOperand(ScratchIdx).getReg()));
+  }
+  // Emit padding.
+  unsigned NumBytes = opers.getMetaOper(PatchPointOpers::NBytesPos).getImm();
+  assert(NumBytes >= EncodedBytes &&
+         "Patchpoint can't request size less than the length of a call.");
+
+  for (unsigned i = EncodedBytes; i < NumBytes; ++i)
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::NOOP));
+}
+
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
-  X86MCInstLower MCInstLowering(Mang, *MF, *this);
+  X86MCInstLower MCInstLowering(*MF, *this);
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
     llvm_unreachable("Should be handled target independently");
@@ -774,6 +896,24 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addExpr(DotExpr));
     return;
   }
+
+  case TargetOpcode::STACKMAP:
+    return LowerSTACKMAP(OutStreamer, SM, *MI);
+
+  case TargetOpcode::PATCHPOINT:
+    return LowerPATCHPOINT(OutStreamer, SM, *MI);
+
+  case X86::MORESTACK_RET:
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::RET));
+    return;
+
+  case X86::MORESTACK_RET_RESTORE_R10:
+    // Return, then restore R10.
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::RET));
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::MOV64rr)
+      .addReg(X86::R10)
+      .addReg(X86::RAX));
+    return;
   }
 
   MCInst TmpInst;

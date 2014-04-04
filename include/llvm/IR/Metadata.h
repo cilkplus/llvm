@@ -28,6 +28,10 @@ template<typename ValueSubClass, typename ItemParentClass>
   class SymbolTableListTraits;
 
 
+enum LLVMConstants LLVM_ENUM_INT_TYPE(uint32_t) {
+  DEBUG_METADATA_VERSION = 1  // Current debug info version number.
+};
+
 //===----------------------------------------------------------------------===//
 /// MDString - a single uniqued string.
 /// These are used to efficiently contain a byte sequence for metadata.
@@ -160,6 +164,9 @@ public:
   static bool classof(const Value *V) {
     return V->getValueID() == MDNodeVal;
   }
+
+  /// Check whether MDNode is a vtable access.
+  bool isTBAAVtableAccess() const;
 
   /// Methods for metadata merging.
   static MDNode *getMostGenericTBAA(MDNode *A, MDNode *B);

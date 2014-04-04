@@ -138,7 +138,7 @@ public:
   symbol_map  SymbolMap;
 
   WinCOFFObjectWriter(MCWinCOFFObjectTargetWriter *MOTW, raw_ostream &OS);
-  ~WinCOFFObjectWriter();
+  virtual ~WinCOFFObjectWriter();
 
   COFFSymbol *createSymbol(StringRef Name);
   COFFSymbol *GetOrCreateCOFFSymbol(const MCSymbol * Symbol);
@@ -148,13 +148,12 @@ public:
   object_t *createCOFFEntity(StringRef Name, list_t &List);
 
   void DefineSection(MCSectionData const &SectionData);
-  void DefineSymbol(MCSymbolData const &SymbolData,
-                    MCAssembler &Assembler);
+  void DefineSymbol(MCSymbolData const &SymbolData, MCAssembler &Assembler,
+                    const MCAsmLayout &Layout);
 
   void MakeSymbolReal(COFFSymbol &S, size_t Index);
   void MakeSectionReal(COFFSection &S, size_t Number);
 
-  bool ExportSection(COFFSection const *S);
   bool ExportSymbol(MCSymbolData const &SymbolData, MCAssembler &Asm);
 
   bool IsPhysicalSection(COFFSection *S);
@@ -188,17 +187,6 @@ static inline void write_uint32_le(void *Data, uint32_t const &Value) {
   Ptr[1] = (Value & 0x0000FF00) >>  8;
   Ptr[2] = (Value & 0x00FF0000) >> 16;
   Ptr[3] = (Value & 0xFF000000) >> 24;
-}
-
-static inline void write_uint16_le(void *Data, uint16_t const &Value) {
-  uint8_t *Ptr = reinterpret_cast<uint8_t *>(Data);
-  Ptr[0] = (Value & 0x00FF) >> 0;
-  Ptr[1] = (Value & 0xFF00) >> 8;
-}
-
-static inline void write_uint8_le(void *Data, uint8_t const &Value) {
-  uint8_t *Ptr = reinterpret_cast<uint8_t *>(Data);
-  Ptr[0] = (Value & 0xFF) >> 0;
 }
 
 //------------------------------------------------------------------------------
@@ -411,7 +399,8 @@ void WinCOFFObjectWriter::DefineSection(MCSectionData const &SectionData) {
 /// This function takes a section data object from the assembler
 /// and creates the associated COFF symbol staging object.
 void WinCOFFObjectWriter::DefineSymbol(MCSymbolData const &SymbolData,
-                                       MCAssembler &Assembler) {
+                                       MCAssembler &Assembler,
+                                       const MCAsmLayout &Layout) {
   MCSymbol const &Symbol = SymbolData.getSymbol();
   COFFSymbol *coff_symbol = GetOrCreateCOFFSymbol(&Symbol);
   SymbolMap[&Symbol] = coff_symbol;
@@ -452,6 +441,12 @@ void WinCOFFObjectWriter::DefineSymbol(MCSymbolData const &SymbolData,
     const MCSymbolData &ResSymData =
       Assembler.getSymbolData(Symbol.AliasedSymbol());
 
+    if (Symbol.isVariable()) {
+      int64_t Addr;
+      if (Symbol.getVariableValue()->EvaluateAsAbsolute(Addr, Layout))
+        coff_symbol->Data.Value = Addr;
+    }
+
     coff_symbol->Data.Type         = (ResSymData.getFlags() & 0x0000FFFF) >>  0;
     coff_symbol->Data.StorageClass = (ResSymData.getFlags() & 0x00FF0000) >> 16;
 
@@ -463,7 +458,9 @@ void WinCOFFObjectWriter::DefineSymbol(MCSymbolData const &SymbolData,
        external ? COFF::IMAGE_SYM_CLASS_EXTERNAL : COFF::IMAGE_SYM_CLASS_STATIC;
     }
 
-    if (ResSymData.Fragment != NULL)
+    if (Symbol.isAbsolute() || Symbol.AliasedSymbol().isVariable())
+      coff_symbol->Data.SectionNumber = COFF::IMAGE_SYM_ABSOLUTE;
+    else if (ResSymData.Fragment != NULL)
       coff_symbol->Section =
         SectionMap[&ResSymData.Fragment->getParent()->getSection()];
 
@@ -506,10 +503,6 @@ void WinCOFFObjectWriter::MakeSymbolReal(COFFSymbol &S, size_t Index) {
   } else
     std::memcpy(S.Data.Name, S.Name.c_str(), S.Name.size());
   S.Index = Index;
-}
-
-bool WinCOFFObjectWriter::ExportSection(COFFSection const *S) {
-  return !S->MCData->getFragmentList().empty();
 }
 
 bool WinCOFFObjectWriter::ExportSymbol(MCSymbolData const &SymbolData,
@@ -625,9 +618,10 @@ void WinCOFFObjectWriter::ExecutePostLayoutBinding(MCAssembler &Asm,
     DefineSection(*i);
 
   for (MCAssembler::const_symbol_iterator i = Asm.symbol_begin(),
-                                          e = Asm.symbol_end(); i != e; i++) {
+                                          e = Asm.symbol_end();
+       i != e; i++) {
     if (ExportSymbol(*i, Asm)) {
-      DefineSymbol(*i, Asm);
+      DefineSymbol(*i, Asm, Layout);
     }
   }
 }
@@ -920,6 +914,9 @@ void WinCOFFObjectWriter::WriteObject(MCAssembler &Asm,
 MCWinCOFFObjectTargetWriter::MCWinCOFFObjectTargetWriter(unsigned Machine_) :
   Machine(Machine_) {
 }
+
+// Pin the vtable to this file.
+void MCWinCOFFObjectTargetWriter::anchor() {}
 
 //------------------------------------------------------------------------------
 // WinCOFFObjectWriter factory function

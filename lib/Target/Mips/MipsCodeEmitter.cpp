@@ -105,12 +105,16 @@ private:
                          const MachineOperand &MO) const;
 
   unsigned getJumpTargetOpValue(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getJumpTargetOpValueMM(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getBranchTargetOpValueMM(const MachineInstr &MI,
+                                    unsigned OpNo) const;
 
   unsigned getBranchTargetOpValue(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncodingMMImm12(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getSizeExtEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getSizeInsEncoding(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getLSAImmEncoding(const MachineInstr &MI, unsigned OpNo) const;
 
   void emitGlobalAddressUnaligned(const GlobalValue *GV, unsigned Reloc,
                                   int Offset) const;
@@ -187,6 +191,18 @@ unsigned MipsCodeEmitter::getJumpTargetOpValue(const MachineInstr &MI,
   return 0;
 }
 
+unsigned MipsCodeEmitter::getJumpTargetOpValueMM(const MachineInstr &MI,
+                                                 unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getBranchTargetOpValueMM(const MachineInstr &MI,
+                                                   unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
 unsigned MipsCodeEmitter::getBranchTargetOpValue(const MachineInstr &MI,
                                                  unsigned OpNo) const {
   MachineOperand MO = MI.getOperand(OpNo);
@@ -219,6 +235,12 @@ unsigned MipsCodeEmitter::getSizeInsEncoding(const MachineInstr &MI,
   // size is encoded as pos+size-1.
   return getMachineOpValue(MI, MI.getOperand(OpNo-1)) +
          getMachineOpValue(MI, MI.getOperand(OpNo)) - 1;
+}
+
+unsigned MipsCodeEmitter::getLSAImmEncoding(const MachineInstr &MI,
+                                            unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
 }
 
 /// getMachineOpValue - Return binary encoding of operand. If the machine
@@ -322,6 +344,14 @@ bool MipsCodeEmitter::expandPseudos(MachineBasicBlock::instr_iterator &MI,
   case Mips::NOP:
     BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::SLL), Mips::ZERO)
       .addReg(Mips::ZERO).addImm(0);
+    break;
+  case Mips::B:
+    BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::BEQ)).addReg(Mips::ZERO)
+      .addReg(Mips::ZERO).addOperand(MI->getOperand(0));
+    break;
+  case Mips::TRAP:
+    BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::BREAK)).addImm(0)
+      .addImm(0);
     break;
   case Mips::JALRPseudo:
     BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::JALR), Mips::RA)

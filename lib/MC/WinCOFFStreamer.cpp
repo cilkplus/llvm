@@ -72,12 +72,9 @@ public:
   virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
                               uint64_t Size, unsigned ByteAlignment);
   virtual void EmitFileDirective(StringRef Filename);
+  virtual void EmitIdent(StringRef IdentString);
   virtual void EmitWin64EHHandlerData();
   virtual void FinishImpl();
-
-  static bool classof(const MCStreamer *S) {
-    return S->getKind() == SK_WinCOFFStreamer;
-  }
 
 private:
   virtual void EmitInstToData(const MCInst &Inst) {
@@ -134,8 +131,7 @@ private:
 
 WinCOFFStreamer::WinCOFFStreamer(MCContext &Context, MCAsmBackend &MAB,
                                  MCCodeEmitter &CE, raw_ostream &OS)
-    : MCObjectStreamer(SK_WinCOFFStreamer, Context, MAB, OS, &CE),
-      CurSymbol(NULL) {}
+    : MCObjectStreamer(Context, 0, MAB, OS, &CE), CurSymbol(NULL) {}
 
 void WinCOFFStreamer::AddCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                       unsigned ByteAlignment, bool External) {
@@ -155,7 +151,8 @@ void WinCOFFStreamer::AddCommonSymbol(MCSymbol *Symbol, uint64_t Size,
   int Selection = COFF::IMAGE_COMDAT_SELECT_LARGEST;
 
   const MCSection *Section = MCStreamer::getContext().getCOFFSection(
-    SectionName, Characteristics, SectionKind::getBSS(), Selection);
+      SectionName, Characteristics, SectionKind::getBSS(), Symbol->getName(),
+      Selection);
 
   MCSectionData &SectionData = getAssembler().getOrCreateSectionData(*Section);
 
@@ -164,7 +161,7 @@ void WinCOFFStreamer::AddCommonSymbol(MCSymbol *Symbol, uint64_t Size,
 
   SymbolData.setExternal(External);
 
-  Symbol->setSection(*Section);
+  AssignSection(Symbol, Section);
 
   if (ByteAlignment != 1)
       new MCAlignFragment(ByteAlignment, 0, 0, ByteAlignment, &SectionData);
@@ -311,6 +308,11 @@ void WinCOFFStreamer::EmitFileDirective(StringRef Filename) {
   // info will be a much large effort.
 }
 
+// TODO: Implement this if you want to emit .comment section in COFF obj files.
+void WinCOFFStreamer::EmitIdent(StringRef IdentString) {
+  llvm_unreachable("unsupported directive");
+}
+
 void WinCOFFStreamer::EmitWin64EHHandlerData() {
   MCStreamer::EmitWin64EHHandlerData();
 
@@ -320,6 +322,7 @@ void WinCOFFStreamer::EmitWin64EHHandlerData() {
 }
 
 void WinCOFFStreamer::FinishImpl() {
+  EmitFrames(NULL, true);
   EmitW64Tables();
   MCObjectStreamer::FinishImpl();
 }

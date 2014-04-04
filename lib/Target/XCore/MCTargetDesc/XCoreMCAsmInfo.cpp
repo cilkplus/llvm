@@ -23,10 +23,14 @@ XCoreMCAsmInfo::XCoreMCAsmInfo(StringRef TT) {
     
   PrivateGlobalPrefix = ".L";
   AscizDirective = ".asciiz";
-  WeakDefDirective = "\t.weak\t";
-  WeakRefDirective = "\t.weak\t";
+
+  HiddenVisibilityAttr = MCSA_Invalid;
+  HiddenDeclarationVisibilityAttr = MCSA_Invalid;
+  ProtectedVisibilityAttr = MCSA_Invalid;
 
   // Debug
   HasLEB128 = true;
+  ExceptionsType = ExceptionHandling::DwarfCFI;
+  DwarfRegNumForCFI = true;
 }
 

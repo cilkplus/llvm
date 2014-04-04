@@ -59,6 +59,7 @@ getTargetNodeName(unsigned Opcode) const
     case XCoreISD::CRC8              : return "XCoreISD::CRC8";
     case XCoreISD::BR_JT             : return "XCoreISD::BR_JT";
     case XCoreISD::BR_JT32           : return "XCoreISD::BR_JT32";
+    case XCoreISD::MEMBARRIER        : return "XCoreISD::MEMBARRIER";
     default                          : return NULL;
   }
 }
@@ -79,7 +80,7 @@ XCoreTargetLowering::XCoreTargetLowering(XCoreTargetMachine &XTM)
 
   setStackPointerRegisterToSaveRestore(XCore::SP);
 
-  setSchedulingPreference(Sched::RegPressure);
+  setSchedulingPreference(Sched::Source);
 
   // Use i32 for setcc operations results (slt, sgt, ...).
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -148,6 +149,13 @@ XCoreTargetLowering::XCoreTargetLowering(XCoreTargetMachine &XTM)
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Expand);
 
+  // Exception handling
+  setExceptionPointerRegister(XCore::R0);
+  setExceptionSelectorRegister(XCore::R1);
+
+  // Atomic operations
+  setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
+
   // TRAMPOLINE is custom lowered.
   setOperationAction(ISD::INIT_TRAMPOLINE, MVT::Other, Custom);
   setOperationAction(ISD::ADJUST_TRAMPOLINE, MVT::Other, Custom);
@@ -164,6 +172,24 @@ XCoreTargetLowering::XCoreTargetLowering(XCoreTargetMachine &XTM)
   setTargetDAGCombine(ISD::ADD);
 
   setMinFunctionAlignment(1);
+}
+
+bool XCoreTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
+  if (Val.getOpcode() != ISD::LOAD)
+    return false;
+
+  EVT VT1 = Val.getValueType();
+  if (!VT1.isSimple() || !VT1.isInteger() ||
+      !VT2.isSimple() || !VT2.isInteger())
+    return false;
+
+  switch (VT1.getSimpleVT().SimpleTy) {
+  default: break;
+  case MVT::i8:
+    return true;
+  }
+
+  return false;
 }
 
 SDValue XCoreTargetLowering::
@@ -188,6 +214,7 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::INIT_TRAMPOLINE:    return LowerINIT_TRAMPOLINE(Op, DAG);
   case ISD::ADJUST_TRAMPOLINE:  return LowerADJUST_TRAMPOLINE(Op, DAG);
   case ISD::INTRINSIC_WO_CHAIN: return LowerINTRINSIC_WO_CHAIN(Op, DAG);
+  case ISD::ATOMIC_FENCE:       return LowerATOMIC_FENCE(Op, DAG);
   default:
     llvm_unreachable("unimplemented operand");
   }
@@ -257,11 +284,6 @@ LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const
     GA = DAG.getNode(ISD::ADD, DL, MVT::i32, GA, Remaining);
   }
   return GA;
-}
-
-static inline SDValue BuildGetId(SelectionDAG &DAG, SDLoc dl) {
-  return DAG.getNode(ISD::INTRINSIC_WO_CHAIN, dl, MVT::i32,
-                     DAG.getConstant(Intrinsic::xcore_getid, MVT::i32));
 }
 
 SDValue XCoreTargetLowering::
@@ -834,6 +856,12 @@ LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const {
   return SDValue();
 }
 
+SDValue XCoreTargetLowering::
+LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  return DAG.getNode(XCoreISD::MEMBARRIER, DL, MVT::Other, Op.getOperand(0));
+}
+
 //===----------------------------------------------------------------------===//
 //                      Calling Convention Implementation
 //===----------------------------------------------------------------------===//
@@ -1200,7 +1228,7 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
        ArgDI != ArgDE; ++ArgDI) {
     if (ArgDI->Flags.isByVal() && ArgDI->Flags.getByValSize()) {
       unsigned Size = ArgDI->Flags.getByValSize();
-      unsigned Align = ArgDI->Flags.getByValAlign();
+      unsigned Align = std::max(StackSlotSize, ArgDI->Flags.getByValAlign());
       // Create a new object on the stack and copy the pointee into it.
       int FI = MFI->CreateStackObject(Size, Align, false, false);
       SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);

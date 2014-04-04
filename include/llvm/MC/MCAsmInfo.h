@@ -93,9 +93,9 @@ namespace llvm {
     /// this value.  Factored out in .debug_frame and .debug_line.
     unsigned MinInstAlignment;                  // Defaults to 1.
 
-    /// PCSymbol - The symbol used to represent the current PC.  Used in PC
-    /// relative expressions.
-    const char *PCSymbol;                    // Defaults to "$".
+    /// DollarIsPC - The '$' token, when not referencing an identifier or
+    /// constant, refers to the current PC.
+    bool DollarIsPC;                         // Defaults to false.
 
     /// SeparatorString - This string, if specified, is used to separate
     /// instructions from each other when on the same line.
@@ -144,21 +144,9 @@ namespace llvm {
     /// AssemblerDialect - Which dialect of an assembler variant to use.
     unsigned AssemblerDialect;               // Defaults to 0
 
-    /// AllowQuotesInName - This is true if the assembler allows for complex
-    /// symbol names to be surrounded in quotes.  This defaults to false.
-    bool AllowQuotesInName;
-
-    /// AllowNameToStartWithDigit - This is true if the assembler allows symbol
-    /// names to start with a digit (e.g., "0x0021").  This defaults to false.
-    bool AllowNameToStartWithDigit;
-
-    /// AllowPeriodsInName - This is true if the assembler allows periods in
-    /// symbol names.  This defaults to true.
-    bool AllowPeriodsInName;
-
-    /// AllowUTF8 - This is true if the assembler accepts UTF-8 input.
-    // FIXME: Make this a more general encoding setting?
-    bool AllowUTF8;
+    /// \brief This is true if the assembler allows @ characters in symbol
+    /// names. Defaults to false.
+    bool AllowAtInName;
 
     /// UseDataRegionDirectives - This is true if data region markers should
     /// be printed as ".data_region/.end_data_region" directives. If false,
@@ -240,11 +228,6 @@ namespace llvm {
     ///
     const char *GlobalDirective;             // Defaults to NULL.
 
-    /// ExternDirective - This is the directive used to declare external
-    /// globals.
-    ///
-    const char *ExternDirective;             // Defaults to NULL.
-
     /// HasSetDirective - True if the assembler supports the .set directive.
     bool HasSetDirective;                    // Defaults to true.
 
@@ -271,13 +254,13 @@ namespace llvm {
     /// .file directive, this is true for ELF targets.
     bool HasSingleParameterDotFile;          // Defaults to true.
 
+    /// hasIdentDirective - True if the target has a .ident directive, this is
+    /// true for ELF targets.
+    bool HasIdentDirective;                  // Defaults to false.
+
     /// HasNoDeadStrip - True if this target supports the MachO .no_dead_strip
     /// directive.
     bool HasNoDeadStrip;                     // Defaults to false.
-
-    /// HasSymbolResolver - True if this target supports the MachO
-    /// .symbol_resolver directive.
-    bool HasSymbolResolver;                     // Defaults to false.
 
     /// WeakRefDirective - This directive, if non-null, is used to declare a
     /// global as being a weak undefined symbol.
@@ -315,10 +298,6 @@ namespace llvm {
 
     /// SupportsExceptionHandling - True if target supports exception handling.
     ExceptionHandling::ExceptionsType ExceptionsType; // Defaults to None
-
-    /// DwarfUsesInlineInfoSection - True if DwarfDebugInlineSection is used to
-    /// encode inline subroutine information.
-    bool DwarfUsesInlineInfoSection;         // Defaults to false.
 
     /// DwarfUsesRelocationsAcrossSections - True if Dwarf2 output generally
     /// uses relocations for references to other .debug_* sections.
@@ -429,8 +408,8 @@ namespace llvm {
     unsigned getMinInstAlignment() const {
       return MinInstAlignment;
     }
-    const char *getPCSymbol() const {
-      return PCSymbol;
+    bool getDollarIsPC() const {
+      return DollarIsPC;
     }
     const char *getSeparatorString() const {
       return SeparatorString;
@@ -476,17 +455,8 @@ namespace llvm {
     unsigned getAssemblerDialect() const {
       return AssemblerDialect;
     }
-    bool doesAllowQuotesInName() const {
-      return AllowQuotesInName;
-    }
-    bool doesAllowNameToStartWithDigit() const {
-      return AllowNameToStartWithDigit;
-    }
-    bool doesAllowPeriodsInName() const {
-      return AllowPeriodsInName;
-    }
-    bool doesAllowUTF8() const {
-      return AllowUTF8;
+    bool doesAllowAtInName() const {
+      return AllowAtInName;
     }
     bool doesSupportDataRegionDirectives() const {
       return UseDataRegionDirectives;
@@ -512,9 +482,6 @@ namespace llvm {
     const char *getGlobalDirective() const {
       return GlobalDirective;
     }
-    const char *getExternDirective() const {
-      return ExternDirective;
-    }
     bool hasSetDirective() const { return HasSetDirective; }
     bool hasAggressiveSymbolFolding() const {
       return HasAggressiveSymbolFolding;
@@ -527,8 +494,8 @@ namespace llvm {
     }
     bool hasDotTypeDotSizeDirective() const {return HasDotTypeDotSizeDirective;}
     bool hasSingleParameterDotFile() const { return HasSingleParameterDotFile; }
+    bool hasIdentDirective() const { return HasIdentDirective; }
     bool hasNoDeadStrip() const { return HasNoDeadStrip; }
-    bool hasSymbolResolver() const { return HasSymbolResolver; }
     const char *getWeakRefDirective() const { return WeakRefDirective; }
     const char *getWeakDefDirective() const { return WeakDefDirective; }
     const char *getLinkOnceDirective() const { return LinkOnceDirective; }
@@ -557,9 +524,6 @@ namespace llvm {
         (ExceptionsType == ExceptionHandling::DwarfCFI ||
          ExceptionsType == ExceptionHandling::ARM ||
          ExceptionsType == ExceptionHandling::Win64);
-    }
-    bool doesDwarfUseInlineInfoSection() const {
-      return DwarfUsesInlineInfoSection;
     }
     bool doesDwarfUseRelocationsAcrossSections() const {
       return DwarfUsesRelocationsAcrossSections;

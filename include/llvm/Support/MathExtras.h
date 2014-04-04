@@ -21,7 +21,8 @@
 #include <cstring>
 
 #ifdef _MSC_VER
-# include <intrin.h>
+#include <intrin.h>
+#include <limits>
 #endif
 
 namespace llvm {
@@ -603,6 +604,13 @@ inline int64_t SignExtend64(uint64_t X, unsigned B) {
   return int64_t(X << (64 - B)) >> (64 - B);
 }
 
+#if defined(_MSC_VER)
+  // Visual Studio defines the HUGE_VAL class of macros using purposeful
+  // constant arithmetic overflow, which it then warns on when encountered.
+  const float huge_valf = std::numeric_limits<float>::infinity();
+#else
+  const float huge_valf = HUGE_VALF;
+#endif
 } // End llvm namespace
 
 #endif

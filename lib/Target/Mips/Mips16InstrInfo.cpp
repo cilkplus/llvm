@@ -10,7 +10,6 @@
 // This file contains the Mips16 implementation of the TargetInstrInfo class.
 //
 //===----------------------------------------------------------------------===//
-
 #include "Mips16InstrInfo.h"
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MipsMachineFunction.h"
@@ -20,10 +19,12 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
+#include <cctype>
 
 using namespace llvm;
 
@@ -36,7 +37,7 @@ static cl::opt<bool> NeverUseSaveRestore(
 
 
 Mips16InstrInfo::Mips16InstrInfo(MipsTargetMachine &tm)
-  : MipsInstrInfo(tm, Mips::BimmX16),
+  : MipsInstrInfo(tm, Mips::Bimm16),
     RI(*tm.getSubtargetImpl()) {}
 
 const MipsRegisterInfo &Mips16InstrInfo::getRegisterInfo() const {
@@ -151,13 +152,17 @@ unsigned Mips16InstrInfo::getOppositeBranchOpc(unsigned Opc) const {
   default:  llvm_unreachable("Illegal opcode!");
   case Mips::BeqzRxImmX16: return Mips::BnezRxImmX16;
   case Mips::BnezRxImmX16: return Mips::BeqzRxImmX16;
+  case Mips::BeqzRxImm16: return Mips::BnezRxImm16;
+  case Mips::BnezRxImm16: return Mips::BeqzRxImm16;
   case Mips::BteqzT8CmpX16: return Mips::BtnezT8CmpX16;
   case Mips::BteqzT8SltX16: return Mips::BtnezT8SltX16;
   case Mips::BteqzT8SltiX16: return Mips::BtnezT8SltiX16;
+  case Mips::Btnez16: return Mips::Bteqz16;
   case Mips::BtnezX16: return Mips::BteqzX16;
   case Mips::BtnezT8CmpiX16: return Mips::BteqzT8CmpiX16;
   case Mips::BtnezT8SltuX16: return Mips::BteqzT8SltuX16;
   case Mips::BtnezT8SltiuX16: return Mips::BteqzT8SltiuX16;
+  case Mips::Bteqz16: return Mips::Btnez16;
   case Mips::BteqzX16: return Mips::BtnezX16;
   case Mips::BteqzT8CmpiX16: return Mips::BtnezT8CmpiX16;
   case Mips::BteqzT8SltuX16: return Mips::BtnezT8SltuX16;
@@ -439,6 +444,9 @@ Mips16InstrInfo::basicLoadImmediate(
 
 unsigned Mips16InstrInfo::getAnalyzableBrOpc(unsigned Opc) const {
   return (Opc == Mips::BeqzRxImmX16   || Opc == Mips::BimmX16  ||
+          Opc == Mips::Bimm16  ||
+          Opc == Mips::Bteqz16        || Opc == Mips::Btnez16 ||
+          Opc == Mips::BeqzRxImm16    || Opc == Mips::BnezRxImm16   ||
           Opc == Mips::BnezRxImmX16   || Opc == Mips::BteqzX16 ||
           Opc == Mips::BteqzT8CmpX16  || Opc == Mips::BteqzT8CmpiX16 ||
           Opc == Mips::BteqzT8SltX16  || Opc == Mips::BteqzT8SltuX16  ||
@@ -493,4 +501,48 @@ bool Mips16InstrInfo::validImmediate(unsigned Opcode, unsigned Reg,
     return isInt<15>(Amount);
   }
   llvm_unreachable("unexpected Opcode in validImmediate");
+}
+
+/// Measure the specified inline asm to determine an approximation of its
+/// length.
+/// Comments (which run till the next SeparatorString or newline) do not
+/// count as an instruction.
+/// Any other non-whitespace text is considered an instruction, with
+/// multiple instructions separated by SeparatorString or newlines.
+/// Variable-length instructions are not handled here; this function
+/// may be overloaded in the target code to do that.
+/// We implement the special case of the .space directive taking only an
+/// integer argument, which is the size in bytes. This is used for creating
+/// inline code spacing for testing purposes using inline assembly.
+///
+unsigned Mips16InstrInfo::getInlineAsmLength(const char *Str,
+                                             const MCAsmInfo &MAI) const {
+
+
+  // Count the number of instructions in the asm.
+  bool atInsnStart = true;
+  unsigned Length = 0;
+  for (; *Str; ++Str) {
+    if (*Str == '\n' || strncmp(Str, MAI.getSeparatorString(),
+                                strlen(MAI.getSeparatorString())) == 0)
+      atInsnStart = true;
+    if (atInsnStart && !std::isspace(static_cast<unsigned char>(*Str))) {
+      if (strncmp(Str, ".space", 6)==0) {
+        char *EStr; int Sz;
+        Sz = strtol(Str+6, &EStr, 10);
+        while (isspace(*EStr)) ++EStr;
+        if (*EStr=='\0') {
+          DEBUG(dbgs() << "parsed .space " << Sz << '\n');
+          return Sz;
+        }
+      }
+      Length += MAI.getMaxInstLength();
+      atInsnStart = false;
+    }
+    if (atInsnStart && strncmp(Str, MAI.getCommentString(),
+                               strlen(MAI.getCommentString())) == 0)
+      atInsnStart = false;
+  }
+
+  return Length;
 }

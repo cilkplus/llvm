@@ -58,8 +58,7 @@ public:
   }
   bool isTargetDarwin() const {
     Triple TT(STI.getTargetTriple());
-    Triple::OSType OS = TT.getOS();
-    return OS == Triple::Darwin || OS == Triple::MacOSX || OS == Triple::IOS;
+  	return TT.isOSDarwin();
   }
 
   unsigned getMachineSoImmOpValue(unsigned SoImm) const;
@@ -642,7 +641,7 @@ getUnconditionalBranchTargetOpValue(const MCInst &MI, unsigned OpIdx,
   const MCOperand MO = MI.getOperand(OpIdx);
     
   if(MO.isExpr())
-    Val = ::getBranchTargetOpValue(MI, OpIdx, ARM::fixup_t2_uncondbranch, Fixups);
+    return ::getBranchTargetOpValue(MI, OpIdx, ARM::fixup_t2_uncondbranch, Fixups);
   else 
     Val = MO.getImm() >> 1;
 

@@ -699,7 +699,10 @@ Instruction *InstCombiner::FoldOpIntoPhi(Instruction &I) {
       Value *TrueVInPred = TrueV->DoPHITranslation(PhiTransBB, ThisBB);
       Value *FalseVInPred = FalseV->DoPHITranslation(PhiTransBB, ThisBB);
       Value *InV = 0;
-      if (Constant *InC = dyn_cast<Constant>(PN->getIncomingValue(i)))
+      // Beware of ConstantExpr:  it may eventually evaluate to getNullValue,
+      // even if currently isNullValue gives false.
+      Constant *InC = dyn_cast<Constant>(PN->getIncomingValue(i));
+      if (InC && !isa<ConstantExpr>(InC))
         InV = InC->isNullValue() ? FalseVInPred : TrueVInPred;
       else
         InV = Builder->CreateSelect(PN->getIncomingValue(i),
@@ -1180,6 +1183,22 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
         GetElementPtrInst::CreateInBounds(Src->getOperand(0), Indices,
                                           GEP.getName()) :
         GetElementPtrInst::Create(Src->getOperand(0), Indices, GEP.getName());
+  }
+
+  // Canonicalize (gep i8* X, -(ptrtoint Y)) to (sub (ptrtoint X), (ptrtoint Y))
+  // The GEP pattern is emitted by the SCEV expander for certain kinds of
+  // pointer arithmetic.
+  if (TD && GEP.getNumIndices() == 1 &&
+      match(GEP.getOperand(1), m_Neg(m_PtrToInt(m_Value())))) {
+    unsigned AS = GEP.getPointerAddressSpace();
+    if (GEP.getType() == Builder->getInt8PtrTy(AS) &&
+        GEP.getOperand(1)->getType()->getScalarSizeInBits() ==
+        TD->getPointerSizeInBits(AS)) {
+      Operator *Index = cast<Operator>(GEP.getOperand(1));
+      Value *PtrToInt = Builder->CreatePtrToInt(PtrOp, Index->getType());
+      Value *NewSub = Builder->CreateSub(PtrToInt, Index->getOperand(1));
+      return CastInst::Create(Instruction::IntToPtr, NewSub, GEP.getType());
+    }
   }
 
   // Handle gep(bitcast x) and gep(gep x, 0, 0, 0).
@@ -2216,7 +2235,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB,
       // DCE instruction if trivially dead.
       if (isInstructionTriviallyDead(Inst, TLI)) {
         ++NumDeadInst;
-        DEBUG(errs() << "IC: DCE: " << *Inst << '\n');
+        DEBUG(dbgs() << "IC: DCE: " << *Inst << '\n');
         Inst->eraseFromParent();
         continue;
       }
@@ -2224,7 +2243,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB,
       // ConstantProp instruction if trivially constant.
       if (!Inst->use_empty() && isa<Constant>(Inst->getOperand(0)))
         if (Constant *C = ConstantFoldInstruction(Inst, TD, TLI)) {
-          DEBUG(errs() << "IC: ConstFold to: " << *C << " from: "
+          DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: "
                        << *Inst << '\n');
           Inst->replaceAllUsesWith(C);
           ++NumConstProp;
@@ -2300,7 +2319,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB,
 bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
   MadeIRChange = false;
 
-  DEBUG(errs() << "\n\nINSTCOMBINE ITERATION #" << Iteration << " on "
+  DEBUG(dbgs() << "\n\nINSTCOMBINE ITERATION #" << Iteration << " on "
                << F.getName() << "\n");
 
   {
@@ -2345,7 +2364,7 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
 
     // Check to see if we can DCE the instruction.
     if (isInstructionTriviallyDead(I, TLI)) {
-      DEBUG(errs() << "IC: DCE: " << *I << '\n');
+      DEBUG(dbgs() << "IC: DCE: " << *I << '\n');
       EraseInstFromFunction(*I);
       ++NumDeadInst;
       MadeIRChange = true;
@@ -2355,7 +2374,7 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
     // Instruction isn't dead, see if we can constant propagate it.
     if (!I->use_empty() && isa<Constant>(I->getOperand(0)))
       if (Constant *C = ConstantFoldInstruction(I, TD, TLI)) {
-        DEBUG(errs() << "IC: ConstFold to: " << *C << " from: " << *I << '\n');
+        DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: " << *I << '\n');
 
         // Add operands to the worklist.
         ReplaceInstUsesWith(*I, C);
@@ -2403,13 +2422,13 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
     std::string OrigI;
 #endif
     DEBUG(raw_string_ostream SS(OrigI); I->print(SS); OrigI = SS.str(););
-    DEBUG(errs() << "IC: Visiting: " << OrigI << '\n');
+    DEBUG(dbgs() << "IC: Visiting: " << OrigI << '\n');
 
     if (Instruction *Result = visit(*I)) {
       ++NumCombined;
       // Should we replace the old instruction with a new one?
       if (Result != I) {
-        DEBUG(errs() << "IC: Old = " << *I << '\n'
+        DEBUG(dbgs() << "IC: Old = " << *I << '\n'
                      << "    New = " << *Result << '\n');
 
         if (!I->getDebugLoc().isUnknown())
@@ -2438,7 +2457,7 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
         EraseInstFromFunction(*I);
       } else {
 #ifndef NDEBUG
-        DEBUG(errs() << "IC: Mod = " << OrigI << '\n'
+        DEBUG(dbgs() << "IC: Mod = " << OrigI << '\n'
                      << "    New = " << *I << '\n');
 #endif
 

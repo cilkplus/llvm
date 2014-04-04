@@ -258,8 +258,14 @@ namespace llvm {
 
     const MCSectionCOFF *getCOFFSection(StringRef Section,
                                         unsigned Characteristics,
-                                        SectionKind Kind, int Selection = 0,
+                                        SectionKind Kind,
+                                        StringRef COMDATSymName,
+                                        int Selection,
                                         const MCSectionCOFF *Assoc = 0);
+
+    const MCSectionCOFF *getCOFFSection(StringRef Section,
+                                        unsigned Characteristics,
+                                        SectionKind Kind);
 
     const MCSectionCOFF *getCOFFSection(StringRef Section);
 
@@ -406,7 +412,7 @@ namespace llvm {
     void Deallocate(void *Ptr) {
     }
 
-    // Unrecoverable error has occured. Display the best diagnostic we can
+    // Unrecoverable error has occurred. Display the best diagnostic we can
     // and bail via exit(1). For now, most MC backend errors are unrecoverable.
     // FIXME: We should really do something about that.
     LLVM_ATTRIBUTE_NORETURN void FatalError(SMLoc L, const Twine &Msg);
