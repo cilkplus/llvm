@@ -22,3 +22,4 @@ void f(T t) {
 // CHECK: Punctuation: "*" [9:9 - 9:10] VarDecl=i:9:10 (Definition)
 // CHECK: Identifier: "i" [9:10 - 9:11] VarDecl=i:9:10 (Definition)
 // CHECK: Punctuation: "=" [9:12 - 9:13] VarDecl=i:9:10 (Definition)
+
