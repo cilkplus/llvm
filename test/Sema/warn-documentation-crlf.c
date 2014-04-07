@@ -5,6 +5,8 @@
 // This file has DOS-style line endings (CR LF).  Please don't change it to
 // Unix-style LF!
 
+//AVT: I removed CRLF because of GIT issues
+
 // PR14591.  Check that we don't crash on this.
 /**
  * @param abc

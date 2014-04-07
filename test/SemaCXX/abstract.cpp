@@ -307,3 +307,4 @@ namespace pr16659 {
     RedundantInit() : A(0) {} // expected-warning {{initializer for virtual base class 'pr16659::A' of abstract class 'RedundantInit' will never be used}}
   };
 }
+
