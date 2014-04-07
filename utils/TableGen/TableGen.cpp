@@ -24,7 +24,8 @@ using namespace clang;
 
 enum ActionType {
   GenClangAttrClasses,
-  GenClangAttrExprArgsList,
+  GenClangAttrIdentifierArgList,
+  GenClangAttrTypeArgList,
   GenClangAttrImpl,
   GenClangAttrList,
   GenClangAttrPCHRead,
@@ -34,6 +35,7 @@ enum ActionType {
   GenClangAttrLateParsedList,
   GenClangAttrTemplateInstantiate,
   GenClangAttrParsedAttrList,
+  GenClangAttrParsedAttrImpl,
   GenClangAttrParsedAttrKinds,
   GenClangAttrDump,
   GenClangDiagsDefs,
@@ -59,9 +61,14 @@ cl::opt<ActionType> Action(
     cl::values(
         clEnumValN(GenClangAttrClasses, "gen-clang-attr-classes",
                    "Generate clang attribute clases"),
-        clEnumValN(GenClangAttrExprArgsList, "gen-clang-attr-expr-args-list",
-                   "Generate a clang attribute expression "
-                   "arguments list"),
+        clEnumValN(GenClangAttrIdentifierArgList,
+                   "gen-clang-attr-identifier-arg-list",
+                   "Generate a list of attributes that take an "
+                   "identifier as their first argument"),
+        clEnumValN(GenClangAttrTypeArgList,
+                   "gen-clang-attr-type-arg-list",
+                   "Generate a list of attributes that take a type as their "
+                   "first argument"),
         clEnumValN(GenClangAttrImpl, "gen-clang-attr-impl",
                    "Generate clang attribute implementations"),
         clEnumValN(GenClangAttrList, "gen-clang-attr-list",
@@ -84,6 +91,9 @@ cl::opt<ActionType> Action(
         clEnumValN(GenClangAttrParsedAttrList,
                    "gen-clang-attr-parsed-attr-list",
                    "Generate a clang parsed attribute list"),
+        clEnumValN(GenClangAttrParsedAttrImpl,
+                   "gen-clang-attr-parsed-attr-impl",
+                   "Generate the clang parsed attribute helpers"),
         clEnumValN(GenClangAttrParsedAttrKinds,
                    "gen-clang-attr-parsed-attr-kinds",
                    "Generate a clang parsed attribute kinds"),
@@ -137,8 +147,11 @@ bool ClangTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
   case GenClangAttrClasses:
     EmitClangAttrClass(Records, OS);
     break;
-  case GenClangAttrExprArgsList:
-    EmitClangAttrExprArgsList(Records, OS);
+  case GenClangAttrIdentifierArgList:
+    EmitClangAttrIdentifierArgList(Records, OS);
+    break;
+  case GenClangAttrTypeArgList:
+    EmitClangAttrTypeArgList(Records, OS);
     break;
   case GenClangAttrImpl:
     EmitClangAttrImpl(Records, OS);
@@ -166,6 +179,9 @@ bool ClangTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
     break;
   case GenClangAttrParsedAttrList:
     EmitClangAttrParsedAttrList(Records, OS);
+    break;
+  case GenClangAttrParsedAttrImpl:
+    EmitClangAttrParsedAttrImpl(Records, OS);
     break;
   case GenClangAttrParsedAttrKinds:
     EmitClangAttrParsedAttrKinds(Records, OS);

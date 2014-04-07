@@ -73,6 +73,8 @@ private:
   Tool *getLink() const;
   Tool *getClangAs() const;
 
+  mutable OwningPtr<SanitizerArgs> SanitizerArguments;
+
 protected:
   ToolChain(const Driver &D, const llvm::Triple &T,
             const llvm::opt::ArgList &Args);
@@ -175,17 +177,9 @@ public:
   /// \brief Check if the toolchain should use the integrated assembler.
   bool useIntegratedAs() const;
 
-  /// IsStrictAliasingDefault - Does this tool chain use -fstrict-aliasing by
-  /// default.
-  virtual bool IsStrictAliasingDefault() const { return true; }
-
   /// IsMathErrnoDefault - Does this tool chain use -fmath-errno by default.
   virtual bool IsMathErrnoDefault() const { return true; }
 
-  /// IsObjCDefaultSynthPropertiesDefault - Does this tool chain enable
-  /// -fobjc-default-synthesize-properties by default.
-  virtual bool IsObjCDefaultSynthPropertiesDefault() const { return true; }
-  
   /// IsEncodeExtendedBlockSignatureDefault - Does this tool chain enable
   /// -fencode-extended-block-signature by default.
   virtual bool IsEncodeExtendedBlockSignatureDefault() const { return false; }

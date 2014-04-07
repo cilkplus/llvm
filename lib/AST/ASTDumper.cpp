@@ -219,6 +219,11 @@ namespace  {
         const ClassTemplatePartialSpecializationDecl *D);
     void VisitClassScopeFunctionSpecializationDecl(
         const ClassScopeFunctionSpecializationDecl *D);
+    void VisitVarTemplateDecl(const VarTemplateDecl *D);
+    void VisitVarTemplateSpecializationDecl(
+        const VarTemplateSpecializationDecl *D);
+    void VisitVarTemplatePartialSpecializationDecl(
+        const VarTemplatePartialSpecializationDecl *D);
     void VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D);
     void VisitNonTypeTemplateParmDecl(const NonTypeTemplateParmDecl *D);
     void VisitTemplateTemplateParmDecl(const TemplateTemplateParmDecl *D);
@@ -281,6 +286,10 @@ namespace  {
     void VisitExprWithCleanups(const ExprWithCleanups *Node);
     void VisitUnresolvedLookupExpr(const UnresolvedLookupExpr *Node);
     void dumpCXXTemporary(const CXXTemporary *Temporary);
+    void VisitLambdaExpr(const LambdaExpr *Node) {
+      VisitExpr(Node);
+      dumpDecl(Node->getLambdaClass());
+    }
 
     // ObjC
     void VisitObjCAtCatchStmt(const ObjCAtCatchStmt *Node);
@@ -492,7 +501,8 @@ void ASTDumper::dumpDeclContext(const DeclContext *DC) {
   if (!DC)
     return;
   bool HasUndeserializedDecls = DC->hasExternalLexicalStorage();
-  for (DeclContext::decl_iterator I = DC->noload_decls_begin(), E = DC->noload_decls_end();
+  for (DeclContext::decl_iterator I = DC->noload_decls_begin(),
+                                  E = DC->noload_decls_end();
        I != E; ++I) {
     DeclContext::decl_iterator Next = I;
     ++Next;
@@ -542,6 +552,8 @@ void ASTDumper::dumpLookups(const DeclContext *DC) {
       if (RI + 1 == RE)
         lastChild();
       dumpDeclRef(*RI);
+      if ((*RI)->isHidden())
+        OS << " hidden";
     }
   }
 
@@ -569,21 +581,29 @@ void ASTDumper::dumpAttr(const Attr *A) {
 #include "clang/AST/AttrDump.inc"
 }
 
-static Decl *getPreviousDeclImpl(...) {
-  return 0;
+static void dumpPreviousDeclImpl(raw_ostream &OS, ...) {}
+
+template<typename T>
+static void dumpPreviousDeclImpl(raw_ostream &OS, const Mergeable<T> *D) {
+  const T *First = D->getFirstDecl();
+  if (First != D)
+    OS << " first " << First;
 }
 
 template<typename T>
-static const Decl *getPreviousDeclImpl(const Redeclarable<T> *D) {
-  return D->getPreviousDecl();
+static void dumpPreviousDeclImpl(raw_ostream &OS, const Redeclarable<T> *D) {
+  const T *Prev = D->getPreviousDecl();
+  if (Prev)
+    OS << " prev " << Prev;
 }
 
-/// Get the previous declaration in the redeclaration chain for a declaration.
-static const Decl *getPreviousDecl(const Decl *D) {
+/// Dump the previous declaration in the redeclaration chain for a declaration,
+/// if any.
+static void dumpPreviousDecl(raw_ostream &OS, const Decl *D) {
   switch (D->getKind()) {
 #define DECL(DERIVED, BASE) \
   case Decl::DERIVED: \
-    return getPreviousDeclImpl(cast<DERIVED##Decl>(D));
+    return dumpPreviousDeclImpl(OS, cast<DERIVED##Decl>(D));
 #define ABSTRACT_DECL(DECL)
 #include "clang/AST/DeclNodes.inc"
   }
@@ -720,9 +740,13 @@ void ASTDumper::dumpDecl(const Decl *D) {
   dumpPointer(D);
   if (D->getLexicalDeclContext() != D->getDeclContext())
     OS << " parent " << cast<Decl>(D->getDeclContext());
-  if (const Decl *Prev = getPreviousDecl(D))
-    OS << " prev " << Prev;
+  dumpPreviousDecl(OS, D);
   dumpSourceRange(D->getSourceRange());
+  if (Module *M = D->getOwningModule())
+    OS << " in " << M->getFullModuleName();
+  if (const NamedDecl *ND = dyn_cast<NamedDecl>(D))
+    if (ND->isHidden())
+      OS << " hidden";
 
   bool HasAttrs = D->attr_begin() != D->attr_end();
   const FullComment *Comment =
@@ -1089,6 +1113,49 @@ void ASTDumper::VisitClassScopeFunctionSpecializationDecl(
     dumpTemplateArgumentListInfo(D->templateArgs());
 }
 
+void ASTDumper::VisitVarTemplateDecl(const VarTemplateDecl *D) {
+  dumpName(D);
+  dumpTemplateParameters(D->getTemplateParameters());
+
+  VarTemplateDecl::spec_iterator I = D->spec_begin();
+  VarTemplateDecl::spec_iterator E = D->spec_end();
+  if (I == E)
+    lastChild();
+  dumpDecl(D->getTemplatedDecl());
+  for (; I != E; ++I) {
+    VarTemplateDecl::spec_iterator Next = I;
+    ++Next;
+    if (Next == E)
+      lastChild();
+    switch (I->getTemplateSpecializationKind()) {
+    case TSK_Undeclared:
+    case TSK_ImplicitInstantiation:
+      if (D == D->getCanonicalDecl())
+        dumpDecl(*I);
+      else
+        dumpDeclRef(*I);
+      break;
+    case TSK_ExplicitSpecialization:
+    case TSK_ExplicitInstantiationDeclaration:
+    case TSK_ExplicitInstantiationDefinition:
+      dumpDeclRef(*I);
+      break;
+    }
+  }
+}
+
+void ASTDumper::VisitVarTemplateSpecializationDecl(
+    const VarTemplateSpecializationDecl *D) {
+  dumpTemplateArgumentList(D->getTemplateArgs());
+  VisitVarDecl(D);
+}
+
+void ASTDumper::VisitVarTemplatePartialSpecializationDecl(
+    const VarTemplatePartialSpecializationDecl *D) {
+  dumpTemplateParameters(D->getTemplateParameters());
+  VisitVarTemplateSpecializationDecl(D);
+}
+
 void ASTDumper::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
   if (D->wasDeclaredWithTypename())
     OS << " typename";
@@ -1174,6 +1241,8 @@ void ASTDumper::VisitObjCIvarDecl(const ObjCIvarDecl *D) {
   dumpType(D->getType());
   if (D->getSynthesize())
     OS << " synthesize";
+  if (D->getBackingIvarReferencedInAccessor())
+    OS << " BackingIvarReferencedInAccessor";
 
   switch (D->getAccessControl()) {
   case ObjCIvarDecl::None:
@@ -1592,6 +1661,7 @@ void ASTDumper::VisitPredefinedExpr(const PredefinedExpr *Node) {
   default: llvm_unreachable("unknown case");
   case PredefinedExpr::Func:           OS <<  " __func__"; break;
   case PredefinedExpr::Function:       OS <<  " __FUNCTION__"; break;
+  case PredefinedExpr::FuncDName:      OS <<  " __FUNCDNAME__"; break;
   case PredefinedExpr::LFunction:      OS <<  " L__FUNCTION__"; break;
   case PredefinedExpr::PrettyFunction: OS <<  " __PRETTY_FUNCTION__";break;
   }

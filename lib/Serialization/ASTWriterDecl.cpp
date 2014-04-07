@@ -199,7 +199,7 @@ void ASTDeclWriter::VisitTypedefDecl(TypedefDecl *D) {
   if (!D->hasAttrs() &&
       !D->isImplicit() &&
       !D->isUsed(false) &&
-      D->getFirstDeclaration() == D->getMostRecentDecl() &&
+      D->getFirstDecl() == D->getMostRecentDecl() &&
       !D->isInvalidDecl() &&
       !D->isReferenced() &&
       !D->isTopLevelDeclInObjCContainer() &&
@@ -229,6 +229,8 @@ void ASTDeclWriter::VisitTagDecl(TagDecl *D) {
   Record.push_back(D->hasExtInfo());
   if (D->hasExtInfo())
     Writer.AddQualifierInfo(*D->getExtInfo(), Record);
+  else if (D->hasDeclaratorForAnonDecl())
+    Writer.AddDeclRef(D->getDeclaratorForAnonDecl(), Record);
   else
     Writer.AddDeclRef(D->getTypedefNameForAnonDecl(), Record);
 }
@@ -256,7 +258,7 @@ void ASTDeclWriter::VisitEnumDecl(EnumDecl *D) {
       !D->isImplicit() &&
       !D->isUsed(false) &&
       !D->hasExtInfo() &&
-      D->getFirstDeclaration() == D->getMostRecentDecl() &&
+      D->getFirstDecl() == D->getMostRecentDecl() &&
       !D->isInvalidDecl() &&
       !D->isReferenced() &&
       !D->isTopLevelDeclInObjCContainer() &&
@@ -282,7 +284,7 @@ void ASTDeclWriter::VisitRecordDecl(RecordDecl *D) {
       !D->isImplicit() &&
       !D->isUsed(false) &&
       !D->hasExtInfo() &&
-      D->getFirstDeclaration() == D->getMostRecentDecl() &&
+      D->getFirstDecl() == D->getMostRecentDecl() &&
       !D->isInvalidDecl() &&
       !D->isReferenced() &&
       !D->isTopLevelDeclInObjCContainer() &&
@@ -526,6 +528,7 @@ void ASTDeclWriter::VisitObjCIvarDecl(ObjCIvarDecl *D) {
   // FIXME: stable encoding for @public/@private/@protected/@package
   Record.push_back(D->getAccessControl());
   Record.push_back(D->getSynthesize());
+  Record.push_back(D->getBackingIvarReferencedInAccessor());
 
   if (!D->hasAttrs() &&
       !D->isImplicit() &&
@@ -703,6 +706,7 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
   Record.push_back(D->isCXXForRangeDecl());
   Record.push_back(D->isARCPseudoStrong());
   Record.push_back(D->isConstexpr());
+  Record.push_back(D->isInitCapture());
   Record.push_back(D->isPreviousDeclInSameBlockScope());
   Record.push_back(D->getLinkageInternal());
 
@@ -739,12 +743,13 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
       !D->isModulePrivate() &&
       D->getDeclName().getNameKind() == DeclarationName::Identifier &&
       !D->hasExtInfo() &&
-      D->getFirstDeclaration() == D->getMostRecentDecl() &&
+      D->getFirstDecl() == D->getMostRecentDecl() &&
       D->getInitStyle() == VarDecl::CInit &&
       D->getInit() == 0 &&
       !isa<ParmVarDecl>(D) &&
       !isa<VarTemplateSpecializationDecl>(D) &&
       !D->isConstexpr() &&
+      !D->isInitCapture() &&
       !D->isPreviousDeclInSameBlockScope() &&
       !D->getMemberSpecializationInfo())
     AbbrevToUse = Writer.getDeclVarAbbrev();
@@ -934,6 +939,7 @@ void ASTDeclWriter::VisitUsingDecl(UsingDecl *D) {
 }
 
 void ASTDeclWriter::VisitUsingShadowDecl(UsingShadowDecl *D) {
+  VisitRedeclarable(D);
   VisitNamedDecl(D);
   Writer.AddDeclRef(D->getTargetDecl(), Record);
   Writer.AddDeclRef(D->UsingOrNextShadow, Record);
@@ -1106,7 +1112,7 @@ void ASTDeclWriter::VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D) {
 
   // Emit data to initialize CommonOrPrev before VisitTemplateDecl so that
   // getCommonPtr() can be used while this is still initializing.
-  if (D->isFirstDeclaration()) {
+  if (D->isFirstDecl()) {
     // This declaration owns the 'common' pointer, so serialize that data now.
     Writer.AddDeclRef(D->getInstantiatedFromMemberTemplate(), Record);
     if (D->getInstantiatedFromMemberTemplate())
@@ -1120,7 +1126,7 @@ void ASTDeclWriter::VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D) {
 void ASTDeclWriter::VisitClassTemplateDecl(ClassTemplateDecl *D) {
   VisitRedeclarableTemplateDecl(D);
 
-  if (D->isFirstDeclaration()) {
+  if (D->isFirstDecl()) {
     typedef llvm::FoldingSetVector<ClassTemplateSpecializationDecl> CTSDSetTy;
     CTSDSetTy &CTSDSet = D->getSpecializations();
     Record.push_back(CTSDSet.size());
@@ -1197,7 +1203,7 @@ void ASTDeclWriter::VisitClassTemplatePartialSpecializationDecl(
 void ASTDeclWriter::VisitVarTemplateDecl(VarTemplateDecl *D) {
   VisitRedeclarableTemplateDecl(D);
 
-  if (D->isFirstDeclaration()) {
+  if (D->isFirstDecl()) {
     typedef llvm::FoldingSetVector<VarTemplateSpecializationDecl> VTSDSetTy;
     VTSDSetTy &VTSDSet = D->getSpecializations();
     Record.push_back(VTSDSet.size());
@@ -1281,7 +1287,7 @@ void ASTDeclWriter::VisitClassScopeFunctionSpecializationDecl(
 void ASTDeclWriter::VisitFunctionTemplateDecl(FunctionTemplateDecl *D) {
   VisitRedeclarableTemplateDecl(D);
 
-  if (D->isFirstDeclaration()) {
+  if (D->isFirstDecl()) {
     // This FunctionTemplateDecl owns the CommonPtr; write it.
 
     // Write the function specialization declarations.
@@ -1398,7 +1404,7 @@ void ASTDeclWriter::VisitDeclContext(DeclContext *DC, uint64_t LexicalOffset,
 
 template <typename T>
 void ASTDeclWriter::VisitRedeclarable(Redeclarable<T> *D) {
-  T *First = D->getFirstDeclaration();
+  T *First = D->getFirstDecl();
   if (First->getMostRecentDecl() != First) {
     assert(isRedeclarableDeclKind(static_cast<T *>(D)->getKind()) &&
            "Not considered redeclarable?");
@@ -1500,6 +1506,8 @@ void ASTWriter::WriteDeclsBlockAbbrevs() {
   // ObjC Ivar
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // getAccessControl
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // getSynthesize
+  // getBackingIvarReferencedInAccessor
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));
   // Type Source Info
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
@@ -1631,6 +1639,7 @@ void ASTWriter::WriteDeclsBlockAbbrevs() {
   Abv->Add(BitCodeAbbrevOp(0));                       // isCXXForRangeDecl
   Abv->Add(BitCodeAbbrevOp(0));                       // isARCPseudoStrong
   Abv->Add(BitCodeAbbrevOp(0));                       // isConstexpr
+  Abv->Add(BitCodeAbbrevOp(0));                       // isInitCapture
   Abv->Add(BitCodeAbbrevOp(0));                       // isPrevDeclInSameScope
   Abv->Add(BitCodeAbbrevOp(0));                       // Linkage
   Abv->Add(BitCodeAbbrevOp(0));                       // HasInit
@@ -1711,6 +1720,7 @@ void ASTWriter::WriteDeclsBlockAbbrevs() {
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // isCXXForRangeDecl
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // isARCPseudoStrong
   Abv->Add(BitCodeAbbrevOp(0));                         // isConstexpr
+  Abv->Add(BitCodeAbbrevOp(0));                         // isInitCapture
   Abv->Add(BitCodeAbbrevOp(0));                         // isPrevDeclInSameScope
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 3)); // Linkage
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // HasInit

@@ -569,7 +569,30 @@ void ExprEngine::ProcessAutomaticObjDtor(const CFGAutomaticObjDtor Dtor,
 void ExprEngine::ProcessDeleteDtor(const CFGDeleteDtor Dtor,
                                    ExplodedNode *Pred,
                                    ExplodedNodeSet &Dst) {
-  //TODO: Handle DeleteDtor
+  ProgramStateRef State = Pred->getState();
+  const LocationContext *LCtx = Pred->getLocationContext();
+  const CXXDeleteExpr *DE = Dtor.getDeleteExpr();
+  const Stmt *Arg = DE->getArgument();
+  SVal ArgVal = State->getSVal(Arg, LCtx);
+
+  // If the argument to delete is known to be a null value,
+  // don't run destructor.
+  if (State->isNull(ArgVal).isConstrainedTrue()) {
+    QualType DTy = DE->getDestroyedType();
+    QualType BTy = getContext().getBaseElementType(DTy);
+    const CXXRecordDecl *RD = BTy->getAsCXXRecordDecl();
+    const CXXDestructorDecl *Dtor = RD->getDestructor();
+
+    PostImplicitCall PP(Dtor, DE->getLocStart(), LCtx);
+    NodeBuilder Bldr(Pred, Dst, *currBldrCtx);
+    Bldr.generateNode(PP, Pred->getState(), Pred);
+    return;
+  }
+
+  VisitCXXDestructor(DE->getDestroyedType(),
+                     ArgVal.getAsRegion(),
+                     DE, /*IsBase=*/ false,
+                     Pred, Dst);
 }
 
 void ExprEngine::ProcessBaseDtor(const CFGBaseDtor D,
@@ -726,6 +749,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::ParenListExprClass:
     case Stmt::PredefinedExprClass:
     case Stmt::ShuffleVectorExprClass:
+    case Stmt::ConvertVectorExprClass:
     case Stmt::VAArgExprClass:
     case Stmt::CUDAKernelCallExprClass:
     case Stmt::OpaqueValueExprClass:
@@ -1362,27 +1386,11 @@ void ExprEngine::processBranch(const Stmt *Condition, const Stmt *Term,
     return;
   }
 
-  SValBuilder &SVB = Pred->getState()->getStateManager().getSValBuilder();
-  SVal TrueVal = SVB.makeTruthVal(true);
-  SVal FalseVal = SVB.makeTruthVal(false);
 
   if (const Expr *Ex = dyn_cast<Expr>(Condition))
     Condition = Ex->IgnoreParens();
 
-  // If the value is already available, we don't need to do anything.
-  if (Pred->getState()->getSVal(Condition, LCtx).isUnknownOrUndef()) {
-    // Resolve the condition in the presence of nested '||' and '&&'.
-    Condition = ResolveCondition(Condition, BldCtx.getBlock());
-  }
-
-  // Cast truth values to the correct type.
-  if (const Expr *Ex = dyn_cast<Expr>(Condition)) {
-    TrueVal = SVB.evalCast(TrueVal, Ex->getType(),
-                           getContext().getLogicalOperationType());
-    FalseVal = SVB.evalCast(FalseVal, Ex->getType(),
-                            getContext().getLogicalOperationType());
-  }
-
+  Condition = ResolveCondition(Condition, BldCtx.getBlock());
   PrettyStackTraceLoc CrashInfo(getContext().getSourceManager(),
                                 Condition->getLocStart(),
                                 "Error evaluating branch");
@@ -1425,37 +1433,31 @@ void ExprEngine::processBranch(const Stmt *Condition, const Stmt *Term,
       }
     }
     
-    ProgramStateRef StTrue, StFalse;
-
     // If the condition is still unknown, give up.
     if (X.isUnknownOrUndef()) {
-
-      StTrue = PrevState->BindExpr(Condition, BldCtx.LC, TrueVal);
-      StFalse = PrevState->BindExpr(Condition, BldCtx.LC, FalseVal);
-
-      builder.generateNode(StTrue, true, PredI);
-      builder.generateNode(StFalse, false, PredI);
+      builder.generateNode(PrevState, true, PredI);
+      builder.generateNode(PrevState, false, PredI);
       continue;
     }
 
     DefinedSVal V = X.castAs<DefinedSVal>();
+
+    ProgramStateRef StTrue, StFalse;
     tie(StTrue, StFalse) = PrevState->assume(V);
 
     // Process the true branch.
     if (builder.isFeasible(true)) {
-      if (StTrue) {
-        StTrue = StTrue->BindExpr(Condition, BldCtx.LC, TrueVal);
+      if (StTrue)
         builder.generateNode(StTrue, true, PredI);
-      } else
+      else
         builder.markInfeasible(true);
     }
 
     // Process the false branch.
     if (builder.isFeasible(false)) {
-      if (StFalse) {
-        StFalse = StFalse->BindExpr(Condition, BldCtx.LC, FalseVal);
+      if (StFalse)
         builder.generateNode(StFalse, false, PredI);
-      } else
+      else
         builder.markInfeasible(false);
     }
   }
@@ -1875,7 +1877,8 @@ ProgramStateRef ExprEngine::processPointerEscapedOnBind(ProgramStateRef State,
   State = getCheckerManager().runCheckersForPointerEscape(State,
                                                           EscapedSymbols,
                                                           /*CallEvent*/ 0,
-                                                          PSK_EscapeOnBind);
+                                                          PSK_EscapeOnBind,
+                                                          0);
 
   return State;
 }
@@ -1886,7 +1889,7 @@ ExprEngine::notifyCheckersOfPointerEscape(ProgramStateRef State,
     ArrayRef<const MemRegion *> ExplicitRegions,
     ArrayRef<const MemRegion *> Regions,
     const CallEvent *Call,
-    bool IsConst) {
+    RegionAndSymbolInvalidationTraits &ITraits) {
   
   if (!Invalidated || Invalidated->empty())
     return State;
@@ -1896,17 +1899,7 @@ ExprEngine::notifyCheckersOfPointerEscape(ProgramStateRef State,
                                                            *Invalidated,
                                                            0,
                                                            PSK_EscapeOther,
-                                                           IsConst);
-
-  // Note: Due to current limitations of RegionStore, we only process the top
-  // level const pointers correctly. The lower level const pointers are
-  // currently treated as non-const.
-  if (IsConst)
-    return getCheckerManager().runCheckersForPointerEscape(State,
-                                                        *Invalidated,
-                                                        Call,
-                                                        PSK_DirectEscapeOnCall,
-                                                        true);
+                                                           &ITraits);
 
   // If the symbols were invalidated by a call, we want to find out which ones 
   // were invalidated directly due to being arguments to the call.
@@ -1928,12 +1921,12 @@ ExprEngine::notifyCheckersOfPointerEscape(ProgramStateRef State,
 
   if (!SymbolsDirectlyInvalidated.empty())
     State = getCheckerManager().runCheckersForPointerEscape(State,
-        SymbolsDirectlyInvalidated, Call, PSK_DirectEscapeOnCall);
+        SymbolsDirectlyInvalidated, Call, PSK_DirectEscapeOnCall, &ITraits);
 
   // Notify about the symbols that get indirectly invalidated by the call.
   if (!SymbolsIndirectlyInvalidated.empty())
     State = getCheckerManager().runCheckersForPointerEscape(State,
-        SymbolsIndirectlyInvalidated, Call, PSK_IndirectEscapeOnCall);
+        SymbolsIndirectlyInvalidated, Call, PSK_IndirectEscapeOnCall, &ITraits);
 
   return State;
 }

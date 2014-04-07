@@ -72,8 +72,8 @@ to format C/C++/Obj-C code.
 
 When the desired code formatting style is different from the available options,
 the style can be customized using the ``-style="{key: value, ...}"`` option or
-by putting your style configuration to the ``.clang-format`` file in your
-project's directory and using ``clang-format -style=file``.
+by putting your style configuration in the ``.clang-format`` or ``_clang-format``
+file in your project's directory and using ``clang-format -style=file``.
 
 An easy way to create the ``.clang-format`` file is:
 
@@ -141,6 +141,13 @@ With this integration you can select the script from the Script menu and
 :program:`clang-format` will format the selection. Note that you can rename the
 menu item by renaming the script, and can assign the menu item a keyboard
 shortcut in the BBEdit preferences, under Menus & Shortcuts.
+
+
+Visual Studio Integration
+=========================
+
+Download the latest Visual Studio plugin from the `alpha build site
+<http://llvm.org/builds/>`_. The default key-binding is Ctrl-R,Ctrl-F.
 
 
 Script for patch reformatting

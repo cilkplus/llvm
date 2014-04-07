@@ -22,6 +22,7 @@
 #include "llvm/Support/Capacity.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cstdio>
 #if defined(LLVM_ON_UNIX)
 #include <limits.h>
@@ -43,11 +44,11 @@ HeaderFileInfo::getControllingMacro(ExternalIdentifierLookup *External) {
 ExternalHeaderFileInfoSource::~ExternalHeaderFileInfoSource() {}
 
 HeaderSearch::HeaderSearch(IntrusiveRefCntPtr<HeaderSearchOptions> HSOpts,
-                           FileManager &FM, DiagnosticsEngine &Diags,
+                           SourceManager &SourceMgr, DiagnosticsEngine &Diags,
                            const LangOptions &LangOpts, 
                            const TargetInfo *Target)
-  : HSOpts(HSOpts), FileMgr(FM), FrameworkMap(64),
-    ModMap(FileMgr, *Diags.getClient(), LangOpts, Target, *this)
+  : HSOpts(HSOpts), FileMgr(SourceMgr.getFileManager()), FrameworkMap(64),
+    ModMap(SourceMgr, *Diags.getClient(), LangOpts, Target, *this)
 {
   AngledDirIdx = 0;
   SystemDirIdx = 0;
@@ -246,16 +247,18 @@ const FileEntry *DirectoryLookup::LookupFile(
     
     // If we have a module map that might map this header, load it and
     // check whether we'll have a suggestion for a module.
-    if (SuggestedModule &&
-        HS.hasModuleMap(TmpDir, getDir(), isSystemHeaderDirectory())) {
-      const FileEntry *File = HS.getFileMgr().getFile(TmpDir.str(), 
+    HS.hasModuleMap(TmpDir, getDir(), isSystemHeaderDirectory());
+    if (SuggestedModule) {
+      const FileEntry *File = HS.getFileMgr().getFile(TmpDir.str(),
                                                       /*openFile=*/false);
       if (!File)
         return File;
       
-      // If there is a module that corresponds to this header, 
-      // suggest it.
+      // If there is a module that corresponds to this header, suggest it.
       *SuggestedModule = HS.findModuleForHeader(File);
+      if (!SuggestedModule->getModule() &&
+          HS.hasModuleMap(TmpDir, getDir(), isSystemHeaderDirectory()))
+        *SuggestedModule = HS.findModuleForHeader(File);
       return File;
     }
     
@@ -502,6 +505,24 @@ const FileEntry *HeaderSearch::LookupFile(
     ModuleMap::KnownHeader *SuggestedModule,
     bool SkipCache)
 {
+  if (!HSOpts->ModuleMapFiles.empty()) {
+    // Preload all explicitly specified module map files. This enables modules
+    // map files lying in a directory structure separate from the header files
+    // that they describe. These cannot be loaded lazily upon encountering a
+    // header file, as there is no other knwon mapping from a header file to its
+    // module map file.
+    for (llvm::SetVector<std::string>::iterator
+             I = HSOpts->ModuleMapFiles.begin(),
+             E = HSOpts->ModuleMapFiles.end();
+         I != E; ++I) {
+      const FileEntry *File = FileMgr.getFile(*I);
+      if (!File)
+        continue;
+      loadModuleMapFile(File, /*IsSystem=*/false);
+    }
+    HSOpts->ModuleMapFiles.clear();
+  }
+
   if (SuggestedModule)
     *SuggestedModule = ModuleMap::KnownHeader();
     
@@ -940,13 +961,13 @@ bool HeaderSearch::hasModuleMap(StringRef FileName,
     DirName = llvm::sys::path::parent_path(DirName);
     if (DirName.empty())
       return false;
-    
+
     // Determine whether this directory exists.
     const DirectoryEntry *Dir = FileMgr.getDirectory(DirName);
     if (!Dir)
       return false;
-    
-    // Try to load the module map file in this directory.
+
+    // Try to load the "module.map" file in this directory.
     switch (loadModuleMapFile(Dir, IsSystem)) {
     case LMM_NewlyLoaded:
     case LMM_AlreadyLoaded:
@@ -954,7 +975,6 @@ bool HeaderSearch::hasModuleMap(StringRef FileName,
       // map file.
       for (unsigned I = 0, N = FixUpDirectories.size(); I != N; ++I)
         DirectoryHasModuleMap[FixUpDirectories[I]] = true;
-      
       return true;
 
     case LMM_NoDirectory:
@@ -1153,9 +1173,8 @@ void HeaderSearch::collectAllModules(SmallVectorImpl<Module *> &Modules) {
 void HeaderSearch::loadTopLevelSystemModules() {
   // Load module maps for each of the header search directories.
   for (unsigned Idx = 0, N = SearchDirs.size(); Idx != N; ++Idx) {
-    // We only care about normal system header directories.
-    if (!SearchDirs[Idx].isNormalDir() ||
-        SearchDirs[Idx].getDirCharacteristic() != SrcMgr::C_System) {
+    // We only care about normal header directories.
+    if (!SearchDirs[Idx].isNormalDir()) {
       continue;
     }
 

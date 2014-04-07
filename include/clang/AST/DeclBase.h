@@ -159,7 +159,12 @@ public:
     /// This declaration is a C++ operator declared in a non-class
     /// context.  All such operators are also in IDNS_Ordinary.
     /// C++ lexical operator lookup looks for these.
-    IDNS_NonMemberOperator   = 0x0400
+    IDNS_NonMemberOperator   = 0x0400,
+
+    /// This declaration is a function-local extern declaration of a
+    /// variable or function. This may also be IDNS_Ordinary if it
+    /// has been declared outside any function.
+    IDNS_LocalExtern         = 0x0800
   };
 
   /// ObjCDeclQualifier - 'Qualifiers' written next to the return and
@@ -503,7 +508,7 @@ public:
   /// \brief Set whether the declaration is used, in the sense of odr-use.
   ///
   /// This should only be used immediately after creating a declaration.
-  void setIsUsed(bool U) { Used = U; }
+  void setIsUsed() { Used = true; }
 
   /// \brief Mark the declaration used, in the sense of odr-use.
   ///
@@ -780,7 +785,12 @@ public:
   const Decl *getPreviousDecl() const { 
     return const_cast<Decl *>(this)->getPreviousDeclImpl();
   }
-  
+
+  /// \brief True if this is the first declaration in its redeclaration chain.
+  bool isFirstDecl() const {
+    return getPreviousDecl() == 0;
+  }
+
   /// \brief Retrieve the most recent declaration that declares the same entity
   /// as this declaration (which may be this declaration).
   Decl *getMostRecentDecl() { return getMostRecentDeclImpl(); }
@@ -829,6 +839,32 @@ public:
   bool isFunctionOrFunctionTemplate() const;
 
   /// \brief Changes the namespace of this declaration to reflect that it's
+  /// a function-local extern declaration.
+  ///
+  /// These declarations appear in the lexical context of the extern
+  /// declaration, but in the semantic context of the enclosing namespace
+  /// scope.
+  void setLocalExternDecl() {
+    assert((IdentifierNamespace == IDNS_Ordinary ||
+            IdentifierNamespace == IDNS_OrdinaryFriend) &&
+           "namespace is not ordinary");
+
+    Decl *Prev = getPreviousDecl();
+    IdentifierNamespace &= ~IDNS_Ordinary;
+
+    IdentifierNamespace |= IDNS_LocalExtern;
+    if (Prev && Prev->getIdentifierNamespace() & IDNS_Ordinary)
+      IdentifierNamespace |= IDNS_Ordinary;
+  }
+
+  /// \brief Determine whether this is a block-scope declaration with linkage.
+  /// This will either be a local variable declaration declared 'extern', or a
+  /// local function declaration.
+  bool isLocalExternDecl() {
+    return IdentifierNamespace & IDNS_LocalExtern;
+  }
+
+  /// \brief Changes the namespace of this declaration to reflect that it's
   /// the object of a friend declaration.
   ///
   /// These declarations appear in the lexical context of the friending
@@ -838,22 +874,25 @@ public:
   void setObjectOfFriendDecl(bool PerformFriendInjection = false) {
     unsigned OldNS = IdentifierNamespace;
     assert((OldNS & (IDNS_Tag | IDNS_Ordinary |
-                     IDNS_TagFriend | IDNS_OrdinaryFriend)) &&
+                     IDNS_TagFriend | IDNS_OrdinaryFriend |
+                     IDNS_LocalExtern)) &&
            "namespace includes neither ordinary nor tag");
     assert(!(OldNS & ~(IDNS_Tag | IDNS_Ordinary | IDNS_Type |
-                       IDNS_TagFriend | IDNS_OrdinaryFriend)) &&
+                       IDNS_TagFriend | IDNS_OrdinaryFriend |
+                       IDNS_LocalExtern)) &&
            "namespace includes other than ordinary or tag");
 
     Decl *Prev = getPreviousDecl();
-    IdentifierNamespace = 0;
+    IdentifierNamespace &= ~(IDNS_Ordinary | IDNS_Tag | IDNS_Type);
+
     if (OldNS & (IDNS_Tag | IDNS_TagFriend)) {
       IdentifierNamespace |= IDNS_TagFriend;
-      if (PerformFriendInjection || 
+      if (PerformFriendInjection ||
           (Prev && Prev->getIdentifierNamespace() & IDNS_Tag))
         IdentifierNamespace |= IDNS_Tag | IDNS_Type;
     }
 
-    if (OldNS & (IDNS_Ordinary | IDNS_OrdinaryFriend)) {
+    if (OldNS & (IDNS_Ordinary | IDNS_OrdinaryFriend | IDNS_LocalExtern)) {
       IdentifierNamespace |= IDNS_OrdinaryFriend;
       if (PerformFriendInjection ||
           (Prev && Prev->getIdentifierNamespace() & IDNS_Ordinary))
@@ -903,9 +942,6 @@ public:
   // Same as dump(), but forces color printing.
   LLVM_ATTRIBUTE_USED void dumpColor() const;
   void dump(raw_ostream &Out) const;
-  // Debuggers don't usually respect default arguments.
-  LLVM_ATTRIBUTE_USED void dumpXML() const;
-  void dumpXML(raw_ostream &OS) const;
 
 private:
   void setAttrsImpl(const AttrVec& Attrs, ASTContext &Ctx);
@@ -1122,6 +1158,14 @@ public:
   /// Examples of transparent contexts include: enumerations (except for
   /// C++0x scoped enums), and C++ linkage specifications.
   bool isTransparentContext() const;
+
+  /// \brief Determines whether this context or some of its ancestors is a
+  /// linkage specification context that specifies C linkage.
+  bool isExternCContext() const;
+
+  /// \brief Determines whether this context or some of its ancestors is a
+  /// linkage specification context that specifies C++ linkage.
+  bool isExternCXXContext() const;
 
   /// \brief Determine whether this declaration context is equivalent
   /// to the declaration context DC.

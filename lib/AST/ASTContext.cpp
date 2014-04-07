@@ -25,6 +25,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExternalASTSource.h"
 #include "clang/AST/Mangle.h"
+#include "clang/AST/MangleNumberingContext.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/TypeLoc.h"
@@ -33,6 +34,7 @@
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/Support/Capacity.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
@@ -694,6 +696,19 @@ static const LangAS::Map *getAddressSpaceMap(const TargetInfo &T,
   }
 }
 
+static bool isAddrSpaceMapManglingEnabled(const TargetInfo &TI,
+                                          const LangOptions &LangOpts) {
+  switch (LangOpts.getAddressSpaceMapMangling()) {
+  case LangOptions::ASMM_Target:
+    return TI.useAddressSpaceMapMangling();
+  case LangOptions::ASMM_On:
+    return true;
+  case LangOptions::ASMM_Off:
+    return false;
+  }
+  llvm_unreachable("getAddressSpaceMapMangling() doesn't cover anything.");
+}
+
 ASTContext::ASTContext(LangOptions& LOpts, SourceManager &SM,
                        const TargetInfo *t,
                        IdentifierTable &idents, SelectorTable &sels,
@@ -766,6 +781,12 @@ ASTContext::~ASTContext() {
                                                     AEnd = DeclAttrs.end();
        A != AEnd; ++A)
     A->second->~AttrVec();
+
+  for (llvm::DenseMap<const DeclContext *, MangleNumberingContext *>::iterator
+           I = MangleNumberingContexts.begin(),
+           E = MangleNumberingContexts.end();
+       I != E; ++I)
+    delete I->second;
 }
 
 void ASTContext::AddDeallocation(void (*Callback)(void*), void *Data) {
@@ -893,6 +914,7 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target) {
   
   ABI.reset(createCXXABI(Target));
   AddrSpaceMap = getAddressSpaceMap(Target, LangOpts);
+  AddrSpaceMapMangling = isAddrSpaceMapManglingEnabled(Target, LangOpts);
   
   // C99 6.2.5p19.
   InitBuiltinType(VoidTy,              BuiltinType::Void);
@@ -1366,7 +1388,9 @@ static getConstantArrayInfoInChars(const ASTContext &Context,
          "Overflow in array type char size evaluation");
   uint64_t Width = EltInfo.first.getQuantity() * Size;
   unsigned Align = EltInfo.second.getQuantity();
-  Width = llvm::RoundUpToAlignment(Width, Align);
+  if (!Context.getTargetInfo().getCXXABI().isMicrosoft() ||
+      Context.getTargetInfo().getPointerWidth(0) == 64)
+    Width = llvm::RoundUpToAlignment(Width, Align);
   return std::make_pair(CharUnits::fromQuantity(Width),
                         CharUnits::fromQuantity(Align));
 }
@@ -1439,7 +1463,9 @@ ASTContext::getTypeInfoImpl(const Type *T) const {
            "Overflow in array type bit size evaluation");
     Width = EltInfo.first*Size;
     Align = EltInfo.second;
-    Width = llvm::RoundUpToAlignment(Width, Align);
+    if (!getTargetInfo().getCXXABI().isMicrosoft() ||
+        getTargetInfo().getPointerWidth(0) == 64)
+      Width = llvm::RoundUpToAlignment(Width, Align);
     break;
   }
   case Type::ExtVector:
@@ -1731,6 +1757,9 @@ CharUnits ASTContext::getTypeAlignInChars(const Type *T) const {
 /// a data type.
 unsigned ASTContext::getPreferredTypeAlign(const Type *T) const {
   unsigned ABIAlign = getTypeAlign(T);
+
+  if (Target->getTriple().getArch() == llvm::Triple::xcore)
+    return ABIAlign;  // Never overalign on XCore.
 
   // Double and long long should be naturally aligned if possible.
   if (const ComplexType* CT = T->getAs<ComplexType>())
@@ -2901,13 +2930,11 @@ QualType ASTContext::getTypeDeclTypeSlow(const TypeDecl *Decl) const {
          "Template type parameter types are always available.");
 
   if (const RecordDecl *Record = dyn_cast<RecordDecl>(Decl)) {
-    assert(!Record->getPreviousDecl() &&
-           "struct/union has previous declaration");
+    assert(Record->isFirstDecl() && "struct/union has previous declaration");
     assert(!NeedsInjectedClassNameType(Record));
     return getRecordType(Record);
   } else if (const EnumDecl *Enum = dyn_cast<EnumDecl>(Decl)) {
-    assert(!Enum->getPreviousDecl() &&
-           "enum has previous declaration");
+    assert(Enum->isFirstDecl() && "enum has previous declaration");
     return getEnumType(Enum);
   } else if (const UnresolvedUsingTypenameDecl *Using =
                dyn_cast<UnresolvedUsingTypenameDecl>(Decl)) {
@@ -4396,12 +4423,27 @@ Qualifiers::ObjCLifetime ASTContext::getInnerObjCOwnership(QualType T) const {
   return Qualifiers::OCL_None;
 }
 
+static const Type *getIntegerTypeForEnum(const EnumType *ET) {
+  // Incomplete enum types are not treated as integer types.
+  // FIXME: In C++, enum types are never integer types.
+  if (ET->getDecl()->isComplete() && !ET->getDecl()->isScoped())
+    return ET->getDecl()->getIntegerType().getTypePtr();
+  return NULL;
+}
+
 /// getIntegerTypeOrder - Returns the highest ranked integer type:
 /// C99 6.3.1.8p1.  If LHS > RHS, return 1.  If LHS == RHS, return 0. If
 /// LHS < RHS, return -1.
 int ASTContext::getIntegerTypeOrder(QualType LHS, QualType RHS) const {
   const Type *LHSC = getCanonicalType(LHS).getTypePtr();
   const Type *RHSC = getCanonicalType(RHS).getTypePtr();
+
+  // Unwrap enums to their underlying type.
+  if (const EnumType *ET = dyn_cast<EnumType>(LHSC))
+    LHSC = getIntegerTypeForEnum(ET);
+  if (const EnumType *ET = dyn_cast<EnumType>(RHSC))
+    RHSC = getIntegerTypeForEnum(ET);
+
   if (LHSC == RHSC) return 0;
 
   bool LHSUnsigned = LHSC->isUnsignedIntegerType();
@@ -5531,7 +5573,8 @@ void ASTContext::getObjCEncodingForStructureImpl(RecordDecl *RDecl,
       if (base->isEmpty())
         continue;
       uint64_t offs = toBits(layout.getVBaseClassOffset(base));
-      if (FieldOrBaseOffsets.find(offs) == FieldOrBaseOffsets.end())
+      if (offs >= uint64_t(toBits(layout.getNonVirtualSize())) &&
+          FieldOrBaseOffsets.find(offs) == FieldOrBaseOffsets.end())
         FieldOrBaseOffsets.insert(FieldOrBaseOffsets.end(),
                                   std::make_pair(offs, base));
     }
@@ -7441,7 +7484,7 @@ QualType ASTContext::mergeObjCGCQualifiers(QualType LHS, QualType RHS) {
 //===----------------------------------------------------------------------===//
 
 unsigned ASTContext::getIntWidth(QualType T) const {
-  if (const EnumType *ET = dyn_cast<EnumType>(T))
+  if (const EnumType *ET = T->getAs<EnumType>())
     T = ET->getDecl()->getIntegerType();
   if (T->isBooleanType())
     return 1;
@@ -7842,14 +7885,7 @@ GVALinkage ASTContext::GetGVALinkageForVariable(const VarDecl *VD) {
   if (!VD->isExternallyVisible())
     return GVA_Internal;
 
-  // If this is a static data member, compute the kind of template
-  // specialization. Otherwise, this variable is not part of a
-  // template.
-  TemplateSpecializationKind TSK = TSK_Undeclared;
-  if (VD->isStaticDataMember())
-    TSK = VD->getTemplateSpecializationKind();
-
-  switch (TSK) {
+  switch (VD->getTemplateSpecializationKind()) {
   case TSK_Undeclared:
   case TSK_ExplicitSpecialization:
     return GVA_StrongExternal;
@@ -7966,9 +8002,9 @@ MangleContext *ASTContext::createMangleContext() {
   case TargetCXXABI::GenericItanium:
   case TargetCXXABI::GenericARM:
   case TargetCXXABI::iOS:
-    return createItaniumMangleContext(*this, getDiagnostics());
+    return ItaniumMangleContext::create(*this, getDiagnostics());
   case TargetCXXABI::Microsoft:
-    return createMicrosoftMangleContext(*this, getDiagnostics());
+    return MicrosoftMangleContext::create(*this, getDiagnostics());
   }
   llvm_unreachable("Unsupported ABI");
 }
@@ -8037,7 +8073,15 @@ unsigned ASTContext::getManglingNumber(const NamedDecl *ND) const {
 
 MangleNumberingContext &
 ASTContext::getManglingNumberContext(const DeclContext *DC) {
-  return MangleNumberingContexts[DC];
+  assert(LangOpts.CPlusPlus);  // We don't need mangling numbers for plain C.
+  MangleNumberingContext *&MCtx = MangleNumberingContexts[DC];
+  if (!MCtx)
+    MCtx = createMangleNumberingContext();
+  return *MCtx;
+}
+
+MangleNumberingContext *ASTContext::createMangleNumberingContext() const {
+  return ABI->createMangleNumberingContext();
 }
 
 void ASTContext::setParameterIndex(const ParmVarDecl *D, unsigned int index) {
@@ -8067,6 +8111,10 @@ ASTContext::getMaterializedTemporaryValue(const MaterializeTemporaryExpr *E,
 bool ASTContext::AtomicUsesUnsupportedLibcall(const AtomicExpr *E) const {
   const llvm::Triple &T = getTargetInfo().getTriple();
   if (!T.isOSDarwin())
+    return false;
+
+  if (!(T.isiOS() && T.isOSVersionLT(7)) &&
+      !(T.isMacOSX() && T.isOSVersionLT(10, 9)))
     return false;
 
   QualType AtomicTy = E->getPtr()->getType()->getPointeeType();

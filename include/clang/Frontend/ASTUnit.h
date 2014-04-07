@@ -25,7 +25,6 @@
 #include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/PreprocessingRecord.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
-#include "clang/Sema/Sema.h"
 #include "clang/Serialization/ASTBitCodes.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/OwningPtr.h"
@@ -44,6 +43,7 @@ namespace llvm {
 }
 
 namespace clang {
+class Sema;
 class ASTContext;
 class ASTReader;
 class CodeCompleteConsumer;
@@ -699,10 +699,10 @@ public:
   /// lifetime is expected to extend past that of the returned ASTUnit.
   ///
   /// \param Action - The ASTFrontendAction to invoke. Its ownership is not
-  /// transfered.
+  /// transferred.
   ///
   /// \param Unit - optionally an already created ASTUnit. Its ownership is not
-  /// transfered.
+  /// transferred.
   ///
   /// \param Persistent - if true the returned ASTUnit will be complete.
   /// false means the caller is only interested in getting info through the

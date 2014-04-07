@@ -1,10 +1,13 @@
-// RUN: %clang_cc1 -fsyntax-only -verify -Wconsumed -std=c++11 %s
+// RUN: %clang_cc1 -fsyntax-only -verify -Wconsumed -fcxx-exceptions -std=c++11 %s
 
-#define CALLABLE_WHEN_UNCONSUMED __attribute__ ((callable_when_unconsumed))
-#define CONSUMABLE(state)        __attribute__ ((consumable(state)))
-#define CONSUMES                 __attribute__ ((consumes))
-#define RETURN_TYPESTATE(state)  __attribute__ ((return_typestate(state)))
-#define TESTS_UNCONSUMED         __attribute__ ((tests_unconsumed))
+// TODO: Switch to using macros for the expected warnings.
+
+#define CALLABLE_WHEN(...)      __attribute__ ((callable_when(__VA_ARGS__)))
+#define CONSUMABLE(state)       __attribute__ ((consumable(state)))
+#define PARAM_TYPESTATE(state)  __attribute__ ((param_typestate(state)))
+#define RETURN_TYPESTATE(state) __attribute__ ((return_typestate(state)))
+#define SET_TYPESTATE(state)    __attribute__ ((set_typestate(state)))
+#define TEST_TYPESTATE(state)   __attribute__ ((test_typestate(state)))
 
 typedef decltype(nullptr) nullptr_t;
 
@@ -12,7 +15,7 @@ template <typename T>
 class CONSUMABLE(unconsumed) ConsumableClass {
   T var;
   
-  public:
+public:
   ConsumableClass();
   ConsumableClass(nullptr_t p) RETURN_TYPESTATE(consumed);
   ConsumableClass(T val) RETURN_TYPESTATE(unconsumed);
@@ -21,7 +24,7 @@ class CONSUMABLE(unconsumed) ConsumableClass {
   
   ConsumableClass<T>& operator=(ConsumableClass<T>  &other);
   ConsumableClass<T>& operator=(ConsumableClass<T> &&other);
-  ConsumableClass<T>& operator=(nullptr_t) CONSUMES;
+  ConsumableClass<T>& operator=(nullptr_t) SET_TYPESTATE(consumed);
   
   template <typename U>
   ConsumableClass<T>& operator=(ConsumableClass<U>  &other);
@@ -29,25 +32,41 @@ class CONSUMABLE(unconsumed) ConsumableClass {
   template <typename U>
   ConsumableClass<T>& operator=(ConsumableClass<U> &&other);
   
-  void operator()(int a) CONSUMES;
-  void operator*() const CALLABLE_WHEN_UNCONSUMED;
-  void unconsumedCall() const CALLABLE_WHEN_UNCONSUMED;
+  void operator()(int a) SET_TYPESTATE(consumed);
+  void operator*() const CALLABLE_WHEN("unconsumed");
+  void unconsumedCall() const CALLABLE_WHEN("unconsumed");
+  void callableWhenUnknown() const CALLABLE_WHEN("unconsumed", "unknown");
   
-  bool isValid() const TESTS_UNCONSUMED;
-  operator bool() const TESTS_UNCONSUMED;
-  bool operator!=(nullptr_t) const TESTS_UNCONSUMED;
+  bool isValid() const TEST_TYPESTATE(unconsumed);
+  operator bool() const TEST_TYPESTATE(unconsumed);
+  bool operator!=(nullptr_t) const TEST_TYPESTATE(unconsumed);
+  bool operator==(nullptr_t) const TEST_TYPESTATE(consumed);
   
   void constCall() const;
   void nonconstCall();
   
-  void consume() CONSUMES;
+  void consume() SET_TYPESTATE(consumed);
+  void unconsume() SET_TYPESTATE(unconsumed);
+};
+
+class CONSUMABLE(unconsumed) DestructorTester {
+public:
+  DestructorTester() RETURN_TYPESTATE(unconsumed);
+  DestructorTester(int);
+  
+  void operator*() CALLABLE_WHEN("unconsumed");
+  
+  ~DestructorTester() CALLABLE_WHEN("consumed");
 };
 
 void baf0(const ConsumableClass<int>  var);
 void baf1(const ConsumableClass<int> &var);
 void baf2(const ConsumableClass<int> *var);
 
-void baf3(ConsumableClass<int> &&var);
+void baf3(ConsumableClass<int>   var);
+void baf4(ConsumableClass<int>  &var);
+void baf5(ConsumableClass<int>  *var);
+void baf6(ConsumableClass<int> &&var);
 
 ConsumableClass<int> returnsUnconsumed() {
   return ConsumableClass<int>(); // expected-warning {{return value not in expected state; expected 'unconsumed', observed 'consumed'}}
@@ -58,39 +77,57 @@ ConsumableClass<int> returnsConsumed() {
   return ConsumableClass<int>();
 }
 
+ConsumableClass<int> returnsUnknown() RETURN_TYPESTATE(unknown);
+
 void testInitialization() {
   ConsumableClass<int> var0;
   ConsumableClass<int> var1 = ConsumableClass<int>();
   
   var0 = ConsumableClass<int>();
   
-  *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-  *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+  *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+  *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
   
   if (var0.isValid()) {
     *var0;
     *var1;
     
   } else {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
   }
 }
 
+void testDestruction() {
+  DestructorTester D0(42), D1(42);
+  
+  *D0;
+  *D1;
+  
+  DestructorTester D2;
+  *D2;
+  
+  D0.~DestructorTester(); // expected-warning {{invalid invocation of method '~DestructorTester' on object 'D0' while it is in the 'unconsumed' state}}
+  
+  return; // expected-warning {{invalid invocation of method '~DestructorTester' on object 'D0' while it is in the 'unconsumed' state}} \
+             expected-warning {{invalid invocation of method '~DestructorTester' on object 'D1' while it is in the 'unconsumed' state}} \
+             expected-warning {{invalid invocation of method '~DestructorTester' on object 'D2' while it is in the 'unconsumed' state}}
+}
+
 void testTempValue() {
-  *ConsumableClass<int>(); // expected-warning {{invocation of method 'operator*' on a temporary object while it is in the 'consumed' state}}
+  *ConsumableClass<int>(); // expected-warning {{invalid invocation of method 'operator*' on a temporary object while it is in the 'consumed' state}}
 }
 
 void testSimpleRValueRefs() {
   ConsumableClass<int> var0;
   ConsumableClass<int> var1(42);
   
-  *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+  *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
   *var1;
   
   var0 = static_cast<ConsumableClass<int>&&>(var1);
   
   *var0;
-  *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+  *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
 }
 
 void testIfStmt() {
@@ -99,11 +136,11 @@ void testIfStmt() {
   if (var.isValid()) {
     *var;
   } else {
-    *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+    *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
   }
   
   if (!var.isValid()) {
-    *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+    *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
   } else {
     *var;
   }
@@ -111,17 +148,23 @@ void testIfStmt() {
   if (var) {
     // Empty
   } else {
-    *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+    *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
   }
   
   if (var != nullptr) {
     // Empty
   } else {
-    *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+    *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  }
+  
+  if (var == nullptr) {
+    *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  } else {
+    // Empty
   }
 }
 
-void testComplexConditionals() {
+void testComplexConditionals0() {
   ConsumableClass<int> var0, var1, var2;
   
   if (var0 && var1) {
@@ -129,8 +172,8 @@ void testComplexConditionals() {
     *var1;
     
   } else {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
   }
   
   if (var0 || var1) {
@@ -138,8 +181,8 @@ void testComplexConditionals() {
     *var1;
     
   } else {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
   }
   
   if (var0 && !var1) {
@@ -147,13 +190,13 @@ void testComplexConditionals() {
     *var1;
     
   } else {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
   }
   
   if (var0 || !var1) {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
     
   } else {
     *var0;
@@ -161,8 +204,8 @@ void testComplexConditionals() {
   }
   
   if (!var0 && !var1) {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
     
   } else {
     *var0;
@@ -170,8 +213,8 @@ void testComplexConditionals() {
   }
   
   if (!var0 || !var1) {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
     
   } else {
     *var0;
@@ -179,8 +222,8 @@ void testComplexConditionals() {
   }
   
   if (!(var0 && var1)) {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
     
   } else {
     *var0;
@@ -188,8 +231,8 @@ void testComplexConditionals() {
   }
   
   if (!(var0 || var1)) {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
     
   } else {
     *var0;
@@ -202,9 +245,9 @@ void testComplexConditionals() {
     *var2;
     
   } else {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
-    *var2; // expected-warning {{invocation of method 'operator*' on object 'var2' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var2; // expected-warning {{invalid invocation of method 'operator*' on object 'var2' while it is in the 'consumed' state}}
   }
   
 #if 0
@@ -215,9 +258,115 @@ void testComplexConditionals() {
     *var2;
     
   } else {
-    *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
-    *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
-    *var2; // expected-warning {{invocation of method 'operator*' on object 'var2' while it is in the 'consumed' state}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var2; // expected-warning {{invalid invocation of method 'operator*' on object 'var2' while it is in the 'consumed' state}}
+  }
+#endif
+}
+
+void testComplexConditionals1() {
+  ConsumableClass<int> var0, var1, var2;
+  
+  // Coerce all variables into the unknown state.
+  baf4(var0);
+  baf4(var1);
+  baf4(var2);
+  
+  if (var0 && var1) {
+    *var0;
+    *var1;
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+  }
+  
+  if (var0 || var1) {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+  }
+  
+  if (var0 && !var1) {
+    *var0;
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+  }
+  
+  if (var0 || !var1) {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1;
+  }
+  
+  if (!var0 && !var1) {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+  }
+  
+  if (!(var0 || var1)) {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+  }
+  
+  if (!var0 || !var1) {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+    
+  } else {
+    *var0;
+    *var1;
+  }
+  
+  if (!(var0 && var1)) {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+    
+  } else {
+    *var0;
+    *var1;
+  }
+  
+  if (var0 && var1 && var2) {
+    *var0;
+    *var1;
+    *var2;
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+    *var2; // expected-warning {{invalid invocation of method 'operator*' on object 'var2' while it is in the 'unknown' state}}
+  }
+  
+#if 0
+  // FIXME: Get this test to pass.
+  if (var0 || var1 || var2) {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'unknown' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'unknown' state}}
+    *var2; // expected-warning {{invalid invocation of method 'operator*' on object 'var2' while it is in the 'unknown' state}}
+    
+  } else {
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+    *var2; // expected-warning {{invalid invocation of method 'operator*' on object 'var2' while it is in the 'consumed' state}}
   }
 #endif
 }
@@ -226,7 +375,7 @@ void testStateChangeInBranch() {
   ConsumableClass<int> var;
   
   // Make var enter the 'unknown' state.
-  baf1(var);
+  baf4(var);
   
   if (!var) {
     var = ConsumableClass<int>(42);
@@ -247,6 +396,49 @@ void testFunctionParam(ConsumableClass<int> param) {
   *param; // expected-warning {{invocation of method 'operator*' on object 'param' while it is in the 'consumed' state}}
 }
 
+void testParamReturnTypestateCallee(bool cond, ConsumableClass<int> &Param RETURN_TYPESTATE(unconsumed)) { // expected-warning {{parameter 'Param' not in expected state when the function returns: expected 'unconsumed', observed 'consumed'}}
+  
+  if (cond) {
+    Param.consume();
+    return; // expected-warning {{parameter 'Param' not in expected state when the function returns: expected 'unconsumed', observed 'consumed'}}
+  }
+  
+  Param.consume();
+}
+
+void testParamReturnTypestateCaller() {
+  ConsumableClass<int> var;
+  
+  testParamReturnTypestateCallee(true, var);
+  
+  *var;
+}
+
+void testParamTypestateCallee(ConsumableClass<int>  Param0 PARAM_TYPESTATE(consumed),
+                              ConsumableClass<int> &Param1 PARAM_TYPESTATE(consumed)) {
+  
+  *Param0; // expected-warning {{invalid invocation of method 'operator*' on object 'Param0' while it is in the 'consumed' state}}
+  *Param1; // expected-warning {{invalid invocation of method 'operator*' on object 'Param1' while it is in the 'consumed' state}}
+}
+
+void testParamTypestateCaller() {
+  ConsumableClass<int> Var0, Var1(42);
+  
+  testParamTypestateCallee(Var0, Var1); // expected-warning {{argument not in expected state; expected 'consumed', observed 'unconsumed'}}
+}
+
+void baf3(ConsumableClass<int> var) {
+  *var;
+}
+
+void baf4(ConsumableClass<int> &var) {
+  *var;  // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'unknown' state}}
+}
+
+void baf6(ConsumableClass<int> &&var) {
+  *var;
+}
+
 void testCallingConventions() {
   ConsumableClass<int> var(42);
   
@@ -259,8 +451,34 @@ void testCallingConventions() {
   baf2(&var);  
   *var;
   
-  baf3(static_cast<ConsumableClass<int>&&>(var));  
-  *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  baf4(var);  
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'unknown' state}}
+  
+  var = ConsumableClass<int>(42);
+  baf5(&var);  
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'unknown' state}}
+  
+  var = ConsumableClass<int>(42);
+  baf6(static_cast<ConsumableClass<int>&&>(var));  
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+}
+
+void testConstAndNonConstMemberFunctions() {
+  ConsumableClass<int> var(42);
+  
+  var.constCall();
+  *var;
+  
+  var.nonconstCall();
+  *var;
+}
+
+void testFunctionParam0(ConsumableClass<int> param) {
+  *param;
+}
+
+void testFunctionParam1(ConsumableClass<int> &param) {
+  *param; // expected-warning {{invalid invocation of method 'operator*' on object 'param' while it is in the 'unknown' state}}
 }
 
 void testReturnStates() {
@@ -270,24 +488,34 @@ void testReturnStates() {
   *var;
   
   var = returnsConsumed();
-  *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+}
+
+void testCallableWhen() {
+  ConsumableClass<int> var(42);
+  
+  *var;
+  
+  baf4(var);
+  
+  var.callableWhenUnknown();
 }
 
 void testMoveAsignmentish() {
   ConsumableClass<int>  var0;
   ConsumableClass<long> var1(42);
   
-  *var0; // expected-warning {{invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+  *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
   *var1;
   
   var0 = static_cast<ConsumableClass<long>&&>(var1);
   
   *var0;
-  *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+  *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
   
   var1 = ConsumableClass<long>(42);
   var1 = nullptr;
-  *var1; // expected-warning {{invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
+  *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
 }
 
 void testConditionalMerge() {
@@ -297,7 +525,7 @@ void testConditionalMerge() {
     // Empty
   }
   
-  *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
   
   if (var.isValid()) {
     // Empty
@@ -305,35 +533,39 @@ void testConditionalMerge() {
     // Empty
   }
   
-  *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
 }
 
-void testConsumes0() {
+void testSetTypestate() {
   ConsumableClass<int> var(42);
   
   *var;
   
   var.consume();
   
-  *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
+  
+  var.unconsume();
+  
+  *var;
+}
+
+void testConsumes0() {
+  ConsumableClass<int> var(nullptr);
+  
+  *var; // expected-warning {{invalid invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
 }
 
 void testConsumes1() {
-  ConsumableClass<int> var(nullptr);
-  
-  *var; // expected-warning {{invocation of method 'operator*' on object 'var' while it is in the 'consumed' state}}
-}
-
-void testConsumes2() {
   ConsumableClass<int> var(42);
   
   var.unconsumedCall();
   var(6);
   
-  var.unconsumedCall(); // expected-warning {{invocation of method 'unconsumedCall' on object 'var' while it is in the 'consumed' state}}
+  var.unconsumedCall(); // expected-warning {{invalid invocation of method 'unconsumedCall' on object 'var' while it is in the 'consumed' state}}
 }
 
-void testNonsenseState() {
+void testUnreachableBlock() {
   ConsumableClass<int> var(42);
   
   if (var) {
@@ -345,25 +577,219 @@ void testNonsenseState() {
   *var;
 }
 
-void testSimpleForLoop() {
-  ConsumableClass<int> var;
+
+void testForLoop1() {
+  ConsumableClass<int> var0, var1(42);
   
-  for (int i = 0; i < 10; ++i) {
-    *var;
+  for (int i = 0; i < 10; ++i) { // expected-warning {{state of variable 'var1' must match at the entry and exit of loop}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    
+    *var1;
+    var1.consume();
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
   }
   
-  *var;
+  *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
 }
 
-void testSimpleWhileLoop() {
-  int i = 0;
+void testWhileLoop1() {
+  int i = 10;
   
-  ConsumableClass<int> var;
+  ConsumableClass<int> var0, var1(42);
   
-  while (i < 10) {
-    *var;
-    ++i;
+  while (i-- > 0) { // expected-warning {{state of variable 'var1' must match at the entry and exit of loop}}
+    *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
+    
+    *var1;
+    var1.consume();
+    *var1; // expected-warning {{invalid invocation of method 'operator*' on object 'var1' while it is in the 'consumed' state}}
   }
   
-  *var;
+  *var0; // expected-warning {{invalid invocation of method 'operator*' on object 'var0' while it is in the 'consumed' state}}
 }
+
+typedef const int*& IntegerPointerReference;
+void testIsRValueRefishAndCanonicalType(IntegerPointerReference a) {}
+
+namespace ContinueICETest {
+
+bool cond1();
+bool cond2();
+
+static void foo1() {
+  while (cond1()) {
+    if (cond2())
+      continue;
+  }
+}
+
+static void foo2() {
+  while (true) {
+    if (false)
+      continue;
+  }
+}
+
+class runtime_error
+{
+public:
+  virtual ~runtime_error();
+};
+
+void read(bool sf) {
+    while (sf) {
+        if(sf) throw runtime_error();
+    }
+}
+
+} // end namespace ContinueICETest
+
+
+namespace InitializerAssertionFailTest {
+
+class CONSUMABLE(unconsumed) Status {
+  int code;
+
+public:
+  Status() RETURN_TYPESTATE(consumed);
+  Status(int c) RETURN_TYPESTATE(unconsumed);
+
+  Status(const Status &other);
+  Status(Status &&other);
+
+  Status& operator=(const Status &other) CALLABLE_WHEN("unknown", "consumed");
+  Status& operator=(Status &&other) CALLABLE_WHEN("unknown", "consumed");
+
+  bool check()  const SET_TYPESTATE(consumed);
+  void ignore() const SET_TYPESTATE(consumed);
+  // Status& markAsChecked() { return *this; }
+
+  void clear() CALLABLE_WHEN("unknown", "consumed") SET_TYPESTATE(consumed);
+
+  ~Status() CALLABLE_WHEN("unknown", "consumed");
+};
+
+
+bool   cond();
+Status doSomething();
+void   handleStatus(const Status& s RETURN_TYPESTATE(consumed));
+void   handleStatusPtr(const Status* s);
+
+void testSimpleTemporaries0() {
+  doSomething(); // expected-warning {{invalid invocation of method '~Status' on a temporary object while it is in the 'unconsumed' state}}
+}
+
+void testSimpleTemporaries1() {
+  doSomething().ignore();
+}
+
+void testSimpleTemporaries2() {
+  handleStatus(doSomething());
+}
+
+void testSimpleTemporaries3() {
+  Status s = doSomething();
+}  // expected-warning {{invalid invocation of method '~Status' on object 's' while it is in the 'unconsumed' state}}
+
+void testSimpleTemporaries4() {
+  Status s = doSomething();
+  s.check();
+}
+
+void testSimpleTemporaries5() {
+  Status s = doSomething();
+  s.clear(); // expected-warning {{invalid invocation of method 'clear' on object 's' while it is in the 'unconsumed' state}}
+}
+
+void testSimpleTemporaries6() {
+  Status s = doSomething();
+  handleStatus(s);
+}
+
+void testSimpleTemporaries7() {
+  Status s;
+  s = doSomething();
+}  // expected-warning {{invalid invocation of method '~Status' on object 's' while it is in the 'unconsumed' state}}
+
+void testTemporariesWithConditionals0() {
+  int a;
+
+  Status s = doSomething();
+  if (cond()) a = 0;
+  else        a = 1;
+} // expected-warning {{invalid invocation of method '~Status' on object 's' while it is in the 'unconsumed' state}}
+
+void testTemporariesWithConditionals1() {
+  int a;
+  
+  Status s = doSomething();
+  if (cond()) a = 0;
+  else        a = 1;
+  s.ignore();
+}
+
+void testTemporariesWithConditionals2() {
+  int a;
+  
+  Status s = doSomething();
+  s.ignore();
+  if (cond()) a = 0;
+  else        a = 1;
+}
+
+void testTemporariesWithConditionals3() {
+  Status s = doSomething();
+  if (cond()) {
+    s.check();
+  }
+}
+
+void testTemporariesAndConstructors0() {
+  Status s(doSomething());
+  s.check();
+}
+
+void testTemporariesAndConstructors1() {
+  // Test the copy constructor.
+  
+  Status s1 = doSomething();
+  Status s2(s1);
+  s2.check();
+}  // expected-warning {{invalid invocation of method '~Status' on object 's1' while it is in the 'unconsumed' state}}
+
+void testTemporariesAndConstructors2() {
+  // Test the move constructor.
+  
+  Status s1 = doSomething();
+  Status s2(static_cast<Status&&>(s1));
+  s2.check();
+}
+
+void testTemporariesAndOperators0() {
+  // Test the assignment operator.
+  
+  Status s1 = doSomething();
+  Status s2;
+  s2 = s1;
+  s2.check();
+} // expected-warning {{invalid invocation of method '~Status' on object 's1' while it is in the 'unconsumed' state}}
+
+void testTemporariesAndOperators1() {
+  // Test the move assignment operator.
+  
+  Status s1 = doSomething();
+  Status s2;
+  s2 = static_cast<Status&&>(s1);
+  s2.check();
+}
+
+void testTemporariesAndOperators2() {
+  Status s1 = doSomething();
+  Status s2 = doSomething();
+  s1 = s2; // expected-warning {{invalid invocation of method 'operator=' on object 's1' while it is in the 'unconsumed' state}}
+  s1.check();
+  s2.check();
+}
+
+} // end namespace InitializerAssertionFailTest
+

@@ -444,14 +444,6 @@ class CXXRecordDecl : public RecordDecl {
     /// const-qualified reference parameter or a non-reference parameter.
     bool HasDeclaredCopyAssignmentWithConstParam : 1;
 
-    /// \brief Whether an implicit move constructor was attempted to be declared
-    /// but would have been deleted.
-    bool FailedImplicitMoveConstructor : 1;
-
-    /// \brief Whether an implicit move assignment operator was attempted to be
-    /// declared but would have been deleted.
-    bool FailedImplicitMoveAssignment : 1;
-
     /// \brief Whether this class describes a C++ lambda.
     bool IsLambda : 1;
 
@@ -514,10 +506,12 @@ class CXXRecordDecl : public RecordDecl {
   struct LambdaDefinitionData : public DefinitionData {
     typedef LambdaExpr::Capture Capture;
     
-    LambdaDefinitionData(CXXRecordDecl *D, TypeSourceInfo *Info, bool Dependent) 
-      : DefinitionData(D), Dependent(Dependent), NumCaptures(0), 
-        NumExplicitCaptures(0), ManglingNumber(0), ContextDecl(0), Captures(0),
-        MethodTyInfo(Info) 
+       LambdaDefinitionData(CXXRecordDecl *D, TypeSourceInfo *Info, 
+                         bool Dependent, bool IsGeneric, 
+                         LambdaCaptureDefault CaptureDefault) 
+      : DefinitionData(D), Dependent(Dependent), IsGenericLambda(IsGeneric), 
+        CaptureDefault(CaptureDefault), NumCaptures(0), NumExplicitCaptures(0), 
+        ManglingNumber(0), ContextDecl(0), Captures(0), MethodTyInfo(Info)
     {
       IsLambda = true;
     }
@@ -529,14 +523,20 @@ class CXXRecordDecl : public RecordDecl {
     /// within the default argument of a function template, because the
     /// lambda will have been created with the enclosing context as its
     /// declaration context, rather than function. This is an unfortunate
-    /// artifact of having to parse the default arguments before 
+    /// artifact of having to parse the default arguments before. 
     unsigned Dependent : 1;
     
-    /// \brief The number of captures in this lambda.
-    unsigned NumCaptures : 16;
+    /// \brief Whether this lambda is a generic lambda.
+    unsigned IsGenericLambda : 1;
+
+    /// \brief The Default Capture.
+    unsigned CaptureDefault : 2;
+
+    /// \brief The number of captures in this lambda is limited 2^NumCaptures.
+    unsigned NumCaptures : 15;
 
     /// \brief The number of explicit captures in this lambda.
-    unsigned NumExplicitCaptures : 15;
+    unsigned NumExplicitCaptures : 13;
 
     /// \brief The number used to indicate this lambda expression for name 
     /// mangling in the Itanium C++ ABI.
@@ -554,6 +554,7 @@ class CXXRecordDecl : public RecordDecl {
 
     /// \brief The type of the call method.
     TypeSourceInfo *MethodTyInfo;
+       
   };
 
   struct DefinitionData &data() {
@@ -637,18 +638,21 @@ public:
     return cast<CXXRecordDecl>(RecordDecl::getCanonicalDecl());
   }
 
-  const CXXRecordDecl *getPreviousDecl() const {
-    return cast_or_null<CXXRecordDecl>(RecordDecl::getPreviousDecl());
-  }
   CXXRecordDecl *getPreviousDecl() {
-    return cast_or_null<CXXRecordDecl>(RecordDecl::getPreviousDecl());
+    return cast_or_null<CXXRecordDecl>(
+            static_cast<RecordDecl *>(this)->getPreviousDecl());
+  }
+  const CXXRecordDecl *getPreviousDecl() const {
+    return const_cast<CXXRecordDecl*>(this)->getPreviousDecl();
+  }
+
+  CXXRecordDecl *getMostRecentDecl() {
+    return cast<CXXRecordDecl>(
+            static_cast<RecordDecl *>(this)->getMostRecentDecl());
   }
 
   const CXXRecordDecl *getMostRecentDecl() const {
-    return cast_or_null<CXXRecordDecl>(RecordDecl::getMostRecentDecl());
-  }
-  CXXRecordDecl *getMostRecentDecl() {
-    return cast_or_null<CXXRecordDecl>(RecordDecl::getMostRecentDecl());
+    return const_cast<CXXRecordDecl*>(this)->getMostRecentDecl();
   }
 
   CXXRecordDecl *getDefinition() const {
@@ -664,7 +668,8 @@ public:
                                bool DelayTypeCreation = false);
   static CXXRecordDecl *CreateLambda(const ASTContext &C, DeclContext *DC,
                                      TypeSourceInfo *Info, SourceLocation Loc,
-                                     bool DependentLambda);
+                                     bool DependentLambda, bool IsGeneric, 
+                                     LambdaCaptureDefault CaptureDefault);
   static CXXRecordDecl *CreateDeserialized(const ASTContext &C, unsigned ID);
 
   bool isDynamicClass() const {
@@ -762,12 +767,14 @@ public:
   /// \brief \c true if we know for sure that this class has a single,
   /// accessible, unambiguous move constructor that is not deleted.
   bool hasSimpleMoveConstructor() const {
-    return !hasUserDeclaredMoveConstructor() && hasMoveConstructor();
+    return !hasUserDeclaredMoveConstructor() && hasMoveConstructor() &&
+           !data().DefaultedMoveConstructorIsDeleted;
   }
   /// \brief \c true if we know for sure that this class has a single,
   /// accessible, unambiguous move assignment operator that is not deleted.
   bool hasSimpleMoveAssignment() const {
-    return !hasUserDeclaredMoveAssignment() && hasMoveAssignment();
+    return !hasUserDeclaredMoveAssignment() && hasMoveAssignment() &&
+           !data().DefaultedMoveAssignmentIsDeleted;
   }
   /// \brief \c true if we know for sure that this class has an accessible
   /// destructor that is not deleted.
@@ -859,28 +866,23 @@ public:
            needsImplicitMoveConstructor();
   }
 
-  /// \brief Determine whether implicit move constructor generation for this
-  /// class has failed before.
-  bool hasFailedImplicitMoveConstructor() const {
-    return data().FailedImplicitMoveConstructor;
-  }
-
-  /// \brief Set whether implicit move constructor generation for this class
-  /// has failed before.
-  void setFailedImplicitMoveConstructor(bool Failed = true) {
-    data().FailedImplicitMoveConstructor = Failed;
+  /// \brief Set that we attempted to declare an implicitly move
+  /// constructor, but overload resolution failed so we deleted it.
+  void setImplicitMoveConstructorIsDeleted() {
+    assert((data().DefaultedMoveConstructorIsDeleted ||
+            needsOverloadResolutionForMoveConstructor()) &&
+           "move constructor should not be deleted");
+    data().DefaultedMoveConstructorIsDeleted = true;
   }
 
   /// \brief Determine whether this class should get an implicit move
   /// constructor or if any existing special member function inhibits this.
   bool needsImplicitMoveConstructor() const {
-    return !hasFailedImplicitMoveConstructor() &&
-           !(data().DeclaredSpecialMembers & SMF_MoveConstructor) &&
+    return !(data().DeclaredSpecialMembers & SMF_MoveConstructor) &&
            !hasUserDeclaredCopyConstructor() &&
            !hasUserDeclaredCopyAssignment() &&
            !hasUserDeclaredMoveAssignment() &&
-           !hasUserDeclaredDestructor() &&
-           !data().DefaultedMoveConstructorIsDeleted;
+           !hasUserDeclaredDestructor();
   }
 
   /// \brief Determine whether we need to eagerly declare a defaulted move
@@ -936,29 +938,24 @@ public:
            needsImplicitMoveAssignment();
   }
 
-  /// \brief Determine whether implicit move assignment generation for this
-  /// class has failed before.
-  bool hasFailedImplicitMoveAssignment() const {
-    return data().FailedImplicitMoveAssignment;
-  }
-
-  /// \brief Set whether implicit move assignment generation for this class
-  /// has failed before.
-  void setFailedImplicitMoveAssignment(bool Failed = true) {
-    data().FailedImplicitMoveAssignment = Failed;
+  /// \brief Set that we attempted to declare an implicit move assignment
+  /// operator, but overload resolution failed so we deleted it.
+  void setImplicitMoveAssignmentIsDeleted() {
+    assert((data().DefaultedMoveAssignmentIsDeleted ||
+            needsOverloadResolutionForMoveAssignment()) &&
+           "move assignment should not be deleted");
+    data().DefaultedMoveAssignmentIsDeleted = true;
   }
 
   /// \brief Determine whether this class should get an implicit move
   /// assignment operator or if any existing special member function inhibits
   /// this.
   bool needsImplicitMoveAssignment() const {
-    return !hasFailedImplicitMoveAssignment() &&
-           !(data().DeclaredSpecialMembers & SMF_MoveAssignment) &&
+    return !(data().DeclaredSpecialMembers & SMF_MoveAssignment) &&
            !hasUserDeclaredCopyConstructor() &&
            !hasUserDeclaredCopyAssignment() &&
            !hasUserDeclaredMoveConstructor() &&
-           !hasUserDeclaredDestructor() &&
-           !data().DefaultedMoveAssignmentIsDeleted;
+           !hasUserDeclaredDestructor();
   }
 
   /// \brief Determine whether we need to eagerly declare a move assignment
@@ -988,6 +985,30 @@ public:
 
   /// \brief Determine whether this class describes a lambda function object.
   bool isLambda() const { return hasDefinition() && data().IsLambda; }
+
+  /// \brief Determine whether this class describes a generic 
+  /// lambda function object (i.e. function call operator is
+  /// a template). 
+  bool isGenericLambda() const; 
+
+  /// \brief Retrieve the lambda call operator of the closure type
+  /// if this is a closure type.
+  CXXMethodDecl *getLambdaCallOperator() const; 
+
+  /// \brief Retrieve the lambda static invoker, the address of which
+  /// is returned by the conversion operator, and the body of which
+  /// is forwarded to the lambda call operator. 
+  CXXMethodDecl *getLambdaStaticInvoker() const; 
+
+  /// \brief Retrieve the generic lambda's template parameter list.
+  /// Returns null if the class does not represent a lambda or a generic 
+  /// lambda.
+  TemplateParameterList *getGenericLambdaTemplateParameterList() const;
+
+  LambdaCaptureDefault getLambdaCaptureDefault() const {
+    assert(isLambda());
+    return static_cast<LambdaCaptureDefault>(getLambdaData().CaptureDefault);
+  }
 
   /// \brief For a closure type, retrieve the mapping from captured
   /// variables and \c this to the non-static data members that store the
@@ -1396,7 +1417,7 @@ public:
   /// returns false if the class has non-computable base classes.
   ///
   /// \param BaseMatches Callback invoked for each (direct or indirect) base
-  /// class of this type, or if \p AllowShortCircut is true then until a call
+  /// class of this type, or if \p AllowShortCircuit is true then until a call
   /// returns false.
   ///
   /// \param UserData Passed as the second argument of every call to
@@ -1643,6 +1664,18 @@ public:
   bool isStatic() const;
   bool isInstance() const { return !isStatic(); }
 
+  /// Returns true if the given operator is implicitly static in a record
+  /// context.
+  static bool isStaticOverloadedOperator(OverloadedOperatorKind OOK) {
+    // [class.free]p1:
+    // Any allocation function for a class T is a static member
+    // (even if not explicitly declared static).
+    // [class.free]p6 Any deallocation function for a class X is a static member
+    // (even if not explicitly declared static).
+    return OOK == OO_New || OOK == OO_Array_New || OOK == OO_Delete ||
+           OOK == OO_Array_Delete;
+  }
+
   bool isConst() const { return getType()->castAs<FunctionType>()->isConst(); }
   bool isVolatile() const { return getType()->castAs<FunctionType>()->isVolatile(); }
 
@@ -1670,11 +1703,19 @@ public:
   /// \brief Determine whether this is a move assignment operator.
   bool isMoveAssignmentOperator() const;
 
-  const CXXMethodDecl *getCanonicalDecl() const {
-    return cast<CXXMethodDecl>(FunctionDecl::getCanonicalDecl());
-  }
   CXXMethodDecl *getCanonicalDecl() {
     return cast<CXXMethodDecl>(FunctionDecl::getCanonicalDecl());
+  }
+  const CXXMethodDecl *getCanonicalDecl() const {
+    return const_cast<CXXMethodDecl*>(this)->getCanonicalDecl();
+  }
+
+  CXXMethodDecl *getMostRecentDecl() {
+    return cast<CXXMethodDecl>(
+            static_cast<FunctionDecl *>(this)->getMostRecentDecl());
+  }
+  const CXXMethodDecl *getMostRecentDecl() const {
+    return const_cast<CXXMethodDecl*>(this)->getMostRecentDecl();
   }
 
   /// True if this method is user-declared and was not
@@ -2065,8 +2106,7 @@ public:
 
   /// \brief Determine whether this constructor was marked "explicit" or not.
   bool isExplicit() const {
-    return cast<CXXConstructorDecl>(getFirstDeclaration())
-      ->isExplicitSpecified();
+    return cast<CXXConstructorDecl>(getFirstDecl())->isExplicitSpecified();
   }
 
   /// \brief Iterates through the member/base initializer list.
@@ -2306,8 +2346,7 @@ public:
   /// Explicit conversion operators are only considered for direct
   /// initialization, e.g., when the user has explicitly written a cast.
   bool isExplicit() const {
-    return cast<CXXConversionDecl>(getFirstDeclaration())
-      ->isExplicitSpecified();
+    return cast<CXXConversionDecl>(getFirstDecl())->isExplicitSpecified();
   }
 
   /// \brief Returns the type that this conversion function is converting to.
@@ -2624,7 +2663,7 @@ public:
 ///                 // Also creates a UsingShadowDecl for A::foo() in B
 /// }
 /// \endcode
-class UsingShadowDecl : public NamedDecl {
+class UsingShadowDecl : public NamedDecl, public Redeclarable<UsingShadowDecl> {
   virtual void anchor();
 
   /// The referenced declaration.
@@ -2647,6 +2686,17 @@ class UsingShadowDecl : public NamedDecl {
     setImplicit();
   }
 
+  typedef Redeclarable<UsingShadowDecl> redeclarable_base;
+  virtual UsingShadowDecl *getNextRedeclaration() {
+    return RedeclLink.getNext();
+  }
+  virtual UsingShadowDecl *getPreviousDeclImpl() {
+    return getPreviousDecl();
+  }
+  virtual UsingShadowDecl *getMostRecentDeclImpl() {
+    return getMostRecentDecl();
+  }
+
 public:
   static UsingShadowDecl *Create(ASTContext &C, DeclContext *DC,
                                  SourceLocation Loc, UsingDecl *Using,
@@ -2655,7 +2705,20 @@ public:
   }
 
   static UsingShadowDecl *CreateDeserialized(ASTContext &C, unsigned ID);
-  
+
+  typedef redeclarable_base::redecl_iterator redecl_iterator;
+  using redeclarable_base::redecls_begin;
+  using redeclarable_base::redecls_end;
+  using redeclarable_base::getPreviousDecl;
+  using redeclarable_base::getMostRecentDecl;
+
+  virtual UsingShadowDecl *getCanonicalDecl() {
+    return getFirstDecl();
+  }
+  virtual const UsingShadowDecl *getCanonicalDecl() const {
+    return getFirstDecl();
+  }
+
   /// \brief Gets the underlying declaration which has been brought into the
   /// local scope.
   NamedDecl *getTargetDecl() const { return Underlying; }

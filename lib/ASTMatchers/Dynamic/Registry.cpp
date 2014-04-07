@@ -83,7 +83,6 @@ RegistryMaps::RegistryMaps() {
   // loc
   // equals
   // equalsNode
-  // hasDeclaration
 
   REGISTER_OVERLOADED_2(callee);
   REGISTER_OVERLOADED_2(hasPrefix);
@@ -174,6 +173,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasCondition);
   REGISTER_MATCHER(hasConditionVariableStatement);
   REGISTER_MATCHER(hasDeclContext);
+  REGISTER_MATCHER(hasDeclaration);
   REGISTER_MATCHER(hasDeducedType);
   REGISTER_MATCHER(hasDescendant);
   REGISTER_MATCHER(hasDestinationType);
@@ -329,10 +329,10 @@ VariantMatcher Registry::constructBoundMatcher(StringRef MatcherName,
   VariantMatcher Out = constructMatcher(MatcherName, NameRange, Args, Error);
   if (Out.isNull()) return Out;
 
-  const DynTypedMatcher *Result;
-  if (Out.getSingleMatcher(Result)) {
-    OwningPtr<DynTypedMatcher> Bound(Result->tryBind(BindID));
-    if (Bound) {
+  llvm::Optional<DynTypedMatcher> Result = Out.getSingleMatcher();
+  if (Result.hasValue()) {
+    llvm::Optional<DynTypedMatcher> Bound = Result->tryBind(BindID);
+    if (Bound.hasValue()) {
       return VariantMatcher::SingleMatcher(*Bound);
     }
   }

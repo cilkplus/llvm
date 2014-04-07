@@ -1,10 +1,10 @@
-// RUN: %clang_cc1 -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 -fno-rtti > %t
+// RUN: %clang_cc1 -emit-llvm %s -o - -mconstructor-aliases -cxx-abi microsoft -triple=i386-pc-win32 -fno-rtti > %t
 // RUN: FileCheck %s < %t
 // vftables are emitted very late, so do another pass to try to keep the checks
 // in source order.
 // RUN: FileCheck --check-prefix DTORS %s < %t
 //
-// RUN: %clang_cc1 -emit-llvm %s -o - -cxx-abi microsoft -triple=x86_64-pc-win32 -fno-rtti | FileCheck --check-prefix DTORS-X64 %s
+// RUN: %clang_cc1 -emit-llvm %s -o - -mconstructor-aliases -cxx-abi microsoft -triple=x86_64-pc-win32 -fno-rtti | FileCheck --check-prefix DTORS-X64 %s
 
 namespace basic {
 
@@ -71,8 +71,8 @@ void C::foo() {}
 void check_vftable_offset() {
   C c;
 // The vftable pointer should point at the beginning of the vftable.
-// CHECK: [[THIS_PTR:%[0-9]+]] = bitcast %"struct.basic::C"* {{.*}} to i8***
-// CHECK: store i8** getelementptr inbounds ([2 x i8*]* @"\01??_7C@basic@@6B@", i64 0, i64 0), i8*** [[THIS_PTR]]
+// CHECK: [[THIS_PTR:%[0-9]+]] = bitcast %"struct.basic::C"* {{.*}} to [2 x i8*]**
+// CHECK: store [2 x i8*]* @"\01??_7C@basic@@6B@", [2 x i8*]** [[THIS_PTR]]
 }
 
 void call_complete_dtor(C *obj_ptr) {
@@ -156,12 +156,15 @@ C::C() {
   // CHECK-NEXT: %[[vbptr_off:.*]] = getelementptr inbounds i8* %[[this_i8]], i64 0
   // CHECK-NEXT: %[[vbptr:.*]] = bitcast i8* %[[vbptr_off]] to [2 x i32]**
   // CHECK-NEXT: store [2 x i32]* @"\01??_8C@constructors@@7B@", [2 x i32]** %[[vbptr]]
-  // CHECK-NEXT: bitcast %"struct.constructors::C"* %{{.*}} to %"struct.constructors::A"*
+  // CHECK-NEXT: bitcast %"struct.constructors::C"* %{{.*}} to i8*
+  // CHECK-NEXT: getelementptr inbounds i8* %{{.*}}, i64 4
+  // CHECK-NEXT: bitcast i8* %{{.*}} to %"struct.constructors::A"*
   // CHECK-NEXT: call x86_thiscallcc %"struct.constructors::A"* @"\01??0A@constructors@@QAE@XZ"(%"struct.constructors::A"* %{{.*}})
   // CHECK-NEXT: br label %[[SKIP_VBASES]]
   //
   // CHECK: [[SKIP_VBASES]]
-  // CHECK: @"\01??_7C@constructors@@6B@"
+  // Class C does not define or override methods, so shouldn't change the vfptr.
+  // CHECK-NOT: @"\01??_7C@constructors@@6B@"
   // CHECK: ret
 }
 
@@ -188,7 +191,9 @@ D::D() {
   // CHECK-NEXT: %[[vbptr_off:.*]] = getelementptr inbounds i8* %[[this_i8]], i64 0
   // CHECK-NEXT: %[[vbptr:.*]] = bitcast i8* %[[vbptr_off]] to [2 x i32]**
   // CHECK-NEXT: store [2 x i32]* @"\01??_8D@constructors@@7B@", [2 x i32]** %[[vbptr]]
-  // CHECK-NEXT: bitcast %"struct.constructors::D"* %{{.*}} to %"struct.constructors::A"*
+  // CHECK-NEXT: bitcast %"struct.constructors::D"* %{{.*}} to i8*
+  // CHECK-NEXT: getelementptr inbounds i8* %{{.*}}, i64 4
+  // CHECK-NEXT: bitcast i8* %{{.*}} to %"struct.constructors::A"*
   // CHECK-NEXT: call x86_thiscallcc %"struct.constructors::A"* @"\01??0A@constructors@@QAE@XZ"(%"struct.constructors::A"* %{{.*}})
   // CHECK-NEXT: br label %[[SKIP_VBASES]]
   //
@@ -216,7 +221,9 @@ E::E() {
   // CHECK-NEXT: %[[offs:.*]] = getelementptr inbounds i8* %[[this_i8]], i64 4
   // CHECK-NEXT: %[[vbptr_C:.*]] = bitcast i8* %[[offs]] to [2 x i32]**
   // CHECK-NEXT: store [2 x i32]* @"\01??_8E@constructors@@7BC@1@@", [2 x i32]** %[[vbptr_C]]
-  // CHECK-NEXT: bitcast %"struct.constructors::E"* %{{.*}} to %"struct.constructors::A"*
+  // CHECK-NEXT: bitcast %"struct.constructors::E"* %{{.*}} to i8*
+  // CHECK-NEXT: getelementptr inbounds i8* %{{.*}}, i64 4
+  // CHECK-NEXT: bitcast i8* %{{.*}} to %"struct.constructors::A"*
   // CHECK-NEXT: call x86_thiscallcc %"struct.constructors::A"* @"\01??0A@constructors@@QAE@XZ"(%"struct.constructors::A"* %{{.*}})
   // CHECK: call x86_thiscallcc %"struct.constructors::C"* @"\01??0C@constructors@@QAE@XZ"(%"struct.constructors::C"* %{{.*}}, i32 0)
   // CHECK-NEXT: br label %[[SKIP_VBASES]]

@@ -202,6 +202,10 @@ protected:
   /// zero length bitfield, regardless of the zero length bitfield type.
   unsigned ZeroLengthBitfieldBoundary;
 
+  /// \brief Specify if mangling based on address space map should be used or
+  /// not for language specific address spaces
+  bool UseAddrSpaceMapMangling;
+
 public:
   IntType getSizeType() const { return SizeType; }
   IntType getIntMaxType() const { return IntMaxType; }
@@ -429,6 +433,12 @@ public:
   /// of Objective-C message passing on this target.
   bool useObjCFP2RetForComplexLongDouble() const {
     return ComplexLongDoubleUsesFP2Ret;
+  }
+
+  /// \brief Specify if mangling based on address space map should be used or
+  /// not for language specific address spaces
+  bool useAddressSpaceMapMangling() const {
+    return UseAddrSpaceMapMangling;
   }
 
   ///===---- Other target property query methods --------------------------===//
@@ -703,7 +713,7 @@ public:
   /// passed onwards to the backend.
   ///
   /// \return  False on error.
-  virtual bool HandleTargetFeatures(std::vector<std::string> &Features,
+  virtual bool handleTargetFeatures(std::vector<std::string> &Features,
                                     DiagnosticsEngine &Diags) {
     return true;
   }
@@ -807,7 +817,7 @@ protected:
   virtual void getGCCRegAliases(const GCCRegAlias *&Aliases,
                                 unsigned &NumAliases) const = 0;
   virtual void getGCCAddlRegNames(const AddlRegName *&Addl,
-				  unsigned &NumAddl) const {
+                                  unsigned &NumAddl) const {
     Addl = 0;
     NumAddl = 0;
   }

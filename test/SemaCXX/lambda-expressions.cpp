@@ -265,3 +265,36 @@ namespace TypeDeduction {
 #endif
   }
 }
+
+
+namespace lambdas_in_NSDMIs {
+  template<class T>
+  struct L {
+      T t{};
+      T t2 = ([](int a) { return [](int b) { return b; };})(t)(t);    
+  };
+  L<int> l; 
+  
+  namespace non_template {
+    struct L {
+      int t = 0;
+      int t2 = ([](int a) { return [](int b) { return b; };})(t)(t);    
+    };
+    L l; 
+  }
+}
+
+namespace PR18473 {
+  template<typename T> void f() {
+    T t(0);
+    (void) [=]{ int n = t; }; // expected-error {{deleted}}
+  }
+
+  template void f<int>();
+  struct NoCopy {
+    NoCopy(int);
+    NoCopy(const NoCopy &) = delete; // expected-note {{deleted}}
+    operator int() const;
+  };
+  template void f<NoCopy>(); // expected-note {{instantiation}}
+}

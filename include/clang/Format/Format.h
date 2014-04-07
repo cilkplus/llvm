@@ -52,6 +52,9 @@ struct FormatStyle {
   /// \brief The penalty for breaking before the first \c <<.
   unsigned PenaltyBreakFirstLessLess;
 
+  /// \brief The penalty for breaking a function call after "call(".
+  unsigned PenaltyBreakBeforeFirstCallParameter;
+
   /// \brief Set whether & and * bind to the type as opposed to the variable.
   bool PointerBindsToType;
 
@@ -166,12 +169,25 @@ struct FormatStyle {
   /// \brief If \c true, always break before multiline string literals.
   bool AlwaysBreakBeforeMultilineStrings;
 
-  /// \brief If \c true, \c IndentWidth consecutive spaces will be replaced
-  /// with tab characters.
-  bool UseTab;
+  /// \brief Different ways to use tab in formatting.
+  enum UseTabStyle {
+    /// Never use tab.
+    UT_Never,
+    /// Use tabs only for indentation.
+    UT_ForIndentation,
+    /// Use tabs whenever we need to fill whitespace that spans at least from
+    /// one tab stop to the next one.
+    UT_Always
+  };
+
+  /// \brief The way to use tab characters in the resulting file.
+  UseTabStyle UseTab;
 
   /// \brief If \c true, binary operators will be placed after line breaks.
   bool BreakBeforeBinaryOperators;
+
+  /// \brief If \c true, ternary operators will be placed after line breaks.
+  bool BreakBeforeTernaryOperators;
 
   /// \brief Different ways to attach braces to their surrounding context.
   enum BraceBreakingStyle {
@@ -208,9 +224,12 @@ struct FormatStyle {
   /// are not also definitions after the type.
   bool IndentFunctionDeclarationAfterType;
 
-  /// \brief If \c true, spaces will be inserted after every '(' and before
-  /// every ')'.
+  /// \brief If \c true, spaces will be inserted after '(' and before ')'.
   bool SpacesInParentheses;
+
+  /// \brief If \c true, spaces will be inserted after '<' and before '>' in
+  /// template argument lists
+  bool SpacesInAngles;
 
   /// \brief If \c false, spaces may be inserted into '()'.
   bool SpaceInEmptyParentheses;
@@ -222,6 +241,12 @@ struct FormatStyle {
   /// and '('.
   bool SpaceAfterControlStatementKeyword;
 
+  /// \brief If \c false, spaces will be removed before assignment operators.
+  bool SpaceBeforeAssignmentOperators;
+
+  /// \brief Indent width for line continuations.
+  unsigned ContinuationIndentWidth;
+
   bool operator==(const FormatStyle &R) const {
     return AccessModifierOffset == R.AccessModifierOffset &&
            ConstructorInitializerIndentWidth ==
@@ -232,12 +257,17 @@ struct FormatStyle {
                R.AllowAllParametersOfDeclarationOnNextLine &&
            AllowShortIfStatementsOnASingleLine ==
                R.AllowShortIfStatementsOnASingleLine &&
+           AllowShortLoopsOnASingleLine == R.AllowShortLoopsOnASingleLine &&
            AlwaysBreakTemplateDeclarations ==
                R.AlwaysBreakTemplateDeclarations &&
            AlwaysBreakBeforeMultilineStrings ==
                R.AlwaysBreakBeforeMultilineStrings &&
            BinPackParameters == R.BinPackParameters &&
+           BreakBeforeBinaryOperators == R.BreakBeforeBinaryOperators &&
+           BreakBeforeTernaryOperators == R.BreakBeforeTernaryOperators &&
            BreakBeforeBraces == R.BreakBeforeBraces &&
+           BreakConstructorInitializersBeforeComma ==
+               R.BreakConstructorInitializersBeforeComma &&
            ColumnLimit == R.ColumnLimit &&
            ConstructorInitializerAllOnOneLineOrOnePerLine ==
                R.ConstructorInitializerAllOnOneLineOrOnePerLine &&
@@ -245,6 +275,8 @@ struct FormatStyle {
            ExperimentalAutoDetectBinPacking ==
                R.ExperimentalAutoDetectBinPacking &&
            IndentCaseLabels == R.IndentCaseLabels &&
+           IndentFunctionDeclarationAfterType ==
+               R.IndentFunctionDeclarationAfterType &&
            IndentWidth == R.IndentWidth &&
            MaxEmptyLinesToKeep == R.MaxEmptyLinesToKeep &&
            NamespaceIndentation == R.NamespaceIndentation &&
@@ -257,15 +289,15 @@ struct FormatStyle {
            PointerBindsToType == R.PointerBindsToType &&
            SpacesBeforeTrailingComments == R.SpacesBeforeTrailingComments &&
            Cpp11BracedListStyle == R.Cpp11BracedListStyle &&
-           Standard == R.Standard && UseTab == R.UseTab &&
-           IndentFunctionDeclarationAfterType ==
-               R.IndentFunctionDeclarationAfterType &&
-           SpacesInParentheses == R.SpacesInParentheses &&
+           Standard == R.Standard && TabWidth == R.TabWidth &&
+           UseTab == R.UseTab && SpacesInParentheses == R.SpacesInParentheses &&
+           SpacesInAngles == R.SpacesInAngles &&
            SpaceInEmptyParentheses == R.SpaceInEmptyParentheses &&
-           SpacesInCStyleCastParentheses ==
-               R.SpacesInCStyleCastParentheses &&
+           SpacesInCStyleCastParentheses == R.SpacesInCStyleCastParentheses &&
            SpaceAfterControlStatementKeyword ==
-               R.SpaceAfterControlStatementKeyword;
+               R.SpaceAfterControlStatementKeyword &&
+           SpaceBeforeAssignmentOperators == R.SpaceBeforeAssignmentOperators &&
+           ContinuationIndentWidth == R.ContinuationIndentWidth;
   }
 };
 
@@ -329,6 +361,30 @@ tooling::Replacements reformat(const FormatStyle &Style, StringRef Code,
 /// lexing mode, LS_Cpp03 - C++03 mode.
 LangOptions getFormattingLangOpts(FormatStyle::LanguageStandard Standard =
                                       FormatStyle::LS_Cpp11);
+
+/// \brief Description to be used for help text for a llvm::cl option for
+/// specifying format style. The description is closely related to the operation
+/// of getStyle().
+extern const char *StyleOptionHelpDescription;
+
+/// \brief Construct a FormatStyle based on \c StyleName.
+///
+/// \c StyleName can take several forms:
+/// \li "{<key>: <value>, ...}" - Set specic style parameters.
+/// \li "<style name>" - One of the style names supported by
+/// getPredefinedStyle().
+/// \li "file" - Load style configuration from a file called '.clang-format'
+/// located in one of the parent directories of \c FileName or the current
+/// directory if \c FileName is empty.
+///
+/// \param[in] StyleName Style name to interpret according to the description
+/// above.
+/// \param[in] FileName Path to start search for .clang-format if \c StyleName
+/// == "file".
+///
+/// \returns FormatStyle as specified by \c StyleName. If no style could be
+/// determined, the default is LLVM Style (see getLLVMStyle()).
+FormatStyle getStyle(StringRef StyleName, StringRef FileName);
 
 } // end namespace format
 } // end namespace clang

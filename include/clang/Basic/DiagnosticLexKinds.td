@@ -159,6 +159,11 @@ def err_invalid_suffix_integer_constant : Error<
   "invalid suffix '%0' on integer constant">;
 def err_invalid_suffix_float_constant : Error<
   "invalid suffix '%0' on floating constant">;
+def warn_cxx11_compat_digit_separator : Warning<
+  "digit separators are incompatible with C++ standards before C++1y">,
+  InGroup<CXXPre1yCompat>, DefaultIgnore;
+def err_digit_separator_not_between_digits : Error<
+  "digit separator cannot appear at %select{start|end}0 of digit sequence">;
 def warn_extraneous_char_constant : Warning<
   "extraneous characters in character constant ignored">;
 def warn_char_constant_too_large : Warning<
@@ -408,6 +413,21 @@ def warn_pragma_include_alias_expected_filename :
    ExtWarn<"pragma include_alias expected include filename">,
    InGroup<UnknownPragmas>;
 
+// - #pragma warning(...)
+def warn_pragma_warning_expected :
+  ExtWarn<"#pragma warning expected '%0'">,
+  InGroup<UnknownPragmas>;
+def warn_pragma_warning_spec_invalid :
+  ExtWarn<"#pragma warning expected 'push', 'pop', 'default', 'disable',"
+          " 'error', 'once', 'suppress', 1, 2, 3, or 4">,
+  InGroup<UnknownPragmas>;
+def warn_pragma_warning_push_level :
+  ExtWarn<"#pragma warning(push, level) requires a level between 0 and 4">,
+  InGroup<UnknownPragmas>;
+def warn_pragma_warning_expected_number :
+  ExtWarn<"#pragma warning expected a warning number">,
+  InGroup<UnknownPragmas>;
+
 def err__Pragma_malformed : Error<
   "_Pragma takes a parenthesized string literal">;
 def err_pragma_message_malformed : Error<
@@ -527,19 +547,18 @@ def note_mmap_lsquare_match : Note<"to match this ']'">;
 def err_mmap_expected_member : Error<
   "expected umbrella, header, submodule, or module export">;
 def err_mmap_expected_header : Error<"expected a header name after '%0'">;
+def err_mmap_expected_mmap_file : Error<"expected a module map file name">;
 def err_mmap_module_redefinition : Error<
   "redefinition of module '%0'">;
 def note_mmap_prev_definition : Note<"previously defined here">;
-def err_mmap_header_conflict : Error<
-  "header '%0' is already part of module '%1'">;
 def err_mmap_header_not_found : Error<
   "%select{|umbrella }0header '%1' not found">;
 def err_mmap_umbrella_dir_not_found : Error<
   "umbrella directory '%0' not found">;
 def err_mmap_umbrella_clash : Error<
   "umbrella for module '%0' already covers this directory">;
-def err_mmap_export_module_id : Error<
-  "expected an exported module name or '*'">;
+def err_mmap_module_id : Error<
+  "expected a module name or '*'">;
 def err_mmap_expected_library_name : Error<
   "expected %select{library|framework}0 name as a string">;
 def err_mmap_config_macro_submodule : Error<
@@ -594,7 +613,9 @@ def err_expected_id_building_module : Error<
   "expected a module name in '__building_module' expression">;
 def error_use_of_private_header_outside_module : Error<
   "use of private header from outside its module: '%0'">;
-  
+def error_undeclared_use_of_module : Error<
+  "use of a module not declared used: '%0'">;
+
 def warn_header_guard : Warning<
   "%0 is used as a header guard here, followed by #define of a different macro">,
   InGroup<DiagGroup<"header-guard">>;

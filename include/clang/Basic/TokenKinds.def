@@ -349,7 +349,10 @@ KEYWORD(__PRETTY_FUNCTION__         , KEYALL)
 KEYWORD(typeof                      , KEYGNU)
 
 // MS Extensions
+KEYWORD(__FUNCDNAME__               , KEYMS)
 KEYWORD(L__FUNCTION__               , KEYMS)
+KEYWORD(__is_interface_class        , KEYMS)
+KEYWORD(__is_sealed                 , KEYMS)
 
 // GNU and MS Type Traits
 KEYWORD(__has_nothrow_assign          , KEYCXX)
@@ -370,7 +373,6 @@ KEYWORD(__is_convertible_to           , KEYCXX)
 KEYWORD(__is_empty                    , KEYCXX)
 KEYWORD(__is_enum                     , KEYCXX)
 KEYWORD(__is_final                    , KEYCXX)
-KEYWORD(__is_interface_class          , KEYCXX)
 // Tentative name - there's no implementation of std::is_literal_type yet.
 KEYWORD(__is_literal                  , KEYCXX)
 // Name for GCC 4.6 compatibility - people have already written libraries using
@@ -542,6 +544,7 @@ ALIAS("_declspec"        , __declspec , KEYMS)
 ALIAS("_pascal"      , __pascal   , KEYBORLAND)
 
 // Clang Extensions.
+KEYWORD(__builtin_convertvector   , KEYALL)
 ALIAS("__char16_t"   , char16_t   , KEYCXX)
 ALIAS("__char32_t"   , char32_t   , KEYCXX)
 
@@ -663,6 +666,9 @@ ANNOTATION(pragma_opencl_extension)
 // handles #pragma omp ... directives.
 ANNOTATION(pragma_openmp)
 ANNOTATION(pragma_openmp_end)
+
+// Annotation for module import translated from #include etc.
+ANNOTATION(module_include)
 
 #undef ANNOTATION
 #undef TESTING_KEYWORD

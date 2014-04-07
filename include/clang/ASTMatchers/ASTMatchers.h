@@ -86,6 +86,16 @@ public:
   }
   /// @}
 
+  /// \brief Type of mapping from binding identifiers to bound nodes. This type
+  /// is an associative container with a key type of \c std::string and a value
+  /// type of \c clang::ast_type_traits::DynTypedNode
+  typedef internal::BoundNodesMap::IDToNodeMap IDToNodeMap;
+
+  /// \brief Retrieve mapping from binding identifiers to bound nodes.
+  const IDToNodeMap &getMap() const {
+    return MyBoundNodes.getMap();
+  }
+
 private:
   /// \brief Create BoundNodes from a pre-filled map of bindings.
   BoundNodes(internal::BoundNodesMap &MyBoundNodes)
@@ -1679,18 +1689,20 @@ unless(const M &InnerMatcher) {
 ///
 /// Also usable as Matcher<T> for any T supporting the getDecl() member
 /// function. e.g. various subtypes of clang::Type and various expressions.
-/// FIXME: Add all node types for which this is matcher is usable due to
-/// getDecl().
 ///
-/// Usable as: Matcher<QualType>, Matcher<CallExpr>, Matcher<CXXConstructExpr>,
-///   Matcher<MemberExpr>, Matcher<TypedefType>,
-///   Matcher<TemplateSpecializationType>
-inline internal::PolymorphicMatcherWithParam1< internal::HasDeclarationMatcher,
-                                     internal::Matcher<Decl> >
-    hasDeclaration(const internal::Matcher<Decl> &InnerMatcher) {
+/// Usable as: Matcher<CallExpr>, Matcher<CXXConstructExpr>,
+///   Matcher<DeclRefExpr>, Matcher<EnumType>, Matcher<InjectedClassNameType>,
+///   Matcher<LabelStmt>, Matcher<MemberExpr>, Matcher<QualType>,
+///   Matcher<RecordType>, Matcher<TagType>,
+///   Matcher<TemplateSpecializationType>, Matcher<TemplateTypeParmType>,
+///   Matcher<TypedefType>, Matcher<UnresolvedUsingType>
+inline internal::PolymorphicMatcherWithParam1<
+    internal::HasDeclarationMatcher, internal::Matcher<Decl>,
+    void(internal::HasDeclarationSupportedTypes)>
+hasDeclaration(const internal::Matcher<Decl> &InnerMatcher) {
   return internal::PolymorphicMatcherWithParam1<
-    internal::HasDeclarationMatcher,
-    internal::Matcher<Decl> >(InnerMatcher);
+      internal::HasDeclarationMatcher, internal::Matcher<Decl>,
+      void(internal::HasDeclarationSupportedTypes)>(InnerMatcher);
 }
 
 /// \brief Matches on the implicit object argument of a member call expression.
@@ -2307,7 +2319,7 @@ AST_POLYMORPHIC_MATCHER_P(equalsBoundNode, AST_POLYMORPHIC_SUPPORTED_TYPES_4(
 /// \code
 ///   if (A* a = GetAPointer()) {}
 /// \endcode
-/// hasConditionVariableStatment(...)
+/// hasConditionVariableStatement(...)
 ///   matches 'A* a = GetAPointer()'.
 AST_MATCHER_P(IfStmt, hasConditionVariableStatement,
               internal::Matcher<DeclStmt>, InnerMatcher) {

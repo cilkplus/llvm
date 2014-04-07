@@ -10,9 +10,9 @@
 // This file implements the C++ related Decl classes.
 //
 //===----------------------------------------------------------------------===//
-
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ASTLambda.h"
 #include "clang/AST/ASTMutationListener.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/DeclTemplate.h"
@@ -71,7 +71,6 @@ CXXRecordDecl::DefinitionData::DefinitionData(CXXRecordDecl *D)
     ImplicitCopyAssignmentHasConstParam(true),
     HasDeclaredCopyConstructorWithConstParam(false),
     HasDeclaredCopyAssignmentWithConstParam(false),
-    FailedImplicitMoveConstructor(false), FailedImplicitMoveAssignment(false),
     IsLambda(false), NumBases(0), NumVBases(0), Bases(), VBases(),
     Definition(D), FirstFriend() {
 }
@@ -108,11 +107,15 @@ CXXRecordDecl *CXXRecordDecl::Create(const ASTContext &C, TagKind TK,
 
 CXXRecordDecl *CXXRecordDecl::CreateLambda(const ASTContext &C, DeclContext *DC,
                                            TypeSourceInfo *Info, SourceLocation Loc,
-                                           bool Dependent) {
+                                           bool Dependent, bool IsGeneric, 
+                                           LambdaCaptureDefault CaptureDefault) {
   CXXRecordDecl* R = new (C) CXXRecordDecl(CXXRecord, TTK_Class, DC, Loc, Loc,
                                            0, 0);
   R->IsBeingDefined = true;
-  R->DefinitionData = new (C) struct LambdaDefinitionData(R, Info, Dependent);
+  R->DefinitionData = new (C) struct LambdaDefinitionData(R, Info, 
+                                                          Dependent, 
+                                                          IsGeneric, 
+                                                          CaptureDefault);
   R->MayHaveOutOfDateDef = false;
   R->setImplicit(true);
   C.getTypeDeclType(R, /*PrevDecl=*/0);
@@ -722,6 +725,13 @@ void CXXRecordDecl::addedMember(Decl *D) {
       if (FieldRec->getDefinition()) {
         addedClassSubobject(FieldRec);
 
+        // We may need to perform overload resolution to determine whether a
+        // field can be moved if it's const or volatile qualified.
+        if (T.getCVRQualifiers() & (Qualifiers::Const | Qualifiers::Volatile)) {
+          data().NeedOverloadResolutionForMoveConstructor = true;
+          data().NeedOverloadResolutionForMoveAssignment = true;
+        }
+
         // C++11 [class.ctor]p5, C++11 [class.copy]p11:
         //   A defaulted [special member] for a class X is defined as
         //   deleted if:
@@ -942,6 +952,43 @@ bool CXXRecordDecl::isCLike() const {
 
   return isPOD() && data().HasOnlyCMembers;
 }
+ 
+bool CXXRecordDecl::isGenericLambda() const { 
+  if (!isLambda()) return false;
+  return getLambdaData().IsGenericLambda;
+}
+
+CXXMethodDecl* CXXRecordDecl::getLambdaCallOperator() const {
+  if (!isLambda()) return 0;
+  DeclarationName Name = 
+    getASTContext().DeclarationNames.getCXXOperatorName(OO_Call);
+  DeclContext::lookup_const_result Calls = lookup(Name);
+
+  assert(!Calls.empty() && "Missing lambda call operator!");
+  assert(Calls.size() == 1 && "More than one lambda call operator!"); 
+   
+  NamedDecl *CallOp = Calls.front();
+  if (FunctionTemplateDecl *CallOpTmpl = 
+                    dyn_cast<FunctionTemplateDecl>(CallOp)) 
+    return cast<CXXMethodDecl>(CallOpTmpl->getTemplatedDecl());
+  
+  return cast<CXXMethodDecl>(CallOp);
+}
+
+CXXMethodDecl* CXXRecordDecl::getLambdaStaticInvoker() const {
+  if (!isLambda()) return 0;
+  DeclarationName Name = 
+    &getASTContext().Idents.get(getLambdaStaticInvokerName());
+  DeclContext::lookup_const_result Invoker = lookup(Name);
+  if (Invoker.empty()) return 0;
+  assert(Invoker.size() == 1 && "More than one static invoker operator!");  
+  NamedDecl *InvokerFun = Invoker.front();
+  if (FunctionTemplateDecl *InvokerTemplate =
+                  dyn_cast<FunctionTemplateDecl>(InvokerFun)) 
+    return cast<CXXMethodDecl>(InvokerTemplate->getTemplatedDecl());
+  
+  return cast<CXXMethodDecl>(InvokerFun); 
+}
 
 void CXXRecordDecl::getCaptureFields(
        llvm::DenseMap<const VarDecl *, FieldDecl *> &Captures,
@@ -958,8 +1005,17 @@ void CXXRecordDecl::getCaptureFields(
     else if (C->capturesVariable())
       Captures[C->getCapturedVar()] = *Field;
   }
+  assert(Field == field_end());
 }
 
+TemplateParameterList * 
+CXXRecordDecl::getGenericLambdaTemplateParameterList() const {
+  if (!isLambda()) return 0;
+  CXXMethodDecl *CallOp = getLambdaCallOperator();     
+  if (FunctionTemplateDecl *Tmpl = CallOp->getDescribedFunctionTemplate())
+    return Tmpl->getTemplateParameters();
+  return 0;
+}
 
 static CanQualType GetConversionType(ASTContext &Context, NamedDecl *Conv) {
   QualType T;
@@ -1150,7 +1206,7 @@ CXXRecordDecl::setInstantiationOfMemberClass(CXXRecordDecl *RD,
                                              TemplateSpecializationKind TSK) {
   assert(TemplateOrInstantiation.isNull() && 
          "Previous template or instantiation?");
-  assert(!isa<ClassTemplateSpecializationDecl>(this));
+  assert(!isa<ClassTemplatePartialSpecializationDecl>(this));
   TemplateOrInstantiation 
     = new (getASTContext()) MemberSpecializationInfo(RD, TSK);
 }
@@ -1281,21 +1337,8 @@ bool CXXMethodDecl::isStatic() const {
   if (MD->getStorageClass() == SC_Static)
     return true;
 
-  DeclarationName Name = getDeclName();
-  // [class.free]p1:
-  // Any allocation function for a class T is a static member
-  // (even if not explicitly declared static).
-  if (Name.getCXXOverloadedOperator() == OO_New ||
-      Name.getCXXOverloadedOperator() == OO_Array_New)
-    return true;
-
-  // [class.free]p6 Any deallocation function for a class X is a static member
-  // (even if not explicitly declared static).
-  if (Name.getCXXOverloadedOperator() == OO_Delete ||
-      Name.getCXXOverloadedOperator() == OO_Array_Delete)
-    return true;
-
-  return false;
+  OverloadedOperatorKind OOK = getDeclName().getCXXOverloadedOperator();
+  return isStaticOverloadedOperator(OOK);
 }
 
 static bool recursivelyOverrides(const CXXMethodDecl *DerivedMD,
@@ -1509,10 +1552,16 @@ bool CXXMethodDecl::hasInlineBody() const {
 }
 
 bool CXXMethodDecl::isLambdaStaticInvoker() const {
-  return getParent()->isLambda() && 
-         getIdentifier() && getIdentifier()->getName() == "__invoke";
+  const CXXRecordDecl *P = getParent();
+  if (P->isLambda()) {
+    if (const CXXMethodDecl *StaticInvoker = P->getLambdaStaticInvoker()) {
+      if (StaticInvoker == this) return true;
+      if (P->isGenericLambda() && this->isFunctionTemplateSpecialization())
+        return StaticInvoker == this->getPrimaryTemplate()->getTemplatedDecl();
+    }
+  }
+  return false;
 }
-
 
 CXXCtorInitializer::CXXCtorInitializer(ASTContext &Context,
                                        TypeSourceInfo *TInfo, bool IsVirtual,
@@ -1882,7 +1931,7 @@ NamespaceDecl::NamespaceDecl(DeclContext *DC, bool Inline,
   : NamedDecl(Namespace, DC, IdLoc, Id), DeclContext(Namespace),
     LocStart(StartLoc), RBraceLoc(), AnonOrFirstNamespaceAndInline(0, Inline) 
 {
-  setPreviousDeclaration(PrevDecl);
+  setPreviousDecl(PrevDecl);
   
   if (PrevDecl)
     AnonOrFirstNamespaceAndInline.setPointer(PrevDecl->getOriginalNamespace());

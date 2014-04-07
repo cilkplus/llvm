@@ -1861,12 +1861,10 @@ public:
 };
 } // end anonymous namespace
 
-static int compareMacroDirectives(const void *XPtr, const void *YPtr) {
-  const std::pair<const IdentifierInfo *, MacroDirective *> &X =
-    *(const std::pair<const IdentifierInfo *, MacroDirective *>*)XPtr;
-  const std::pair<const IdentifierInfo *, MacroDirective *> &Y =
-    *(const std::pair<const IdentifierInfo *, MacroDirective *>*)YPtr;
-  return X.first->getName().compare(Y.first->getName());
+static int compareMacroDirectives(
+    const std::pair<const IdentifierInfo *, MacroDirective *> *X,
+    const std::pair<const IdentifierInfo *, MacroDirective *> *Y) {
+  return X->first->getName().compare(Y->first->getName());
 }
 
 static bool shouldIgnoreMacro(MacroDirective *MD, bool IsModule,
@@ -2280,7 +2278,8 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
 
   Abbrev = new BitCodeAbbrev();
   Abbrev->Add(BitCodeAbbrevOp(SUBMODULE_REQUIRES));
-  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob)); // Feature
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // State
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob));     // Feature
   unsigned RequiresAbbrev = Stream.EmitAbbrev(Abbrev);
 
   Abbrev = new BitCodeAbbrev();
@@ -2344,12 +2343,12 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
     Stream.EmitRecordWithBlob(DefinitionAbbrev, Record, Mod->Name);
     
     // Emit the requirements.
-    for (unsigned I = 0, N = Mod->Requires.size(); I != N; ++I) {
+    for (unsigned I = 0, N = Mod->Requirements.size(); I != N; ++I) {
       Record.clear();
       Record.push_back(SUBMODULE_REQUIRES);
+      Record.push_back(Mod->Requirements[I].second);
       Stream.EmitRecordWithBlob(RequiresAbbrev, Record,
-                                Mod->Requires[I].data(),
-                                Mod->Requires[I].size());
+                                Mod->Requirements[I].first);
     }
 
     // Emit the umbrella header, if there is one.
@@ -2422,6 +2421,10 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
       }
       Stream.EmitRecord(SUBMODULE_EXPORTS, Record);
     }
+
+    //FIXME: How do we emit the 'use'd modules?  They may not be submodules.
+    // Might be unnecessary as use declarations are only used to build the
+    // module itself.
 
     // Emit the link libraries.
     for (unsigned I = 0, N = Mod->LinkLibraries.size(); I != N; ++I) {
@@ -3529,7 +3532,7 @@ void ASTWriter::WriteRedeclarations() {
 
   for (unsigned I = 0, N = Redeclarations.size(); I != N; ++I) {
     Decl *First = Redeclarations[I];
-    assert(First->getPreviousDecl() == 0 && "Not the first declaration?");
+    assert(First->isFirstDecl() && "Not the first declaration?");
     
     Decl *MostRecent = First->getMostRecentDecl();
     
@@ -5103,8 +5106,6 @@ void ASTWriter::AddCXXDefinitionData(const CXXRecordDecl *D, RecordDataImpl &Rec
   Record.push_back(Data.ImplicitCopyAssignmentHasConstParam);
   Record.push_back(Data.HasDeclaredCopyConstructorWithConstParam);
   Record.push_back(Data.HasDeclaredCopyAssignmentWithConstParam);
-  Record.push_back(Data.FailedImplicitMoveConstructor);
-  Record.push_back(Data.FailedImplicitMoveAssignment);
   // IsLambda bit is already saved.
 
   Record.push_back(Data.NumBases);
@@ -5127,6 +5128,8 @@ void ASTWriter::AddCXXDefinitionData(const CXXRecordDecl *D, RecordDataImpl &Rec
   if (Data.IsLambda) {
     CXXRecordDecl::LambdaDefinitionData &Lambda = D->getLambdaData();
     Record.push_back(Lambda.Dependent);
+    Record.push_back(Lambda.IsGenericLambda);
+    Record.push_back(Lambda.CaptureDefault);
     Record.push_back(Lambda.NumCaptures);
     Record.push_back(Lambda.NumExplicitCaptures);
     Record.push_back(Lambda.ManglingNumber);
@@ -5141,18 +5144,13 @@ void ASTWriter::AddCXXDefinitionData(const CXXRecordDecl *D, RecordDataImpl &Rec
       case LCK_This:
         break;
       case LCK_ByCopy:
-      case LCK_ByRef: {
+      case LCK_ByRef:
         VarDecl *Var =
             Capture.capturesVariable() ? Capture.getCapturedVar() : 0;
         AddDeclRef(Var, Record);
         AddSourceLocation(Capture.isPackExpansion() ? Capture.getEllipsisLoc()
                                                     : SourceLocation(),
                           Record);
-        break;
-      }
-      case LCK_Init:
-        FieldDecl *Field = Capture.getInitCaptureField();
-        AddDeclRef(Field, Record);
         break;
       }
     }

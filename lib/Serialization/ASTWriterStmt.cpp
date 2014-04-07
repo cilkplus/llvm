@@ -794,6 +794,15 @@ void ASTStmtWriter::VisitShuffleVectorExpr(ShuffleVectorExpr *E) {
   Code = serialization::EXPR_SHUFFLE_VECTOR;
 }
 
+void ASTStmtWriter::VisitConvertVectorExpr(ConvertVectorExpr *E) {
+  VisitExpr(E);
+  Writer.AddSourceLocation(E->getBuiltinLoc(), Record);
+  Writer.AddSourceLocation(E->getRParenLoc(), Record);
+  Writer.AddTypeSourceInfo(E->getTypeSourceInfo(), Record);
+  Writer.AddStmt(E->getSrcExpr());
+  Code = serialization::EXPR_CONVERT_VECTOR;
+}
+
 void ASTStmtWriter::VisitBlockExpr(BlockExpr *E) {
   VisitExpr(E);
   Writer.AddDeclRef(E->getBlockDecl(), Record);
@@ -1697,8 +1706,17 @@ void OMPClauseWriter::VisitOMPDefaultClause(OMPDefaultClause *C) {
 void OMPClauseWriter::VisitOMPPrivateClause(OMPPrivateClause *C) {
   Record.push_back(C->varlist_size());
   Writer->Writer.AddSourceLocation(C->getLParenLoc(), Record);
-  for (OMPVarList<OMPPrivateClause>::varlist_iterator I = C->varlist_begin(),
-                                                      E = C->varlist_end();
+  for (OMPPrivateClause::varlist_iterator I = C->varlist_begin(),
+                                          E = C->varlist_end();
+       I != E; ++I)
+    Writer->Writer.AddStmt(*I);
+}
+
+void OMPClauseWriter::VisitOMPFirstprivateClause(OMPFirstprivateClause *C) {
+  Record.push_back(C->varlist_size());
+  Writer->Writer.AddSourceLocation(C->getLParenLoc(), Record);
+  for (OMPFirstprivateClause::varlist_iterator I = C->varlist_begin(),
+                                               E = C->varlist_end();
        I != E; ++I)
     Writer->Writer.AddStmt(*I);
 }
@@ -1706,8 +1724,8 @@ void OMPClauseWriter::VisitOMPPrivateClause(OMPPrivateClause *C) {
 void OMPClauseWriter::VisitOMPSharedClause(OMPSharedClause *C) {
   Record.push_back(C->varlist_size());
   Writer->Writer.AddSourceLocation(C->getLParenLoc(), Record);
-  for (OMPVarList<OMPSharedClause>::varlist_iterator I = C->varlist_begin(),
-                                                     E = C->varlist_end();
+  for (OMPSharedClause::varlist_iterator I = C->varlist_begin(),
+                                         E = C->varlist_end();
        I != E; ++I)
     Writer->Writer.AddStmt(*I);
 }

@@ -29,6 +29,7 @@
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/PreprocessorOptions.h"
+#include "clang/Sema/Sema.h"
 #include "clang/Serialization/ASTReader.h"
 #include "clang/Serialization/ASTWriter.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -706,7 +707,7 @@ ASTUnit *ASTUnit::LoadFromASTFile(const std::string &Filename,
   AST->HSOpts = new HeaderSearchOptions();
   
   AST->HeaderInfo.reset(new HeaderSearch(AST->HSOpts,
-                                         AST->getFileManager(),
+                                         AST->getSourceManager(),
                                          AST->getDiagnostics(),
                                          AST->ASTFileLangOpts,
                                          /*Target=*/0));
@@ -876,6 +877,18 @@ void AddTopLevelDeclarationToHash(Decl *D, unsigned &Hash) {
     return;
 
   if (NamedDecl *ND = dyn_cast<NamedDecl>(D)) {
+    if (EnumDecl *EnumD = dyn_cast<EnumDecl>(D)) {
+      // For an unscoped enum include the enumerators in the hash since they
+      // enter the top-level namespace.
+      if (!EnumD->isScoped()) {
+        for (EnumDecl::enumerator_iterator EI = EnumD->enumerator_begin(),
+               EE = EnumD->enumerator_end(); EI != EE; ++EI) {
+          if ((*EI)->getIdentifier())
+            Hash = llvm::HashString((*EI)->getIdentifier()->getName(), Hash);
+        }
+      }
+    }
+
     if (ND->getIdentifier())
       Hash = llvm::HashString(ND->getIdentifier()->getName(), Hash);
     else if (DeclarationName Name = ND->getDeclName()) {

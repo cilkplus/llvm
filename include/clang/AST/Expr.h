@@ -579,15 +579,14 @@ public:
   /// \brief Determine whether this expression involves a call to any function
   /// that is not trivial.
   bool hasNonTrivialCall(ASTContext &Ctx);
-  
+
   /// EvaluateKnownConstInt - Call EvaluateAsRValue and return the folded
   /// integer. This must be called on an expression that constant folds to an
   /// integer.
   llvm::APSInt EvaluateKnownConstInt(const ASTContext &Ctx,
                           SmallVectorImpl<PartialDiagnosticAt> *Diag=0) const;
-  
-  void EvaluateForOverflow(const ASTContext &Ctx,
-                           SmallVectorImpl<PartialDiagnosticAt> *Diag) const;
+
+  void EvaluateForOverflow(const ASTContext &Ctx) const;
 
   /// EvaluateAsLValue - Evaluate an expression to see if we can fold it to an
   /// lvalue with link time known address, with no side-effects.
@@ -893,7 +892,7 @@ class DeclRefExpr : public Expr {
   bool hasFoundDecl() const { return DeclRefExprBits.HasFoundDecl; }
 
   /// \brief Helper to retrieve the optional NamedDecl through which this
-  /// reference occured.
+  /// reference occurred.
   NamedDecl *&getInternalFoundDecl() {
     assert(hasFoundDecl());
     if (hasQualifier())
@@ -902,7 +901,7 @@ class DeclRefExpr : public Expr {
   }
 
   /// \brief Helper to retrieve the optional NamedDecl through which this
-  /// reference occured.
+  /// reference occurred.
   NamedDecl *getInternalFoundDecl() const {
     return const_cast<DeclRefExpr *>(this)->getInternalFoundDecl();
   }
@@ -1000,7 +999,7 @@ public:
     return getInternalQualifierLoc();
   }
 
-  /// \brief Get the NamedDecl through which this reference occured.
+  /// \brief Get the NamedDecl through which this reference occurred.
   ///
   /// This Decl may be different from the ValueDecl actually referred to in the
   /// presence of using declarations, etc. It always returns non-NULL, and may
@@ -1151,6 +1150,7 @@ public:
     Func,
     Function,
     LFunction,  // Same as Function, but as wide string.
+    FuncDName,
     PrettyFunction,
     /// PrettyFunctionNoVirtual - The same as PrettyFunction, except that the
     /// 'virtual' keyword is omitted for virtual member functions.
@@ -1422,7 +1422,7 @@ public:
 };
 
 /// StringLiteral - This represents a string literal expression, e.g. "foo"
-/// or L"bar" (wide strings).  The actual string is returned by getStrData()
+/// or L"bar" (wide strings).  The actual string is returned by getBytes()
 /// is NOT null-terminated, and the length of the string is determined by
 /// calling getByteLength().  The C type for a string is always a
 /// ConstantArrayType.  In C++, the char type is const qualified, in C it is
@@ -3468,6 +3468,60 @@ public:
   }
 };
 
+/// ConvertVectorExpr - Clang builtin function __builtin_convertvector
+/// This AST node provides support for converting a vector type to another
+/// vector type of the same arity.
+class ConvertVectorExpr : public Expr {
+private:
+  Stmt *SrcExpr;
+  TypeSourceInfo *TInfo;
+  SourceLocation BuiltinLoc, RParenLoc;
+
+  friend class ASTReader;
+  friend class ASTStmtReader;
+  explicit ConvertVectorExpr(EmptyShell Empty) : Expr(ConvertVectorExprClass, Empty) {}
+
+public:
+  ConvertVectorExpr(Expr* SrcExpr, TypeSourceInfo *TI, QualType DstType,
+             ExprValueKind VK, ExprObjectKind OK,
+             SourceLocation BuiltinLoc, SourceLocation RParenLoc)
+    : Expr(ConvertVectorExprClass, DstType, VK, OK,
+           DstType->isDependentType(),
+           DstType->isDependentType() || SrcExpr->isValueDependent(),
+           (DstType->isInstantiationDependentType() ||
+            SrcExpr->isInstantiationDependent()),
+           (DstType->containsUnexpandedParameterPack() ||
+            SrcExpr->containsUnexpandedParameterPack())),
+  SrcExpr(SrcExpr), TInfo(TI), BuiltinLoc(BuiltinLoc), RParenLoc(RParenLoc) {}
+
+  /// getSrcExpr - Return the Expr to be converted.
+  Expr *getSrcExpr() const { return cast<Expr>(SrcExpr); }
+
+  /// getTypeSourceInfo - Return the destination type.
+  TypeSourceInfo *getTypeSourceInfo() const {
+    return TInfo;
+  }
+  void setTypeSourceInfo(TypeSourceInfo *ti) {
+    TInfo = ti;
+  }
+
+  /// getBuiltinLoc - Return the location of the __builtin_convertvector token.
+  SourceLocation getBuiltinLoc() const { return BuiltinLoc; }
+
+  /// getRParenLoc - Return the location of final right parenthesis.
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+
+  SourceLocation getLocStart() const LLVM_READONLY { return BuiltinLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return RParenLoc; }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ConvertVectorExprClass;
+  }
+
+  // Iterators
+  child_range children() { return child_range(&SrcExpr, &SrcExpr+1); }
+};
+
 /// ChooseExpr - GNU builtin-in function __builtin_choose_expr.
 /// This AST node is similar to the conditional operator (?:) in C, with
 /// the following exceptions:
@@ -3679,7 +3733,7 @@ class InitListExpr : public Expr {
   SourceLocation LBraceLoc, RBraceLoc;
 
   /// The alternative form of the initializer list (if it exists).
-  /// The int part of the pair stores whether this initalizer list is
+  /// The int part of the pair stores whether this initializer list is
   /// in semantic form. If not null, the pointer points to:
   ///   - the syntactic form, if this is in semantic form;
   ///   - the semantic form, if this is in syntactic form.
@@ -3770,6 +3824,10 @@ public:
     return const_cast<InitListExpr *>(this)->getInitializedFieldInUnion();
   }
   void setInitializedFieldInUnion(FieldDecl *FD) {
+    assert((FD == 0
+            || getInitializedFieldInUnion() == 0
+            || getInitializedFieldInUnion() == FD)
+           && "Only one field of a union may be initialized at a time!");
     ArrayFillerOrUnionFieldInit = FD;
   }
 
@@ -3860,7 +3918,7 @@ public:
 /// The InitListExpr contains three DesignatedInitExprs, the first of
 /// which covers @c [2].y=1.0. This DesignatedInitExpr will have two
 /// designators, one array designator for @c [2] followed by one field
-/// designator for @c .y. The initalization expression will be 1.0.
+/// designator for @c .y. The initialization expression will be 1.0.
 class DesignatedInitExpr : public Expr {
 public:
   /// \brief Forward declaration of the Designator class.
@@ -4461,7 +4519,7 @@ public:
 /// AsTypeExpr - Clang builtin function __builtin_astype [OpenCL 6.2.4.2]
 /// This AST node provides support for reinterpreting a type to another
 /// type of the same size.
-class AsTypeExpr : public Expr { // Should this be an ExplicitCastExpr?
+class AsTypeExpr : public Expr {
 private:
   Stmt *SrcExpr;
   SourceLocation BuiltinLoc, RParenLoc;
@@ -4563,7 +4621,7 @@ class PseudoObjectExpr : public Expr {
 public:
   /// NoResult - A value for the result index indicating that there is
   /// no semantic result.
-  enum { NoResult = ~0U };
+  enum LLVM_ENUM_INT_TYPE(unsigned) { NoResult = ~0U };
 
   static PseudoObjectExpr *Create(const ASTContext &Context, Expr *syntactic,
                                   ArrayRef<Expr*> semantic,

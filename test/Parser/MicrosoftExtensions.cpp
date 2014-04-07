@@ -72,6 +72,10 @@ int uuid_sema_test()
    __uuidof(struct_without_uuid); // expected-error {{cannot call operator __uuidof on a type with no GUID}}
    __uuidof(struct_with_uuid*);
    __uuidof(struct_without_uuid*); // expected-error {{cannot call operator __uuidof on a type with no GUID}}
+   __uuidof(struct_with_uuid[1]);
+   __uuidof(struct_with_uuid*[1]); // expected-error {{cannot call operator __uuidof on a type with no GUID}}
+   __uuidof(const struct_with_uuid[1][1]);
+   __uuidof(const struct_with_uuid*[1][1]); // expected-error {{cannot call operator __uuidof on a type with no GUID}}
 
    __uuidof(var_with_uuid);
    __uuidof(var_without_uuid);// expected-error {{cannot call operator __uuidof on a type with no GUID}}
@@ -325,6 +329,15 @@ int __identifier(generic) = 3;
 class inline_definition_pure_spec {
    virtual int f() = 0 { return 0; }// expected-warning {{function definition with pure-specifier is a Microsoft extension}}
    virtual int f2() = 0;
+};
+
+struct pure_virtual_dtor {
+  virtual ~pure_virtual_dtor() = 0;
+};
+pure_virtual_dtor::~pure_virtual_dtor() { }
+
+struct pure_virtual_dtor_inline {
+  virtual ~pure_virtual_dtor_inline() = 0 { }// expected-warning {{function definition with pure-specifier is a Microsoft extension}}
 };
 
 

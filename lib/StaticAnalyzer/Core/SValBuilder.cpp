@@ -202,10 +202,12 @@ DefinedSVal SValBuilder::getFunctionPointer(const FunctionDecl *func) {
 
 DefinedSVal SValBuilder::getBlockPointer(const BlockDecl *block,
                                          CanQualType locTy,
-                                         const LocationContext *locContext) {
+                                         const LocationContext *locContext,
+                                         unsigned blockCount) {
   const BlockTextRegion *BC =
     MemMgr.getBlockTextRegion(block, locTy, locContext->getAnalysisDeclContext());
-  const BlockDataRegion *BD = MemMgr.getBlockDataRegion(BC, locContext);
+  const BlockDataRegion *BD = MemMgr.getBlockDataRegion(BC, locContext,
+                                                        blockCount);
   return loc::MemRegionVal(BD);
 }
 
@@ -405,6 +407,10 @@ SVal SValBuilder::evalCast(SVal val, QualType castTy, QualType originalTy) {
       return val;
     if (val.isConstant())
       return makeTruthVal(!val.isZeroConstant(), castTy);
+    if (!Loc::isLocType(originalTy) &&
+        !originalTy->isIntegralOrEnumerationType() &&
+        !originalTy->isMemberPointerType())
+      return UnknownVal();
     if (SymbolRef Sym = val.getAsSymbol(true)) {
       BasicValueFactory &BVF = getBasicValueFactory();
       // FIXME: If we had a state here, we could see if the symbol is known to

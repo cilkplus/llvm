@@ -250,7 +250,6 @@ class CodeGenModule : public CodeGenTypeCache {
  
   /// VTables - Holds information about C++ vtables.
   CodeGenVTables VTables;
-  friend class CodeGenVTables;
 
   CGObjCRuntime* ObjCRuntime;
   CGOpenCLRuntime* OpenCLRuntime;
@@ -275,6 +274,13 @@ class CodeGenModule : public CodeGenTypeCache {
   /// that *are* actually referenced.  These get code generated when the module
   /// is done.
   std::vector<GlobalDecl> DeferredDeclsToEmit;
+
+  /// List of alias we have emitted. Used to make sure that what they point to
+  /// is defined once we get to the end of the of the translation unit.
+  std::vector<GlobalDecl> Aliases;
+
+  typedef llvm::StringMap<llvm::TrackingVH<llvm::Constant> > ReplacementsTy;
+  ReplacementsTy Replacements;
 
   /// DeferredVTables - A queue of (optional) vtables to consider emitting.
   std::vector<const CXXRecordDecl*> DeferredVTables;
@@ -311,6 +317,9 @@ class CodeGenModule : public CodeGenTypeCache {
 
   llvm::DenseMap<QualType, llvm::Constant *> AtomicSetterHelperFnMap;
   llvm::DenseMap<QualType, llvm::Constant *> AtomicGetterHelperFnMap;
+
+  /// Map used to get unique type descriptor constants for sanitizers.
+  llvm::DenseMap<QualType, llvm::Constant *> TypeDescriptorMap;
 
   /// Map used to track internal linkage functions declared within
   /// extern "C" regions.
@@ -492,6 +501,13 @@ public:
     AtomicGetterHelperFnMap[Ty] = Fn;
   }
 
+  llvm::Constant *getTypeDescriptor(QualType Ty) {
+    return TypeDescriptorMap[Ty];
+  }
+  void setTypeDescriptor(QualType Ty, llvm::Constant *C) {
+    TypeDescriptorMap[Ty] = C;
+  }
+
   CGDebugInfo *getModuleDebugInfo() { return DebugInfo; }
 
   llvm::MDNode *getNoObjCARCExceptionsMetadata() {
@@ -520,10 +536,12 @@ public:
  
   CodeGenVTables &getVTables() { return VTables; }
 
-  VTableContext &getVTableContext() { return VTables.getVTableContext(); }
+  ItaniumVTableContext &getItaniumVTableContext() {
+    return VTables.getItaniumVTableContext();
+  }
 
-  MicrosoftVFTableContext &getVFTableContext() {
-    return VTables.getVFTableContext();
+  MicrosoftVTableContext &getMicrosoftVTableContext() {
+    return VTables.getMicrosoftVTableContext();
   }
 
   llvm::MDNode *getTBAAInfo(QualType QTy);
@@ -915,6 +933,10 @@ public:
 
   void EmitVTable(CXXRecordDecl *Class, bool DefinitionRequired);
 
+  /// EmitFundamentalRTTIDescriptors - Emit the RTTI descriptors for the
+  /// builtin types.
+  void EmitFundamentalRTTIDescriptors();
+
   /// \brief Appends Opts to the "Linker Options" metadata value.
   void AppendLinkerOptions(StringRef Opts);
 
@@ -1025,7 +1047,8 @@ private:
   
   // C++ related functions.
 
-  bool TryEmitDefinitionAsAlias(GlobalDecl Alias, GlobalDecl Target);
+  bool TryEmitDefinitionAsAlias(GlobalDecl Alias, GlobalDecl Target,
+                                bool InEveryTU);
   bool TryEmitBaseDestructorAsAlias(const CXXDestructorDecl *D);
 
   void EmitNamespace(const NamespaceDecl *D);
@@ -1068,13 +1091,14 @@ private:
   /// given type.
   void EmitFundamentalRTTIDescriptor(QualType Type);
 
-  /// EmitFundamentalRTTIDescriptors - Emit the RTTI descriptors for the
-  /// builtin types.
-  void EmitFundamentalRTTIDescriptors();
-
   /// EmitDeferred - Emit any needed decls for which code generation
   /// was deferred.
   void EmitDeferred();
+
+  /// Call replaceAllUsesWith on all pairs in Replacements.
+  void applyReplacements();
+
+  void checkAliases();
 
   /// EmitDeferredVTables - Emit any vtables which we deferred and
   /// still have a use for.
@@ -1092,6 +1116,9 @@ private:
   void EmitStaticExternCAliases();
 
   void EmitDeclMetadata();
+
+  /// \brief Emit the Clang version as llvm.ident metadata.
+  void EmitVersionIdentMetadata();
 
   /// EmitCoverageFile - Emit the llvm.gcov metadata used to tell LLVM where
   /// to emit the .gcno and .gcda files in a way that persists in .bc files.

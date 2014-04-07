@@ -58,7 +58,6 @@ namespace {
       BLOCK_IS_GLOBAL =         (1 << 28),
       BLOCK_HAS_DESCRIPTOR =    (1 << 29)
     };
-    static const int OBJC_ABI_VERSION = 7;
     
     Rewriter Rewrite;
     DiagnosticsEngine &Diags;
@@ -222,6 +221,21 @@ namespace {
       }
       return true;
     }
+    
+    virtual void HandleTopLevelDeclInObjCContainer(DeclGroupRef D) {
+      for (DeclGroupRef::iterator I = D.begin(), E = D.end(); I != E; ++I) {
+        if (TypedefNameDecl *TD = dyn_cast<TypedefNameDecl>(*I)) {
+          if (isTopLevelBlockPointerType(TD->getUnderlyingType()))
+            RewriteBlockPointerDecl(TD);
+          else if (TD->getUnderlyingType()->isFunctionPointerType())
+            CheckFunctionPointerDecl(TD->getUnderlyingType(), TD);
+          else
+            RewriteObjCQualifiedInterfaceTypes(TD);
+        }
+      }
+      return;
+    }
+    
     void HandleTopLevelSingleDecl(Decl *D);
     void HandleDeclInMainFile(Decl *D);
     RewriteModernObjC(std::string inFile, raw_ostream *OS,
@@ -1067,16 +1081,19 @@ void RewriteModernObjC::RewriteForwardClassEpilogue(ObjCInterfaceDecl *ClassDecl
 void RewriteModernObjC::RewriteForwardClassDecl(DeclGroupRef D) {
   std::string typedefString;
   for (DeclGroupRef::iterator I = D.begin(), E = D.end(); I != E; ++I) {
-    ObjCInterfaceDecl *ForwardDecl = cast<ObjCInterfaceDecl>(*I);
-    if (I == D.begin()) {
-      // Translate to typedef's that forward reference structs with the same name
-      // as the class. As a convenience, we include the original declaration
-      // as a comment.
-      typedefString += "// @class ";
-      typedefString += ForwardDecl->getNameAsString();
-      typedefString += ";";
+    if (ObjCInterfaceDecl *ForwardDecl = dyn_cast<ObjCInterfaceDecl>(*I)) {
+      if (I == D.begin()) {
+        // Translate to typedef's that forward reference structs with the same name
+        // as the class. As a convenience, we include the original declaration
+        // as a comment.
+        typedefString += "// @class ";
+        typedefString += ForwardDecl->getNameAsString();
+        typedefString += ";";
+      }
+      RewriteOneForwardClassDecl(ForwardDecl, typedefString);
     }
-    RewriteOneForwardClassDecl(ForwardDecl, typedefString);
+    else
+      HandleTopLevelSingleDecl(*I);
   }
   DeclGroupRef::iterator I = D.begin();
   RewriteForwardClassEpilogue(cast<ObjCInterfaceDecl>(*I), typedefString);
@@ -1905,7 +1922,7 @@ Stmt *RewriteModernObjC::RewriteObjCSynchronizedStmt(ObjCAtSynchronizedStmt *S) 
   std::string buf;
   SourceLocation SynchLoc = S->getAtSynchronizedLoc();
   ConvertSourceLocationToLineDirective(SynchLoc, buf);
-  buf += "{ id _rethrow = 0; id _sync_obj = ";
+  buf += "{ id _rethrow = 0; id _sync_obj = (id)";
   
   const char *lparenBuf = startBuf;
   while (*lparenBuf != '(') lparenBuf++;

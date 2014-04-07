@@ -406,9 +406,7 @@ void Sema::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
         if (Context.getLangOpts().getGC() != LangOptions::NonGC)
           getCurFunction()->ObjCShouldCallSuper = true;
         
-      } else if (MDecl->hasAttr<ObjCRequiresSuperAttr>())
-        getCurFunction()->ObjCShouldCallSuper = true;
-      else {
+      } else {
         const ObjCMethodDecl *SuperMethod =
           SuperClass->lookupMethod(MDecl->getSelector(),
                                    MDecl->isInstanceMethod());
@@ -590,6 +588,29 @@ ActOnStartClassInterface(SourceLocation AtInterfaceLoc,
 
   CheckObjCDeclScope(IDecl);
   return ActOnObjCContainerStartDefinition(IDecl);
+}
+
+/// ActOnTypedefedProtocols - this action finds protocol list as part of the
+/// typedef'ed use for a qualified super class and adds them to the list
+/// of the protocols.
+void Sema::ActOnTypedefedProtocols(SmallVectorImpl<Decl *> &ProtocolRefs,
+                                   IdentifierInfo *SuperName,
+                                   SourceLocation SuperLoc) {
+  if (!SuperName)
+    return;
+  NamedDecl* IDecl = LookupSingleName(TUScope, SuperName, SuperLoc,
+                                      LookupOrdinaryName);
+  if (!IDecl)
+    return;
+  
+  if (const TypedefNameDecl *TDecl = dyn_cast_or_null<TypedefNameDecl>(IDecl)) {
+    QualType T = TDecl->getUnderlyingType();
+    if (T->isObjCObjectType())
+      if (const ObjCObjectType *OPT = T->getAs<ObjCObjectType>())
+        for (ObjCObjectType::qual_iterator I = OPT->qual_begin(),
+             E = OPT->qual_end(); I != E; ++I)
+          ProtocolRefs.push_back(*I);
+  }
 }
 
 /// ActOnCompatibilityAlias - this action is called after complete parsing of
@@ -1710,9 +1731,8 @@ void Sema::MatchAllMethodDeclarations(const SelectorSet &InsMap,
   // implemented in the implementation class. If so, their types match.
   for (ObjCInterfaceDecl::instmeth_iterator I = CDecl->instmeth_begin(),
        E = CDecl->instmeth_end(); I != E; ++I) {
-    if (InsMapSeen.count((*I)->getSelector()))
-        continue;
-    InsMapSeen.insert((*I)->getSelector());
+    if (!InsMapSeen.insert((*I)->getSelector()))
+      continue;
     if (!(*I)->isPropertyAccessor() &&
         !InsMap.count((*I)->getSelector())) {
       if (ImmediateClass)
@@ -1739,11 +1759,11 @@ void Sema::MatchAllMethodDeclarations(const SelectorSet &InsMap,
 
   // Check and see if class methods in class interface have been
   // implemented in the implementation class. If so, their types match.
-   for (ObjCInterfaceDecl::classmeth_iterator
-       I = CDecl->classmeth_begin(), E = CDecl->classmeth_end(); I != E; ++I) {
-     if (ClsMapSeen.count((*I)->getSelector()))
-       continue;
-     ClsMapSeen.insert((*I)->getSelector());
+  for (ObjCInterfaceDecl::classmeth_iterator I = CDecl->classmeth_begin(),
+                                             E = CDecl->classmeth_end();
+       I != E; ++I) {
+    if (!ClsMapSeen.insert((*I)->getSelector()))
+      continue;
     if (!ClsMap.count((*I)->getSelector())) {
       if (ImmediateClass)
         WarnUndefinedMethod(IMPDecl->getLocation(), *I, IncompleteImpl,
@@ -3478,4 +3498,44 @@ void Sema::DiagnoseUseOfUnimplementedSelectors() {
       Diag((*S).second, diag::warn_unimplemented_selector) << Sel;
   }
   return;
+}
+
+ObjCIvarDecl *
+Sema::GetIvarBackingPropertyAccessor(const ObjCMethodDecl *Method,
+                                     const ObjCPropertyDecl *&PDecl) const {
+  
+  const ObjCInterfaceDecl *IDecl = Method->getClassInterface();
+  if (!IDecl)
+    return 0;
+  Method = IDecl->lookupMethod(Method->getSelector(), true);
+  if (!Method || !Method->isPropertyAccessor())
+    return 0;
+  if ((PDecl = Method->findPropertyDecl())) {
+    if (!PDecl->getDeclContext())
+      return 0;
+    // Make sure property belongs to accessor's class and not to
+    // one of its super classes.
+    if (const ObjCInterfaceDecl *CID =
+        dyn_cast<ObjCInterfaceDecl>(PDecl->getDeclContext()))
+      if (CID != IDecl)
+        return 0;
+    return PDecl->getPropertyIvarDecl();
+  }
+  return 0;
+}
+
+void Sema::DiagnoseUnusedBackingIvarInAccessor(Scope *S) {
+  if (S->hasUnrecoverableErrorOccurred() || !S->isInObjcMethodScope())
+    return;
+  
+  const ObjCMethodDecl *CurMethod = getCurMethodDecl();
+  if (!CurMethod)
+    return;
+  const ObjCPropertyDecl *PDecl;
+  const ObjCIvarDecl *IV = GetIvarBackingPropertyAccessor(CurMethod, PDecl);
+  if (IV && !IV->getBackingIvarReferencedInAccessor()) {
+    Diag(getCurMethodDecl()->getLocation(), diag::warn_unused_property_backing_ivar)
+    << IV->getDeclName();
+    Diag(PDecl->getLocation(), diag::note_property_declare);
+  }
 }

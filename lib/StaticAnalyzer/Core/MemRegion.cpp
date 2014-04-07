@@ -383,15 +383,17 @@ void BlockTextRegion::Profile(llvm::FoldingSetNodeID& ID) const {
 void BlockDataRegion::ProfileRegion(llvm::FoldingSetNodeID& ID,
                                     const BlockTextRegion *BC,
                                     const LocationContext *LC,
+                                    unsigned BlkCount,
                                     const MemRegion *sReg) {
   ID.AddInteger(MemRegion::BlockDataRegionKind);
   ID.AddPointer(BC);
   ID.AddPointer(LC);
+  ID.AddInteger(BlkCount);
   ID.AddPointer(sReg);
 }
 
 void BlockDataRegion::Profile(llvm::FoldingSetNodeID& ID) const {
-  BlockDataRegion::ProfileRegion(ID, BC, LC, getSuperRegion());
+  BlockDataRegion::ProfileRegion(ID, BC, LC, BlockCount, getSuperRegion());
 }
 
 void CXXTempObjectRegion::ProfileRegion(llvm::FoldingSetNodeID &ID,
@@ -464,7 +466,14 @@ void BlockTextRegion::dumpToStream(raw_ostream &os) const {
 }
 
 void BlockDataRegion::dumpToStream(raw_ostream &os) const {
-  os << "block_data{" << BC << '}';
+  os << "block_data{" << BC;
+  os << "; ";
+  for (BlockDataRegion::referenced_vars_iterator
+         I = referenced_vars_begin(),
+         E = referenced_vars_end(); I != E; ++I)
+    os << "(" << I.getCapturedRegion() << "," <<
+                 I.getOriginalRegion() << ") ";
+  os << '}';
 }
 
 void CompoundLiteralRegion::dumpToStream(raw_ostream &os) const {
@@ -839,7 +848,8 @@ const VarRegion *MemRegionManager::getVarRegion(const VarDecl *D,
 
 const BlockDataRegion *
 MemRegionManager::getBlockDataRegion(const BlockTextRegion *BC,
-                                     const LocationContext *LC) {
+                                     const LocationContext *LC,
+                                     unsigned blockCount) {
   const MemRegion *sReg = 0;
   const BlockDecl *BD = BC->getDecl();
   if (!BD->hasCaptures()) {
@@ -861,7 +871,7 @@ MemRegionManager::getBlockDataRegion(const BlockTextRegion *BC,
     }
   }
 
-  return getSubRegion<BlockDataRegion>(BC, LC, sReg);
+  return getSubRegion<BlockDataRegion>(BC, LC, blockCount, sReg);
 }
 
 const CXXTempObjectRegion *
@@ -1449,4 +1459,46 @@ const VarRegion *BlockDataRegion::getOriginalRegion(const VarRegion *R) const {
       return I.getOriginalRegion();
   }
   return 0;
+}
+
+//===----------------------------------------------------------------------===//
+// RegionAndSymbolInvalidationTraits
+//===----------------------------------------------------------------------===//
+
+void RegionAndSymbolInvalidationTraits::setTrait(SymbolRef Sym, 
+                                                 InvalidationKinds IK) {
+  SymTraitsMap[Sym] |= IK;
+}
+
+void RegionAndSymbolInvalidationTraits::setTrait(const MemRegion *MR, 
+                                                 InvalidationKinds IK) {
+  assert(MR);
+  if (const SymbolicRegion *SR = dyn_cast<SymbolicRegion>(MR))
+    setTrait(SR->getSymbol(), IK);
+  else
+    MRTraitsMap[MR] |= IK;
+}
+
+bool RegionAndSymbolInvalidationTraits::hasTrait(SymbolRef Sym, 
+                                                 InvalidationKinds IK) {
+  const_symbol_iterator I = SymTraitsMap.find(Sym);
+  if (I != SymTraitsMap.end())
+    return I->second & IK;
+
+  return false;    
+}
+
+bool RegionAndSymbolInvalidationTraits::hasTrait(const MemRegion *MR,
+                                                 InvalidationKinds IK) {
+  if (!MR)
+    return false;
+
+  if (const SymbolicRegion *SR = dyn_cast<SymbolicRegion>(MR))
+    return hasTrait(SR->getSymbol(), IK);
+
+  const_region_iterator I = MRTraitsMap.find(MR);
+  if (I != MRTraitsMap.end())
+    return I->second & IK;
+
+  return false;
 }

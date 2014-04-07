@@ -89,8 +89,9 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
     NumSFINAEErrors(0), InFunctionDeclarator(0),
     AccessCheckingSFINAE(false), InNonInstantiationSFINAEContext(false),
     NonInstantiationEntries(0), ArgumentPackSubstitutionIndex(-1),
-    CurrentInstantiationScope(0), TyposCorrected(0),
-    AnalysisWarnings(*this), VarDataSharingAttributesStack(0), CurScope(0),
+    CurrentInstantiationScope(0), DisableTypoCorrection(false),
+    TyposCorrected(0), AnalysisWarnings(*this),
+    VarDataSharingAttributesStack(0), CurScope(0),
     Ident_super(0), Ident___float128(0)
 {
   TUScope = 0;
@@ -358,6 +359,15 @@ static bool ShouldRemoveFromUnused(Sema *SemaRef, const DeclaratorDecl *D) {
   }
 
   if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+    // If a variable usable in constant expressions is referenced,
+    // don't warn if it isn't used: if the value of a variable is required
+    // for the computation of a constant expression, it doesn't make sense to
+    // warn even if the variable isn't odr-used.  (isReferenced doesn't
+    // precisely reflect that, but it's a decent approximation.)
+    if (VD->isReferenced() &&
+        VD->isUsableInConstantExpressions(SemaRef->Context))
+      return true;
+
     // UnusedFileScopedDecls stores the first declaration.
     // The declaration may have become definition so check again.
     const VarDecl *DeclToCheck = VD->getDefinition();
@@ -594,7 +604,13 @@ void Sema::ActOnEndOfTranslationUnit() {
     // valid, but we could do better by diagnosing if an instantiation uses a
     // name that was not visible at its first point of instantiation.
     PerformPendingInstantiations();
+    CheckDelayedMemberExceptionSpecs();
   }
+
+  // All delayed member exception specs should be checked or we end up accepting
+  // incompatible declarations.
+  assert(DelayedDefaultedMemberExceptionSpecs.empty());
+  assert(DelayedDestructorExceptionSpecChecks.empty());
 
   // Remove file scoped decls that turned out to be used.
   UnusedFileScopedDecls.erase(
@@ -644,6 +660,7 @@ void Sema::ActOnEndOfTranslationUnit() {
         // diagnostic client to deal with complaints in the module map at this
         // point.
         ModMap.resolveExports(Mod, /*Complain=*/false);
+        ModMap.resolveUses(Mod, /*Complain=*/false);
         ModMap.resolveConflicts(Mod, /*Complain=*/false);
 
         // Queue the submodules, so their exports will also be resolved.
@@ -749,11 +766,10 @@ void Sema::ActOnEndOfTranslationUnit() {
         if (DiagD->isReferenced()) {
           Diag(DiagD->getLocation(), diag::warn_unneeded_internal_decl)
                 << /*variable*/1 << DiagD->getDeclName();
-        } else if (SourceMgr.isInMainFile(DiagD->getLocation())) {
-          // If the declaration is in a header which is included into multiple
-          // TUs, it will declare one variable per TU, and one of the other
-          // variables may be used. So, only warn if the declaration is in the
-          // main file.
+        } else if (DiagD->getType().isConstQualified()) {
+          Diag(DiagD->getLocation(), diag::warn_unused_const_variable)
+              << DiagD->getDeclName();
+        } else {
           Diag(DiagD->getLocation(), diag::warn_unused_variable)
               << DiagD->getDeclName();
         }
@@ -987,7 +1003,7 @@ Scope *Sema::getScopeForContext(DeclContext *Ctx) {
     // Ignore scopes that cannot have declarations. This is important for
     // out-of-line definitions of static class members.
     if (S->getFlags() & (Scope::DeclScope | Scope::TemplateParamScope))
-      if (DeclContext *Entity = static_cast<DeclContext *> (S->getEntity()))
+      if (DeclContext *Entity = S->getEntity())
         if (Ctx == Entity->getPrimaryContext())
           return S;
   }
@@ -1013,10 +1029,19 @@ void Sema::PushBlockScope(Scope *BlockScope, BlockDecl *Block) {
                                               BlockScope, Block));
 }
 
-void Sema::PushLambdaScope(CXXRecordDecl *Lambda,
-                           CXXMethodDecl *CallOperator) {
-  FunctionScopes.push_back(new LambdaScopeInfo(getDiagnostics(), Lambda,
-                                               CallOperator));
+LambdaScopeInfo *Sema::PushLambdaScope() {
+  LambdaScopeInfo *const LSI = new LambdaScopeInfo(getDiagnostics());
+  FunctionScopes.push_back(LSI);
+  return LSI;
+}
+
+void Sema::RecordParsingTemplateParameterDepth(unsigned Depth) {
+  if (LambdaScopeInfo *const LSI = getCurLambda()) {
+    LSI->AutoTemplateParameterDepth = Depth;
+    return;
+  } 
+  llvm_unreachable( 
+      "Remove assertion if intentionally called in a non-lambda context.");
 }
 
 void Sema::PopFunctionScopeInfo(const AnalysisBasedWarnings::Policy *WP,
@@ -1072,6 +1097,16 @@ LambdaScopeInfo *Sema::getCurLambda() {
 
   return dyn_cast<LambdaScopeInfo>(FunctionScopes.back());
 }
+// We have a generic lambda if we parsed auto parameters, or we have 
+// an associated template parameter list.
+LambdaScopeInfo *Sema::getCurGenericLambda() {
+  if (LambdaScopeInfo *LSI =  getCurLambda()) {
+    return (LSI->AutoTemplateParams.size() ||
+                    LSI->GLTemplateParameterList) ? LSI : 0;
+  }
+  return 0;
+}
+
 
 void Sema::ActOnComment(SourceRange Comment) {
   if (!LangOpts.RetainCommentsFromSystemHeaders &&

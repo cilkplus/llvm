@@ -13,6 +13,7 @@
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
+#include "clang/Driver/SanitizerArgs.h"
 #include "clang/Driver/ToolChain.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Option/Arg.h"
@@ -43,7 +44,9 @@ bool ToolChain::useIntegratedAs() const {
 }
 
 const SanitizerArgs& ToolChain::getSanitizerArgs() const {
-  return D.getOrParseSanitizerArgs(Args);
+  if (!SanitizerArguments.get())
+    SanitizerArguments.reset(new SanitizerArgs(*this, Args));
+  return *SanitizerArguments.get();
 }
 
 std::string ToolChain::getDefaultUniversalArchName() const {
@@ -180,6 +183,11 @@ static const char *getARMTargetCPU(const ArgList &Args,
     MArch = Triple.getArchName();
   }
 
+  if (Triple.getOS() == llvm::Triple::NetBSD) {
+    if (MArch == "armv6")
+      return "arm1176jzf-s";
+  }
+
   const char *result = llvm::StringSwitch<const char *>(MArch)
     .Cases("armv2", "armv2a","arm2")
     .Case("armv3", "arm6")
@@ -238,23 +246,37 @@ static const char *getLLVMArchSuffixForARM(StringRef CPU) {
     .Cases("arm1176jzf-s",  "mpcorenovfp",  "mpcore", "v6")
     .Cases("arm1156t2-s",  "arm1156t2f-s", "v6t2")
     .Cases("cortex-a5", "cortex-a7", "cortex-a8", "v7")
-    .Cases("cortex-a9", "cortex-a15", "v7")
-    .Case("cortex-r5", "v7r")
+    .Cases("cortex-a9", "cortex-a12", "cortex-a15", "v7")
+    .Cases("cortex-r4", "cortex-r5", "v7r")
     .Case("cortex-m0", "v6m")
     .Case("cortex-m3", "v7m")
     .Case("cortex-m4", "v7em")
     .Case("cortex-a9-mp", "v7f")
     .Case("swift", "v7s")
-    .Case("cortex-a53", "v8")
+    .Cases("cortex-a53", "cortex-a57", "v8")
     .Default("");
 }
 
-std::string ToolChain::ComputeLLVMTriple(const ArgList &Args, 
+std::string ToolChain::ComputeLLVMTriple(const ArgList &Args,
                                          types::ID InputType) const {
   switch (getTriple().getArch()) {
   default:
     return getTripleString();
 
+  case llvm::Triple::x86_64: {
+    llvm::Triple Triple = getTriple();
+    if (!Triple.isOSDarwin())
+      return getTripleString();
+
+    if (Arg *A = Args.getLastArg(options::OPT_march_EQ)) {
+      // x86_64h goes in the triple. Other -march options just use the
+      // vanilla triple we already have.
+      StringRef MArch = A->getValue();
+      if (MArch == "x86_64h")
+        Triple.setArchName(MArch);
+    }
+    return Triple.getTriple();
+  }
   case llvm::Triple::arm:
   case llvm::Triple::thumb: {
     // FIXME: Factor into subclasses.

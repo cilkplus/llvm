@@ -408,6 +408,7 @@ AddDefaultCPlusPlusIncludePaths(const llvm::Triple &triple, const HeaderSearchOp
     // mingw.org C++ include paths
     AddMinGWCPlusPlusIncludePaths("/mingw/lib/gcc", "mingw32", "4.5.2"); //MSYS
 #if defined(_WIN32)
+    AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.8.1");
     AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.6.2");
     AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.6.1");
     AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.5.2");
@@ -474,15 +475,17 @@ void InitHeaderSearch::AddDefaultIncludePaths(const LangOptions &Lang,
     if (HSOpts.UseLibcxx) {
       if (triple.isOSDarwin()) {
         // On Darwin, libc++ may be installed alongside the compiler in
-        // lib/c++/v1.
+        // include/c++/v1.
         if (!HSOpts.ResourceDir.empty()) {
           // Remove version from foo/lib/clang/version
           StringRef NoVer = llvm::sys::path::parent_path(HSOpts.ResourceDir);
           // Remove clang from foo/lib/clang
-          SmallString<128> P = llvm::sys::path::parent_path(NoVer);
-          
-          // Get foo/lib/c++/v1
-          llvm::sys::path::append(P, "c++", "v1");
+          StringRef Lib = llvm::sys::path::parent_path(NoVer);
+          // Remove lib from foo/lib
+          SmallString<128> P = llvm::sys::path::parent_path(Lib);
+
+          // Get foo/include/c++/v1
+          llvm::sys::path::append(P, "include", "c++", "v1");
           AddUnmappedPath(P.str(), CXXSystem, false);
         }
       }

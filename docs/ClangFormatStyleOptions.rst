@@ -16,8 +16,8 @@ Configuring Style with clang-format
 
 :program:`clang-format` supports two ways to provide custom style options:
 directly specify style configuration in the ``-style=`` command line option or
-use ``-style=file`` and put style configuration in the ``.clang-format`` file
-in the project directory.
+use ``-style=file`` and put style configuration in the ``.clang-format`` or
+``_clang-format`` file in the project directory.
 
 When using ``-style=file``, :program:`clang-format` for each input file will
 try to find the ``.clang-format`` file located in the closest parent directory
@@ -204,7 +204,7 @@ the configuration (without a prefix: ``Auto``).
   are not also definitions after the type.
 
 **IndentWidth** (``unsigned``)
-  The number of characters to use for indentation.
+  The number of columns to use for indentation.
 
 **MaxEmptyLinesToKeep** (``unsigned``)
   The maximum number of consecutive empty lines to keep.
@@ -249,6 +249,9 @@ the configuration (without a prefix: ``Auto``).
   If ``true``, spaces will be inserted between 'for'/'if'/'while'/...
   and '('.
 
+**SpaceBeforeAssignmentOperators** (``bool``)
+  If ``false``, spaces will be removed before assignment operators.
+
 **SpaceInEmptyParentheses** (``bool``)
   If ``false``, spaces may be inserted into '()'.
 
@@ -277,9 +280,22 @@ the configuration (without a prefix: ``Auto``).
     Automatic detection based on the input.
 
 
-**UseTab** (``bool``)
-  If ``true``, ``IndentWidth`` consecutive spaces will be replaced
-  with tab characters.
+**TabWidth** (``unsigned``)
+  The number of columns used for tab stops.
+
+**UseTab** (``UseTabStyle``)
+  The way to use tab characters in the resulting file.
+
+  Possible values:
+
+  * ``UT_Never`` (in configuration: ``Never``)
+    Never use tab.
+  * ``UT_ForIndentation`` (in configuration: ``ForIndentation``)
+    Use tabs only for indentation.
+  * ``UT_Always`` (in configuration: ``Always``)
+    Use tabs whenever we need to fill whitespace that spans at least from
+    one tab stop to the next one.
+
 
 .. END_FORMAT_STYLE_OPTIONS
 
@@ -293,7 +309,7 @@ A style similar to the `Linux Kernel style
 
   BasedOnStyle: LLVM
   IndentWidth: 8
-  UseTab: true
+  UseTab: Always
   BreakBeforeBraces: Linux
   AllowShortIfStatementsOnASingleLine: false
   IndentCaseLabels: false
@@ -331,7 +347,7 @@ A style similar to the default Visual Studio formatting style:
 
 .. code-block:: yaml
 
-  UseTab: false
+  UseTab: Never
   IndentWidth: 4
   BreakBeforeBraces: Allman
   AllowShortIfStatementsOnASingleLine: false

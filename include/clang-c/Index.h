@@ -727,7 +727,7 @@ CINDEX_LINKAGE void clang_disposeDiagnosticSet(CXDiagnosticSet Diags);
  * \brief Retrieve the child diagnostics of a CXDiagnostic. 
  *
  * This CXDiagnosticSet does not need to be released by
- * clang_diposeDiagnosticSet.
+ * clang_disposeDiagnosticSet.
  */
 CINDEX_LINKAGE CXDiagnosticSet clang_getChildDiagnostics(CXDiagnostic D);
 
@@ -767,7 +767,7 @@ CINDEX_LINKAGE void clang_disposeDiagnostic(CXDiagnostic Diagnostic);
  * \brief Options to control the display of diagnostics.
  *
  * The values in this enum are meant to be combined to customize the
- * behavior of \c clang_displayDiagnostic().
+ * behavior of \c clang_formatDiagnostic().
  */
 enum CXDiagnosticDisplayOptions {
   /**
@@ -854,7 +854,7 @@ CINDEX_LINKAGE CXString clang_formatDiagnostic(CXDiagnostic Diagnostic,
  * default behavior of the clang compiler.
  *
  * \returns A set of display options suitable for use with \c
- * clang_displayDiagnostic().
+ * clang_formatDiagnostic().
  */
 CINDEX_LINKAGE unsigned clang_defaultDiagnosticDisplayOptions(void);
 
@@ -1946,7 +1946,7 @@ enum CXCursorKind {
    */
   CXCursor_CompoundStmt                  = 202,
 
-  /** \brief A case statment.
+  /** \brief A case statement.
    */
   CXCursor_CaseStmt                      = 203,
 
@@ -2095,7 +2095,8 @@ enum CXCursorKind {
   CXCursor_CXXOverrideAttr               = 405,
   CXCursor_AnnotateAttr                  = 406,
   CXCursor_AsmLabelAttr                  = 407,
-  CXCursor_LastAttr                      = CXCursor_AsmLabelAttr,
+  CXCursor_PackedAttr                    = 408,
+  CXCursor_LastAttr                      = CXCursor_PackedAttr,
      
   /* Preprocessing */
   CXCursor_PreprocessingDirective        = 500,
@@ -2677,7 +2678,8 @@ enum CXTypeKind {
   CXType_Vector = 113,
   CXType_IncompleteArray = 114,
   CXType_VariableArray = 115,
-  CXType_DependentSizedArray = 116
+  CXType_DependentSizedArray = 116,
+  CXType_MemberPointer = 117
 };
 
 /**
@@ -2968,6 +2970,13 @@ enum CXTypeLayoutError {
 CINDEX_LINKAGE long long clang_Type_getAlignOf(CXType T);
 
 /**
+ * \brief Return the class type of an member pointer type.
+ *
+ * If a non-member-pointer type is passed in, an invalid type is returned.
+ */
+CINDEX_LINKAGE CXType clang_Type_getClassType(CXType T);
+
+/**
  * \brief Return the size of a type in bytes as per C++[expr.sizeof] standard.
  *
  * If the type declaration is invalid, CXTypeLayoutError_Invalid is returned.
@@ -2992,6 +3001,23 @@ CINDEX_LINKAGE long long clang_Type_getSizeOf(CXType T);
  *   CXTypeLayoutError_InvalidFieldName is returned.
  */
 CINDEX_LINKAGE long long clang_Type_getOffsetOf(CXType T, const char *S);
+
+enum CXRefQualifierKind {
+  /** \brief No ref-qualifier was provided. */
+  CXRefQualifier_None = 0,
+  /** \brief An lvalue ref-qualifier was provided (\c &). */
+  CXRefQualifier_LValue,
+  /** \brief An rvalue ref-qualifier was provided (\c &&). */
+  CXRefQualifier_RValue
+};
+
+/**
+ * \brief Retrieve the ref-qualifier kind of a function or method.
+ *
+ * The ref-qualifier is returned for C++ functions or methods. For other types
+ * or non-C++ declarations, CXRefQualifier_None is returned.
+ */
+CINDEX_LINKAGE enum CXRefQualifierKind clang_Type_getCXXRefQualifier(CXType T);
 
 /**
  * \brief Returns non-zero if the cursor specifies a Record member that is a

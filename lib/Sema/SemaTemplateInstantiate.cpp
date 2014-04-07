@@ -14,6 +14,7 @@
 #include "TreeTransform.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ASTLambda.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/Basic/LangOptions.h"
@@ -130,6 +131,11 @@ Sema::getTemplateInstantiationArgs(NamedDecl *D,
         assert(Function->getPrimaryTemplate() && "No function template?");
         if (Function->getPrimaryTemplate()->isMemberSpecialization())
           break;
+
+        // If this function is a generic lambda specialization, we are done.
+        if (isGenericLambdaCallOperatorSpecialization(Function))
+          break;
+
       } else if (FunctionTemplateDecl *FunTmpl
                                    = Function->getDescribedFunctionTemplate()) {
         // Add the "injected" template arguments.
@@ -911,13 +917,38 @@ namespace {
     }
 
     ExprResult TransformLambdaScope(LambdaExpr *E,
-                                    CXXMethodDecl *CallOperator) {
-      CallOperator->setInstantiationOfMemberFunction(E->getCallOperator(),
-                                                     TSK_ImplicitInstantiation);
-      return TreeTransform<TemplateInstantiator>::
-         TransformLambdaScope(E, CallOperator);
+        CXXMethodDecl *NewCallOperator, 
+        ArrayRef<InitCaptureInfoTy> InitCaptureExprsAndTypes) {
+      CXXMethodDecl *const OldCallOperator = E->getCallOperator();   
+      // In the generic lambda case, we set the NewTemplate to be considered
+      // an "instantiation" of the OldTemplate.
+      if (FunctionTemplateDecl *const NewCallOperatorTemplate = 
+            NewCallOperator->getDescribedFunctionTemplate()) {
+        
+        FunctionTemplateDecl *const OldCallOperatorTemplate = 
+                              OldCallOperator->getDescribedFunctionTemplate();
+        NewCallOperatorTemplate->setInstantiatedFromMemberTemplate(
+                                                     OldCallOperatorTemplate);
+        // Mark the NewCallOperatorTemplate a specialization.  
+        NewCallOperatorTemplate->setMemberSpecialization();
+      } else 
+        // For a non-generic lambda we set the NewCallOperator to 
+        // be an instantiation of the OldCallOperator.
+        NewCallOperator->setInstantiationOfMemberFunction(OldCallOperator,
+                                                    TSK_ImplicitInstantiation);
+      
+      return inherited::TransformLambdaScope(E, NewCallOperator, 
+          InitCaptureExprsAndTypes);
     }
-
+    TemplateParameterList *TransformTemplateParameterList(
+                              TemplateParameterList *OrigTPL)  {
+      if (!OrigTPL || !OrigTPL->size()) return OrigTPL;
+         
+      DeclContext *Owner = OrigTPL->getParam(0)->getDeclContext();
+      TemplateDeclInstantiator  DeclInstantiator(getSema(), 
+                        /* DeclContext *Owner */ Owner, TemplateArgs);
+      return DeclInstantiator.SubstTemplateParams(OrigTPL); 
+    }
   private:
     ExprResult transformNonTypeTemplateParmRef(NonTypeTemplateParmDecl *parm,
                                                SourceLocation loc,
@@ -1149,25 +1180,7 @@ TemplateInstantiator::TransformPredefinedExpr(PredefinedExpr *E) {
   if (!E->isTypeDependent())
     return SemaRef.Owned(E);
 
-  FunctionDecl *currentDecl = getSema().getCurFunctionDecl();
-  assert(currentDecl && "Must have current function declaration when "
-                        "instantiating.");
-
-  PredefinedExpr::IdentType IT = E->getIdentType();
-
-  unsigned Length = PredefinedExpr::ComputeName(IT, currentDecl).length();
-
-  llvm::APInt LengthI(32, Length + 1);
-  QualType ResTy;
-  if (IT == PredefinedExpr::LFunction)
-    ResTy = getSema().Context.WideCharTy.withConst();
-  else
-    ResTy = getSema().Context.CharTy.withConst();
-  ResTy = getSema().Context.getConstantArrayType(ResTy, LengthI, 
-                                                 ArrayType::Normal, 0);
-  PredefinedExpr *PE =
-    new (getSema().Context) PredefinedExpr(E->getLocation(), ResTy, IT);
-  return getSema().Owned(PE);
+  return getSema().BuildPredefinedExpr(E->getLocation(), E->getIdentType());
 }
 
 ExprResult
@@ -1997,7 +2010,7 @@ Sema::InstantiateClass(SourceLocation PointOfInstantiation,
   }
   
   InstantiatingTemplate Inst(*this, PointOfInstantiation, Instantiation);
-  if (Inst)
+  if (Inst.isInvalid())
     return true;
 
   // Enter the scope of this instantiation. We don't use
@@ -2160,13 +2173,25 @@ Sema::InstantiateClass(SourceLocation PointOfInstantiation,
 
     // Instantiate any out-of-line class template partial
     // specializations now.
-    for (TemplateDeclInstantiator::delayed_partial_spec_iterator 
+    for (TemplateDeclInstantiator::delayed_partial_spec_iterator
               P = Instantiator.delayed_partial_spec_begin(),
            PEnd = Instantiator.delayed_partial_spec_end();
          P != PEnd; ++P) {
       if (!Instantiator.InstantiateClassTemplatePartialSpecialization(
-                                                                P->first,
-                                                                P->second)) {
+              P->first, P->second)) {
+        Instantiation->setInvalidDecl();
+        break;
+      }
+    }
+
+    // Instantiate any out-of-line variable template partial
+    // specializations now.
+    for (TemplateDeclInstantiator::delayed_var_partial_spec_iterator
+              P = Instantiator.delayed_var_partial_spec_begin(),
+           PEnd = Instantiator.delayed_var_partial_spec_end();
+         P != PEnd; ++P) {
+      if (!Instantiator.InstantiateVarTemplatePartialSpecialization(
+              P->first, P->second)) {
         Instantiation->setInvalidDecl();
         break;
       }
@@ -2222,7 +2247,7 @@ bool Sema::InstantiateEnum(SourceLocation PointOfInstantiation,
   }
 
   InstantiatingTemplate Inst(*this, PointOfInstantiation, Instantiation);
-  if (Inst)
+  if (Inst.isInvalid())
     return true;
 
   // Enter the scope of this instantiation. We don't use
@@ -2434,6 +2459,11 @@ Sema::InstantiateClassMembers(SourceLocation PointOfInstantiation,
                               CXXRecordDecl *Instantiation,
                         const MultiLevelTemplateArgumentList &TemplateArgs,
                               TemplateSpecializationKind TSK) {
+  assert(
+      (TSK == TSK_ExplicitInstantiationDefinition ||
+       TSK == TSK_ExplicitInstantiationDeclaration ||
+       (TSK == TSK_ImplicitInstantiation && Instantiation->isLocalClass())) &&
+      "Unexpected template specialization kind!");
   for (DeclContext::decl_iterator D = Instantiation->decls_begin(),
                                DEnd = Instantiation->decls_end();
        D != DEnd; ++D) {
@@ -2474,9 +2504,15 @@ Sema::InstantiateClassMembers(SourceLocation PointOfInstantiation,
           InstantiateFunctionDefinition(PointOfInstantiation, Function);
         } else {
           Function->setTemplateSpecializationKind(TSK, PointOfInstantiation);
+          if (TSK == TSK_ImplicitInstantiation)
+            PendingLocalImplicitInstantiations.push_back(
+                std::make_pair(Function, PointOfInstantiation));
         }
       }
     } else if (VarDecl *Var = dyn_cast<VarDecl>(*D)) {
+      if (isa<VarTemplateSpecializationDecl>(Var))
+        continue;
+
       if (Var->isStaticDataMember()) {
         MemberSpecializationInfo *MSInfo = Var->getMemberSpecializationInfo();
         assert(MSInfo && "No member specialization information?");
@@ -2824,3 +2860,4 @@ NamedDecl *LocalInstantiationScope::getPartiallySubstitutedPack(
   
   return 0;
 }
+

@@ -28,7 +28,8 @@ binary = 'clang-format'
 
 # Change this to format according to other formatting styles. See the output of
 # 'clang-format --help' for a list of supported styles. The default looks for
-# a '.clang-format' file to indicate the style that should be used.
+# a '.clang-format' or '_clang-format' file to indicate the style that should be
+# used.
 style = 'file'
 
 # Get the current text.
@@ -47,8 +48,10 @@ if sys.platform.startswith('win32'):
   startupinfo.wShowWindow = subprocess.SW_HIDE
 
 # Call formatter.
-p = subprocess.Popen([binary, '-lines', lines, '-style', style,
-                      '-cursor', str(cursor)],
+command = [binary, '-lines', lines, '-style', style, '-cursor', str(cursor)]
+if vim.current.buffer.name:
+  command.extend(['-assume-filename', vim.current.buffer.name])
+p = subprocess.Popen(command,
                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                      stdin=subprocess.PIPE, startupinfo=startupinfo)
 stdout, stderr = p.communicate(input=text)

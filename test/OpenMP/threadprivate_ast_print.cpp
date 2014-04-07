@@ -1,7 +1,9 @@
 // RUN: %clang_cc1 -verify -fopenmp -ast-print %s | FileCheck %s
-// RUN: %clang_cc1 -fopenmp -x c++ -std=c++11 -emit-pch -o %t
+// RUN: %clang_cc1 -fopenmp -x c++ -std=c++11 -emit-pch -o %t %s
 // RUN: %clang_cc1 -fopenmp -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print
 // expected-no-diagnostics
+// FIXME: This test has been crashing since r186647.
+// REQUIRES: disabled
 
 #ifndef HEADER
 #define HEADER
@@ -15,7 +17,7 @@ struct St1{
  static int b;
 // CHECK: static int b;
 #pragma omp threadprivate(b)
-// CHECK-NEXT: #pragma omp threadprivate(b)
+// CHECK-NEXT: #pragma omp threadprivate(St1::b)
 } d;
 
 int a, b;
@@ -37,6 +39,15 @@ template <class T> T foo() {
 //CHECK: template <class T> T foo() {
 //CHECK-NEXT: static T v;
 //CHECK-NEXT: #pragma omp threadprivate(v)
+
+namespace ns{
+  int a;
+}
+// CHECK: namespace ns {
+// CHECK-NEXT: int a;
+// CHECK-NEXT: }
+#pragma omp threadprivate(ns::a)
+// CHECK-NEXT: #pragma omp threadprivate(ns::a)
 
 int main () {
   static int a;

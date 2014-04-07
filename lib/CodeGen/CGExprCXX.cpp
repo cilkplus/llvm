@@ -16,6 +16,7 @@
 #include "CGCXXABI.h"
 #include "CGDebugInfo.h"
 #include "CGObjCRuntime.h"
+#include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/CallSite.h"
@@ -86,7 +87,8 @@ RValue CodeGenFunction::EmitCXXMemberCallExpr(const CXXMemberCallExpr *CE,
     // The method is static, emit it as we would a regular call.
     llvm::Value *Callee = CGM.GetAddrOfFunction(MD);
     return EmitCall(getContext().getPointerType(MD->getType()), Callee,
-                    ReturnValue, CE->arg_begin(), CE->arg_end());
+                    CE->getLocStart(), ReturnValue, CE->arg_begin(),
+                    CE->arg_end());
   }
 
   // Compute the object pointer.
@@ -272,8 +274,8 @@ CodeGenFunction::EmitCXXMemberPointerCallExpr(const CXXMemberCallExpr *E,
   
   // And the rest of the call args
   EmitCallArgs(Args, FPT, E->arg_begin(), E->arg_end());
-  return EmitCall(CGM.getTypes().arrangeCXXMethodCall(Args, FPT, required), Callee, 
-                  ReturnValue, Args);
+  return EmitCall(CGM.getTypes().arrangeCXXMethodCall(Args, FPT, required),
+                  Callee, ReturnValue, Args);
 }
 
 RValue
@@ -441,8 +443,7 @@ CodeGenFunction::EmitSynthesizedCXXCopyCtor(llvm::Value *Dest,
   
   assert(!getContext().getAsConstantArrayType(E->getType())
          && "EmitSynthesizedCXXCopyCtor - Copied-in Array");
-  EmitSynthesizedCXXCopyCtorCall(CD, Dest, Src,
-                                 E->arg_begin(), E->arg_end());
+  EmitSynthesizedCXXCopyCtorCall(CD, Dest, Src, E->arg_begin(), E->arg_end());
 }
 
 static CharUnits CalculateCookiePadding(CodeGenFunction &CGF,
@@ -719,7 +720,7 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
 
 static void StoreAnyExprIntoOneUnit(CodeGenFunction &CGF, const Expr *Init,
                                     QualType AllocType, llvm::Value *NewPtr) {
-
+  // FIXME: Refactor with EmitExprAsInit.
   CharUnits Alignment = CGF.getContext().getTypeAlignInChars(AllocType);
   switch (CGF.getEvaluationKind(AllocType)) {
   case TEK_Scalar:
@@ -765,9 +766,21 @@ CodeGenFunction::EmitNewArrayInitializer(const CXXNewExpr *E,
   QualType::DestructionKind dtorKind = elementType.isDestructedType();
   EHScopeStack::stable_iterator cleanup;
   llvm::Instruction *cleanupDominator = 0;
+
   // If the initializer is an initializer list, first do the explicit elements.
   if (const InitListExpr *ILE = dyn_cast<InitListExpr>(Init)) {
     initializerElements = ILE->getNumInits();
+
+    // If this is a multi-dimensional array new, we will initialize multiple
+    // elements with each init list element.
+    QualType AllocType = E->getAllocatedType();
+    if (const ConstantArrayType *CAT = dyn_cast_or_null<ConstantArrayType>(
+            AllocType->getAsArrayTypeUnsafe())) {
+      unsigned AS = explicitPtr->getType()->getPointerAddressSpace();
+      llvm::Type *AllocPtrTy = ConvertTypeForMem(AllocType)->getPointerTo(AS);
+      explicitPtr = Builder.CreateBitCast(explicitPtr, AllocPtrTy);
+      initializerElements *= getContext().getConstantArrayElementCount(CAT);
+    }
 
     // Enter a partial-destruction cleanup if necessary.
     if (needsEHCleanup(dtorKind)) {
@@ -787,12 +800,16 @@ CodeGenFunction::EmitNewArrayInitializer(const CXXNewExpr *E,
       // element.  TODO: some of these stores can be trivially
       // observed to be unnecessary.
       if (endOfInit) Builder.CreateStore(explicitPtr, endOfInit);
-      StoreAnyExprIntoOneUnit(*this, ILE->getInit(i), elementType, explicitPtr);
-      explicitPtr =Builder.CreateConstGEP1_32(explicitPtr, 1, "array.exp.next");
+      StoreAnyExprIntoOneUnit(*this, ILE->getInit(i),
+                              ILE->getInit(i)->getType(), explicitPtr);
+      explicitPtr = Builder.CreateConstGEP1_32(explicitPtr, 1,
+                                               "array.exp.next");
     }
 
     // The remaining elements are filled with the array filler expression.
     Init = ILE->getArrayFiller();
+
+    explicitPtr = Builder.CreateBitCast(explicitPtr, beginPtr->getType());
   }
 
   // Create the continuation block.
@@ -1589,8 +1606,8 @@ llvm::Value *CodeGenFunction::EmitCXXTypeidExpr(const CXXTypeidExpr *E) {
     ConvertType(E->getType())->getPointerTo();
   
   if (E->isTypeOperand()) {
-    llvm::Constant *TypeInfo = 
-      CGM.GetAddrOfRTTIDescriptor(E->getTypeOperand());
+    llvm::Constant *TypeInfo =
+        CGM.GetAddrOfRTTIDescriptor(E->getTypeOperand(getContext()));
     return Builder.CreateBitCast(TypeInfo, StdTypeInfoPtrTy);
   }
 

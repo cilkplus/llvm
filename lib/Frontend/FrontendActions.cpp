@@ -63,17 +63,6 @@ ASTConsumer *ASTDeclListAction::CreateASTConsumer(CompilerInstance &CI,
   return CreateASTDeclNodeLister();
 }
 
-ASTConsumer *ASTDumpXMLAction::CreateASTConsumer(CompilerInstance &CI,
-                                                 StringRef InFile) {
-  raw_ostream *OS;
-  if (CI.getFrontendOpts().OutputFile.empty())
-    OS = &llvm::outs();
-  else
-    OS = CI.createDefaultOutputFile(false, InFile);
-  if (!OS) return 0;
-  return CreateASTDumperXML(*OS);
-}
-
 ASTConsumer *ASTViewAction::CreateASTConsumer(CompilerInstance &CI,
                                               StringRef InFile) {
   return CreateASTViewer();
@@ -257,11 +246,11 @@ bool GenerateModuleAction::BeginSourceFileAction(CompilerInstance &CI,
   }
 
   // Check whether we can build this module at all.
-  StringRef Feature;
-  if (!Module->isAvailable(CI.getLangOpts(), CI.getTarget(), Feature)) {
+  clang::Module::Requirement Requirement;
+  if (!Module->isAvailable(CI.getLangOpts(), CI.getTarget(), Requirement)) {
     CI.getDiagnostics().Report(diag::err_module_unavailable)
       << Module->getFullModuleName()
-      << Feature;
+      << Requirement.second << Requirement.first;
 
     return false;
   }

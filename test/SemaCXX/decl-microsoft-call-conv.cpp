@@ -144,3 +144,50 @@ void multi_attribute(int x) { __builtin_unreachable(); }
 // expected-error@+2 {{stdcall and cdecl attributes are not compatible}}
 // expected-error@+1 {{fastcall and cdecl attributes are not compatible}}
 void __cdecl __cdecl __stdcall __cdecl __fastcall multi_cc(int x);
+
+template <typename T> void __stdcall StdcallTemplate(T) {}
+template <> void StdcallTemplate<int>(int) {}
+template <> void __stdcall StdcallTemplate<short>(short) {}
+
+// FIXME: Note the template, not the implicit instantiation.
+// expected-error@+2 {{function declared 'cdecl' here was previously declared 'stdcall}}
+// expected-note@+1 {{previous declaration is here}}
+template <> void __cdecl StdcallTemplate<long>(long) {}
+
+struct ExactlyInt {
+  template <typename T> static int cast_to_int(T) {
+    return T::this_is_not_an_int();
+  }
+};
+template <> inline int ExactlyInt::cast_to_int<int>(int x) { return x; }
+
+namespace test2 {
+  class foo {
+    template <typename T> void bar(T v);
+  };
+  extern template void foo::bar(const void *);
+}
+
+namespace test3 {
+  struct foo {
+    typedef void bar();
+  };
+  bool zed(foo::bar *);
+  void bah() {}
+  void baz() { zed(bah); }
+}
+
+namespace test4 {
+  class foo {
+    template <typename T> static void bar(T v);
+  };
+  extern template void foo::bar(const void *);
+}
+
+namespace test5 {
+  template <class T>
+  class valarray {
+    void bar();
+  };
+  extern template void valarray<int>::bar();
+}

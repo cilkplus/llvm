@@ -135,6 +135,7 @@ namespace {
   template <class T> good implements_children(children_t T::*) {
     return good();
   }
+  LLVM_ATTRIBUTE_UNUSED
   static inline bad implements_children(children_t Stmt::*) {
     return bad();
   }
@@ -143,6 +144,7 @@ namespace {
   template <class T> good implements_getLocStart(getLocStart_t T::*) {
     return good();
   }
+  LLVM_ATTRIBUTE_UNUSED
   static inline bad implements_getLocStart(getLocStart_t Stmt::*) {
     return bad();
   }
@@ -151,20 +153,22 @@ namespace {
   template <class T> good implements_getLocEnd(getLocEnd_t T::*) {
     return good();
   }
+  LLVM_ATTRIBUTE_UNUSED
   static inline bad implements_getLocEnd(getLocEnd_t Stmt::*) {
     return bad();
   }
 
 #define ASSERT_IMPLEMENTS_children(type) \
-  (void) sizeof(is_good(implements_children(&type::children)))
+  (void) is_good(implements_children(&type::children))
 #define ASSERT_IMPLEMENTS_getLocStart(type) \
-  (void) sizeof(is_good(implements_getLocStart(&type::getLocStart)))
+  (void) is_good(implements_getLocStart(&type::getLocStart))
 #define ASSERT_IMPLEMENTS_getLocEnd(type) \
-  (void) sizeof(is_good(implements_getLocEnd(&type::getLocEnd)))
+  (void) is_good(implements_getLocEnd(&type::getLocEnd))
 }
 
 /// Check whether the various Stmt classes implement their member
 /// functions.
+LLVM_ATTRIBUTE_UNUSED
 static inline void check_implementations() {
 #define ABSTRACT_STMT(type)
 #define STMT(type, base) \
@@ -1139,6 +1143,29 @@ OMPPrivateClause *OMPPrivateClause::CreateEmpty(const ASTContext &C,
   void *Mem = C.Allocate(sizeof(OMPPrivateClause) + sizeof(Expr *) * N,
                          llvm::alignOf<OMPPrivateClause>());
   return new (Mem) OMPPrivateClause(N);
+}
+
+OMPFirstprivateClause *OMPFirstprivateClause::Create(const ASTContext &C,
+                                                     SourceLocation StartLoc,
+                                                     SourceLocation LParenLoc,
+                                                     SourceLocation EndLoc,
+                                                     ArrayRef<Expr *> VL) {
+  void *Mem = C.Allocate(sizeof(OMPFirstprivateClause) +
+                         sizeof(Expr *) * VL.size(),
+                         llvm::alignOf<OMPFirstprivateClause>());
+  OMPFirstprivateClause *Clause = new (Mem) OMPFirstprivateClause(StartLoc,
+                                                                  LParenLoc,
+                                                                  EndLoc,
+                                                                  VL.size());
+  Clause->setVarRefs(VL);
+  return Clause;
+}
+
+OMPFirstprivateClause *OMPFirstprivateClause::CreateEmpty(const ASTContext &C,
+                                                          unsigned N) {
+  void *Mem = C.Allocate(sizeof(OMPFirstprivateClause) + sizeof(Expr *) * N,
+                         llvm::alignOf<OMPFirstprivateClause>());
+  return new (Mem) OMPFirstprivateClause(N);
 }
 
 OMPSharedClause *OMPSharedClause::Create(const ASTContext &C,

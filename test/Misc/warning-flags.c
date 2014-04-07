@@ -5,20 +5,20 @@ This test serves two purposes:
 
 (1) It documents all existing warnings that currently have no associated -W flag,
     and ensures that the list never grows.
-    
+
     If take an existing warning and add a flag, this test will fail.  To
     fix this test, simply remove that warning from the list below.
-    
+
 (2) It prevents us adding new warnings to Clang that have no -W flag.  All
     new warnings should have -W flags.
-    
+
     If you add a new warning without a flag, this test will fail.  To fix
     this test, simply add a warning group to that warning.
-    
+
 
 The list of warnings below should NEVER grow.  It should gradually shrink to 0.
 
-CHECK: Warnings without flags (135):
+CHECK: Warnings without flags (134):
 CHECK-NEXT:   ext_delete_void_ptr_operand
 CHECK-NEXT:   ext_expected_semi_decl_list
 CHECK-NEXT:   ext_explicit_specialization_storage_class
@@ -150,11 +150,10 @@ CHECK-NEXT:   warn_unavailable_fwdclass_message
 CHECK-NEXT:   warn_undef_interface
 CHECK-NEXT:   warn_undef_interface_suggest
 CHECK-NEXT:   warn_undef_protocolref
-CHECK-NEXT:   warn_unknown_method_family
 CHECK-NEXT:   warn_use_out_of_scope_declaration
 CHECK-NEXT:   warn_weak_identifier_undeclared
 CHECK-NEXT:   warn_weak_import
 
 The list of warnings in -Wpedantic should NEVER grow.
 
-CHECK: Number in -Wpedantic (not covered by other -W flags): 29
+CHECK: Number in -Wpedantic (not covered by other -W flags): 28

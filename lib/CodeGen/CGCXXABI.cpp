@@ -1,4 +1,4 @@
-//===----- CGCXXABI.cpp - Interface to C++ ABIs -----------------*- C++ -*-===//
+//===----- CGCXXABI.cpp - Interface to C++ ABIs ---------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -210,13 +210,6 @@ llvm::Value *CGCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
                                            CharUnits cookieSize) {
   ErrorUnsupportedABI(CGF, "reading a new[] cookie");
   return llvm::ConstantInt::get(CGF.SizeTy, 0);
-}
-
-void CGCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
-                               const VarDecl &D,
-                               llvm::GlobalVariable *GV,
-                               bool PerformInit) {
-  ErrorUnsupportedABI(CGF, "static local variable initialization");
 }
 
 void CGCXXABI::registerGlobalDtor(CodeGenFunction &CGF,

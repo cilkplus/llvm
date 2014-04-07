@@ -532,6 +532,88 @@ void Preprocessor::PTHSkipExcludedConditionalBlock() {
   }
 }
 
+Module *Preprocessor::getModuleForLocation(SourceLocation FilenameLoc) {
+  ModuleMap &ModMap = HeaderInfo.getModuleMap();
+  if (SourceMgr.isInMainFile(FilenameLoc)) {
+    if (Module *CurMod = getCurrentModule())
+      return CurMod;                               // Compiling a module.
+    return HeaderInfo.getModuleMap().SourceModule; // Compiling a source.
+  }
+  // Try to determine the module of the include directive.
+  FileID IDOfIncl = SourceMgr.getFileID(FilenameLoc);
+  if (const FileEntry *EntryOfIncl = SourceMgr.getFileEntryForID(IDOfIncl)) {
+    // The include comes from a file.
+    return ModMap.findModuleForHeader(EntryOfIncl).getModule();
+  } else {
+    // The include does not come from a file,
+    // so it is probably a module compilation.
+    return getCurrentModule();
+  }
+}
+
+bool Preprocessor::violatesPrivateInclude(
+    Module *RequestingModule,
+    const FileEntry *IncFileEnt,
+    ModuleMap::ModuleHeaderRole Role,
+    Module *RequestedModule) {
+  #ifndef NDEBUG
+  // Check for consistency between the module header role
+  // as obtained from the lookup and as obtained from the module.
+  // This check is not cheap, so enable it only for debugging.
+  SmallVectorImpl<const FileEntry *> &PvtHdrs
+      = RequestedModule->PrivateHeaders;
+  SmallVectorImpl<const FileEntry *>::iterator Look
+      = std::find(PvtHdrs.begin(), PvtHdrs.end(), IncFileEnt);
+  bool IsPrivate = Look != PvtHdrs.end();
+  assert((IsPrivate && Role == ModuleMap::PrivateHeader)
+               || (!IsPrivate && Role != ModuleMap::PrivateHeader));
+  #endif
+  return Role == ModuleMap::PrivateHeader &&
+         RequestedModule->getTopLevelModule() != RequestingModule;
+}
+
+bool Preprocessor::violatesUseDeclarations(
+    Module *RequestingModule,
+    Module *RequestedModule) {
+  ModuleMap &ModMap = HeaderInfo.getModuleMap();
+  ModMap.resolveUses(RequestingModule, /*Complain=*/false);
+  const SmallVectorImpl<Module *> &AllowedUses = RequestingModule->DirectUses;
+  SmallVectorImpl<Module *>::const_iterator Declared =
+      std::find(AllowedUses.begin(), AllowedUses.end(), RequestedModule);
+  return Declared == AllowedUses.end();
+}
+
+void Preprocessor::verifyModuleInclude(SourceLocation FilenameLoc,
+                                       StringRef Filename,
+                                       const FileEntry *IncFileEnt) {
+  Module *RequestingModule = getModuleForLocation(FilenameLoc);
+  if (RequestingModule)
+    HeaderInfo.getModuleMap().resolveUses(RequestingModule, /*Complain=*/false);
+  ModuleMap::KnownHeader RequestedModule =
+      HeaderInfo.getModuleMap().findModuleForHeader(IncFileEnt,
+                                                    RequestingModule);
+
+  if (RequestingModule == RequestedModule.getModule())
+    return; // No faults wihin a module, or between files both not in modules.
+
+  if (RequestingModule != HeaderInfo.getModuleMap().SourceModule)
+    return; // No errors for indirect modules.
+            // This may be a bit of a problem for modules with no source files.
+
+  if (RequestedModule && violatesPrivateInclude(RequestingModule, IncFileEnt,
+                                                RequestedModule.getRole(),
+                                                RequestedModule.getModule()))
+    Diag(FilenameLoc, diag::error_use_of_private_header_outside_module)
+        << Filename;
+
+  // FIXME: Add support for FixIts in module map files and offer adding the
+  // required use declaration.
+  if (RequestingModule && getLangOpts().ModulesDeclUse &&
+      violatesUseDeclarations(RequestingModule, RequestedModule.getModule()))
+    Diag(FilenameLoc, diag::error_undeclared_use_of_module)
+        << Filename;
+}
+
 const FileEntry *Preprocessor::LookupFile(
     SourceLocation FilenameLoc,
     StringRef Filename,
@@ -567,29 +649,8 @@ const FileEntry *Preprocessor::LookupFile(
       Filename, isAngled, FromDir, CurDir, CurFileEnt,
       SearchPath, RelativePath, SuggestedModule, SkipCache);
   if (FE) {
-    if (SuggestedModule) {
-      Module *RequestedModule = SuggestedModule->getModule();
-      if (RequestedModule) {
-        ModuleMap::ModuleHeaderRole Role = SuggestedModule->getRole();
-        #ifndef NDEBUG
-        // Check for consistency between the module header role
-        // as obtained from the lookup and as obtained from the module.
-        // This check is not cheap, so enable it only for debugging.
-        SmallVectorImpl<const FileEntry *> &PvtHdrs
-            = RequestedModule->PrivateHeaders;
-        SmallVectorImpl<const FileEntry *>::iterator Look
-            = std::find(PvtHdrs.begin(), PvtHdrs.end(), FE);
-        bool IsPrivate = Look != PvtHdrs.end();
-        assert((IsPrivate && Role == ModuleMap::PrivateHeader)
-               || (!IsPrivate && Role != ModuleMap::PrivateHeader));
-        #endif
-        if (Role == ModuleMap::PrivateHeader) {
-          if (RequestedModule->getTopLevelModule() != getCurrentModule())
-            Diag(FilenameLoc, diag::error_use_of_private_header_outside_module)
-                 << Filename;
-        }
-      }
-    }
+    if (SuggestedModule)
+      verifyModuleInclude(FilenameLoc, Filename, FE);
     return FE;
   }
 
@@ -850,6 +911,11 @@ static bool GetLineValue(Token &DigitTok, unsigned &Val,
   // here.
   Val = 0;
   for (unsigned i = 0; i != ActualLength; ++i) {
+    // C++1y [lex.fcon]p1:
+    //   Optional separating single quotes in a digit-sequence are ignored
+    if (DigitTokBegin[i] == '\'')
+      continue;
+
     if (!isDigit(DigitTokBegin[i])) {
       PP.Diag(PP.AdvanceToTokenCharacter(DigitTok.getLocation(), i),
               diag::err_pp_line_digit_sequence) << IsGNULineDirective;
@@ -1537,10 +1603,9 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
              "@import " + PathString.str().str() + ";");
     }
     
-    // Load the module.
-    // If this was an #__include_macros directive, only make macros visible.
-    Module::NameVisibilityKind Visibility 
-      = (IncludeKind == 3)? Module::MacrosVisible : Module::AllVisible;
+    // Load the module. Only make macros visible. We'll make the declarations
+    // visible when the parser gets here.
+    Module::NameVisibilityKind Visibility = Module::MacrosVisible;
     ModuleLoadResult Imported
       = TheModuleLoader.loadModule(IncludeTok.getLocation(), Path, Visibility,
                                    /*IsIncludeDirective=*/true);
@@ -1560,13 +1625,27 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
       }
       return;
     }
-    
+
     // If this header isn't part of the module we're building, we're done.
     if (!BuildingImportedModule && Imported) {
       if (Callbacks) {
         Callbacks->InclusionDirective(HashLoc, IncludeTok, Filename, isAngled,
                                       FilenameRange, File,
                                       SearchPath, RelativePath, Imported);
+      }
+
+      if (IncludeKind != 3) {
+        // Let the parser know that we hit a module import, and it should
+        // make the module visible.
+        // FIXME: Produce this as the current token directly, rather than
+        // allocating a new token for it.
+        Token *Tok = new Token[1];
+        Tok[0].startToken();
+        Tok[0].setKind(tok::annot_module_include);
+        Tok[0].setLocation(HashLoc);
+        Tok[0].setAnnotationEndLoc(End);
+        Tok[0].setAnnotationValue(Imported);
+        EnterTokenStream(Tok, 1, true, true);
       }
       return;
     }
@@ -1939,13 +2018,8 @@ void Preprocessor::HandleDefineDirective(Token &DefineTok,
             MI->getReplacementToken(NumTokens-1).is(tok::comma))
           MI->setHasCommaPasting();
 
-        // Things look ok, add the '##' and param name tokens to the macro.
+        // Things look ok, add the '##' token to the macro.
         MI->AddTokenToBody(LastTok);
-        MI->AddTokenToBody(Tok);
-        LastTok = Tok;
-
-        // Get the next token of the macro.
-        LexUnexpandedToken(Tok);
         continue;
       }
 

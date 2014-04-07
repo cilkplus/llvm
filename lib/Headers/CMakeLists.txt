@@ -24,6 +24,7 @@ set(files
   prfchwintrin.h
   rdseedintrin.h
   rtmintrin.h
+  shaintrin.h
   smmintrin.h
   stdalign.h
   stdarg.h
@@ -31,6 +32,7 @@ set(files
   stddef.h
   stdint.h
   stdnoreturn.h
+  tbmintrin.h
   tgmath.h
   tmmintrin.h
   varargs.h

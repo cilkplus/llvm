@@ -1709,7 +1709,8 @@ QualType ASTNodeImporter::VisitAutoType(const AutoType *T) {
       return QualType();
   }
   
-  return Importer.getToContext().getAutoType(ToDeduced, T->isDecltypeAuto());
+  return Importer.getToContext().getAutoType(ToDeduced, T->isDecltypeAuto(), 
+                                             /*IsDependent*/false);
 }
 
 QualType ASTNodeImporter::VisitRecordType(const RecordType *T) {
@@ -1982,9 +1983,6 @@ bool ASTNodeImporter::ImportDefinition(RecordDecl *From, RecordDecl *To,
       = FromData.HasDeclaredCopyConstructorWithConstParam;
     ToData.HasDeclaredCopyAssignmentWithConstParam
       = FromData.HasDeclaredCopyAssignmentWithConstParam;
-    ToData.FailedImplicitMoveConstructor
-      = FromData.FailedImplicitMoveConstructor;
-    ToData.FailedImplicitMoveAssignment = FromData.FailedImplicitMoveAssignment;
     ToData.IsLambda = FromData.IsLambda;
 
     SmallVector<CXXBaseSpecifier *, 4> Bases;
@@ -2177,8 +2175,17 @@ bool ASTNodeImporter::ImportTemplateArguments(const TemplateArgument *FromArgs,
 
 bool ASTNodeImporter::IsStructuralMatch(RecordDecl *FromRecord, 
                                         RecordDecl *ToRecord, bool Complain) {
+  // Eliminate a potential failure point where we attempt to re-import
+  // something we're trying to import while completing ToRecord.
+  Decl *ToOrigin = Importer.GetOriginalDecl(ToRecord);
+  if (ToOrigin) {
+    RecordDecl *ToOriginRecord = dyn_cast<RecordDecl>(ToOrigin);
+    if (ToOriginRecord)
+      ToRecord = ToOriginRecord;
+  }
+
   StructuralEquivalenceContext Ctx(Importer.getFromContext(),
-                                   Importer.getToContext(),
+                                   ToRecord->getASTContext(),
                                    Importer.getNonEquivalentDecls(),
                                    false, Complain);
   return Ctx.IsStructurallyEquivalent(FromRecord, ToRecord);
@@ -3007,7 +3014,8 @@ Decl *ASTNodeImporter::VisitObjCIvarDecl(ObjCIvarDecl *D) {
                                        Importer.Import(D->getInnerLocStart()),
                                               Loc, Name.getAsIdentifierInfo(),
                                               T, TInfo, D->getAccessControl(),
-                                              BitWidth, D->getSynthesize());
+                                              BitWidth, D->getSynthesize(),
+                                              D->getBackingIvarReferencedInAccessor());
   ToIvar->setLexicalDeclContext(LexicalDC);
   Importer.Imported(D, ToIvar);
   LexicalDC->addDeclInternal(ToIvar);

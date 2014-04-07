@@ -168,8 +168,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
     break;
   case Stmt::CXXForRangeStmtClass:
     EmitCXXForRangeStmt(cast<CXXForRangeStmt>(*S));
+    break;
   case Stmt::SEHTryStmtClass:
-    // FIXME Not yet implemented
+    EmitSEHTryStmt(cast<SEHTryStmt>(*S));
     break;
   }
 }
@@ -638,15 +639,14 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S) {
   // Create a cleanup scope for the condition variable cleanups.
   RunCleanupsScope ConditionScope(*this);
 
-  llvm::Value *BoolCondVal = 0;
   if (S.getCond()) {
     // If the for statement has a condition scope, emit the local variable
     // declaration.
-    llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
     if (S.getConditionVariable()) {
       EmitAutoVarDecl(*S.getConditionVariable());
     }
 
+    llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
     // If there are any cleanups between here and the loop-exit scope,
     // create a block to stage a loop exit along.
     if (ForScope.requiresCleanups())
@@ -657,8 +657,7 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S) {
 
     // C99 6.8.5p2/p4: The first substatement is executed if the expression
     // compares unequal to 0.  The condition must be a scalar type.
-    BoolCondVal = EvaluateExprAsBool(S.getCond());
-    Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock);
+    EmitBranchOnBoolExpr(S.getCond(), ForBody, ExitBlock);
 
     if (ExitBlock != LoopExit.getBlock()) {
       EmitBlock(ExitBlock);
@@ -738,8 +737,7 @@ void CodeGenFunction::EmitCXXForRangeStmt(const CXXForRangeStmt &S) {
 
   // The body is executed if the expression, contextually converted
   // to bool, is true.
-  llvm::Value *BoolCondVal = EvaluateExprAsBool(S.getCond());
-  Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock);
+  EmitBranchOnBoolExpr(S.getCond(), ForBody, ExitBlock);
 
   if (ExitBlock != LoopExit.getBlock()) {
     EmitBlock(ExitBlock);
@@ -1410,11 +1408,12 @@ AddVariableConstraints(const std::string &Constraint, const Expr &AsmExpr,
 llvm::Value*
 CodeGenFunction::EmitAsmInputLValue(const TargetInfo::ConstraintInfo &Info,
                                     LValue InputValue, QualType InputType,
-                                    std::string &ConstraintStr) {
+                                    std::string &ConstraintStr,
+                                    SourceLocation Loc) {
   llvm::Value *Arg;
   if (Info.allowsRegister() || !Info.allowsMemory()) {
     if (CodeGenFunction::hasScalarEvaluationKind(InputType)) {
-      Arg = EmitLoadOfLValue(InputValue).getScalarVal();
+      Arg = EmitLoadOfLValue(InputValue, Loc).getScalarVal();
     } else {
       llvm::Type *Ty = ConvertType(InputType);
       uint64_t Size = CGM.getDataLayout().getTypeSizeInBits(Ty);
@@ -1447,7 +1446,8 @@ llvm::Value* CodeGenFunction::EmitAsmInput(
 
   InputExpr = InputExpr->IgnoreParenNoopCasts(getContext());
   LValue Dest = EmitLValue(InputExpr);
-  return EmitAsmInputLValue(Info, Dest, InputExpr->getType(), ConstraintStr);
+  return EmitAsmInputLValue(Info, Dest, InputExpr->getType(), ConstraintStr,
+                            InputExpr->getExprLoc());
 }
 
 /// getAsmSrcLocInfo - Return the !srcloc metadata node to attach to an inline
@@ -1592,7 +1592,8 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
 
       const Expr *InputExpr = S.getOutputExpr(i);
       llvm::Value *Arg = EmitAsmInputLValue(Info, Dest, InputExpr->getType(),
-                                            InOutConstraints);
+                                            InOutConstraints,
+                                            InputExpr->getExprLoc());
 
       if (llvm::Type* AdjTy =
           getTargetHooks().adjustInlineAsmType(*this, OutputConstraint,
@@ -1803,7 +1804,7 @@ CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K) {
   // Emit the CapturedDecl
   CodeGenFunction CGF(CGM, true);
   CGF.CapturedStmtInfo = new CGCapturedStmtInfo(S, K);
-  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
+  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD, S.getLocStart());
   delete CGF.CapturedStmtInfo;
 
   // Emit call to the helper function.
@@ -1815,7 +1816,8 @@ CodeGenFunction::EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K) {
 /// Creates the outlined function for a CapturedStmt.
 llvm::Function *
 CodeGenFunction::GenerateCapturedStmtFunction(const CapturedDecl *CD,
-                                              const RecordDecl *RD) {
+                                              const RecordDecl *RD,
+                                              SourceLocation Loc) {
   assert(CapturedStmtInfo &&
     "CapturedStmtInfo should be set when generating the captured function");
 
@@ -1850,8 +1852,7 @@ CodeGenFunction::GenerateCapturedStmtFunction(const CapturedDecl *CD,
     LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getContextValue(),
                                            Ctx.getTagDeclType(RD));
     LValue ThisLValue = EmitLValueForField(LV, FD);
-
-    CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
+    CXXThisValue = EmitLoadOfLValue(ThisLValue, Loc).getScalarVal();
   }
 
   CapturedStmtInfo->EmitBody(*this, CD->getBody());
