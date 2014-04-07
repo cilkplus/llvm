@@ -377,6 +377,7 @@ static const char *getElfSectionType(unsigned Arch, unsigned Type) {
 static const EnumEntry<unsigned> ElfSectionFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_WRITE           ),
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_ALLOC           ),
+  LLVM_READOBJ_ENUM_ENT(ELF, SHF_EXCLUDE         ),
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_EXECINSTR       ),
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_MERGE           ),
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_STRINGS         ),
@@ -390,26 +391,41 @@ static const EnumEntry<unsigned> ElfSectionFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_MIPS_NOSTRIP    )
 };
 
-static const EnumEntry<unsigned> ElfSegmentTypes[] = {
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_NULL   ),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_LOAD   ),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_DYNAMIC),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_INTERP ),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_NOTE   ),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_SHLIB  ),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_PHDR   ),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_TLS    ),
+static const char *getElfSegmentType(unsigned Arch, unsigned Type) {
+  // Check potentially overlapped processor-specific
+  // program header type.
+  switch (Arch) {
+  case ELF::EM_ARM:
+    switch (Type) {
+    LLVM_READOBJ_ENUM_CASE(ELF, PT_ARM_EXIDX);
+    }
+  case ELF::EM_MIPS:
+  case ELF::EM_MIPS_RS3_LE:
+    switch (Type) {
+    LLVM_READOBJ_ENUM_CASE(ELF, PT_MIPS_REGINFO);
+    LLVM_READOBJ_ENUM_CASE(ELF, PT_MIPS_RTPROC);
+    LLVM_READOBJ_ENUM_CASE(ELF, PT_MIPS_OPTIONS);
+    }
+  }
 
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_GNU_EH_FRAME),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_SUNW_EH_FRAME),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_SUNW_UNWIND),
+  switch (Type) {
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_NULL   );
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_LOAD   );
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_DYNAMIC);
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_INTERP );
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_NOTE   );
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_SHLIB  );
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_PHDR   );
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_TLS    );
 
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_GNU_STACK),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_GNU_RELRO),
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_GNU_EH_FRAME);
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_SUNW_UNWIND);
 
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_ARM_EXIDX),
-  LLVM_READOBJ_ENUM_ENT(ELF, PT_ARM_UNWIND)
-};
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_GNU_STACK);
+  LLVM_READOBJ_ENUM_CASE(ELF, PT_GNU_RELRO);
+  default: return "";
+  }
+}
 
 static const EnumEntry<unsigned> ElfSegmentFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, PF_X),
@@ -419,8 +435,6 @@ static const EnumEntry<unsigned> ElfSegmentFlags[] = {
 
 template<class ELFT>
 void ELFDumper<ELFT>::printFileHeaders() {
-  error_code EC;
-
   const typename ELFO::Elf_Ehdr *Header = Obj->getHeader();
 
   {
@@ -511,7 +525,6 @@ template<class ELFT>
 void ELFDumper<ELFT>::printRelocations() {
   ListScope D(W, "Relocations");
 
-  error_code EC;
   int SectionNumber = -1;
   for (typename ELFO::Elf_Shdr_Iter SecI = Obj->begin_sections(),
                                     SecE = Obj->end_sections();
@@ -670,6 +683,16 @@ static const char *getTypeString(uint64_t Type) {
   LLVM_READOBJ_TYPE_CASE(SYMENT);
   LLVM_READOBJ_TYPE_CASE(SYMTAB);
   LLVM_READOBJ_TYPE_CASE(TEXTREL);
+  LLVM_READOBJ_TYPE_CASE(VERNEED);
+  LLVM_READOBJ_TYPE_CASE(VERNEEDNUM);
+  LLVM_READOBJ_TYPE_CASE(VERSYM);
+  LLVM_READOBJ_TYPE_CASE(MIPS_RLD_VERSION);
+  LLVM_READOBJ_TYPE_CASE(MIPS_FLAGS);
+  LLVM_READOBJ_TYPE_CASE(MIPS_BASE_ADDRESS);
+  LLVM_READOBJ_TYPE_CASE(MIPS_LOCAL_GOTNO);
+  LLVM_READOBJ_TYPE_CASE(MIPS_SYMTABNO);
+  LLVM_READOBJ_TYPE_CASE(MIPS_UNREFEXTNO);
+  LLVM_READOBJ_TYPE_CASE(MIPS_GOTSYM);
   default: return "unknown";
   }
 }
@@ -702,8 +725,20 @@ static void printValue(const ELFFile<ELFT> *O, uint64_t Type, uint64_t Value,
   case DT_FINI_ARRAY:
   case DT_PREINIT_ARRAY:
   case DT_DEBUG:
+  case DT_VERNEED:
+  case DT_VERSYM:
   case DT_NULL:
+  case DT_MIPS_FLAGS:
+  case DT_MIPS_BASE_ADDRESS:
+  case DT_MIPS_GOTSYM:
     OS << format("0x%" PRIX64, Value);
+    break;
+  case DT_VERNEEDNUM:
+  case DT_MIPS_RLD_VERSION:
+  case DT_MIPS_LOCAL_GOTNO:
+  case DT_MIPS_SYMTABNO:
+  case DT_MIPS_UNREFEXTNO:
+    OS << Value;
     break;
   case DT_PLTRELSZ:
   case DT_RELASZ:
@@ -722,6 +757,10 @@ static void printValue(const ELFFile<ELFT> *O, uint64_t Type, uint64_t Value,
     break;
   case DT_SONAME:
     OS << "LibrarySoname (" << O->getDynamicString(Value) << ")";
+    break;
+  case DT_RPATH:
+  case DT_RUNPATH:
+    OS << O->getDynamicString(Value);
     break;
   }
 }
@@ -764,8 +803,6 @@ template<class ELFT>
 void ELFDumper<ELFT>::printNeededLibraries() {
   ListScope D(W, "NeededLibraries");
 
-  error_code EC;
-
   typedef std::vector<StringRef> LibsTy;
   LibsTy Libs;
 
@@ -790,7 +827,9 @@ void ELFDumper<ELFT>::printProgramHeaders() {
                                     PE = Obj->end_program_headers();
                                     PI != PE; ++PI) {
     DictScope P(W, "ProgramHeader");
-    W.printEnum  ("Type", PI->p_type, makeArrayRef(ElfSegmentTypes));
+    W.printHex   ("Type",
+                  getElfSegmentType(Obj->getHeader()->e_machine, PI->p_type),
+                  PI->p_type);
     W.printHex   ("Offset", PI->p_offset);
     W.printHex   ("VirtualAddress", PI->p_vaddr);
     W.printHex   ("PhysicalAddress", PI->p_paddr);

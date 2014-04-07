@@ -28,18 +28,20 @@ static bool didCallAllocateCodeSection;
 
 static uint8_t *roundTripAllocateCodeSection(void *object, uintptr_t size,
                                              unsigned alignment,
-                                             unsigned sectionID) {
+                                             unsigned sectionID,
+                                             const char *sectionName) {
   didCallAllocateCodeSection = true;
   return static_cast<SectionMemoryManager*>(object)->allocateCodeSection(
-    size, alignment, sectionID);
+    size, alignment, sectionID, sectionName);
 }
 
 static uint8_t *roundTripAllocateDataSection(void *object, uintptr_t size,
                                              unsigned alignment,
                                              unsigned sectionID,
+                                             const char *sectionName,
                                              LLVMBool isReadOnly) {
   return static_cast<SectionMemoryManager*>(object)->allocateDataSection(
-    size, alignment, sectionID, isReadOnly);
+    size, alignment, sectionID, sectionName, isReadOnly);
 }
 
 static LLVMBool roundTripFinalizeMemory(void *object, char **errMsg) {
@@ -57,6 +59,7 @@ static void roundTripDestroy(void *object) {
   delete static_cast<SectionMemoryManager*>(object);
 }
 
+namespace {
 class MCJITCAPITest : public testing::Test, public MCJITTestAPICommon {
 protected:
   MCJITCAPITest() {
@@ -154,6 +157,7 @@ protected:
   LLVMExecutionEngineRef Engine;
   char *Error;
 };
+} // end anonymous namespace
 
 TEST_F(MCJITCAPITest, simple_function) {
   SKIP_UNSUPPORTED_PLATFORM;

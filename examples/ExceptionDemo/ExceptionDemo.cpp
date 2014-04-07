@@ -1562,7 +1562,7 @@ llvm::Function *createUnwindExceptionTest(llvm::Module &module,
   return(outerCatchFunct);
 }
 
-
+namespace {
 /// Represents our foreign exceptions
 class OurCppRunException : public std::runtime_error {
 public:
@@ -1577,9 +1577,9 @@ public:
                                  std::runtime_error::operator=(toCopy)));
   }
 
-  ~OurCppRunException (void) throw () {}
+  virtual ~OurCppRunException (void) throw () {}
 };
-
+} // end anonymous namespace
 
 /// Throws foreign C++ exception.
 /// @param ignoreIt unused parameter that allows function to match implied

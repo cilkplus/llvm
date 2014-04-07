@@ -120,7 +120,9 @@ class RAGreedy : public MachineFunctionPass,
     RS_Done
   };
 
+#ifndef NDEBUG
   static const char *const StageName[];
+#endif
 
   // RegInfo - Keep additional information about each live range.
   struct RegInfo {
@@ -220,7 +222,7 @@ class RAGreedy : public MachineFunctionPass,
   /// class.
   SmallVector<GlobalSplitCandidate, 32> GlobalCand;
 
-  enum { NoCand = ~0u };
+  enum LLVM_ENUM_INT_TYPE(unsigned) { NoCand = ~0u };
 
   /// Candidate map. Each edge bundle is assigned to a GlobalCand entry, or to
   /// NoCand which indicates the stack interval.
@@ -313,7 +315,6 @@ RAGreedy::RAGreedy(): MachineFunctionPass(ID) {
   initializeSlotIndexesPass(*PassRegistry::getPassRegistry());
   initializeRegisterCoalescerPass(*PassRegistry::getPassRegistry());
   initializeMachineSchedulerPass(*PassRegistry::getPassRegistry());
-  initializeCalculateSpillWeightsPass(*PassRegistry::getPassRegistry());
   initializeLiveStacksPass(*PassRegistry::getPassRegistry());
   initializeMachineDominatorTreePass(*PassRegistry::getPassRegistry());
   initializeMachineLoopInfoPass(*PassRegistry::getPassRegistry());
@@ -337,7 +338,6 @@ void RAGreedy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<LiveDebugVariables>();
   AU.addRequired<LiveStacks>();
   AU.addPreserved<LiveStacks>();
-  AU.addRequired<CalculateSpillWeights>();
   AU.addRequired<MachineDominatorTree>();
   AU.addPreserved<MachineDominatorTree>();
   AU.addRequired<MachineLoopInfo>();
@@ -1464,9 +1464,9 @@ void RAGreedy::calcGapWeights(unsigned PhysReg,
 
   // Add fixed interference.
   for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
-    const LiveInterval &LI = LIS->getRegUnit(*Units);
-    LiveInterval::const_iterator I = LI.find(StartIdx);
-    LiveInterval::const_iterator E = LI.end();
+    const LiveRange &LR = LIS->getRegUnit(*Units);
+    LiveRange::const_iterator I = LR.find(StartIdx);
+    LiveRange::const_iterator E = LR.end();
 
     // Same loop as above. Mark any overlapped gaps as HUGE_VALF.
     for (unsigned Gap = 0; I != E && I->start < StopIdx; ++I) {
@@ -1477,7 +1477,7 @@ void RAGreedy::calcGapWeights(unsigned PhysReg,
         break;
 
       for (; Gap != NumGaps; ++Gap) {
-        GapWeight[Gap] = HUGE_VALF;
+        GapWeight[Gap] = llvm::huge_valf;
         if (Uses[Gap+1].getBaseIndex() >= I->end)
           break;
       }
@@ -1583,7 +1583,7 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
     // Remove any gaps with regmask clobbers.
     if (Matrix->checkRegMaskInterference(VirtReg, PhysReg))
       for (unsigned i = 0, e = RegMaskGaps.size(); i != e; ++i)
-        GapWeight[RegMaskGaps[i]] = HUGE_VALF;
+        GapWeight[RegMaskGaps[i]] = llvm::huge_valf;
 
     // Try to find the best sequence of gaps to close.
     // The new spill weight must be larger than any gap interference.
@@ -1618,7 +1618,7 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
       // Legally, without causing looping?
       bool Legal = !ProgressRequired || NewGaps < NumGaps;
 
-      if (Legal && MaxGap < HUGE_VALF) {
+      if (Legal && MaxGap < llvm::huge_valf) {
         // Estimate the new spill weight. Each instruction reads or writes the
         // register. Conservatively assume there are no read-modify-write
         // instructions.
@@ -1837,6 +1837,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   Bundles = &getAnalysis<EdgeBundles>();
   SpillPlacer = &getAnalysis<SpillPlacement>();
   DebugVars = &getAnalysis<LiveDebugVariables>();
+
+  calculateSpillWeightsAndHints(*LIS, mf, *Loops, *MBFI);
 
   DEBUG(LIS->dump());
 

@@ -51,6 +51,13 @@ namespace CallingConv {
     // (HiPE).
     HiPE = 11,
 
+    // WebKit JS - Calling convention for stack based JavaScript calls
+    WebKit_JS = 12,
+
+    // AnyReg - Calling convention for dynamic register based calls (e.g.
+    // stackmap and patchpoint intrinsics).
+    AnyReg = 13,
+
     // Target - This is the start of the target-specific calling conventions,
     // e.g. fastcall and thiscall on X86.
     FirstTargetCC = 64,

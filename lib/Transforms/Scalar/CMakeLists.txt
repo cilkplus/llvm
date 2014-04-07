@@ -1,9 +1,5 @@
 add_llvm_library(LLVMScalarOpts
   ADCE.cpp
-  BasicBlockPlacement.cpp
-  CilkPlus.cpp
-  CilkStackFrameInit.cpp
-  CilkSync.cpp
   CodeGenPrepare.cpp
   ConstantProp.cpp
   CorrelatedValuePropagation.cpp
@@ -20,6 +16,7 @@ add_llvm_library(LLVMScalarOpts
   LoopInstSimplify.cpp
   LoopRotation.cpp
   LoopStrengthReduce.cpp
+  LoopRerollPass.cpp
   LoopUnrollPass.cpp
   LoopUnswitch.cpp
   LowerAtomic.cpp
@@ -27,6 +24,7 @@ add_llvm_library(LLVMScalarOpts
   PartiallyInlineLibCalls.cpp
   Reassociate.cpp
   Reg2Mem.cpp
+  SampleProfile.cpp
   SCCP.cpp
   SROA.cpp
   Scalar.cpp

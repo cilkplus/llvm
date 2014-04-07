@@ -35,7 +35,7 @@ MCAsmInfo::MCAsmInfo() {
   LinkerRequiresNonEmptyDwarfLines = false;
   MaxInstLength = 4;
   MinInstAlignment = 1;
-  PCSymbol = "$";
+  DollarIsPC = false;
   SeparatorString = ";";
   CommentColumn = 40;
   CommentString = "#";
@@ -50,10 +50,7 @@ MCAsmInfo::MCAsmInfo() {
   Code32Directive = ".code32";
   Code64Directive = ".code64";
   AssemblerDialect = 0;
-  AllowQuotesInName = false;
-  AllowNameToStartWithDigit = false;
-  AllowPeriodsInName = true;
-  AllowUTF8 = true;
+  AllowAtInName = false;
   UseDataRegionDirectives = false;
   ZeroDirective = "\t.zero\t";
   AsciiDirective = "\t.ascii\t";
@@ -76,8 +73,8 @@ MCAsmInfo::MCAsmInfo() {
   LCOMMDirectiveAlignmentType = LCOMM::NoAlignment;
   HasDotTypeDotSizeDirective = true;
   HasSingleParameterDotFile = true;
+  HasIdentDirective = false;
   HasNoDeadStrip = false;
-  HasSymbolResolver = false;
   WeakRefDirective = 0;
   WeakDefDirective = 0;
   LinkOnceDirective = 0;
@@ -87,7 +84,6 @@ MCAsmInfo::MCAsmInfo() {
   HasLEB128 = false;
   SupportsDebugInformation = false;
   ExceptionsType = ExceptionHandling::None;
-  DwarfUsesInlineInfoSection = false;
   DwarfUsesRelocationsAcrossSections = true;
   DwarfRegNumForCFI = false;
   HasMicrosoftFastStdCallMangling = false;

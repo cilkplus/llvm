@@ -226,12 +226,12 @@ _func:
         beq.w _bar
         bmi.w   #-183396
 
-@ CHECK: b.w	_bar                    @ encoding: [A,0xf0'A',A,0xb8'A']
+@ CHECK: b.w	_bar                    @ encoding: [A,0xf0'A',A,0x90'A']
           @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
 @ CHECK: beq.w	_bar                    @ encoding: [A,0xf0'A',A,0x80'A']
           @   fixup A - offset: 0, value: _bar, kind: fixup_t2_condbranch
 @ CHECK: it	eq                      @ encoding: [0x08,0xbf]
-@ CHECK: beq.w	_bar                    @ encoding: [A,0xf0'A',A,0xb8'A']
+@ CHECK: beq.w	_bar                    @ encoding: [A,0xf0'A',A,0x90'A']
           @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
 @ CHECK: bmi.w   #-183396                @ encoding: [0x13,0xf5,0xce,0xa9]
 
@@ -662,8 +662,8 @@ _func:
         ldc2l p7, c1, [r8]
         ldc2l p8, c0, [r9, #-224]
         ldc2l p9, c1, [r10, #-120]!
-        ldc2l p10, c2, [r11], #16
-        ldc2l p11, c3, [r12], #-72
+        ldc2l p0, c2, [r11], #16
+        ldc2l p1, c3, [r12], #-72
 
         ldc p12, c4, [r0, #4]
         ldc p13, c5, [r1]
@@ -690,8 +690,8 @@ _func:
 @ CHECK: ldc2l	p7, c1, [r8]            @ encoding: [0xd8,0xfd,0x00,0x17]
 @ CHECK: ldc2l	p8, c0, [r9, #-224]     @ encoding: [0x59,0xfd,0x38,0x08]
 @ CHECK: ldc2l	p9, c1, [r10, #-120]!   @ encoding: [0x7a,0xfd,0x1e,0x19]
-@ CHECK: ldc2l	p10, c2, [r11], #16     @ encoding: [0xfb,0xfc,0x04,0x2a]
-@ CHECK: ldc2l	p11, c3, [r12], #-72    @ encoding: [0x7c,0xfc,0x12,0x3b]
+@ CHECK: ldc2l	p0, c2, [r11], #16      @ encoding: [0xfb,0xfc,0x04,0x20]
+@ CHECK: ldc2l	p1, c3, [r12], #-72     @ encoding: [0x7c,0xfc,0x12,0x31]
 
 @ CHECK: ldc	p12, c4, [r0, #4]       @ encoding: [0x90,0xed,0x01,0x4c]
 @ CHECK: ldc	p13, c5, [r1]           @ encoding: [0x91,0xed,0x00,0x5d]
@@ -1417,17 +1417,17 @@ _func:
 @------------------------------------------------------------------------------
         mrc  p14, #0, r1, c1, c2, #4
         mrc  p15, #7, apsr_nzcv, c15, c6, #6
-        mrc  p11, #1, r1, c2, c2
+        mrc  p9, #1, r1, c2, c2
         mrc2 p12, #3, r3, c3, c4
         mrc2 p14, #0, r1, c1, c2, #4
-        mrc2 p10, #7, apsr_nzcv, c15, c0, #1
+        mrc2 p8, #7, apsr_nzcv, c15, c0, #1
  
 @ CHECK: mrc  p14, #0, r1, c1, c2, #4            @ encoding: [0x11,0xee,0x92,0x1e]
 @ CHECK: mrc  p15, #7, apsr_nzcv, c15, c6, #6    @ encoding: [0xff,0xee,0xd6,0xff]
-@ CHECK: mrc  p11, #1, r1, c2, c2, #0            @ encoding: [0x32,0xee,0x12,0x1b]
+@ CHECK: mrc  p9, #1, r1, c2, c2, #0             @ encoding: [0x32,0xee,0x12,0x19]
 @ CHECK: mrc2 p12, #3, r3, c3, c4, #0            @ encoding: [0x73,0xfe,0x14,0x3c]
 @ CHECK: mrc2 p14, #0, r1, c1, c2, #4            @ encoding: [0x11,0xfe,0x92,0x1e]
-@ CHECK: mrc2 p10, #7, apsr_nzcv, c15, c0, #1    @ encoding: [0xff,0xfe,0x30,0xfa]
+@ CHECK: mrc2 p8, #7, apsr_nzcv, c15, c0, #1     @ encoding: [0xff,0xfe,0x30,0xf8]
  
 @------------------------------------------------------------------------------
 @ MRRC/MRRC2
@@ -2554,8 +2554,8 @@ _func:
         stc2l p7, c1, [r8]
         stc2l p8, c0, [r9, #-224]
         stc2l p9, c1, [r10, #-120]!
-        stc2l p10, c2, [r11], #16
-        stc2l p11, c3, [r12], #-72
+        stc2l p0, c2, [r11], #16
+        stc2l p1, c3, [r12], #-72
 
         stc p12, c4, [r0, #4]
         stc p13, c5, [r1]
@@ -2582,8 +2582,8 @@ _func:
 @ CHECK: stc2l	p7, c1, [r8]            @ encoding: [0xc8,0xfd,0x00,0x17]
 @ CHECK: stc2l	p8, c0, [r9, #-224]     @ encoding: [0x49,0xfd,0x38,0x08]
 @ CHECK: stc2l	p9, c1, [r10, #-120]!   @ encoding: [0x6a,0xfd,0x1e,0x19]
-@ CHECK: stc2l	p10, c2, [r11], #16     @ encoding: [0xeb,0xfc,0x04,0x2a]
-@ CHECK: stc2l	p11, c3, [r12], #-72    @ encoding: [0x6c,0xfc,0x12,0x3b]
+@ CHECK: stc2l	p0, c2, [r11], #16      @ encoding: [0xeb,0xfc,0x04,0x20]
+@ CHECK: stc2l	p1, c3, [r12], #-72     @ encoding: [0x6c,0xfc,0x12,0x31]
 
 @ CHECK: stc	p12, c4, [r0, #4]       @ encoding: [0x80,0xed,0x01,0x4c]
 @ CHECK: stc	p13, c5, [r1]           @ encoding: [0x81,0xed,0x00,0x5d]
@@ -3593,10 +3593,20 @@ _func:
         wfige
         yieldlt
         hint.w #4
+        hint.w #3
+        hint.w #2
+        hint.w #1
+        hint.w #0
+        hint #4
         hint #3
         hint #2
         hint #1
         hint #0
+
+        itet lt
+        hintlt #15
+        hintge #16
+        hintlt #239
 
 @ CHECK: wfe                            @ encoding: [0x20,0xbf]
 @ CHECK: wfi                            @ encoding: [0x30,0xbf]
@@ -3610,7 +3620,24 @@ _func:
 @ CHECK: wfe.w                          @ encoding: [0xaf,0xf3,0x02,0x80]
 @ CHECK: yield.w                        @ encoding: [0xaf,0xf3,0x01,0x80]
 @ CHECK: nop.w                          @ encoding: [0xaf,0xf3,0x00,0x80]
+@ CHECK: sev                            @ encoding: [0x40,0xbf]
+@ CHECK: wfi                            @ encoding: [0x30,0xbf]
+@ CHECK: wfe                            @ encoding: [0x20,0xbf]
+@ CHECK: yield                          @ encoding: [0x10,0xbf]
+@ CHECK: nop                            @ encoding: [0x00,0xbf]
 
+@ CHECK: itet	lt                      @ encoding: [0xb6,0xbf]
+@ CHECK: hintlt #15                     @ encoding: [0xf0,0xbf]
+@ CHECK: hintge.w #16                   @ encoding: [0xaf,0xf3,0x10,0x80]
+@ CHECK: hintlt.w #239                  @ encoding: [0xaf,0xf3,0xef,0x80]
+
+@------------------------------------------------------------------------------
+@ Unallocated wide/narrow hints
+@------------------------------------------------------------------------------
+        hint #7
+        hint.w #7
+@ CHECK: hint #7                        @ encoding: [0x70,0xbf]
+@ CHECK: hint.w #7                      @ encoding: [0xaf,0xf3,0x07,0x80]
 
 @------------------------------------------------------------------------------
 @ Alternate syntax for LDR*(literal) encodings

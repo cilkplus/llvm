@@ -224,7 +224,8 @@ static bool IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV,
                                        APInt &Offset, const DataLayout &TD) {
   // Trivial case, constant is the global.
   if ((GV = dyn_cast<GlobalValue>(C))) {
-    Offset.clearAllBits();
+    unsigned BitWidth = TD.getPointerTypeSizeInBits(GV->getType());
+    Offset = APInt(BitWidth, 0);
     return true;
   }
 
@@ -238,16 +239,23 @@ static bool IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV,
     return IsConstantOffsetFromGlobal(CE->getOperand(0), GV, Offset, TD);
 
   // i32* getelementptr ([5 x i32]* @a, i32 0, i32 5)
-  if (GEPOperator *GEP = dyn_cast<GEPOperator>(CE)) {
-    // If the base isn't a global+constant, we aren't either.
-    if (!IsConstantOffsetFromGlobal(CE->getOperand(0), GV, Offset, TD))
-      return false;
+  GEPOperator *GEP = dyn_cast<GEPOperator>(CE);
+  if (!GEP)
+    return false;
 
-    // Otherwise, add any offset that our operands provide.
-    return GEP->accumulateConstantOffset(TD, Offset);
-  }
+  unsigned BitWidth = TD.getPointerTypeSizeInBits(GEP->getType());
+  APInt TmpOffset(BitWidth, 0);
 
-  return false;
+  // If the base isn't a global+constant, we aren't either.
+  if (!IsConstantOffsetFromGlobal(CE->getOperand(0), GV, TmpOffset, TD))
+    return false;
+
+  // Otherwise, add any offset that our operands provide.
+  if (!GEP->accumulateConstantOffset(TD, TmpOffset))
+    return false;
+
+  Offset = TmpOffset;
+  return true;
 }
 
 /// ReadDataFromGlobal - Recursive helper to read bits out of global.  C is the
@@ -416,7 +424,7 @@ static Constant *FoldReinterpretLoadFromConstPtr(Constant *C,
     return 0;
 
   GlobalValue *GVal;
-  APInt Offset(TD.getPointerTypeSizeInBits(PTy), 0);
+  APInt Offset;
   if (!IsConstantOffsetFromGlobal(C, GVal, Offset, TD))
     return 0;
 
@@ -585,13 +593,13 @@ static Constant *SymbolicallyEvaluateBinop(unsigned Opc, Constant *Op0,
   // constant.  This happens frequently when iterating over a global array.
   if (Opc == Instruction::Sub && DL) {
     GlobalValue *GV1, *GV2;
-    unsigned PtrSize = DL->getPointerSizeInBits();
-    unsigned OpSize = DL->getTypeSizeInBits(Op0->getType());
-    APInt Offs1(PtrSize, 0), Offs2(PtrSize, 0);
+    APInt Offs1, Offs2;
 
     if (IsConstantOffsetFromGlobal(Op0, GV1, Offs1, *DL))
       if (IsConstantOffsetFromGlobal(Op1, GV2, Offs2, *DL) &&
           GV1 == GV2) {
+        unsigned OpSize = DL->getTypeSizeInBits(Op0->getType());
+
         // (&GV+C1) - (&GV+C2) -> C1-C2, pointer arithmetic cannot overflow.
         // PtrToInt may change the bitwidth so we have convert to the right size
         // first.
@@ -655,7 +663,7 @@ static Constant* StripPtrCastKeepAS(Constant* Ptr) {
   if (NewPtrTy->getAddressSpace() != OldPtrTy->getAddressSpace()) {
     NewPtrTy = NewPtrTy->getElementType()->getPointerTo(
       OldPtrTy->getAddressSpace());
-    Ptr = ConstantExpr::getBitCast(Ptr, NewPtrTy);
+    Ptr = ConstantExpr::getPointerCast(Ptr, NewPtrTy);
   }
   return Ptr;
 }
@@ -973,10 +981,11 @@ Constant *llvm::ConstantFoldInstOperands(unsigned Opcode, Type *DestTy,
       if (TD && CE->getOpcode() == Instruction::IntToPtr) {
         Constant *Input = CE->getOperand(0);
         unsigned InWidth = Input->getType()->getScalarSizeInBits();
-        if (TD->getPointerTypeSizeInBits(CE->getType()) < InWidth) {
+        unsigned PtrWidth = TD->getPointerTypeSizeInBits(CE->getType());
+        if (PtrWidth < InWidth) {
           Constant *Mask =
-            ConstantInt::get(CE->getContext(), APInt::getLowBitsSet(InWidth,
-                                                  TD->getPointerSizeInBits()));
+            ConstantInt::get(CE->getContext(),
+                             APInt::getLowBitsSet(InWidth, PtrWidth));
           Input = ConstantExpr::getAnd(Input, Mask);
         }
         // Do a zext or trunc to get to the dest size.
@@ -986,8 +995,9 @@ Constant *llvm::ConstantFoldInstOperands(unsigned Opcode, Type *DestTy,
     return ConstantExpr::getCast(Opcode, Ops[0], DestTy);
   case Instruction::IntToPtr:
     // If the input is a ptrtoint, turn the pair into a ptr to ptr bitcast if
-    // the int size is >= the ptr size.  This requires knowing the width of a
-    // pointer, so it can't be done in ConstantExpr::getCast.
+    // the int size is >= the ptr size and the address spaces are the same.
+    // This requires knowing the width of a pointer, so it can't be done in
+    // ConstantExpr::getCast.
     if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Ops[0])) {
       if (TD && CE->getOpcode() == Instruction::PtrToInt) {
         Constant *SrcPtr = CE->getOperand(0);
@@ -995,8 +1005,8 @@ Constant *llvm::ConstantFoldInstOperands(unsigned Opcode, Type *DestTy,
         unsigned MidIntSize = CE->getType()->getScalarSizeInBits();
 
         if (MidIntSize >= SrcPtrSize) {
-          unsigned DestPtrSize = TD->getPointerTypeSizeInBits(DestTy);
-          if (SrcPtrSize == DestPtrSize)
+          unsigned SrcAS = SrcPtr->getType()->getPointerAddressSpace();
+          if (SrcAS == DestTy->getPointerAddressSpace())
             return FoldBitCast(CE->getOperand(0), DestTy, *TD);
         }
       }
@@ -1012,6 +1022,7 @@ Constant *llvm::ConstantFoldInstOperands(unsigned Opcode, Type *DestTy,
   case Instruction::SIToFP:
   case Instruction::FPToUI:
   case Instruction::FPToSI:
+  case Instruction::AddrSpaceCast:
       return ConstantExpr::getCast(Opcode, Ops[0], DestTy);
   case Instruction::BitCast:
     if (TD)

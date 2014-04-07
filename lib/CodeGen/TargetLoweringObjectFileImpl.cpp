@@ -52,10 +52,10 @@ TargetLoweringObjectFileELF::getCFIPersonalitySymbol(const GlobalValue *GV,
   default:
     report_fatal_error("We do not support this DWARF encoding yet!");
   case dwarf::DW_EH_PE_absptr:
-    return  Mang->getSymbol(GV);
+    return  getSymbol(*Mang, GV);
   case dwarf::DW_EH_PE_pcrel: {
     return getContext().GetOrCreateSymbol(StringRef("DW.ref.") +
-                                          Mang->getSymbol(GV)->getName());
+                                          getSymbol(*Mang, GV)->getName());
   }
   }
 }
@@ -104,7 +104,7 @@ getTTypeGlobalReference(const GlobalValue *GV, Mangler *Mang,
     MCSymbol *SSym = getContext().GetOrCreateSymbol(Name.str());
     MachineModuleInfoImpl::StubValueTy &StubSym = ELFMMI.getGVStubEntry(SSym);
     if (StubSym.getPointer() == 0) {
-      MCSymbol *Sym = Mang->getSymbol(GV);
+      MCSymbol *Sym = getSymbol(*Mang, GV);
       StubSym = MachineModuleInfoImpl::StubValueTy(Sym, !GV->hasLocalLinkage());
     }
 
@@ -252,7 +252,7 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
     Prefix = getSectionPrefixForGlobal(Kind);
 
     SmallString<128> Name(Prefix, Prefix+strlen(Prefix));
-    MCSymbol *Sym = Mang->getSymbol(GV);
+    MCSymbol *Sym = getSymbol(*Mang, GV);
     Name.append(Sym->getName().begin(), Sym->getName().end());
     StringRef Group = "";
     unsigned Flags = getELFSectionFlags(Kind);
@@ -523,6 +523,11 @@ getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
 const MCSection *TargetLoweringObjectFileMachO::
 SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
                        Mangler *Mang, const TargetMachine &TM) const {
+
+  // Handle thread local data.
+  if (Kind.isThreadBSS()) return TLSBSSSection;
+  if (Kind.isThreadData()) return TLSDataSection;
+
   if (Kind.isText())
     return GV->isWeakForLinker() ? TextCoalSection : TextSection;
 
@@ -575,10 +580,6 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
   if (Kind.isBSSLocal())
     return DataBSSSection;
 
-  // Handle thread local data.
-  if (Kind.isThreadBSS()) return TLSBSSSection;
-  if (Kind.isThreadData()) return TLSDataSection;
-
   // Otherwise, just drop the variable in the normal data section.
   return DataSection;
 }
@@ -613,7 +614,7 @@ shouldEmitUsedDirectiveFor(const GlobalValue *GV, Mangler *Mang) const {
     // FIXME: ObjC metadata is currently emitted as internal symbols that have
     // \1L and \0l prefixes on them.  Fix them to be Private/LinkerPrivate and
     // this horrible hack can go away.
-    MCSymbol *Sym = Mang->getSymbol(GV);
+    MCSymbol *Sym = getSymbol(*Mang, GV);
     if (Sym->getName()[0] == 'L' || Sym->getName()[0] == 'l')
       return false;
   }
@@ -642,7 +643,7 @@ getTTypeGlobalReference(const GlobalValue *GV, Mangler *Mang,
       GV->hasHiddenVisibility() ? MachOMMI.getHiddenGVStubEntry(SSym) :
                                   MachOMMI.getGVStubEntry(SSym);
     if (StubSym.getPointer() == 0) {
-      MCSymbol *Sym = Mang->getSymbol(GV);
+      MCSymbol *Sym = getSymbol(*Mang, GV);
       StubSym = MachineModuleInfoImpl::StubValueTy(Sym, !GV->hasLocalLinkage());
     }
 
@@ -671,7 +672,7 @@ getCFIPersonalitySymbol(const GlobalValue *GV, Mangler *Mang,
   MCSymbol *SSym = getContext().GetOrCreateSymbol(Name.str());
   MachineModuleInfoImpl::StubValueTy &StubSym = MachOMMI.getGVStubEntry(SSym);
   if (StubSym.getPointer() == 0) {
-    MCSymbol *Sym = Mang->getSymbol(GV);
+    MCSymbol *Sym = getSymbol(*Mang, GV);
     StubSym = MachineModuleInfoImpl::StubValueTy(Sym, !GV->hasLocalLinkage());
   }
 
@@ -732,6 +733,7 @@ getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
   return getContext().getCOFFSection(Name,
                                      Characteristics,
                                      Kind,
+                                     "",
                                      Selection);
 }
 
@@ -767,7 +769,7 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
     Characteristics |= COFF::IMAGE_SCN_LNK_COMDAT;
 
     return getContext().getCOFFSection(Name.str(), Characteristics,
-                                       Kind, COFF::IMAGE_COMDAT_SELECT_ANY);
+                                       Kind, "", COFF::IMAGE_COMDAT_SELECT_ANY);
   }
 
   if (Kind.isText())

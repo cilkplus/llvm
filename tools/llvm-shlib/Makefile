@@ -10,10 +10,12 @@
 LEVEL := ../..
 
 LIBRARYNAME = LLVM-$(LLVMVersion)
+LIBRARYALIASNAME = LLVM-$(LLVM_VERSION_MAJOR).$(LLVM_VERSION_MINOR)$(LLVM_VERSION_SUFFIX)
 
 NO_BUILD_ARCHIVE := 1
 LINK_LIBS_IN_SHARED := 1
 SHARED_LIBRARY := 1
+SHARED_ALIAS := 1
 
 include $(LEVEL)/Makefile.config
 
@@ -62,13 +64,13 @@ ifeq ($(HOST_OS),Darwin)
     endif
 endif
 
-ifeq ($(HOST_OS), $(filter $(HOST_OS), Linux FreeBSD GNU/kFreeBSD OpenBSD GNU Bitrig))
+ifeq ($(HOST_OS), $(filter $(HOST_OS), DragonFly Linux FreeBSD GNU/kFreeBSD OpenBSD GNU Bitrig))
     # Include everything from the .a's into the shared library.
     LLVMLibsOptions := -Wl,--whole-archive $(LLVMLibsOptions) \
                        -Wl,--no-whole-archive
 endif
 
-ifeq ($(HOST_OS), $(filter $(HOST_OS), Linux FreeBSD GNU/kFreeBSD GNU))
+ifeq ($(HOST_OS), $(filter $(HOST_OS), DragonFly Linux FreeBSD GNU/kFreeBSD GNU))
     # Add soname to the library.
     LLVMLibsOptions += -Wl,--soname,lib$(LIBRARYNAME)$(SHLIBEXT)
 endif

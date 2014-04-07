@@ -1126,6 +1126,7 @@ getWithOperands(ArrayRef<Constant*> Ops, Type *Ty) const {
   case Instruction::PtrToInt:
   case Instruction::IntToPtr:
   case Instruction::BitCast:
+  case Instruction::AddrSpaceCast:
     return ConstantExpr::getCast(getOpcode(), Ops[0], Ty);
   case Instruction::Select:
     return ConstantExpr::getSelect(Ops[0], Ops[1], Ops[2]);
@@ -1461,6 +1462,7 @@ Constant *ConstantExpr::getCast(unsigned oc, Constant *C, Type *Ty) {
   case Instruction::PtrToInt: return getPtrToInt(C, Ty);
   case Instruction::IntToPtr: return getIntToPtr(C, Ty);
   case Instruction::BitCast:  return getBitCast(C, Ty);
+  case Instruction::AddrSpaceCast:  return getAddrSpaceCast(C, Ty);
   }
 }
 
@@ -1489,10 +1491,26 @@ Constant *ConstantExpr::getPointerCast(Constant *S, Type *Ty) {
 
   if (Ty->isIntOrIntVectorTy())
     return getPtrToInt(S, Ty);
+
+  unsigned SrcAS = S->getType()->getPointerAddressSpace();
+  if (Ty->isPtrOrPtrVectorTy() && SrcAS != Ty->getPointerAddressSpace())
+    return getAddrSpaceCast(S, Ty);
+
   return getBitCast(S, Ty);
 }
 
-Constant *ConstantExpr::getIntegerCast(Constant *C, Type *Ty, 
+Constant *ConstantExpr::getPointerBitCastOrAddrSpaceCast(Constant *S,
+                                                         Type *Ty) {
+  assert(S->getType()->isPtrOrPtrVectorTy() && "Invalid cast");
+  assert(Ty->isPtrOrPtrVectorTy() && "Invalid cast");
+
+  if (S->getType()->getPointerAddressSpace() != Ty->getPointerAddressSpace())
+    return getAddrSpaceCast(S, Ty);
+
+  return getBitCast(S, Ty);
+}
+
+Constant *ConstantExpr::getIntegerCast(Constant *C, Type *Ty,
                                        bool isSigned) {
   assert(C->getType()->isIntOrIntVectorTy() &&
          Ty->isIntOrIntVectorTy() && "Invalid cast");
@@ -1660,6 +1678,13 @@ Constant *ConstantExpr::getBitCast(Constant *C, Type *DstTy) {
   if (C->getType() == DstTy) return C;
 
   return getFoldedCast(Instruction::BitCast, C, DstTy);
+}
+
+Constant *ConstantExpr::getAddrSpaceCast(Constant *C, Type *DstTy) {
+  assert(CastInst::castIsValid(Instruction::AddrSpaceCast, C, DstTy) &&
+         "Invalid constantexpr addrspacecast!");
+
+  return getFoldedCast(Instruction::AddrSpaceCast, C, DstTy);
 }
 
 Constant *ConstantExpr::get(unsigned Opcode, Constant *C1, Constant *C2,

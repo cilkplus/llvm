@@ -1,5 +1,4 @@
-; RUN:  %lli_mcjit -remote-mcjit -O0 %s
-; XFAIL: mips
+; RUN:  %lli_mcjit -remote-mcjit -O0 -mcjit-remote-process=lli-child-target %s
 
 ; Check that a variable is always aligned as specified.
 

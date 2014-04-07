@@ -1229,6 +1229,19 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
     }
   }
 
+  // (fptrunc (select cond, R1, Cst)) -->
+  // (select cond, (fptrunc R1), (fptrunc Cst))
+  SelectInst *SI = dyn_cast<SelectInst>(CI.getOperand(0));
+  if (SI &&
+      (isa<ConstantFP>(SI->getOperand(1)) ||
+       isa<ConstantFP>(SI->getOperand(2)))) {
+    Value *LHSTrunc = Builder->CreateFPTrunc(SI->getOperand(1),
+                                             CI.getType());
+    Value *RHSTrunc = Builder->CreateFPTrunc(SI->getOperand(2),
+                                             CI.getType());
+    return SelectInst::Create(SI->getOperand(0), LHSTrunc, RHSTrunc);
+  }
+
   IntrinsicInst *II = dyn_cast<IntrinsicInst>(CI.getOperand(0));
   if (II) {
     switch (II->getIntrinsicID()) {
@@ -1249,9 +1262,14 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
   }
 
   // Fold (fptrunc (sqrt (fpext x))) -> (sqrtf x)
+  // Note that we restrict this transformation based on
+  // TLI->has(LibFunc::sqrtf), even for the sqrt intrinsic, because
+  // TLI->has(LibFunc::sqrtf) is sufficient to guarantee that the
+  // single-precision intrinsic can be expanded in the backend.
   CallInst *Call = dyn_cast<CallInst>(CI.getOperand(0));
   if (Call && Call->getCalledFunction() && TLI->has(LibFunc::sqrtf) &&
-      Call->getCalledFunction()->getName() == TLI->getName(LibFunc::sqrt) &&
+      (Call->getCalledFunction()->getName() == TLI->getName(LibFunc::sqrt) ||
+       Call->getCalledFunction()->getIntrinsicID() == Intrinsic::sqrt) &&
       Call->getNumArgOperands() == 1 &&
       Call->hasOneUse()) {
     CastInst *Arg = dyn_cast<CastInst>(Call->getArgOperand(0));
@@ -1262,11 +1280,11 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
         Arg->getOperand(0)->getType()->isFloatTy()) {
       Function *Callee = Call->getCalledFunction();
       Module *M = CI.getParent()->getParent()->getParent();
-      Constant *SqrtfFunc = M->getOrInsertFunction("sqrtf",
-                                                   Callee->getAttributes(),
-                                                   Builder->getFloatTy(),
-                                                   Builder->getFloatTy(),
-                                                   NULL);
+      Constant *SqrtfFunc = (Callee->getIntrinsicID() == Intrinsic::sqrt) ?
+        Intrinsic::getDeclaration(M, Intrinsic::sqrt, Builder->getFloatTy()) :
+        M->getOrInsertFunction("sqrtf", Callee->getAttributes(),
+                               Builder->getFloatTy(), Builder->getFloatTy(),
+                               NULL);
       CallInst *ret = CallInst::Create(SqrtfFunc, Arg->getOperand(0),
                                        "sqrtfcall");
       ret->setAttributes(Callee->getAttributes());
@@ -1836,5 +1854,9 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
 
   if (SrcTy->isPointerTy())
     return commonPointerCastTransforms(CI);
+  return commonCastTransforms(CI);
+}
+
+Instruction *InstCombiner::visitAddrSpaceCast(AddrSpaceCastInst &CI) {
   return commonCastTransforms(CI);
 }

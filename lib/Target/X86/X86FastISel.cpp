@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "X86.h"
+#include "X86CallingConv.h"
 #include "X86ISelLowering.h"
 #include "X86InstrBuilder.h"
 #include "X86RegisterInfo.h"
@@ -124,6 +125,8 @@ private:
   const X86TargetMachine *getTargetMachine() const {
     return static_cast<const X86TargetMachine *>(&TM);
   }
+
+  bool handleConstantAddresses(const Value *V, X86AddressMode &AM);
 
   unsigned TargetMaterializeConstant(const Constant *C);
 
@@ -344,152 +347,7 @@ bool X86FastISel::X86FastEmitExtend(ISD::NodeType Opc, EVT DstVT,
   return true;
 }
 
-/// X86SelectAddress - Attempt to fill in an address from the given value.
-///
-bool X86FastISel::X86SelectAddress(const Value *V, X86AddressMode &AM) {
-  const User *U = NULL;
-  unsigned Opcode = Instruction::UserOp1;
-  if (const Instruction *I = dyn_cast<Instruction>(V)) {
-    // Don't walk into other basic blocks; it's possible we haven't
-    // visited them yet, so the instructions may not yet be assigned
-    // virtual registers.
-    if (FuncInfo.StaticAllocaMap.count(static_cast<const AllocaInst *>(V)) ||
-        FuncInfo.MBBMap[I->getParent()] == FuncInfo.MBB) {
-      Opcode = I->getOpcode();
-      U = I;
-    }
-  } else if (const ConstantExpr *C = dyn_cast<ConstantExpr>(V)) {
-    Opcode = C->getOpcode();
-    U = C;
-  }
-
-  if (PointerType *Ty = dyn_cast<PointerType>(V->getType()))
-    if (Ty->getAddressSpace() > 255)
-      // Fast instruction selection doesn't support the special
-      // address spaces.
-      return false;
-
-  switch (Opcode) {
-  default: break;
-  case Instruction::BitCast:
-    // Look past bitcasts.
-    return X86SelectAddress(U->getOperand(0), AM);
-
-  case Instruction::IntToPtr:
-    // Look past no-op inttoptrs.
-    if (TLI.getValueType(U->getOperand(0)->getType()) == TLI.getPointerTy())
-      return X86SelectAddress(U->getOperand(0), AM);
-    break;
-
-  case Instruction::PtrToInt:
-    // Look past no-op ptrtoints.
-    if (TLI.getValueType(U->getType()) == TLI.getPointerTy())
-      return X86SelectAddress(U->getOperand(0), AM);
-    break;
-
-  case Instruction::Alloca: {
-    // Do static allocas.
-    const AllocaInst *A = cast<AllocaInst>(V);
-    DenseMap<const AllocaInst*, int>::iterator SI =
-      FuncInfo.StaticAllocaMap.find(A);
-    if (SI != FuncInfo.StaticAllocaMap.end()) {
-      AM.BaseType = X86AddressMode::FrameIndexBase;
-      AM.Base.FrameIndex = SI->second;
-      return true;
-    }
-    break;
-  }
-
-  case Instruction::Add: {
-    // Adds of constants are common and easy enough.
-    if (const ConstantInt *CI = dyn_cast<ConstantInt>(U->getOperand(1))) {
-      uint64_t Disp = (int32_t)AM.Disp + (uint64_t)CI->getSExtValue();
-      // They have to fit in the 32-bit signed displacement field though.
-      if (isInt<32>(Disp)) {
-        AM.Disp = (uint32_t)Disp;
-        return X86SelectAddress(U->getOperand(0), AM);
-      }
-    }
-    break;
-  }
-
-  case Instruction::GetElementPtr: {
-    X86AddressMode SavedAM = AM;
-
-    // Pattern-match simple GEPs.
-    uint64_t Disp = (int32_t)AM.Disp;
-    unsigned IndexReg = AM.IndexReg;
-    unsigned Scale = AM.Scale;
-    gep_type_iterator GTI = gep_type_begin(U);
-    // Iterate through the indices, folding what we can. Constants can be
-    // folded, and one dynamic index can be handled, if the scale is supported.
-    for (User::const_op_iterator i = U->op_begin() + 1, e = U->op_end();
-         i != e; ++i, ++GTI) {
-      const Value *Op = *i;
-      if (StructType *STy = dyn_cast<StructType>(*GTI)) {
-        const StructLayout *SL = TD.getStructLayout(STy);
-        Disp += SL->getElementOffset(cast<ConstantInt>(Op)->getZExtValue());
-        continue;
-      }
-
-      // A array/variable index is always of the form i*S where S is the
-      // constant scale size.  See if we can push the scale into immediates.
-      uint64_t S = TD.getTypeAllocSize(GTI.getIndexedType());
-      for (;;) {
-        if (const ConstantInt *CI = dyn_cast<ConstantInt>(Op)) {
-          // Constant-offset addressing.
-          Disp += CI->getSExtValue() * S;
-          break;
-        }
-        if (isa<AddOperator>(Op) &&
-            (!isa<Instruction>(Op) ||
-             FuncInfo.MBBMap[cast<Instruction>(Op)->getParent()]
-               == FuncInfo.MBB) &&
-            isa<ConstantInt>(cast<AddOperator>(Op)->getOperand(1))) {
-          // An add (in the same block) with a constant operand. Fold the
-          // constant.
-          ConstantInt *CI =
-            cast<ConstantInt>(cast<AddOperator>(Op)->getOperand(1));
-          Disp += CI->getSExtValue() * S;
-          // Iterate on the other operand.
-          Op = cast<AddOperator>(Op)->getOperand(0);
-          continue;
-        }
-        if (IndexReg == 0 &&
-            (!AM.GV || !Subtarget->isPICStyleRIPRel()) &&
-            (S == 1 || S == 2 || S == 4 || S == 8)) {
-          // Scaled-index addressing.
-          Scale = S;
-          IndexReg = getRegForGEPIndex(Op).first;
-          if (IndexReg == 0)
-            return false;
-          break;
-        }
-        // Unsupported.
-        goto unsupported_gep;
-      }
-    }
-    // Check for displacement overflow.
-    if (!isInt<32>(Disp))
-      break;
-    // Ok, the GEP indices were covered by constant-offset and scaled-index
-    // addressing. Update the address state and move on to examining the base.
-    AM.IndexReg = IndexReg;
-    AM.Scale = Scale;
-    AM.Disp = (uint32_t)Disp;
-    if (X86SelectAddress(U->getOperand(0), AM))
-      return true;
-
-    // If we couldn't merge the gep value into this addr mode, revert back to
-    // our address and just match the value instead of completely failing.
-    AM = SavedAM;
-    break;
-  unsupported_gep:
-    // Ok, the GEP indices weren't all covered.
-    break;
-  }
-  }
-
+bool X86FastISel::handleConstantAddresses(const Value *V, X86AddressMode &AM) {
   // Handle constant address.
   if (const GlobalValue *GV = dyn_cast<GlobalValue>(V)) {
     // Can't handle alternate code models yet.
@@ -604,14 +462,201 @@ bool X86FastISel::X86SelectAddress(const Value *V, X86AddressMode &AM) {
   return false;
 }
 
+/// X86SelectAddress - Attempt to fill in an address from the given value.
+///
+bool X86FastISel::X86SelectAddress(const Value *V, X86AddressMode &AM) {
+  SmallVector<const Value *, 32> GEPs;
+redo_gep:
+  const User *U = NULL;
+  unsigned Opcode = Instruction::UserOp1;
+  if (const Instruction *I = dyn_cast<Instruction>(V)) {
+    // Don't walk into other basic blocks; it's possible we haven't
+    // visited them yet, so the instructions may not yet be assigned
+    // virtual registers.
+    if (FuncInfo.StaticAllocaMap.count(static_cast<const AllocaInst *>(V)) ||
+        FuncInfo.MBBMap[I->getParent()] == FuncInfo.MBB) {
+      Opcode = I->getOpcode();
+      U = I;
+    }
+  } else if (const ConstantExpr *C = dyn_cast<ConstantExpr>(V)) {
+    Opcode = C->getOpcode();
+    U = C;
+  }
+
+  if (PointerType *Ty = dyn_cast<PointerType>(V->getType()))
+    if (Ty->getAddressSpace() > 255)
+      // Fast instruction selection doesn't support the special
+      // address spaces.
+      return false;
+
+  switch (Opcode) {
+  default: break;
+  case Instruction::BitCast:
+    // Look past bitcasts.
+    return X86SelectAddress(U->getOperand(0), AM);
+
+  case Instruction::IntToPtr:
+    // Look past no-op inttoptrs.
+    if (TLI.getValueType(U->getOperand(0)->getType()) == TLI.getPointerTy())
+      return X86SelectAddress(U->getOperand(0), AM);
+    break;
+
+  case Instruction::PtrToInt:
+    // Look past no-op ptrtoints.
+    if (TLI.getValueType(U->getType()) == TLI.getPointerTy())
+      return X86SelectAddress(U->getOperand(0), AM);
+    break;
+
+  case Instruction::Alloca: {
+    // Do static allocas.
+    const AllocaInst *A = cast<AllocaInst>(V);
+    DenseMap<const AllocaInst*, int>::iterator SI =
+      FuncInfo.StaticAllocaMap.find(A);
+    if (SI != FuncInfo.StaticAllocaMap.end()) {
+      AM.BaseType = X86AddressMode::FrameIndexBase;
+      AM.Base.FrameIndex = SI->second;
+      return true;
+    }
+    break;
+  }
+
+  case Instruction::Add: {
+    // Adds of constants are common and easy enough.
+    if (const ConstantInt *CI = dyn_cast<ConstantInt>(U->getOperand(1))) {
+      uint64_t Disp = (int32_t)AM.Disp + (uint64_t)CI->getSExtValue();
+      // They have to fit in the 32-bit signed displacement field though.
+      if (isInt<32>(Disp)) {
+        AM.Disp = (uint32_t)Disp;
+        return X86SelectAddress(U->getOperand(0), AM);
+      }
+    }
+    break;
+  }
+
+  case Instruction::GetElementPtr: {
+    X86AddressMode SavedAM = AM;
+
+    // Pattern-match simple GEPs.
+    uint64_t Disp = (int32_t)AM.Disp;
+    unsigned IndexReg = AM.IndexReg;
+    unsigned Scale = AM.Scale;
+    gep_type_iterator GTI = gep_type_begin(U);
+    // Iterate through the indices, folding what we can. Constants can be
+    // folded, and one dynamic index can be handled, if the scale is supported.
+    for (User::const_op_iterator i = U->op_begin() + 1, e = U->op_end();
+         i != e; ++i, ++GTI) {
+      const Value *Op = *i;
+      if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+        const StructLayout *SL = TD.getStructLayout(STy);
+        Disp += SL->getElementOffset(cast<ConstantInt>(Op)->getZExtValue());
+        continue;
+      }
+
+      // A array/variable index is always of the form i*S where S is the
+      // constant scale size.  See if we can push the scale into immediates.
+      uint64_t S = TD.getTypeAllocSize(GTI.getIndexedType());
+      for (;;) {
+        if (const ConstantInt *CI = dyn_cast<ConstantInt>(Op)) {
+          // Constant-offset addressing.
+          Disp += CI->getSExtValue() * S;
+          break;
+        }
+        if (canFoldAddIntoGEP(U, Op)) {
+          // A compatible add with a constant operand. Fold the constant.
+          ConstantInt *CI =
+            cast<ConstantInt>(cast<AddOperator>(Op)->getOperand(1));
+          Disp += CI->getSExtValue() * S;
+          // Iterate on the other operand.
+          Op = cast<AddOperator>(Op)->getOperand(0);
+          continue;
+        }
+        if (IndexReg == 0 &&
+            (!AM.GV || !Subtarget->isPICStyleRIPRel()) &&
+            (S == 1 || S == 2 || S == 4 || S == 8)) {
+          // Scaled-index addressing.
+          Scale = S;
+          IndexReg = getRegForGEPIndex(Op).first;
+          if (IndexReg == 0)
+            return false;
+          break;
+        }
+        // Unsupported.
+        goto unsupported_gep;
+      }
+    }
+
+    // Check for displacement overflow.
+    if (!isInt<32>(Disp))
+      break;
+
+    AM.IndexReg = IndexReg;
+    AM.Scale = Scale;
+    AM.Disp = (uint32_t)Disp;
+    GEPs.push_back(V);
+
+    if (const GetElementPtrInst *GEP =
+          dyn_cast<GetElementPtrInst>(U->getOperand(0))) {
+      // Ok, the GEP indices were covered by constant-offset and scaled-index
+      // addressing. Update the address state and move on to examining the base.
+      V = GEP;
+      goto redo_gep;
+    } else if (X86SelectAddress(U->getOperand(0), AM)) {
+      return true;
+    }
+
+    // If we couldn't merge the gep value into this addr mode, revert back to
+    // our address and just match the value instead of completely failing.
+    AM = SavedAM;
+
+    for (SmallVectorImpl<const Value *>::reverse_iterator
+           I = GEPs.rbegin(), E = GEPs.rend(); I != E; ++I)
+      if (handleConstantAddresses(*I, AM))
+        return true;
+
+    return false;
+  unsupported_gep:
+    // Ok, the GEP indices weren't all covered.
+    break;
+  }
+  }
+
+  return handleConstantAddresses(V, AM);
+}
+
 /// X86SelectCallAddress - Attempt to fill in an address from the given value.
 ///
 bool X86FastISel::X86SelectCallAddress(const Value *V, X86AddressMode &AM) {
   const User *U = NULL;
   unsigned Opcode = Instruction::UserOp1;
-  if (const Instruction *I = dyn_cast<Instruction>(V)) {
+  const Instruction *I = dyn_cast<Instruction>(V);
+  // Record if the value is defined in the same basic block.
+  //
+  // This information is crucial to know whether or not folding an
+  // operand is valid.
+  // Indeed, FastISel generates or reuses a virtual register for all
+  // operands of all instructions it selects. Obviously, the definition and
+  // its uses must use the same virtual register otherwise the produced
+  // code is incorrect.
+  // Before instruction selection, FunctionLoweringInfo::set sets the virtual
+  // registers for values that are alive across basic blocks. This ensures
+  // that the values are consistently set between across basic block, even
+  // if different instruction selection mechanisms are used (e.g., a mix of
+  // SDISel and FastISel).
+  // For values local to a basic block, the instruction selection process
+  // generates these virtual registers with whatever method is appropriate
+  // for its needs. In particular, FastISel and SDISel do not share the way
+  // local virtual registers are set.
+  // Therefore, this is impossible (or at least unsafe) to share values
+  // between basic blocks unless they use the same instruction selection
+  // method, which is not guarantee for X86.
+  // Moreover, things like hasOneUse could not be used accurately, if we
+  // allow to reference values across basic blocks whereas they are not
+  // alive across basic blocks initially.
+  bool InMBB = true;
+  if (I) {
     Opcode = I->getOpcode();
     U = I;
+    InMBB = I->getParent() == FuncInfo.MBB->getBasicBlock();
   } else if (const ConstantExpr *C = dyn_cast<ConstantExpr>(V)) {
     Opcode = C->getOpcode();
     U = C;
@@ -620,18 +665,22 @@ bool X86FastISel::X86SelectCallAddress(const Value *V, X86AddressMode &AM) {
   switch (Opcode) {
   default: break;
   case Instruction::BitCast:
-    // Look past bitcasts.
-    return X86SelectCallAddress(U->getOperand(0), AM);
+    // Look past bitcasts if its operand is in the same BB.
+    if (InMBB)
+      return X86SelectCallAddress(U->getOperand(0), AM);
+    break;
 
   case Instruction::IntToPtr:
-    // Look past no-op inttoptrs.
-    if (TLI.getValueType(U->getOperand(0)->getType()) == TLI.getPointerTy())
+    // Look past no-op inttoptrs if its operand is in the same BB.
+    if (InMBB &&
+        TLI.getValueType(U->getOperand(0)->getType()) == TLI.getPointerTy())
       return X86SelectCallAddress(U->getOperand(0), AM);
     break;
 
   case Instruction::PtrToInt:
-    // Look past no-op ptrtoints.
-    if (TLI.getValueType(U->getType()) == TLI.getPointerTy())
+    // Look past no-op ptrtoints if its operand is in the same BB.
+    if (InMBB &&
+        TLI.getValueType(U->getType()) == TLI.getPointerTy())
       return X86SelectCallAddress(U->getOperand(0), AM);
     break;
   }

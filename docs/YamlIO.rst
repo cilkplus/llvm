@@ -549,7 +549,7 @@ coordinates into polar when reading YAML.
     };
 
 When writing YAML, the local variable "keys" will be a stack allocated 
-instance of NormalizedPolar, constructed from the suppled polar object which
+instance of NormalizedPolar, constructed from the supplied polar object which
 initializes it x and y fields.  The mapRequired() methods then write out the x
 and y values as key/value pairs.  
 
@@ -633,6 +633,20 @@ This works for both reading and writing. For example:
     };
 
 
+Tags
+----
+
+The YAML syntax supports tags as a way to specify the type of a node before
+it is parsed. This allows dynamic types of nodes.  But the YAML I/O model uses
+static typing, so there are limits to how you can use tags with the YAML I/O
+model. Recently, we added support to YAML I/O for checking/setting the optional 
+tag on a map. Using this functionality it is even possbile to support differnt 
+mappings, as long as they are convertable.  
+
+To check a tag, inside your mapping() method you can use io.mapTag() to specify
+what the tag should be.  This will also add that tag when writing yaml.
+
+
 Sequence
 ========
 
@@ -646,7 +660,7 @@ llvm::yaml::SequenceTraits on T and implement two methods:
   template <>
   struct SequenceTraits<MySeq> {
     static size_t size(IO &io, MySeq &list) { ... }
-    static MySeqEl element(IO &io, MySeq &list, size_t index) { ... }
+    static MySeqEl &element(IO &io, MySeq &list, size_t index) { ... }
   };
 
 The size() method returns how many elements are currently in your sequence.
@@ -669,7 +683,7 @@ add "static const bool flow = true;".  For instance:
   template <>
   struct SequenceTraits<MyList> {
     static size_t size(IO &io, MyList &list) { ... }
-    static MyListEl element(IO &io, MyList &list, size_t index) { ... }
+    static MyListEl &element(IO &io, MyList &list, size_t index) { ... }
     
     // The existence of this member causes YAML I/O to use a flow sequence
     static const bool flow = true;

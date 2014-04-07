@@ -33,7 +33,8 @@ public:
     R700,
     EVERGREEN,
     NORTHERN_ISLANDS,
-    SOUTHERN_ISLANDS
+    SOUTHERN_ISLANDS,
+    SEA_ISLANDS
   };
 
 private:
@@ -48,6 +49,8 @@ private:
   enum Generation Gen;
   bool FP64;
   bool CaymanISA;
+  bool EnableIRStructurizer;
+  bool EnableIfCvt;
 
   InstrItineraryData InstrItins;
 
@@ -63,6 +66,12 @@ public:
   enum Generation getGeneration() const;
   bool hasHWFP64() const;
   bool hasCaymanISA() const;
+  bool IsIRStructurizerEnabled() const;
+  bool isIfCvtEnabled() const;
+
+  virtual bool enableMachineScheduler() const {
+    return getGeneration() <= NORTHERN_ISLANDS;
+  }
 
   // Helper functions to simplify if statements
   bool isTargetELF() const;

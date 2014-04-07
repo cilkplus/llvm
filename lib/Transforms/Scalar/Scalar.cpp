@@ -28,17 +28,15 @@ using namespace llvm;
 /// ScalarOpts library.
 void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeADCEPass(Registry);
-  initializeBlockPlacementPass(Registry);
-  initializeCilkStackFrameLateInitPass(Registry);
+  initializeSampleProfileLoaderPass(Registry);
   initializeCodeGenPreparePass(Registry);
   initializeConstantPropagationPass(Registry);
   initializeCorrelatedValuePropagationPass(Registry);
   initializeDCEPass(Registry);
   initializeDeadInstEliminationPass(Registry);
   initializeDSEPass(Registry);
-  initializeEarlyCSEPass(Registry);
-  initializeElideCilkSyncPass(Registry);
   initializeGVNPass(Registry);
+  initializeEarlyCSEPass(Registry);
   initializeIndVarSimplifyPass(Registry);
   initializeJumpThreadingPass(Registry);
   initializeLICMPass(Registry);
@@ -46,6 +44,7 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeLoopInstSimplifyPass(Registry);
   initializeLoopRotatePass(Registry);
   initializeLoopStrengthReducePass(Registry);
+  initializeLoopRerollPass(Registry);
   initializeLoopUnrollPass(Registry);
   initializeLoopUnswitchPass(Registry);
   initializeLoopIdiomRecognizePass(Registry);
@@ -112,6 +111,10 @@ void LLVMAddLoopIdiomPass(LLVMPassManagerRef PM) {
 
 void LLVMAddLoopRotatePass(LLVMPassManagerRef PM) {
   unwrap(PM)->add(createLoopRotatePass());
+}
+
+void LLVMAddLoopRerollPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createLoopRerollPass());
 }
 
 void LLVMAddLoopUnrollPass(LLVMPassManagerRef PM) {

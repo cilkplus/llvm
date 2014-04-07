@@ -862,6 +862,7 @@ public:
   static Constant *getPtrToInt(Constant *C, Type *Ty);
   static Constant *getIntToPtr(Constant *C, Type *Ty);
   static Constant *getBitCast (Constant *C, Type *Ty);
+  static Constant *getAddrSpaceCast(Constant *C, Type *Ty);
 
   static Constant *getNSWNeg(Constant *C) { return getNeg(C, false, true); }
   static Constant *getNUWNeg(Constant *C) { return getNeg(C, true, false); }
@@ -942,10 +943,18 @@ public:
     Type *Ty ///< The type to trunc or bitcast C to
   );
 
-  /// @brief Create a BitCast or a PtrToInt cast constant expression
+  /// @brief Create a BitCast, AddrSpaceCast, or a PtrToInt cast constant
+  /// expression.
   static Constant *getPointerCast(
     Constant *C,   ///< The pointer value to be casted (operand 0)
     Type *Ty ///< The type to which cast should be made
+  );
+
+  /// @brief Create a BitCast or AddrSpaceCast for a pointer type depending on
+  /// the address space.
+  static Constant *getPointerBitCastOrAddrSpaceCast(
+    Constant *C,   ///< The constant to addrspacecast or bitcast
+    Type *Ty ///< The type to bitcast or addrspacecast C to
   );
 
   /// @brief Create a ZExt, Bitcast or Trunc for integer -> integer casts
@@ -1079,8 +1088,8 @@ public:
   /// as this ConstantExpr. The instruction is not linked to any basic block.
   ///
   /// A better approach to this could be to have a constructor for Instruction
-  /// which would take a ConstantExpr parameter, but that would have spread 
-  /// implementation details of ConstantExpr outside of Constants.cpp, which 
+  /// which would take a ConstantExpr parameter, but that would have spread
+  /// implementation details of ConstantExpr outside of Constants.cpp, which
   /// would make it harder to remove ConstantExprs altogether.
   Instruction *getAsInstruction();
 

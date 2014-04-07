@@ -310,6 +310,8 @@ const char *NVPTXTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "NVPTXISD::CallSeqBegin";
   case NVPTXISD::CallSeqEnd:
     return "NVPTXISD::CallSeqEnd";
+  case NVPTXISD::CallPrototype:
+    return "NVPTXISD::CallPrototype";
   case NVPTXISD::LoadV2:
     return "NVPTXISD::LoadV2";
   case NVPTXISD::LoadV4:
@@ -471,22 +473,47 @@ NVPTXTargetLowering::getArgumentAlignment(SDValue Callee,
                                           Type *Ty,
                                           unsigned Idx) const {
   const DataLayout *TD = getDataLayout();
-  unsigned align = 0;
-  GlobalAddressSDNode *Func = dyn_cast<GlobalAddressSDNode>(Callee.getNode());
+  unsigned Align = 0;
+  const Value *DirectCallee = CS->getCalledFunction();
 
-  if (Func) { // direct call
-    assert(CS->getCalledFunction() &&
-           "direct call cannot find callee");
-    if (!llvm::getAlign(*(CS->getCalledFunction()), Idx, align))
-      align = TD->getABITypeAlignment(Ty);
-  }
-  else { // indirect call
-    const CallInst *CallI = dyn_cast<CallInst>(CS->getInstruction());
-    if (!llvm::getAlign(*CallI, Idx, align))
-      align = TD->getABITypeAlignment(Ty);
+  if (!DirectCallee) {
+    // We don't have a direct function symbol, but that may be because of
+    // constant cast instructions in the call.
+    const Instruction *CalleeI = CS->getInstruction();
+    assert(CalleeI && "Call target is not a function or derived value?");
+
+    // With bitcast'd call targets, the instruction will be the call
+    if (isa<CallInst>(CalleeI)) {
+      // Check if we have call alignment metadata
+      if (llvm::getAlign(*cast<CallInst>(CalleeI), Idx, Align))
+        return Align;
+
+      const Value *CalleeV = cast<CallInst>(CalleeI)->getCalledValue();
+      // Ignore any bitcast instructions
+      while(isa<ConstantExpr>(CalleeV)) {
+        const ConstantExpr *CE = cast<ConstantExpr>(CalleeV);
+        if (!CE->isCast())
+          break;
+        // Look through the bitcast
+        CalleeV = cast<ConstantExpr>(CalleeV)->getOperand(0);
+      }
+
+      // We have now looked past all of the bitcasts.  Do we finally have a
+      // Function?
+      if (isa<Function>(CalleeV))
+        DirectCallee = CalleeV;
+    }
   }
 
-  return align;
+  // Check for function alignment information if we found that the
+  // ultimate target is a Function
+  if (DirectCallee)
+    if (llvm::getAlign(*cast<Function>(DirectCallee), Idx, Align))
+      return Align;
+
+  // Call is indirect or alignment information is not available, fall back to
+  // the ABI type alignment
+  return TD->getABITypeAlignment(Ty);
 }
 
 SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
@@ -860,18 +887,16 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     // proto_0 : .callprototype(.param .b32 _) _ (.param .b32 _);
     // to be emitted, and the label has to used as the last arg of call
     // instruction.
-    // The prototype is embedded in a string and put as the operand for an
-    // INLINEASM SDNode.
-    SDVTList InlineAsmVTs = DAG.getVTList(MVT::Other, MVT::Glue);
-    std::string proto_string =
-        getPrototype(retTy, Args, Outs, retAlignment, CS);
-    const char *asmstr = nvTM->getManagedStrPool()
-        ->getManagedString(proto_string.c_str())->c_str();
-    SDValue InlineAsmOps[] = {
-      Chain, DAG.getTargetExternalSymbol(asmstr, getPointerTy()),
-      DAG.getMDNode(0), DAG.getTargetConstant(0, MVT::i32), InFlag
+    // The prototype is embedded in a string and put as the operand for a
+    // CallPrototype SDNode which will print out to the value of the string.
+    SDVTList ProtoVTs = DAG.getVTList(MVT::Other, MVT::Glue);
+    std::string Proto = getPrototype(retTy, Args, Outs, retAlignment, CS);
+    const char *ProtoStr =
+      nvTM->getManagedStrPool()->getManagedString(Proto.c_str())->c_str();
+    SDValue ProtoOps[] = {
+      Chain, DAG.getTargetExternalSymbol(ProtoStr, MVT::i32), InFlag,
     };
-    Chain = DAG.getNode(ISD::INLINEASM, dl, InlineAsmVTs, InlineAsmOps, 5);
+    Chain = DAG.getNode(NVPTXISD::CallPrototype, dl, ProtoVTs, &ProtoOps[0], 3);
     InFlag = Chain.getValue(1);
   }
   // Op to just print "call"
@@ -1595,7 +1620,7 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
             }
             Ofst += TD->getTypeAllocSize(VecVT.getTypeForEVT(F->getContext()));
           }
-          InsIdx += VecSize;
+          InsIdx += NumElts;
         }
 
         if (NumElts > 0)
@@ -2262,4 +2287,30 @@ void NVPTXTargetLowering::ReplaceNodeResults(
     ReplaceINTRINSIC_W_CHAIN(N, DAG, Results);
     return;
   }
+}
+
+// Pin NVPTXSection's and NVPTXTargetObjectFile's vtables to this file.
+void NVPTXSection::anchor() {}
+
+NVPTXTargetObjectFile::~NVPTXTargetObjectFile() {
+  delete TextSection;
+  delete DataSection;
+  delete BSSSection;
+  delete ReadOnlySection;
+
+  delete StaticCtorSection;
+  delete StaticDtorSection;
+  delete LSDASection;
+  delete EHFrameSection;
+  delete DwarfAbbrevSection;
+  delete DwarfInfoSection;
+  delete DwarfLineSection;
+  delete DwarfFrameSection;
+  delete DwarfPubTypesSection;
+  delete DwarfDebugInlineSection;
+  delete DwarfStrSection;
+  delete DwarfLocSection;
+  delete DwarfARangesSection;
+  delete DwarfRangesSection;
+  delete DwarfMacroInfoSection;
 }

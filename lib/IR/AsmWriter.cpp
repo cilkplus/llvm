@@ -74,6 +74,8 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   default:                         Out << "cc" << cc; break;
   case CallingConv::Fast:          Out << "fastcc"; break;
   case CallingConv::Cold:          Out << "coldcc"; break;
+  case CallingConv::WebKit_JS:     Out << "webkit_jscc"; break;
+  case CallingConv::AnyReg:        Out << "anyregcc"; break;
   case CallingConv::X86_StdCall:   Out << "x86_stdcallcc"; break;
   case CallingConv::X86_FastCall:  Out << "x86_fastcallcc"; break;
   case CallingConv::X86_ThisCall:  Out << "x86_thiscallcc"; break;
@@ -1395,9 +1397,6 @@ static void PrintLinkage(GlobalValue::LinkageTypes LT,
   case GlobalValue::InternalLinkage:      Out << "internal ";       break;
   case GlobalValue::LinkOnceAnyLinkage:   Out << "linkonce ";       break;
   case GlobalValue::LinkOnceODRLinkage:   Out << "linkonce_odr ";   break;
-  case GlobalValue::LinkOnceODRAutoHideLinkage:
-    Out << "linkonce_odr_auto_hide ";
-    break;
   case GlobalValue::WeakAnyLinkage:       Out << "weak ";           break;
   case GlobalValue::WeakODRLinkage:       Out << "weak_odr ";       break;
   case GlobalValue::CommonLinkage:        Out << "common ";         break;
@@ -1648,6 +1647,10 @@ void AssemblyWriter::printFunction(const Function *F) {
     Out << " align " << F->getAlignment();
   if (F->hasGC())
     Out << " gc \"" << F->getGC() << '"';
+  if (F->hasPrefixData()) {
+    Out << " prefix ";
+    writeOperand(F->getPrefixData(), true);
+  }
   if (F->isDeclaration()) {
     Out << '\n';
   } else {

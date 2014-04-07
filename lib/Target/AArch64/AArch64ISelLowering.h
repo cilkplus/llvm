@@ -19,7 +19,7 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
-
+#include "llvm/IR/Intrinsics.h"
 
 namespace llvm {
 namespace AArch64ISD {
@@ -125,6 +125,19 @@ namespace AArch64ISD {
     // Vector FP move immediate
     NEON_FMOVIMM,
 
+    // Vector permute
+    NEON_UZP1,
+    NEON_UZP2,
+    NEON_ZIP1,
+    NEON_ZIP2,
+    NEON_TRN1,
+    NEON_TRN2,
+
+    // Vector Element reverse
+    NEON_REV64,
+    NEON_REV32,
+    NEON_REV16,
+
     // Vector compare
     NEON_CMP,
 
@@ -134,8 +147,56 @@ namespace AArch64ISD {
     // Vector compare bitwise test
     NEON_TST,
 
-    // Operation for the immediate in vector shift
-    NEON_DUPIMM
+    // Vector saturating shift
+    NEON_QSHLs,
+    NEON_QSHLu,
+
+    // Vector dup
+    NEON_VDUP,
+
+    // Vector dup by lane
+    NEON_VDUPLANE,
+
+    // Vector extract
+    NEON_VEXTRACT,
+
+    // NEON duplicate lane loads
+    NEON_LD2DUP = ISD::FIRST_TARGET_MEMORY_OPCODE,
+    NEON_LD3DUP,
+    NEON_LD4DUP,
+
+    // NEON loads with post-increment base updates:
+    NEON_LD1_UPD,
+    NEON_LD2_UPD,
+    NEON_LD3_UPD,
+    NEON_LD4_UPD,
+    NEON_LD1x2_UPD,
+    NEON_LD1x3_UPD,
+    NEON_LD1x4_UPD,
+
+    // NEON stores with post-increment base updates:
+    NEON_ST1_UPD,
+    NEON_ST2_UPD,
+    NEON_ST3_UPD,
+    NEON_ST4_UPD,
+    NEON_ST1x2_UPD,
+    NEON_ST1x3_UPD,
+    NEON_ST1x4_UPD,
+
+    // NEON duplicate lane loads with post-increment base updates:
+    NEON_LD2DUP_UPD,
+    NEON_LD3DUP_UPD,
+    NEON_LD4DUP_UPD,
+
+    // NEON lane loads with post-increment base updates:
+    NEON_LD2LN_UPD,
+    NEON_LD3LN_UPD,
+    NEON_LD4LN_UPD,
+
+    // NEON lane store with post-increment base updates:
+    NEON_ST2LN_UPD,
+    NEON_ST3LN_UPD,
+    NEON_ST4LN_UPD
   };
 }
 
@@ -172,8 +233,12 @@ public:
                           SDLoc dl, SelectionDAG &DAG,
                           SmallVectorImpl<SDValue> &InVals) const;
 
+  bool isKnownShuffleVector(SDValue Op, SelectionDAG &DAG, SDValue &Res) const;
+
   SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG,
                             const AArch64Subtarget *ST) const;
+
+  SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
 
   void SaveVarArgRegisters(CCState &CCInfo, SelectionDAG &DAG, SDLoc DL,
                            SDValue &Chain) const;
@@ -237,6 +302,8 @@ public:
   SDValue LowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG, bool IsSigned) const;
+  SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue LowerGlobalAddressELFSmall(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalAddressELFLarge(SDValue Op, SelectionDAG &DAG) const;
@@ -272,6 +339,14 @@ public:
 
   std::pair<unsigned, const TargetRegisterClass*>
   getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const;
+
+  virtual bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
+                                  unsigned Intrinsic) const LLVM_OVERRIDE;
+
+protected:
+  std::pair<const TargetRegisterClass*, uint8_t>
+  findRepresentativeClass(MVT VT) const;
+
 private:
   const InstrItineraryData *Itins;
 
@@ -283,6 +358,10 @@ enum NeonModImmType {
   Neon_Mov_Imm,
   Neon_Mvn_Imm
 };
+
+extern SDValue ScanBUILD_VECTOR(SDValue Op, bool &isOnlyLowElement,
+                                bool &usesOnlyOneValue, bool &hasDominantValue,
+                                bool &isConstant, bool &isUNDEF);
 } // namespace llvm
 
 #endif // LLVM_TARGET_AARCH64_ISELLOWERING_H

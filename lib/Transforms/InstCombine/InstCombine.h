@@ -158,8 +158,8 @@ public:
                               ConstantInt *DivRHS);
   Instruction *FoldICmpShrCst(ICmpInst &ICI, BinaryOperator *DivI,
                               ConstantInt *DivRHS);
-  Instruction *FoldICmpAddOpCst(ICmpInst &ICI, Value *X, ConstantInt *CI,
-                                ICmpInst::Predicate Pred, Value *TheAdd);
+  Instruction *FoldICmpAddOpCst(Instruction &ICI, Value *X, ConstantInt *CI,
+                                ICmpInst::Predicate Pred);
   Instruction *FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
                            ICmpInst::Predicate Cond, Instruction &I);
   Instruction *FoldShiftByConstant(Value *Op0, ConstantInt *Op1,
@@ -178,6 +178,7 @@ public:
   Instruction *visitPtrToInt(PtrToIntInst &CI);
   Instruction *visitIntToPtr(IntToPtrInst &CI);
   Instruction *visitBitCast(BitCastInst &CI);
+  Instruction *visitAddrSpaceCast(AddrSpaceCastInst &CI);
   Instruction *FoldSelectOpOp(SelectInst &SI, Instruction *TI,
                               Instruction *FI);
   Instruction *FoldSelectIntoOp(SelectInst &SI, Value*, Value*);
@@ -271,7 +272,7 @@ public:
     if (&I == V)
       V = UndefValue::get(I.getType());
 
-    DEBUG(errs() << "IC: Replacing " << I << "\n"
+    DEBUG(dbgs() << "IC: Replacing " << I << "\n"
                     "    with " << *V << '\n');
 
     I.replaceAllUsesWith(V);
@@ -283,7 +284,7 @@ public:
   // instruction.  Instead, visit methods should return the value returned by
   // this function.
   Instruction *EraseInstFromFunction(Instruction &I) {
-    DEBUG(errs() << "IC: ERASE " << I << '\n');
+    DEBUG(dbgs() << "IC: ERASE " << I << '\n');
 
     assert(I.use_empty() && "Cannot erase instruction that is used!");
     // Make sure that we reprocess all operands now that we reduced their

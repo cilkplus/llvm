@@ -57,10 +57,28 @@ Align(cl::desc("Load/store alignment support"),
                      "Allow unaligned memory accesses"),
           clEnumValEnd));
 
+enum ITMode {
+  DefaultIT,
+  RestrictedIT,
+  NoRestrictedIT
+};
+
+static cl::opt<ITMode>
+IT(cl::desc("IT block support"), cl::Hidden, cl::init(DefaultIT),
+   cl::ZeroOrMore,
+   cl::values(clEnumValN(DefaultIT, "arm-default-it",
+                         "Generate IT block based on arch"),
+              clEnumValN(RestrictedIT, "arm-restrict-it",
+                         "Disallow deprecated IT based on ARMv8"),
+              clEnumValN(NoRestrictedIT, "arm-no-restrict-it",
+                         "Allow IT blocks based on ARMv7"),
+              clEnumValEnd));
+
 ARMSubtarget::ARMSubtarget(const std::string &TT, const std::string &CPU,
                            const std::string &FS, const TargetOptions &Options)
   : ARMGenSubtargetInfo(TT, CPU, FS)
   , ARMProcFamily(Others)
+  , ARMProcClass(None)
   , stackAlignment(4)
   , CPUString(CPU)
   , TargetTriple(TT)
@@ -75,13 +93,14 @@ void ARMSubtarget::initializeEnvironment() {
   HasV5TOps = false;
   HasV5TEOps = false;
   HasV6Ops = false;
+  HasV6MOps = false;
   HasV6T2Ops = false;
   HasV7Ops = false;
   HasV8Ops = false;
   HasVFPv2 = false;
   HasVFPv3 = false;
   HasVFPv4 = false;
-  HasV8FP = false;
+  HasFPARMv8 = false;
   HasNEON = false;
   UseNEONForSinglePrecisionFP = false;
   UseMulOps = UseFusedMulOps;
@@ -90,7 +109,6 @@ void ARMSubtarget::initializeEnvironment() {
   SlowFPBrcc = false;
   InThumbMode = false;
   HasThumb2 = false;
-  IsMClass = false;
   NoARM = false;
   PostRAScheduler = false;
   IsR9Reserved = ReserveR9;
@@ -107,9 +125,12 @@ void ARMSubtarget::initializeEnvironment() {
   AvoidMOVsShifterOperand = false;
   HasRAS = false;
   HasMPExtension = false;
+  HasVirtualization = false;
   FPOnlySP = false;
   HasPerfMon = false;
   HasTrustZone = false;
+  HasCrypto = false;
+  HasCRC = false;
   AllowsUnalignedMem = false;
   Thumb2DSP = false;
   UseNaClTrap = false;
@@ -133,8 +154,13 @@ void ARMSubtarget::resetSubtargetFeatures(const MachineFunction *MF) {
 }
 
 void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
-  if (CPUString.empty())
-    CPUString = "generic";
+  if (CPUString.empty()) {
+    if (isTargetIOS() && TargetTriple.getArchName().endswith("v7s"))
+      // Default to the Swift CPU when targeting armv7s/thumbv7s.
+      CPUString = "swift";
+    else
+      CPUString = "generic";
+  }
 
   // Insert the architecture feature derived from the target triple into the
   // feature string. This is important for setting features that are implied
@@ -152,7 +178,7 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
   // Thumb2 implies at least V6T2. FIXME: Fix tests to explicitly specify a
   // ARM version or CPU and then remove this.
   if (!HasV6T2Ops && hasThumb2())
-    HasV4TOps = HasV5TOps = HasV5TEOps = HasV6Ops = HasV6T2Ops = true;
+    HasV4TOps = HasV5TOps = HasV5TEOps = HasV6Ops = HasV6MOps = HasV6T2Ops = true;
 
   // Keep a pointer to static instruction cost data for the specified CPU.
   SchedModel = getSchedModelForCPU(CPUString);
@@ -206,6 +232,18 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
     case NoStrictAlign:
       AllowsUnalignedMem = true;
       break;
+  }
+
+  switch (IT) {
+  case DefaultIT:
+    RestrictIT = hasV8Ops() ? true : false;
+    break;
+  case RestrictedIT:
+    RestrictIT = true;
+    break;
+  case NoRestrictedIT:
+    RestrictIT = false;
+    break;
   }
 
   // NEON f32 ops are non-IEEE 754 compliant. Darwin is ok with it by default.
@@ -272,12 +310,15 @@ unsigned ARMSubtarget::getMispredictionPenalty() const {
   return SchedModel->MispredictPenalty;
 }
 
+bool ARMSubtarget::hasSinCos() const {
+  return getTargetTriple().getOS() == Triple::IOS &&
+    !getTargetTriple().isOSVersionLT(7, 0);
+}
+
 bool ARMSubtarget::enablePostRAScheduler(
            CodeGenOpt::Level OptLevel,
            TargetSubtargetInfo::AntiDepBreakMode& Mode,
            RegClassVector& CriticalPathRCs) const {
-  Mode = TargetSubtargetInfo::ANTIDEP_CRITICAL;
-  CriticalPathRCs.clear();
-  CriticalPathRCs.push_back(&ARM::GPRRegClass);
+  Mode = TargetSubtargetInfo::ANTIDEP_NONE;
   return PostRAScheduler && OptLevel >= CodeGenOpt::Default;
 }

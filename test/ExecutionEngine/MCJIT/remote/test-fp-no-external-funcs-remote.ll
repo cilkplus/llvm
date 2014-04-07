@@ -1,5 +1,4 @@
-; RUN: %lli_mcjit -remote-mcjit %s > /dev/null
-; XFAIL:  mips
+; RUN: %lli_mcjit -remote-mcjit -mcjit-remote-process=lli-child-target %s > /dev/null
 
 define double @test(double* %DP, double %Arg) {
 	%D = load double* %DP		; <double> [#uses=1]

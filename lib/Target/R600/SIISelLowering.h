@@ -21,13 +21,16 @@
 namespace llvm {
 
 class SITargetLowering : public AMDGPUTargetLowering {
-  SDValue LowerParameter(SelectionDAG &DAG, EVT VT, SDLoc DL,
+  SDValue LowerParameter(SelectionDAG &DAG, EVT VT, EVT MemVT, SDLoc DL,
                          SDValue Chain, unsigned Offset) const;
   SDValue LowerSampleIntrinsic(unsigned Opcode, const SDValue &Op,
                                SelectionDAG &DAG) const;
+  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerZERO_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerADD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue ResourceDescriptorToi128(SDValue Op, SelectionDAG &DAG) const;

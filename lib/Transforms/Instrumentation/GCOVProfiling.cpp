@@ -17,7 +17,6 @@
 #define DEBUG_TYPE "insert-gcov-profiling"
 
 #include "llvm/Transforms/Instrumentation.h"
-#include "ProfilingUtils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
@@ -103,6 +102,7 @@ namespace {
     Constant *getIncrementIndirectCounterFunc();
     Constant *getEmitFunctionFunc();
     Constant *getEmitArcsFunc();
+    Constant *getSummaryInfoFunc();
     Constant *getDeleteWriteoutFunctionListFunc();
     Constant *getDeleteFlushFunctionListFunc();
     Constant *getEndFileFunc();
@@ -599,7 +599,7 @@ bool GCOVProfiler::emitProfileArcs() {
     };
     FTy = FunctionType::get(Builder.getVoidTy(), Params, false);
 
-    // Inialize the environment and register the local writeout and flush
+    // Initialize the environment and register the local writeout and flush
     // functions.
     Constant *GCOVInit = M->getOrInsertFunction("llvm_gcov_init", FTy);
     Builder.CreateCall2(GCOVInit, WriteoutF, FlushF);
@@ -701,6 +701,11 @@ Constant *GCOVProfiler::getEmitArcsFunc() {
   return M->getOrInsertFunction("llvm_gcda_emit_arcs", FTy);
 }
 
+Constant *GCOVProfiler::getSummaryInfoFunc() {
+  FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Ctx), false);
+  return M->getOrInsertFunction("llvm_gcda_summary_info", FTy);
+}
+
 Constant *GCOVProfiler::getDeleteWriteoutFunctionListFunc() {
   FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Ctx), false);
   return M->getOrInsertFunction("llvm_delete_writeout_function_list", FTy);
@@ -747,6 +752,7 @@ Function *GCOVProfiler::insertCounterWriteout(
   Constant *StartFile = getStartFileFunc();
   Constant *EmitFunction = getEmitFunctionFunc();
   Constant *EmitArcs = getEmitArcsFunc();
+  Constant *SummaryInfo = getSummaryInfoFunc();
   Constant *EndFile = getEndFileFunc();
 
   NamedMDNode *CU_Nodes = M->getNamedMetadata("llvm.dbg.cu");
@@ -773,6 +779,7 @@ Function *GCOVProfiler::insertCounterWriteout(
                             Builder.getInt32(Arcs),
                             Builder.CreateConstGEP2_64(GV, 0, 0));
       }
+      Builder.CreateCall(SummaryInfo);
       Builder.CreateCall(EndFile);
     }
   }
