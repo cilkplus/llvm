@@ -368,6 +368,7 @@ extern char &InstructionSimplifierID;
 // "block_weights" metadata.
 FunctionPass *createLowerExpectIntrinsicPass();
 
+
 //===----------------------------------------------------------------------===//
 //
 // PartiallyInlineLibCalls - Tries to inline the fast path of library

@@ -28,6 +28,9 @@ using namespace llvm;
 /// ScalarOpts library.
 void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeADCEPass(Registry);
+//  initializeBlockPlacementPass(Registry); //AVT: try to add it later
+  initializeCilkStackFrameLateInitPass(Registry);
+  initializeElideCilkSyncPass(Registry);
   initializeSampleProfileLoaderPass(Registry);
   initializeCodeGenPreparePass(Registry);
   initializeConstantPropagationPass(Registry);

@@ -84,9 +84,10 @@ ValueEnumerator::ValueEnumerator(const Module *M) {
         for (User::const_op_iterator OI = I->op_begin(), E = I->op_end();
              OI != E; ++OI) {
           if (MDNode *MD = dyn_cast<MDNode>(*OI))
-            if (MD->isFunctionLocal() && MD->getFunction())
+            if (MD->isFunctionLocal() && MD->getFunction()) {
               // These will get enumerated during function-incorporation.
               continue;
+            }
           EnumerateOperandType(*OI);
         }
         EnumerateType(I->getType());
@@ -300,8 +301,10 @@ void ValueEnumerator::EnumerateFunctionLocalMetadata(const MDNode *N) {
       if (MDNode *O = dyn_cast<MDNode>(V)) {
         if (O->isFunctionLocal() && O->getFunction())
           EnumerateFunctionLocalMetadata(O);
-      } else if (isa<Instruction>(V) || isa<Argument>(V))
+      } 
+      else if (isa<Instruction>(V) || isa<Argument>(V)) {
         EnumerateValue(V);
+      }
     }
 
   // Also, collect all function-local MDNodes for easy access.
