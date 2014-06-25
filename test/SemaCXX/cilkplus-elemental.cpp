@@ -13,7 +13,7 @@
 #endif
 
 // processor clause
-ATTR(vector(processor)) // expected-error {{argument required after attribute}}
+ATTR(vector(processor)) // expected-error {{'processor' attribute takes one argument}}
 ATTR(vector(processor(ceci_nest_pas_un_processor))) // expected-error {{unrecognized processor}}
 ATTR(vector(processor(pentium_4), processor(pentium_4_sse3))) // expected-warning {{inconsistent processor attribute}} \
                                                             // expected-note {{previous attribute is here}}
@@ -30,11 +30,11 @@ int test_processor_1(int x);
 
 // vectorlength clause
 const int VL = 2;
-ATTR(vector(vectorlength))      // expected-error {{argument required after attribute}}
+ATTR(vector(vectorlength))      // expected-error {{attribute takes one argument}}
 ATTR(vector(vectorlength(-1)))  // expected-error {{vectorlength must be positive}}
 ATTR(vector(vectorlength(0)))   // expected-error {{vectorlength must be positive}}
-ATTR(vector(vectorlength(3)))   // expected-error {{vectorlength expression must be a power of 2}}
-ATTR(vector(vectorlength(int))) // expected-error {{expected expression}}
+ATTR(vector(vectorlength(3)))
+ATTR(vector(vectorlength(int))) // expected-error {{expected '(' for function-style cast or type construction}}
 ATTR(vector(vectorlength(4), vectorlength(8))) // expected-error {{repeated vectorlength attribute is not allowed}} \
                                                // expected-note {{previous attribute is here}}
 ATTR(vector(vectorlength(VL)))      // OK
@@ -42,7 +42,7 @@ ATTR(vector(vectorlength(VL + 2)))  // OK
 int test_vectorlength_1(int x);
 
 // uniform clause
-ATTR(vector(uniform))    // expected-error {{argument required after attribute}}
+ATTR(vector(uniform))    // expected-error {{'uniform' attribute requires an identifier}}
 ATTR(vector(uniform()))  // expected-error {{expected identifier}}
 ATTR(vector(uniform(1))) // expected-error {{expected identifier}}
 ATTR(vector(uniform(w))) // expected-error {{not a function parameter}}
@@ -54,7 +54,7 @@ int test_uniform_1(int x, int &y, float z); // expected-note {{parameter here}}
 
 // linear clause
 ATTR(vector(linear(x))) // OK
-ATTR(vector(linear))    // expected-error {{argument required after attribute}}
+ATTR(vector(linear))    // expected-error {{'linear' attribute requires an identifier}}
 ATTR(vector(linear()))  // expected-error {{expected identifier}}
 ATTR(vector(linear(1))) // expected-error {{expected identifier}}
 ATTR(vector(linear(w))) // expected-error {{not a function parameter}}
@@ -68,7 +68,7 @@ ATTR(vector(linear(x), uniform(x)))  // expected-error {{parameter 'x' cannot be
 ATTR(vector(linear(x:w)))            // expected-error {{use of undeclared identifier 'w'}}
 ATTR(vector(linear(x:y)))            // expected-error {{linear step parameter must also be uniform}}
 ATTR(vector(linear(z))) // expected-error {{linear parameter type 'float' is not an integer or pointer type}}
-ATTR(vector(linear(r))) // expected-error {{linear parameter type 'int &' is not an integer or pointer type}}
+ATTR(vector(linear(r))) // OK
 int test_linear_1(int &r, int x, int y, float z); // expected-note 3{{parameter here}}
 
 const int s = 1;
@@ -96,7 +96,7 @@ struct Class2 {
 };
 
 // mask clause
-ATTR(vector(mask(1))) // expected-error {{'mask' clause takes no arguments}}
+ATTR(vector(mask(1))) // expected-error {{attribute takes no arguments}}
 ATTR(vector(mask, nomask)) // expected-error {{elemental function cannot have both mask and nomask attributes}} \
                            // expected-note {{here}}
 ATTR(vector(nomask, mask)) // expected-error {{elemental function cannot have both mask and nomask attributes}} \

@@ -22,7 +22,6 @@
 namespace clang {
   class DiagnosticsEngine;
   class SourceLocation;
-  struct WarningOption;
 
   // Import the diagnostic enums themselves.
   namespace diag {
@@ -34,7 +33,7 @@ namespace clang {
       DIAG_START_SERIALIZATION = DIAG_START_FRONTEND        +  100,
       DIAG_START_LEX           = DIAG_START_SERIALIZATION   +  120,
       DIAG_START_PARSE         = DIAG_START_LEX             +  300,
-      DIAG_START_AST           = DIAG_START_PARSE           +  400,
+      DIAG_START_AST           = DIAG_START_PARSE           +  500,
       DIAG_START_COMMENT       = DIAG_START_AST             +  100,
       DIAG_START_SEMA          = DIAG_START_COMMENT         +  100,
       DIAG_START_ANALYSIS      = DIAG_START_SEMA            + 3000,
@@ -49,7 +48,7 @@ namespace clang {
     // Get typedefs for common diagnostics.
     enum {
 #define DIAG(ENUM,FLAGS,DEFAULT_MAPPING,DESC,GROUP,\
-             SFINAE,ACCESS,CATEGORY,NOWERROR,SHOWINSYSHEADER) ENUM,
+             SFINAE,CATEGORY,NOWERROR,SHOWINSYSHEADER) ENUM,
 #define COMMONSTART
 #include "clang/Basic/DiagnosticCommonKinds.inc"
       NUM_BUILTIN_COMMON_DIAGNOSTICS
@@ -240,12 +239,6 @@ public:
   static StringRef getNearestWarningOption(StringRef Group);
 
 private:
-  /// \brief Get the set of all diagnostic IDs in the given group.
-  ///
-  /// \param[out] Diags - On return, the diagnostics in the group.
-  void getDiagnosticsInGroup(const WarningOption *Group,
-                             SmallVectorImpl<diag::kind> &Diags) const;
- 
   /// \brief Classify the specified diagnostic ID into a Level, consumable by
   /// the DiagnosticClient.
   /// 

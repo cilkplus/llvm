@@ -36,12 +36,18 @@ unsigned CommaSeparatedList::format(LineState &State,
   // Ensure that we start on the opening brace.
   const FormatToken *LBrace = State.NextToken->Previous->Previous;
   if (LBrace->isNot(tok::l_brace) ||
+      LBrace->BlockKind == BK_Block ||
+      LBrace->Type == TT_DictLiteral ||
       LBrace->Next->Type == TT_DesignatedInitializerPeriod)
     return 0;
 
+  // Calculate the number of code points we have to format this list. As the
+  // first token is already placed, we have to subtract it.
+  unsigned RemainingCodePoints = Style.ColumnLimit - State.Column +
+                                 State.NextToken->Previous->ColumnWidth;
+
   // Find the best ColumnFormat, i.e. the best number of columns to use.
-  unsigned RemainingCharacters = Style.ColumnLimit - State.Stack.back().Indent;
-  const ColumnFormat *Format = getColumnFormat(RemainingCharacters);
+  const ColumnFormat *Format = getColumnFormat(RemainingCodePoints);
   if (!Format)
     return 0;
 
@@ -78,7 +84,7 @@ unsigned CommaSeparatedList::format(LineState &State,
 static unsigned CodePointsBetween(const FormatToken *Begin,
                                   const FormatToken *End) {
   assert(End->TotalLength >= Begin->TotalLength);
-  return End->TotalLength - Begin->TotalLength + Begin->CodePointCount;
+  return End->TotalLength - Begin->TotalLength + Begin->ColumnWidth;
 }
 
 void CommaSeparatedList::precomputeFormattingInfos(const FormatToken *Token) {
@@ -93,12 +99,15 @@ void CommaSeparatedList::precomputeFormattingInfos(const FormatToken *Token) {
   // trailing comments which are otherwise ignored for column alignment.
   SmallVector<unsigned, 8> EndOfLineItemLength;
 
+  bool HasNestedBracedList = false;
   for (unsigned i = 0, e = Commas.size() + 1; i != e; ++i) {
     // Skip comments on their own line.
     while (ItemBegin->HasUnescapedNewline && ItemBegin->isTrailingComment())
       ItemBegin = ItemBegin->Next;
 
     MustBreakBeforeItem.push_back(ItemBegin->MustBreakBefore);
+    if (ItemBegin->is(tok::l_brace))
+      HasNestedBracedList = true;
     const FormatToken *ItemEnd = NULL;
     if (i == Commas.size()) {
       ItemEnd = Token->MatchingParen;
@@ -136,10 +145,11 @@ void CommaSeparatedList::precomputeFormattingInfos(const FormatToken *Token) {
     ColumnFormat Format;
     Format.Columns = Columns;
     Format.ColumnSizes.resize(Columns);
-    Format.LineCount = 0;
+    Format.LineCount = 1;
     bool HasRowWithSufficientColumns = false;
     unsigned Column = 0;
     for (unsigned i = 0, e = ItemLengths.size(); i != e; ++i) {
+      assert(i < MustBreakBeforeItem.size());
       if (MustBreakBeforeItem[i] || Column == Columns) {
         ++Format.LineCount;
         Column = 0;
@@ -163,6 +173,11 @@ void CommaSeparatedList::precomputeFormattingInfos(const FormatToken *Token) {
 
     // Ignore layouts that are bound to violate the column limit.
     if (Format.TotalWidth > Style.ColumnLimit)
+      continue;
+
+    // If this braced list has nested braced list, we format it either with one
+    // element per line or with all elements on one line.
+    if (HasNestedBracedList && Columns > 1 && Format.LineCount > 1)
       continue;
 
     Formats.push_back(Format);

@@ -42,6 +42,7 @@ public:
   void VisitBlockExpr(BlockExpr *E) { }
   void VisitCXXUuidofExpr(CXXUuidofExpr *E) { }  
   void VisitCXXNoexceptExpr(CXXNoexceptExpr *E) { }
+  void VisitCEANBuiltinExpr(CEANBuiltinExpr *E) { }
   
   void VisitMemberExpr(MemberExpr *E) {
     // Only the base matters.

@@ -92,6 +92,9 @@ def StmtExpr : DStmt<Expr>;
 def ChooseExpr : DStmt<Expr>;
 def GNUNullExpr : DStmt<Expr>;
 
+def CEANIndexExpr : DStmt<Expr>;
+def CEANBuiltinExpr : DStmt<Expr>;
+
 // C++ Expressions.
 def CXXOperatorCallExpr : DStmt<CallExpr>;
 def CXXMemberCallExpr : DStmt<CallExpr>;
@@ -162,6 +165,7 @@ def CUDAKernelCallExpr : DStmt<CallExpr>;
 
 // Clang Extensions.
 def ShuffleVectorExpr : DStmt<Expr>;
+def ConvertVectorExpr : DStmt<Expr>;
 def BlockExpr : DStmt<Expr>;
 def OpaqueValueExpr : DStmt<Expr>;
 
@@ -182,6 +186,7 @@ def CilkForGrainsizeStmt : Stmt;
 def CilkForStmt : Stmt;
 def SIMDForStmt : Stmt;
 def CilkSpawnExpr : DStmt<Expr>;
+def CilkRankedStmt : Stmt;
 
 // OpenMP Directives.
 def OMPExecutableDirective : Stmt<1>;

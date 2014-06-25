@@ -584,6 +584,9 @@ static Function *GetCilkExceptingSyncFn(CodeGenFunction &CGF) {
 
   Fn->addFnAttr(Attribute::AlwaysInline);
   Fn->addFnAttr(Attribute::ReturnsTwice);
+//***INTEL
+  // Special Intel-specific attribute for inliner.
+  Fn->addFnAttr("INTEL_ALWAYS_INLINE");
   registerSyncFunction(CGF, Fn);
 
   return Fn;
@@ -711,6 +714,9 @@ static Function *GetCilkSyncFn(CodeGenFunction &CGF) {
 
   Fn->addFnAttr(Attribute::AlwaysInline);
   Fn->addFnAttr(Attribute::ReturnsTwice);
+//***INTEL
+  // Special Intel-specific attribute for inliner.
+  Fn->addFnAttr("INTEL_ALWAYS_INLINE");
   registerSyncFunction(CGF, Fn);
 
   return Fn;
@@ -1245,7 +1251,7 @@ CodeGenFunction::EmitSpawnCapturedStmt(const CapturedStmt &S,
   // Emit the CapturedDecl
   CodeGenFunction CGF(CGM, true);
   CGF.CapturedStmtInfo = new CGCilkSpawnInfo(S, ReceiverDecl);
-  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD);
+  llvm::Function *F = CGF.GenerateCapturedStmtFunction(CD, RD, S.getLocStart());
   delete CGF.CapturedStmtInfo;
 
   // Emit call to the helper function.

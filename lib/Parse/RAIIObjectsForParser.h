@@ -330,6 +330,18 @@ namespace clang {
     }
   };
 
+  class SuppressCEANSupport {
+  private:
+    Parser &P;
+  public:
+    SuppressCEANSupport(Parser &P) : P(P) {
+      P.getActions().StartCEAN(Sema::NoCEANAllowed);
+    }
+    ~SuppressCEANSupport() {
+      P.getActions().EndCEAN();
+    }
+  };
+
   class PoisonSEHIdentifiersRAIIObject {
     PoisonIdentifierRAIIObject Ident_AbnormalTermination;
     PoisonIdentifierRAIIObject Ident_GetExceptionCode;

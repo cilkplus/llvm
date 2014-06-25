@@ -753,6 +753,7 @@ PragmaOpenCLExtensionHandler::HandlePragma(Preprocessor &PP,
     PP.Diag(Tok.getLocation(), diag::warn_pragma_expected_enable_disable);
     return;
   }
+  SourceLocation StateLoc = Tok.getLocation();
 
   PP.Lex(Tok);
   if (Tok.isNot(tok::eod)) {
@@ -772,6 +773,10 @@ PragmaOpenCLExtensionHandler::HandlePragma(Preprocessor &PP,
   Toks[0].setAnnotationValue(data.getOpaqueValue());
   PP.EnterTokenStream(Toks, 1, /*DisableMacroExpansion=*/true,
                       /*OwnsTokens=*/false);
+
+  if (PP.getPPCallbacks())
+    PP.getPPCallbacks()->PragmaOpenCLExtension(NameLoc, ename, 
+                                               StateLoc, state);
 }
 
 /// \brief Handle Cilk Plus grainsize pragma.
@@ -1010,4 +1015,42 @@ void PragmaCommentHandler::HandlePragma(Preprocessor &PP,
     PP.getPPCallbacks()->PragmaComment(CommentLoc, II, ArgumentString);
 
   Actions.ActOnPragmaMSComment(Kind, ArgumentString);
+}
+
+// #pragma region
+static llvm::SmallVector<Token, 4> Regions;
+
+void PragmaRegionHandler::HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer, Token &FirstTok) {
+  Token Tok;
+
+  PP.Lex(Tok);
+  if (Tok.isNot(tok::eod)) {
+    PP.DiscardUntilEndOfDirective();
+  }
+  Regions.push_back(FirstTok);
+}
+
+void PragmaRegionHandler::CheckOpenedRegions(Preprocessor &PP) {
+  if(!Regions.empty()) {
+    while (!Regions.empty()) {
+      PP.Diag(Regions.back().getLocation(), diag::x_warn_intel_pragma_missing_endregion);
+      Regions.pop_back();
+    }
+  }
+}
+
+// #pragma endregion
+void PragmaEndRegionHandler::HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer, Token &FirstTok) {
+  Token Tok;
+
+  PP.Lex(Tok);
+  if (Tok.isNot(tok::eod)) {
+    PP.DiscardUntilEndOfDirective();
+  }
+  if (Regions.empty()) {
+    PP.Diag(FirstTok.getLocation(), diag::x_warn_intel_pragma_missing_region);
+  }
+  else {
+    Regions.pop_back();
+  }
 }

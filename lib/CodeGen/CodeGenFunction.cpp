@@ -18,12 +18,14 @@
 #include "CGCXXABI.h"
 #include "CGDebugInfo.h"
 #include "CodeGenModule.h"
+#include "TargetInfo.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/Basic/OpenCL.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Intrinsics.h"
@@ -33,27 +35,44 @@ using namespace clang;
 using namespace CodeGen;
 
 CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
-  : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
-    Builder(cgm.getModule().getContext(), llvm::ConstantFolder(),
+    : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
+      Builder(cgm.getModule().getContext(), llvm::ConstantFolder(),
             CGBuilderInserterTy(this)),
-    CapturedStmtInfo(0),
-    CurCGCilkImplicitSyncInfo(0),
-    SanitizePerformTypeCheck(CGM.getSanOpts().Null |
-                             CGM.getSanOpts().Alignment |
-                             CGM.getSanOpts().ObjectSize |
-                             CGM.getSanOpts().Vptr),
-    SanOpts(&CGM.getSanOpts()),
-    AutoreleaseResult(false), BlockInfo(0), BlockPointer(0),
-    LambdaThisCaptureField(0), NormalCleanupDest(0), NextCleanupDestIndex(1),
-    FirstBlockInfo(0), EHResumeBlock(0), ExceptionSlot(0), EHSelectorSlot(0),
-    DebugInfo(0), DisableDebugInfo(false), DidCallStackSave(false),
-    IndirectBranch(0), SwitchInsn(0), CaseRangeBlock(0), UnreachableBlock(0),
-    NumReturnExprs(0), NumSimpleReturnExprs(0),
-    CXXABIThisDecl(0), CXXABIThisValue(0), CXXThisValue(0),
-    CXXDefaultInitExprThis(0),
-    CXXStructorImplicitParamDecl(0), CXXStructorImplicitParamValue(0),
-    OutermostConditional(0), CurLexicalScope(0), ExceptionsDisabled(false),
-    TerminateLandingPad(0), TerminateHandler(0), TrapBB(0) {
+      CapturedStmtInfo(0), CurCGCilkImplicitSyncInfo(0),
+      SanitizePerformTypeCheck(CGM.getSanOpts().Null |
+                               CGM.getSanOpts().Alignment |
+                               CGM.getSanOpts().ObjectSize |
+                               CGM.getSanOpts().Vptr),
+      SanOpts(&CGM.getSanOpts()), AutoreleaseResult(false), BlockInfo(0),
+      BlockPointer(0), LambdaThisCaptureField(0), NormalCleanupDest(0),
+      NextCleanupDestIndex(1), FirstBlockInfo(0), EHResumeBlock(0),
+      ExceptionSlot(0), EHSelectorSlot(0), DebugInfo(CGM.getModuleDebugInfo()),
+      DisableDebugInfo(false), DidCallStackSave(false), IndirectBranch(0),
+      SwitchInsn(0), CaseRangeBlock(0), UnreachableBlock(0), NumReturnExprs(0),
+      NumSimpleReturnExprs(0), CXXABIThisDecl(0), CXXABIThisValue(0),
+      CXXThisValue(0), CXXDefaultInitExprThis(0),
+      CXXStructorImplicitParamDecl(0), CXXStructorImplicitParamValue(0),
+      OutermostConditional(0), CurLexicalScope(0), ExceptionsDisabled(false),
+      TerminateLandingPad(0), TerminateHandler(0), TrapBB(0) {
+/*
+    : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
+      Builder(cgm.getModule().getContext()), CapturedStmtInfo(0),
+      SanitizePerformTypeCheck(CGM.getSanOpts().Null |
+                               CGM.getSanOpts().Alignment |
+                               CGM.getSanOpts().ObjectSize |
+                               CGM.getSanOpts().Vptr),
+      SanOpts(&CGM.getSanOpts()), AutoreleaseResult(false), BlockInfo(0),
+      BlockPointer(0), LambdaThisCaptureField(0), NormalCleanupDest(0),
+      NextCleanupDestIndex(1), FirstBlockInfo(0), EHResumeBlock(0),
+      ExceptionSlot(0), EHSelectorSlot(0), DebugInfo(CGM.getModuleDebugInfo()),
+      DisableDebugInfo(false), DidCallStackSave(false), IndirectBranch(0),
+      SwitchInsn(0), CaseRangeBlock(0), UnreachableBlock(0), NumReturnExprs(0),
+      NumSimpleReturnExprs(0), CXXABIThisDecl(0), CXXABIThisValue(0),
+      CXXThisValue(0), CXXDefaultInitExprThis(0),
+      CXXStructorImplicitParamDecl(0), CXXStructorImplicitParamValue(0),
+      OutermostConditional(0), CurLexicalScope(0), TerminateLandingPad(0),
+      TerminateHandler(0), TrapBB(0) {
+*/
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
 
@@ -170,6 +189,7 @@ void CodeGenFunction::EmitReturnBlock() {
       // branch.  This is really subtle and only works because the next change
       // in location will hit the caching in CGDebugInfo::EmitLocation and not
       // override this.
+      ReturnLoc = BI->getDebugLoc();
       Builder.SetCurrentDebugLocation(BI->getDebugLoc());
       Builder.SetInsertPoint(BI->getParent());
       BI->eraseFromParent();
@@ -246,7 +266,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
     DI->EmitFunctionEnd(Builder);
   }
 
-  EmitFunctionEpilog(*CurFnInfo, EmitRetDbgLoc);
+  EmitFunctionEpilog(*CurFnInfo, EmitRetDbgLoc, EndLoc);
   EmitEndEHSpec(CurCodeDecl);
 
   assert(EHStack.empty() &&
@@ -263,6 +283,11 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   llvm::Instruction *Ptr = AllocaInsertPt;
   AllocaInsertPt = 0;
   Ptr->eraseFromParent();
+  if (FirstprivateInsertPt) {
+    Ptr = FirstprivateInsertPt;
+    FirstprivateInsertPt = 0;
+    Ptr->eraseFromParent();
+  }
 
   // If someone took the address of a label but never did an indirect goto, we
   // made a zero entry PHI node, which is illegal, zap it now.
@@ -527,6 +552,22 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
       EmitOpenCLKernelMetadata(FD, Fn);
   }
 
+  // If we are checking function types, emit a function type signature as
+  // prefix data.
+  if (getLangOpts().CPlusPlus && SanOpts->Function) {
+    if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D)) {
+      if (llvm::Constant *PrefixSig =
+              CGM.getTargetCodeGenInfo().getUBSanFunctionSignature(CGM)) {
+        llvm::Constant *FTRTTIConst =
+            CGM.GetAddrOfRTTIDescriptor(FD->getType(), /*ForEH=*/true);
+        llvm::Constant *PrefixStructElems[] = { PrefixSig, FTRTTIConst };
+        llvm::Constant *PrefixStructConst =
+            llvm::ConstantStruct::getAnon(PrefixStructElems, /*Packed=*/true);
+        Fn->setPrefixData(PrefixStructConst);
+      }
+    }
+  }
+
   llvm::BasicBlock *EntryBB = createBasicBlock("entry", CurFn);
 
   // Create a marker to make it easy to insert allocas into the entryblock
@@ -534,6 +575,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
   // folded.
   llvm::Value *Undef = llvm::UndefValue::get(Int32Ty);
   AllocaInsertPt = new llvm::BitCastInst(Undef, Int32Ty, "", EntryBB);
+  FirstprivateInsertPt = 0;
   if (Builder.isNamePreserving())
     AllocaInsertPt->setName("allocapt");
 
@@ -613,7 +655,8 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
       if (LambdaThisCaptureField) {
         // If this lambda captures this, load it.
         LValue ThisLValue = EmitLValueForLambdaField(LambdaThisCaptureField);
-        CXXThisValue = EmitLoadOfLValue(ThisLValue).getScalarVal();
+        CXXThisValue = EmitLoadOfLValue(ThisLValue,
+                                        SourceLocation()).getScalarVal();
       }
     } else {
       // Not in a lambda; just use 'this' from the method.
@@ -646,13 +689,12 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
     DI->EmitLocation(Builder, StartLoc);
 }
 
-void CodeGenFunction::EmitFunctionBody(FunctionArgList &Args) {
-  const FunctionDecl *FD = cast<FunctionDecl>(CurGD.getDecl());
-  assert(FD->getBody());
-  if (const CompoundStmt *S = dyn_cast<CompoundStmt>(FD->getBody()))
+void CodeGenFunction::EmitFunctionBody(FunctionArgList &Args,
+                                       const Stmt *Body) {
+  if (const CompoundStmt *S = dyn_cast<CompoundStmt>(Body))
     EmitCompoundStmtWithoutScope(*S);
   else
-    EmitStmt(FD->getBody());
+    EmitStmt(Body);
 }
 
 /// Tries to mark the given function nounwind based on the
@@ -675,13 +717,24 @@ static void TryMarkNoThrow(llvm::Function *F) {
   F->setDoesNotThrow();
 }
 
+static void EmitSizedDeallocationFunction(CodeGenFunction &CGF,
+                                          const FunctionDecl *UnsizedDealloc) {
+  // This is a weak discardable definition of the sized deallocation function.
+  CGF.CurFn->setLinkage(llvm::Function::LinkOnceAnyLinkage);
+
+  // Call the unsized deallocation function and forward the first argument
+  // unchanged.
+  llvm::Constant *Unsized = CGF.CGM.GetAddrOfFunction(UnsizedDealloc);
+  CGF.Builder.CreateCall(Unsized, &*CGF.CurFn->arg_begin());
+}
+
 void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
                                    const CGFunctionInfo &FnInfo) {
   const FunctionDecl *FD = cast<FunctionDecl>(GD.getDecl());
 
   // Check if we should generate debug info for this function.
-  if (!FD->hasAttr<NoDebugAttr>())
-    maybeInitializeDebugInfo();
+  if (FD->hasAttr<NoDebugAttr>())
+    DebugInfo = NULL; // disable debug info indefinitely for this function
 
   FunctionArgList Args;
   QualType ResTy = FD->getResultType();
@@ -720,17 +773,24 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
     EmitLambdaToBlockPointerBody(Args);
   } else if (isa<CXXMethodDecl>(FD) &&
              cast<CXXMethodDecl>(FD)->isLambdaStaticInvoker()) {
-    // The lambda "__invoke" function is special, because it forwards or
+    // The lambda static invoker function is special, because it forwards or
     // clones the body of the function call operator (but is actually static).
     EmitLambdaStaticInvokeFunction(cast<CXXMethodDecl>(FD));
   } else if (FD->isDefaulted() && isa<CXXMethodDecl>(FD) &&
-             cast<CXXMethodDecl>(FD)->isCopyAssignmentOperator()) {
+             (cast<CXXMethodDecl>(FD)->isCopyAssignmentOperator() ||
+              cast<CXXMethodDecl>(FD)->isMoveAssignmentOperator())) {
     // Implicit copy-assignment gets the same special treatment as implicit
     // copy-constructors.
     emitImplicitAssignmentOperatorBody(Args);
-  }
-  else
-    EmitFunctionBody(Args);
+  } else if (Stmt *Body = FD->getBody()) {
+    EmitFunctionBody(Args, Body);
+  } else if (FunctionDecl *UnsizedDealloc =
+                 FD->getCorrespondingUnsizedGlobalDeallocationFunction()) {
+    // Global sized deallocation functions get an implicit weak definition if
+    // they don't have an explicit definition.
+    EmitSizedDeallocationFunction(*this, UnsizedDealloc);
+  } else
+    llvm_unreachable("no definition for emitted function");
 
   // C++11 [stmt.return]p2:
   //   Flowing off the end of a function [...] results in undefined behavior in
@@ -1375,10 +1435,14 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
       break;
 
     case Type::Typedef:
+      type = cast<TypedefType>(ty)->desugar();
+      break;
     case Type::Decltype:
+      type = cast<DecltypeType>(ty)->desugar();
+      break;
     case Type::Auto:
-      // Stop walking: nothing to do.
-      return;
+      type = cast<AutoType>(ty)->getDeducedType();
+      break;
 
     case Type::TypeOfExpr:
       // Stop walking: emit typeof expression.
@@ -1389,7 +1453,7 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
       type = cast<AtomicType>(ty)->getValueType();
       break;
     }
-  } while (type->isVariablyModifiedType());
+  } while (!type.isNull() && type->isVariablyModifiedType());
 }
 
 llvm::Value* CodeGenFunction::EmitVAListRef(const Expr* E) {

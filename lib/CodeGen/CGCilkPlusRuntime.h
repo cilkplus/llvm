@@ -45,8 +45,6 @@ class CodeGenModule;
 /// \brief Implements Cilk Plus runtime specific code generation functions.
 class CGCilkPlusRuntime {
 public:
-  void EmitCilkSpawn(CodeGenFunction &CGF, const CilkSpawnStmt &S);
-
   void EmitCilkSync(CodeGenFunction &CGF);
 
   void EmitCilkParentStackFrame(CodeGenFunction &CGF);

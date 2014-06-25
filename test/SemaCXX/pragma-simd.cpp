@@ -153,7 +153,6 @@ namespace ConstExprCheck {
   void test() {
     #pragma simd vectorlength(ce(2))
     for (int i = 0; i < 10; ++i) ;
-    /* expected-error@+1 {{vectorlength expression must be a power of 2}} */
     #pragma simd vectorlength(ce_bad(4))
     for (int i = 0; i < 10; ++i) ;
 
@@ -253,7 +252,7 @@ void test_simd_length2(T length) {
 
 template <typename T>
 void test_simd_length_for() {
-  #pragma simd vectorlengthfor(T)
+  #pragma simd
   for (int i = 0; i < 10; i++) {}
 }
 
@@ -363,54 +362,53 @@ void test_simd_multiple_clauses2() {
 
 void templated_tests() {
   test_simd_length<2>(); // OK
-  test_simd_length<-2>(); // expected-error@244 {{vectorlength expression must be a power of 2}} \
-                          // expected-note {{in instantiation of function template specialization}}
+  test_simd_length<-2>();
 
-  test_simd_length2(2); // expected-error@250 {{vectorlength expression must be an integer constant}} \
+  test_simd_length2(2); // expected-error@249 {{vectorlength expression must be an integer constant}} \
                         // expected-note {{in instantiation of function template specialization}}
 
   test_simd_length_for<long>(); // OK
-  test_simd_length_for<void>(); // expected-error@256 {{cannot select vector length for void type}} \
-                                // expected-note {{in instantiation of function template specialization}}
+  test_simd_length_for<void>(); // OK
+                                //
 
   test_simd_linear<int, int>(); // OK
-  test_simd_linear<int, float>(); // expected-error@266 {{invalid linear step: expected integral constant or variable reference}} \
+  test_simd_linear<int, float>(); // expected-error@265 {{invalid linear step: expected integral constant or variable reference}} \
                                   // expected-note {{in instantiation of function template specialization}}
-  test_simd_linear<S, int>(); // expected-error@266 {{invalid linear variable}} \
-                              // expected-error@269 {{invalid linear variable}} \
+  test_simd_linear<S, int>(); // expected-error@265 {{invalid linear variable}} \
+                              // expected-error@268 {{invalid linear variable}} \
                               // expected-note {{in instantiation of function template specialization}}
 
   test_simd_private<float, long>(); // OK
-  test_simd_private2<S>(); // expected-error@285 {{expected ','}} \
-                           // expected-error@285 {{expected unqualified-id}}
+  test_simd_private2<S>(); // expected-error@284 {{expected ','}} \
+                           // expected-error@284 {{expected unqualified-id}}
 
-  test_simd_private3<S>(); // expected-error@292 {{variable in private clause shall not be const-qualified}} \
-                           // expected-error@291 {{default initialization of an object of const type}} \
-                           // expected-note@291 {{variable declared here}} \
+  test_simd_private3<S>(); // expected-error@291 {{variable in private clause shall not be const-qualified}} \
+                           // expected-error@290 {{default initialization of an object of const type}} \
+                           // expected-note@290 {{variable declared here}} \
                            // expected-note {{in instantiation of function template specialization}}
 
-  test_simd_private4<int>(); // expected-error@300 {{variable in private clause shall not be a reference}}
+  test_simd_private4<int>(); // expected-error@299 {{variable in private clause shall not be a reference}}
 
   test_simd_firstprivate<long, float>(); // OK
 
-  test_simd_firstprivate2<S>(); // expected-error@315 {{expected ','}} \
-                                // expected-error@315 {{expected unqualified-id}}
+  test_simd_firstprivate2<S>(); // expected-error@314 {{expected ','}} \
+                                // expected-error@314 {{expected unqualified-id}}
 
   test_simd_lastprivate<double, float>();
 
-  test_simd_lastprivate2<S>(); // expected-error@330 {{expected ','}} \
-                               // expected-error@330 {{expected unqualified-id}}
+  test_simd_lastprivate2<S>(); // expected-error@329 {{expected ','}} \
+                               // expected-error@329 {{expected unqualified-id}}
 
   test_simd_reduction<int>(); // OK
 
-  test_simd_reduction2<int>(); // expected-error@344 {{variable in reduction clause shall not be of array type}} \
-                               // expected-note@343 {{declared here}}
+  test_simd_reduction2<int>(); // expected-error@343 {{variable in reduction clause shall not be of array type}} \
+                               // expected-note@342 {{declared here}}
 
   test_simd_multiple_clauses<float, long, double>(); // OK
 
-  test_simd_multiple_clauses2<float>(); // expected-error@360 {{private variable shall not appear in multiple simd clauses}} \
-                                        // expected-note@360 {{first used here}} \
-                                        // expected-error@360 {{vectorlength expression must be an integer constant}} \
+  test_simd_multiple_clauses2<float>(); // expected-error@359 {{private variable shall not appear in multiple simd clauses}} \
+                                        // expected-note@359 {{first used here}} \
+                                        // expected-error@359 {{vectorlength expression must be an integer constant}} \
                                         // expected-note {{in instantiation of function template specialization}}
 }
 
@@ -470,7 +468,7 @@ void test() {
   #pragma simd vectorlength(C2+C2)
   for (int i = 0; i < 10; ++i) ;
 
-  /* expected-error@+1 {{vectorlength expression must be a power of 2}} */
+  /* expected-error@+1 {{expected for statement following '#pragma simd'}} */
   #pragma simd vectorlength(C1+C2)
   /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(C1+j)

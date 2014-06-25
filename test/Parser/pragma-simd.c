@@ -93,35 +93,13 @@ void test_vectorlength()
   for (i = 0; i < 16; ++i) ;
 }
 
-void test_vectorlengthfor()
-{
-  int i;
-  /* expected-error@+1 {{expected a type}} */
-  #pragma simd vectorlengthfor()
-  for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected a type}} */
-  #pragma simd vectorlengthfor(
-  for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected a type}} */
-  #pragma simd vectorlengthfor()
-  for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{unknown type name 'foo'}} */
-  #pragma simd vectorlengthfor(foo)
-  for (i = 0; i < 16; ++i) ;
-  /* expected-error@+1 {{expected a type}} */
-  #pragma simd vectorlengthfor(0)
-  for (i = 0; i < 16; ++i) ;
-  /* expected-error@+2 {{expected ')'}} */
-  /* expected-note@+1 {{to match this '('}} */
-  #pragma simd vectorlengthfor(float,)
-  for (i = 0; i < 16; ++i) ;
-  #pragma simd vectorlengthfor(float)
-  for (i = 0; i < 16; ++i) ;
-}
-
 void test_linear()
 {
-  int i;
+  int i, s;
+
+  #pragma simd linear(s:sizeof(int))
+  for (i = 0; i < 256; i++);
+
   /* expected-error@+1 {{expected expression}} */
   #pragma simd linear(
   for (i = 0; i < 16; ++i) ;
@@ -276,6 +254,16 @@ void test_lastprivate()
 void test_reduction()
 {
   int i, x, y;
+  double d;
+
+  _Complex double z = 0;
+  /* expected-error@+1 {{reduction operator min requires arithmetic type}} */
+  #pragma simd reduction (min:z)
+  for (i = 0; i < 16; ++i) {z = 1.234;};
+  /* expected-error@+1 {{invalid operands to binary expression ('double' and 'double')}} */
+  #pragma simd reduction (^:d)
+  for (i = 0; i < 16; ++i) {d = d + 7.89;} ;
+  
   /* expected-error@+1 {{expected reduction operator}} */
   #pragma simd reduction(
   for (i = 0; i < 16; ++i) ;

@@ -742,7 +742,9 @@ namespace clang {
       /// \brief OpenCL event type.
       PREDEF_TYPE_EVENT_ID      = 44,
       /// \brief OpenCL sampler type.
-      PREDEF_TYPE_SAMPLER_ID    = 45
+      PREDEF_TYPE_SAMPLER_ID    = 45,
+      /// \brief _Quad type
+      PREDEF_TYPE_FLOAT128_ID       = 46
     };
 
     /// \brief The number of predefined type IDs that are reserved for
@@ -1067,6 +1069,9 @@ namespace clang {
       DECL_OMP_THREADPRIVATE,
       /// \brief An EmptyDecl record.
       DECL_EMPTY
+//AVT: maybe we'll support it soon
+//***INTEL: pragma support
+//#include "../../../intel/include/ASTBitCodes_Decl.h"
     };
 
     /// \brief Record codes for each kind of statement or expression.
@@ -1094,6 +1099,9 @@ namespace clang {
       STMT_DEFAULT,
       /// \brief A LabelStmt record.
       STMT_LABEL,
+//AVT: maybe we'll support it soon	  
+//***INTEL: pragma support
+//#include "../../../intel/include/ASTBitCodes_Stmt.h"
       /// \brief An AttributedStmt record.
       STMT_ATTRIBUTED,
       /// \brief An IfStmt record.
@@ -1186,6 +1194,8 @@ namespace clang {
       EXPR_GNU_NULL,
       /// \brief A ShuffleVectorExpr record.
       EXPR_SHUFFLE_VECTOR,
+      /// \brief A ConvertVectorExpr record.
+      EXPR_CONVERT_VECTOR,
       /// \brief BlockExpr
       EXPR_BLOCK,
       /// \brief A GenericSelectionExpr record.
@@ -1194,6 +1204,9 @@ namespace clang {
       EXPR_PSEUDO_OBJECT,
       /// \brief An AtomicExpr record.
       EXPR_ATOMIC,
+      /// \brief A CEANIndexExpr record.
+      EXPR_CEAN_INDEX,
+      EXPR_CEAN_BUILTIN,
 
       // Objective-C
 
@@ -1342,7 +1355,8 @@ namespace clang {
       STMT_CILKSYNC,
       STMT_CILK_FOR_GRAINSIZE,
       STMT_CILK_FOR,
-      STMT_SIMD_FOR
+      STMT_SIMD_FOR,
+      STMT_CILK_RANKED
     };
 
     /// \brief The kinds of designators that can occur in a

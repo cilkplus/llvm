@@ -145,8 +145,34 @@ public:
     : PragmaHandler("detect_mismatch"), Actions(Actions) {}
   virtual void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer,
                             Token &FirstToken);
+
 private:
   Sema &Actions;
+};
+
+/// \brief Handle "\#pragma region [...]"
+///
+/// The syntax is
+/// \code
+///   #pragma region [optional name]
+///   #pragma endregion [optional comment]
+/// \endcode
+///
+/// \note This is
+/// <a href="http://msdn.microsoft.com/en-us/library/b6xkz944(v=vs.80).aspx">editor-only</a>
+/// pragma, just skipped by compiler.
+class PragmaRegionHandler: public PragmaHandler {
+  public:
+    explicit PragmaRegionHandler() : PragmaHandler("region") {}
+    virtual void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer, Token &FirstTok);
+    void CheckOpenedRegions(Preprocessor &PP);
+};
+
+// #pragma endregion
+class PragmaEndRegionHandler: public PragmaHandler {
+  public:
+    explicit PragmaEndRegionHandler() : PragmaHandler("endregion") {}
+    virtual void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer, Token &FirstTok);
 };
 
 }  // end namespace clang

@@ -586,6 +586,9 @@ void StmtPrinter::VisitSEHFinallyStmt(SEHFinallyStmt *Node) {
 namespace {
 class OMPClausePrinter : public OMPClauseVisitor<OMPClausePrinter> {
   raw_ostream &OS;
+  /// \brief Process clauses with list of variables.
+  template <typename T>
+  void VisitOMPClauseList(T *Node, char StartSym);
 public:
   OMPClausePrinter(raw_ostream &OS) : OS(OS) { }
 #define OPENMP_CLAUSE(Name, Class)                              \
@@ -599,22 +602,39 @@ void OMPClausePrinter::VisitOMPDefaultClause(OMPDefaultClause *Node) {
      << ")";
 }
 
-#define PROCESS_OMP_CLAUSE_LIST(Class, Node, StartSym)                         \
-  for (OMPVarList<Class>::varlist_iterator I = Node->varlist_begin(),          \
-                                           E = Node->varlist_end();            \
-         I != E; ++I)                                                          \
-    OS << (I == Node->varlist_begin() ? StartSym : ',')                        \
+template<typename T>
+void OMPClausePrinter::VisitOMPClauseList(T *Node, char StartSym) {
+  for (typename T::varlist_iterator I = Node->varlist_begin(),
+                                    E = Node->varlist_end();
+         I != E; ++I)
+    OS << (I == Node->varlist_begin() ? StartSym : ',')
        << *cast<NamedDecl>(cast<DeclRefExpr>(*I)->getDecl());
+}
 
 void OMPClausePrinter::VisitOMPPrivateClause(OMPPrivateClause *Node) {
   if (!Node->varlist_empty()) {
     OS << "private";
-    PROCESS_OMP_CLAUSE_LIST(OMPPrivateClause, Node, '(')
+    VisitOMPClauseList(Node, '(');
     OS << ")";
   }
 }
 
-#undef PROCESS_OMP_CLAUSE_LIST
+void OMPClausePrinter::VisitOMPFirstprivateClause(OMPFirstprivateClause *Node) {
+  if (!Node->varlist_empty()) {
+    OS << "firstprivate";
+    VisitOMPClauseList(Node, '(');
+    OS << ")";
+  }
+}
+
+void OMPClausePrinter::VisitOMPSharedClause(OMPSharedClause *Node) {
+  if (!Node->varlist_empty()) {
+    OS << "shared";
+    VisitOMPClauseList(Node, '(');
+    OS << ")";
+  }
+}
+
 }
 
 //===----------------------------------------------------------------------===//
@@ -717,6 +737,9 @@ void StmtPrinter::VisitPredefinedExpr(PredefinedExpr *Node) {
       break;
     case PredefinedExpr::Function:
       OS << "__FUNCTION__";
+      break;
+    case PredefinedExpr::FuncDName:
+      OS << "__FUNCDNAME__";
       break;
     case PredefinedExpr::LFunction:
       OS << "L__FUNCTION__";
@@ -823,6 +846,7 @@ static void PrintFloatingLiteral(raw_ostream &OS, FloatingLiteral *Node,
   case BuiltinType::Double:     break; // no suffix.
   case BuiltinType::Float:      OS << 'F'; break;
   case BuiltinType::LongDouble: OS << 'L'; break;
+  case BuiltinType::Float128:   OS << 'Q'; break;
   }
 }
 
@@ -953,6 +977,73 @@ void StmtPrinter::VisitArraySubscriptExpr(ArraySubscriptExpr *Node) {
   OS << "]";
 }
 
+void StmtPrinter::VisitCEANIndexExpr(CEANIndexExpr *Node) {
+  if (Node->getLowerBound() && Node->getLowerBound()->getLocStart().isValid())
+    PrintExpr(Node->getLowerBound());
+  OS << ":";
+  if (Node->getLength() && Node->getLength()->getLocStart().isValid())
+    PrintExpr(Node->getLength());
+  bool PrintStride =
+    Node->getStride() && Node->getStride()->getLocStart().isValid();
+  if (PrintStride) {
+    OS << ":";
+    PrintExpr(Node->getStride());
+  }
+}
+
+void StmtPrinter::VisitCEANBuiltinExpr(CEANBuiltinExpr *Node) {
+  switch (Node->getBuiltinKind()) {
+  case CEANBuiltinExpr::ReduceAdd:
+    OS << "__sec_reduce_add";
+    break;
+  case CEANBuiltinExpr::ReduceMul:
+    OS << "__sec_reduce_mul";
+    break;
+  case CEANBuiltinExpr::ReduceMax:
+    OS << "__sec_reduce_max";
+    break;
+  case CEANBuiltinExpr::ReduceMin:
+    OS << "__sec_reduce_min";
+    break;
+  case CEANBuiltinExpr::ReduceMaxIndex:
+    OS << "__sec_reduce_max_index";
+    break;
+  case CEANBuiltinExpr::ReduceMinIndex:
+    OS << "__sec_reduce_min_index";
+    break;
+  case CEANBuiltinExpr::ReduceAllZero:
+    OS << "__sec_reduce_max_all_zero";
+    break;
+  case CEANBuiltinExpr::ReduceAllNonZero:
+    OS << "__sec_reduce_max_all_nonzero";
+    break;
+  case CEANBuiltinExpr::ReduceAnyZero:
+    OS << "__sec_reduce_max_any_zero";
+    break;
+  case CEANBuiltinExpr::ReduceAnyNonZero:
+    OS << "__sec_reduce_max_any_nonzero";
+    break;
+  case CEANBuiltinExpr::Reduce:
+    OS << "__sec_reduce";
+    break;
+  case CEANBuiltinExpr::ReduceMutating:
+    OS << "__sec_reduce_mutating";
+    break;
+  case CEANBuiltinExpr::ImplicitIndex:
+    OS << "__sec_implicit_index";
+    break;
+  case CEANBuiltinExpr::Unknown:
+    return;
+  }
+  ArrayRef<Expr *> Args = Node->getArgs();
+  for (ArrayRef<Expr *>::iterator I = Args.begin(), B = I, E = Args.end();
+       I != E; ++I) {
+    OS << ((I == B) ? "(" : ",");
+    PrintExpr(*I);
+  }
+  OS << ")";
+}
+
 void StmtPrinter::PrintCallArgs(CallExpr *Call) {
   for (unsigned i = 0, e = Call->getNumArgs(); i != e; ++i) {
     if (isa<CXXDefaultArgExpr>(Call->getArg(i))) {
@@ -1079,6 +1170,14 @@ void StmtPrinter::VisitShuffleVectorExpr(ShuffleVectorExpr *Node) {
     if (i) OS << ", ";
     PrintExpr(Node->getExpr(i));
   }
+  OS << ")";
+}
+
+void StmtPrinter::VisitConvertVectorExpr(ConvertVectorExpr *Node) {
+  OS << "__builtin_convertvector(";
+  PrintExpr(Node->getSrcExpr());
+  OS << ", ";
+  Node->getType().print(OS, Policy);
   OS << ")";
 }
 
@@ -1289,7 +1388,7 @@ void StmtPrinter::VisitCXXConstCastExpr(CXXConstCastExpr *Node) {
 void StmtPrinter::VisitCXXTypeidExpr(CXXTypeidExpr *Node) {
   OS << "typeid(";
   if (Node->isTypeOperand()) {
-    Node->getTypeOperand().print(OS, Policy);
+    Node->getTypeOperandSourceInfo()->getType().print(OS, Policy);
   } else {
     PrintExpr(Node->getExprOperand());
   }
@@ -1299,7 +1398,7 @@ void StmtPrinter::VisitCXXTypeidExpr(CXXTypeidExpr *Node) {
 void StmtPrinter::VisitCXXUuidofExpr(CXXUuidofExpr *Node) {
   OS << "__uuidof(";
   if (Node->isTypeOperand()) {
-    Node->getTypeOperand().print(OS, Policy);
+    Node->getTypeOperandSourceInfo()->getType().print(OS, Policy);
   } else {
     PrintExpr(Node->getExprOperand());
   }
@@ -1442,24 +1541,18 @@ void StmtPrinter::VisitLambdaExpr(LambdaExpr *Node) {
       break;
 
     case LCK_ByRef:
-      if (Node->getCaptureDefault() != LCD_ByRef)
+      if (Node->getCaptureDefault() != LCD_ByRef || C->isInitCapture())
         OS << '&';
       OS << C->getCapturedVar()->getName();
       break;
 
     case LCK_ByCopy:
-      if (Node->getCaptureDefault() != LCD_ByCopy)
-        OS << '=';
       OS << C->getCapturedVar()->getName();
       break;
-
-    case LCK_Init:
-      if (C->getInitCaptureField()->getType()->isReferenceType())
-        OS << '&';
-      OS << C->getInitCaptureField()->getName();
-      PrintExpr(Node->getInitCaptureInit(C));
-      break;
     }
+
+    if (C->isInitCapture())
+      PrintExpr(C->getCapturedVar()->getInit());
   }
   OS << ']';
 
@@ -1692,6 +1785,7 @@ static const char *getTypeTraitName(UnaryTypeTrait UTT) {
   case UTT_IsReference:             return "__is_reference";
   case UTT_IsRvalueReference:       return "__is_rvalue_reference";
   case UTT_IsScalar:                return "__is_scalar";
+  case UTT_IsSealed:                return "__is_sealed";
   case UTT_IsSigned:                return "__is_signed";
   case UTT_IsStandardLayout:        return "__is_standard_layout";
   case UTT_IsTrivial:               return "__is_trivial";
@@ -2031,6 +2125,24 @@ void StmtPrinter::VisitSIMDForStmt(SIMDForStmt *Node) {
   }
   OS << ") \n";
   PrintStmt(Node->getBody());
+}
+
+void StmtPrinter::VisitCilkRankedStmt(CilkRankedStmt *Node) {
+  OS << " // Ranked Stmt: Rank " << Node->getRank();
+  for (ArrayRef<Expr *>::iterator I = Node->getLengths().begin(),
+                                  E = Node->getLengths().end();
+       I  != E; ++I) {
+    OS << ", ";
+    PrintExpr(*I);
+  }
+  OS << "\n";
+  Indent() << "{\n";
+  for (Stmt::child_range ChRange = Node->getInits()->children();
+       ChRange; ++ChRange)
+    PrintStmt(*ChRange);
+  if (Node->getAssociatedStmt())
+    PrintStmt(Node->getAssociatedStmt());
+  Indent() << "}\n";
 }
 
 //===----------------------------------------------------------------------===//

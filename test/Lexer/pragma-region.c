@@ -19,12 +19,12 @@ void foo(void){}
 
 void inner();
 
-__pragma(region) // no sense, but ignored
-_Pragma("region")// ditto
+__pragma(region) // expected-warning {{the #pragma region unclosed at end of file}}
+_Pragma("region") // expected-warning {{the #pragma region unclosed at end of file}}
 
 #pragma region2 // expected-warning {{unknown pragma ignored}}
 
-#pragma region one
+#pragma region one // expected-warning {{the #pragma region unclosed at end of file}}
 #pragma region inner
 //#pragma endregion inner
 

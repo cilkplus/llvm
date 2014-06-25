@@ -402,8 +402,9 @@ void ASTStmtReader::VisitCapturedStmt(CapturedStmt *S) {
   for (CapturedStmt::capture_iterator I = S->capture_begin(),
                                       E = S->capture_end();
        I != E; ++I) {
-    I->Var = ReadDeclAs<VarDecl>(Record, Idx);
-    I->Kind = static_cast<CapturedStmt::VariableCaptureKind>(Record[Idx++]);
+    I->VarAndKind.setPointer(ReadDeclAs<VarDecl>(Record, Idx));
+    I->VarAndKind
+        .setInt(static_cast<CapturedStmt::VariableCaptureKind>(Record[Idx++]));
     I->Loc = ReadSourceLocation(Record, Idx);
   }
 }
@@ -587,6 +588,48 @@ void ASTStmtReader::VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
   E->setLHS(Reader.ReadSubExpr());
   E->setRHS(Reader.ReadSubExpr());
   E->setRBracketLoc(ReadSourceLocation(Record, Idx));
+  if (CEANIndexExpr *CIE = dyn_cast_or_null<CEANIndexExpr>(E->getIdx()))
+    CIE->setBase(E->getBase());
+}
+
+void ASTStmtReader::VisitCEANIndexExpr(CEANIndexExpr *E) {
+  VisitExpr(E);
+  E->setBase(0);
+  E->setLowerBound(Reader.ReadSubExpr());
+  E->setColonLoc1(ReadSourceLocation(Record, Idx));
+  E->setLength(Reader.ReadSubExpr());
+  E->setColonLoc2(ReadSourceLocation(Record, Idx));
+  E->setStride(Reader.ReadSubExpr());
+  E->setIndexExpr(Reader.ReadSubExpr());
+  E->setRank(Record[Idx++]);
+}
+
+void ASTStmtReader::VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
+  VisitExpr(E);
+  ++Idx;
+  ++Idx;
+  E->setBuiltinKind(static_cast<CEANBuiltinExpr::CEANKindType>(Record[Idx++]));
+  E->setStartLoc(ReadSourceLocation(Record, Idx));
+  E->setRParenLoc(ReadSourceLocation(Record, Idx));
+  llvm::SmallVector<Expr *, 16> Args;
+  for (unsigned i = 0; i < E->getArgsSize(); ++i)
+    Args.push_back(Reader.ReadSubExpr());
+  E->setArgs(Args);
+  Args.clear();
+  for (unsigned i = 0; i < E->getRank(); ++i)
+    Args.push_back(Reader.ReadSubExpr());
+  E->setLengths(Args);
+  llvm::SmallVector<Stmt *, 16> Vars;
+  for (unsigned i = 0; i < E->getRank(); ++i)
+    Vars.push_back(Reader.ReadSubStmt());
+  E->setVars(Vars);
+  Vars.clear();
+  for (unsigned i = 0; i < E->getRank(); ++i)
+    Vars.push_back(Reader.ReadSubStmt());
+  E->setIncrements(Vars);
+  E->setInit(Reader.ReadSubStmt());
+  E->setBody(Reader.ReadSubStmt());
+  E->setReturnExpr(Reader.ReadSubExpr());
 }
 
 void ASTStmtReader::VisitCallExpr(CallExpr *E) {
@@ -851,6 +894,14 @@ void ASTStmtReader::VisitShuffleVectorExpr(ShuffleVectorExpr *E) {
   E->setExprs(Reader.getContext(), Exprs);
   E->setBuiltinLoc(ReadSourceLocation(Record, Idx));
   E->setRParenLoc(ReadSourceLocation(Record, Idx));
+}
+
+void ASTStmtReader::VisitConvertVectorExpr(ConvertVectorExpr *E) {
+  VisitExpr(E);
+  E->BuiltinLoc = ReadSourceLocation(Record, Idx);
+  E->RParenLoc = ReadSourceLocation(Record, Idx);
+  E->TInfo = GetTypeSourceInfo(Record, Idx);
+  E->SrcExpr = Reader.ReadSubExpr();
 }
 
 void ASTStmtReader::VisitBlockExpr(BlockExpr *E) {
@@ -1179,6 +1230,9 @@ void ASTStmtReader::VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
   E->Operator = (OverloadedOperatorKind)Record[Idx++];
   E->Range = Reader.ReadSourceRange(F, Record, Idx);
   E->setFPContractable((bool)Record[Idx++]);
+  if (E->Operator == OO_Subscript)
+    if (CEANIndexExpr *CIE = dyn_cast_or_null<CEANIndexExpr>(E->getArg(0)))
+      CIE->setBase(E->getCallee());
 }
 
 void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
@@ -1195,7 +1249,7 @@ void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
   E->setListInitialization(Record[Idx++]);
   E->setRequiresZeroInitialization(Record[Idx++]);
   E->setConstructionKind((CXXConstructExpr::ConstructionKind)Record[Idx++]);
-  E->ParenRange = ReadSourceRange(Record, Idx);
+  E->ParenOrBraceRange = ReadSourceRange(Record, Idx);
 }
 
 void ASTStmtReader::VisitCXXTemporaryObjectExpr(CXXTemporaryObjectExpr *E) {
@@ -1663,25 +1717,6 @@ void ASTStmtReader::VisitAsTypeExpr(AsTypeExpr *E) {
 }
 
 //===----------------------------------------------------------------------===//
-// Cilk Plus Expressions and Statements.
-//===----------------------------------------------------------------------===//
-void ASTStmtReader::VisitCilkSyncStmt(CilkSyncStmt *S) {
-  VisitStmt(S);
-  S->SyncLoc = ReadSourceLocation(Record, Idx);
-}
-
-void ASTStmtReader::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtReader::VisitSIMDForStmt(SIMDForStmt *S) {
-  llvm_unreachable("not implemented yet");
-}
-
 //===----------------------------------------------------------------------===//
 // OpenMP Clauses.
 //===----------------------------------------------------------------------===//
@@ -1712,6 +1747,12 @@ OMPClause *OMPClauseReader::readClause() {
   case OMPC_private:
     C = OMPPrivateClause::CreateEmpty(Context, Record[Idx++]);
     break;
+  case OMPC_firstprivate:
+    C = OMPFirstprivateClause::CreateEmpty(Context, Record[Idx++]);
+    break;
+  case OMPC_shared:
+    C = OMPSharedClause::CreateEmpty(Context, Record[Idx++]);
+    break;
   }
   Visit(C);
   C->setLocStart(Reader->ReadSourceLocation(Record, Idx));
@@ -1728,6 +1769,26 @@ void OMPClauseReader::VisitOMPDefaultClause(OMPDefaultClause *C) {
 }
 
 void OMPClauseReader::VisitOMPPrivateClause(OMPPrivateClause *C) {
+  C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
+  unsigned NumVars = C->varlist_size();
+  SmallVector<Expr *, 16> Vars;
+  Vars.reserve(NumVars);
+  for (unsigned i = 0; i != NumVars; ++i)
+    Vars.push_back(Reader->Reader.ReadSubExpr());
+  C->setVarRefs(Vars);
+}
+
+void OMPClauseReader::VisitOMPFirstprivateClause(OMPFirstprivateClause *C) {
+  C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
+  unsigned NumVars = C->varlist_size();
+  SmallVector<Expr *, 16> Vars;
+  Vars.reserve(NumVars);
+  for (unsigned i = 0; i != NumVars; ++i)
+    Vars.push_back(Reader->Reader.ReadSubExpr());
+  C->setVarRefs(Vars);
+}
+
+void OMPClauseReader::VisitOMPSharedClause(OMPSharedClause *C) {
   C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
   unsigned NumVars = C->varlist_size();
   SmallVector<Expr *, 16> Vars;
@@ -1755,6 +1816,46 @@ void ASTStmtReader::VisitOMPExecutableDirective(OMPExecutableDirective *E) {
 
 void ASTStmtReader::VisitOMPParallelDirective(OMPParallelDirective *D) {
   VisitOMPExecutableDirective(D);
+}
+// Cilk Plus Expressions and Statements.
+//===----------------------------------------------------------------------===//
+void ASTStmtReader::VisitCilkSyncStmt(CilkSyncStmt *S) {
+  VisitStmt(S);
+  S->SyncLoc = ReadSourceLocation(Record, Idx);
+}
+
+void ASTStmtReader::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtReader::VisitSIMDForStmt(SIMDForStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtReader::VisitCilkRankedStmt(CilkRankedStmt *S) {
+  VisitStmt(S);
+  ++Idx;
+  SmallVector<Expr *, 16> Lengths;
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
+    Lengths.push_back(Reader.ReadSubExpr());
+  if (S->getRank() > 0)
+    S->setLengths(Lengths);
+  SmallVector<Stmt *, 16> Vars;
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
+    Vars.push_back(Reader.ReadSubStmt());
+  if (S->getRank() > 0)
+    S->setVars(Vars);
+  Vars.clear();
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
+    Vars.push_back(Reader.ReadSubStmt());
+  if (S->getRank() > 0)
+    S->setIncrements(Vars);
+  S->setAssociatedStmt(Reader.ReadSubStmt());
+  S->setInits(Reader.ReadSubStmt());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1989,6 +2090,15 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       S = new (Context) ArraySubscriptExpr(Empty);
       break;
 
+    case EXPR_CEAN_INDEX:
+      S = new (Context) CEANIndexExpr(Empty);
+      break;
+
+    case EXPR_CEAN_BUILTIN:
+      S = CEANBuiltinExpr::CreateEmpty(Context, Record[ASTStmtReader::NumExprFields],
+                                       Record[ASTStmtReader::NumExprFields + 1]);
+      break;
+
     case EXPR_CALL:
       S = new (Context) CallExpr(Context, Stmt::CallExprClass, Empty);
       break;
@@ -2112,6 +2222,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case EXPR_SHUFFLE_VECTOR:
       S = new (Context) ShuffleVectorExpr(Empty);
+      break;
+
+    case EXPR_CONVERT_VECTOR:
+      S = new (Context) ConvertVectorExpr(Empty);
       break;
 
     case EXPR_BLOCK:
@@ -2461,6 +2575,12 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case STMT_CILKSYNC:
       S = new (Context) CilkSyncStmt(Empty);
+      break;
+
+    case STMT_CILK_RANKED:
+      S = CilkRankedStmt::CreateEmpty(Context,
+                                      Record[ASTStmtReader::NumStmtFields],
+                                      Empty);
       break;
 
     case STMT_CILK_FOR_GRAINSIZE:

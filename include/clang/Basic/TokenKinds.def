@@ -344,17 +344,21 @@ KEYWORD(__real                      , KEYALL)
 KEYWORD(__thread                    , KEYALL)
 KEYWORD(__FUNCTION__                , KEYALL)
 KEYWORD(__PRETTY_FUNCTION__         , KEYALL)
+KEYWORD(_Quad                       , KEYFLOAT128)
 
 // GNU Extensions (outside impl-reserved namespace)
 KEYWORD(typeof                      , KEYGNU)
 
 // MS Extensions
+KEYWORD(__FUNCDNAME__               , KEYMS)
 KEYWORD(L__FUNCTION__               , KEYMS)
+KEYWORD(__is_interface_class        , KEYMS)
+KEYWORD(__is_sealed                 , KEYMS)
 
 // Intel Extensions (in impl-reserved namespace)
-KEYWORD(_Cilk_spawn                 , KEYALL)
-KEYWORD(_Cilk_sync                  , KEYALL)
-KEYWORD(_Cilk_for                   , KEYALL)
+KEYWORD(_Cilk_spawn                 , KEYCILKPLUS)
+KEYWORD(_Cilk_sync                  , KEYCILKPLUS)
+KEYWORD(_Cilk_for                   , KEYCILKPLUS)
 
 // GNU and MS Type Traits
 KEYWORD(__has_nothrow_assign          , KEYCXX)
@@ -375,7 +379,6 @@ KEYWORD(__is_convertible_to           , KEYCXX)
 KEYWORD(__is_empty                    , KEYCXX)
 KEYWORD(__is_enum                     , KEYCXX)
 KEYWORD(__is_final                    , KEYCXX)
-KEYWORD(__is_interface_class          , KEYCXX)
 // Tentative name - there's no implementation of std::is_literal_type yet.
 KEYWORD(__is_literal                  , KEYCXX)
 // Name for GCC 4.6 compatibility - people have already written libraries using
@@ -508,6 +511,7 @@ ALIAS("__signed"     , signed     , KEYALL)
 ALIAS("__signed__"   , signed     , KEYALL)
 ALIAS("__typeof"     , typeof     , KEYALL)
 ALIAS("__typeof__"   , typeof     , KEYALL)
+ALIAS("_Typeof"      , typeof     , KEYALL)
 ALIAS("__volatile"   , volatile   , KEYALL)
 ALIAS("__volatile__" , volatile   , KEYALL)
 
@@ -547,6 +551,7 @@ ALIAS("_declspec"        , __declspec , KEYMS)
 ALIAS("_pascal"      , __pascal   , KEYBORLAND)
 
 // Clang Extensions.
+KEYWORD(__builtin_convertvector   , KEYALL)
 ALIAS("__char16_t"   , char16_t   , KEYCXX)
 ALIAS("__char32_t"   , char32_t   , KEYCXX)
 
@@ -684,6 +689,11 @@ ANNOTATION(pragma_openmp_end)
 // handles them.
 ANNOTATION(pragma_simd)
 ANNOTATION(pragma_simd_end)
+//AVT: maybe we'll support it later
+///***INTEL: pragma tokens
+//#include "../../../intel/include/TokenKinds.def"
+// Annotation for module import translated from #include etc.
+ANNOTATION(module_include)
 
 #undef ANNOTATION
 #undef TESTING_KEYWORD
@@ -695,3 +705,4 @@ ANNOTATION(pragma_simd_end)
 #undef KEYWORD
 #undef PUNCTUATOR
 #undef TOK
+

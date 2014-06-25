@@ -54,10 +54,6 @@ void VBTableBuilder::enumerateVBTables(VBTableVector &VBTables) {
   }
 }
 
-bool VBTableBuilder::hasVBPtr(const CXXRecordDecl *RD) {
-  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
-  return Layout.getVBPtrOffset().getQuantity() != -1;
-}
 
 void VBTableBuilder::findUnambiguousPaths(const CXXRecordDecl *ReusingBase,
                                           BaseSubobject CurSubobject,
@@ -65,10 +61,11 @@ void VBTableBuilder::findUnambiguousPaths(const CXXRecordDecl *ReusingBase,
   size_t PathsStart = Paths.size();
   bool ReuseVBPtrFromBase = true;
   const CXXRecordDecl *CurBase = CurSubobject.getBase();
+  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(CurBase);
 
   // If this base has a vbptr, then we've found a path.  These are not full
   // paths, so we don't use CXXBasePath.
-  if (hasVBPtr(CurBase)) {
+  if (Layout.hasOwnVBPtr()) {
     ReuseVBPtrFromBase = false;
     VBTablePath *Info = new VBTablePath(
       VBTableInfo(ReusingBase, CurSubobject, /*GV=*/0));
@@ -76,7 +73,6 @@ void VBTableBuilder::findUnambiguousPaths(const CXXRecordDecl *ReusingBase,
   }
 
   // Recurse onto any bases which themselves have virtual bases.
-  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(CurBase);
   for (CXXRecordDecl::base_class_const_iterator I = CurBase->bases_begin(),
        E = CurBase->bases_end(); I != E; ++I) {
     const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
@@ -170,7 +166,8 @@ VBTableBuilder::getAddrOfVBTable(const CXXRecordDecl *ReusingBase,
 
   SmallString<256> OutName;
   llvm::raw_svector_ostream Out(OutName);
-  MangleContext &Mangler = CGM.getCXXABI().getMangleContext();
+  MicrosoftMangleContext &Mangler =
+      cast<MicrosoftMangleContext>(CGM.getCXXABI().getMangleContext());
   Mangler.mangleCXXVBTable(MostDerived, BasePath, Out);
   Out.flush();
   StringRef Name = OutName.str();
@@ -198,15 +195,13 @@ void VBTableInfo::EmitVBTableDefinition(
   const ASTRecordLayout &DerivedLayout =
     CGM.getContext().getASTRecordLayout(RD);
 
-  SmallVector<llvm::Constant *, 4> Offsets;
+  SmallVector<llvm::Constant *, 4> Offsets(1 + ReusingBase->getNumVBases(), 0);
 
   // The offset from ReusingBase's vbptr to itself always leads.
   CharUnits VBPtrOffset = BaseLayout.getVBPtrOffset();
-  Offsets.push_back(
-      llvm::ConstantInt::get(CGM.IntTy, -VBPtrOffset.getQuantity()));
+  Offsets[0] = llvm::ConstantInt::get(CGM.IntTy, -VBPtrOffset.getQuantity());
 
-  // These are laid out in the same order as in Itanium, which is the same as
-  // the order of the vbase iterator.
+  MicrosoftVTableContext &Context = CGM.getMicrosoftVTableContext();
   for (CXXRecordDecl::base_class_const_iterator I = ReusingBase->vbases_begin(),
        E = ReusingBase->vbases_end(); I != E; ++I) {
     const CXXRecordDecl *VBase = I->getType()->getAsCXXRecordDecl();
@@ -214,7 +209,9 @@ void VBTableInfo::EmitVBTableDefinition(
     assert(!Offset.isNegative());
     // Make it relative to the subobject vbptr.
     Offset -= VBPtrSubobject.getBaseOffset() + VBPtrOffset;
-    Offsets.push_back(llvm::ConstantInt::get(CGM.IntTy, Offset.getQuantity()));
+    unsigned VBIndex = Context.getVBTableIndex(ReusingBase, VBase);
+    assert(Offsets[VBIndex] == 0 && "The same vbindex seen twice?");
+    Offsets[VBIndex] = llvm::ConstantInt::get(CGM.IntTy, Offset.getQuantity());
   }
 
   assert(Offsets.size() ==

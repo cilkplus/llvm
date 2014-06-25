@@ -155,6 +155,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::OffsetOfExprClass:
   case Expr::CXXThrowExprClass:
   case Expr::ShuffleVectorExprClass:
+  case Expr::ConvertVectorExprClass:
   case Expr::IntegerLiteralClass:
   case Expr::CharacterLiteralClass:
   case Expr::AddrLabelExprClass:
@@ -183,6 +184,8 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::AsTypeExprClass:
   case Expr::ObjCIndirectCopyRestoreExprClass:
   case Expr::AtomicExprClass:
+  case Expr::CEANIndexExprClass:
+  case Expr::CEANBuiltinExprClass:
     return Cl::CL_PRValue;
 
     // Next come the complicated cases.
@@ -591,6 +594,8 @@ static Cl::ModifiableType IsModifiable(ASTContext &Ctx, const Expr *E,
   CanQualType CT = Ctx.getCanonicalType(E->getType());
   // Const stuff is obviously not modifiable.
   if (CT.isConstQualified())
+    return Cl::CM_ConstQualified;
+  if (CT.getQualifiers().getAddressSpace() == LangAS::opencl_constant)
     return Cl::CM_ConstQualified;
 
   // Arrays are not modifiable, only their elements are.

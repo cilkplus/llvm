@@ -13,17 +13,6 @@ void test_simd_length() {
 }
 
 template <typename T>
-void test_simd_length_for() {
-// CHECK: test_simd_length_for
-  #pragma simd vectorlengthfor(T)
-  for (T i = 0; i < 10; i++) {}
-  // CHECK:   TemplateArgument
-  // CHECK:       SIMDForStmt
-  // CHECK-NEXT:    SIMDAttr
-  // CHECK-NEXT:    SIMDLengthForAttr {{.*}} long
-}
-
-template <typename T>
 void test_simd_linear() {
 // CHECK: test_simd_linear
   T t;
@@ -125,7 +114,6 @@ void test_simd_multiple_clauses() {
 
 void test_simd_clauses() {
   test_simd_length<2>();
-  test_simd_length_for<long>();
   test_simd_linear<int>();
   test_simd_private<float, long>();
   test_simd_first_private<long, float>();

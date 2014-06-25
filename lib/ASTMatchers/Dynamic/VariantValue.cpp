@@ -26,48 +26,37 @@ VariantMatcher::Payload::~Payload() {}
 
 class VariantMatcher::SinglePayload : public VariantMatcher::Payload {
 public:
-  SinglePayload(const DynTypedMatcher &Matcher) : Matcher(Matcher.clone()) {}
+  SinglePayload(const DynTypedMatcher &Matcher) : Matcher(Matcher) {}
 
-  virtual bool getSingleMatcher(const DynTypedMatcher *&Out) const {
-    Out = Matcher.get();
-    return true;
+  virtual llvm::Optional<DynTypedMatcher> getSingleMatcher() const {
+    return Matcher;
   }
 
   virtual std::string getTypeAsString() const {
-    return (Twine("Matcher<") + Matcher->getSupportedKind().asStringRef() + ">")
+    return (Twine("Matcher<") + Matcher.getSupportedKind().asStringRef() + ">")
         .str();
   }
 
-  virtual bool hasTypedMatcher(const MatcherOps &Ops) const {
-    return Ops.canConstructFrom(*Matcher);
-  }
-
-  virtual const DynTypedMatcher *getTypedMatcher(const MatcherOps &Ops) const {
-    assert(hasTypedMatcher(Ops));
-    return Matcher.get();
+  virtual void makeTypedMatcher(MatcherOps &Ops) const {
+    if (Ops.canConstructFrom(Matcher))
+      Ops.constructFrom(Matcher);
   }
 
 private:
-  OwningPtr<const DynTypedMatcher> Matcher;
+  const DynTypedMatcher Matcher;
 };
 
 class VariantMatcher::PolymorphicPayload : public VariantMatcher::Payload {
 public:
-  PolymorphicPayload(ArrayRef<const DynTypedMatcher *> MatchersIn) {
-    for (size_t i = 0, e = MatchersIn.size(); i != e; ++i) {
-      Matchers.push_back(MatchersIn[i]->clone());
-    }
-  }
+  PolymorphicPayload(ArrayRef<DynTypedMatcher> MatchersIn)
+      : Matchers(MatchersIn) {}
 
-  virtual ~PolymorphicPayload() {
-    llvm::DeleteContainerPointers(Matchers);
-  }
+  virtual ~PolymorphicPayload() {}
 
-  virtual bool getSingleMatcher(const DynTypedMatcher *&Out) const {
+  virtual llvm::Optional<DynTypedMatcher> getSingleMatcher() const {
     if (Matchers.size() != 1)
-      return false;
-    Out = Matchers[0];
-    return true;
+      return llvm::Optional<DynTypedMatcher>();
+    return Matchers[0];
   }
 
   virtual std::string getTypeAsString() const {
@@ -75,28 +64,54 @@ public:
     for (size_t i = 0, e = Matchers.size(); i != e; ++i) {
       if (i != 0)
         Inner += "|";
-      Inner += Matchers[i]->getSupportedKind().asStringRef();
+      Inner += Matchers[i].getSupportedKind().asStringRef();
     }
     return (Twine("Matcher<") + Inner + ">").str();
   }
 
-  virtual bool hasTypedMatcher(const MatcherOps &Ops) const {
-    return getTypedMatcher(Ops) != NULL;
-  }
-
-  virtual const DynTypedMatcher *getTypedMatcher(const MatcherOps &Ops) const {
-    const DynTypedMatcher* Found = NULL;
+  virtual void makeTypedMatcher(MatcherOps &Ops) const {
+    const DynTypedMatcher *Found = NULL;
     for (size_t i = 0, e = Matchers.size(); i != e; ++i) {
-      if (Ops.canConstructFrom(*Matchers[i])) {
-        if (Found) return NULL;
-        Found = Matchers[i];
+      if (Ops.canConstructFrom(Matchers[i])) {
+        if (Found)
+          return;
+        Found = &Matchers[i];
       }
     }
-    return Found;
+    if (Found)
+      Ops.constructFrom(*Found);
+  }
+
+  const std::vector<DynTypedMatcher> Matchers;
+};
+
+class VariantMatcher::VariadicOpPayload : public VariantMatcher::Payload {
+public:
+  VariadicOpPayload(ast_matchers::internal::VariadicOperatorFunction Func,
+                    ArrayRef<VariantMatcher> Args)
+      : Func(Func), Args(Args) {}
+
+  virtual llvm::Optional<DynTypedMatcher> getSingleMatcher() const {
+    return llvm::Optional<DynTypedMatcher>();
+  }
+
+  virtual std::string getTypeAsString() const {
+    std::string Inner;
+    for (size_t i = 0, e = Args.size(); i != e; ++i) {
+      if (i != 0)
+        Inner += "&";
+      Inner += Args[i].getTypeAsString();
+    }
+    return Inner;
+  }
+
+  virtual void makeTypedMatcher(MatcherOps &Ops) const {
+    Ops.constructVariadicOperator(Func, Args);
   }
 
 private:
-  std::vector<const DynTypedMatcher *> Matchers;
+  const ast_matchers::internal::VariadicOperatorFunction Func;
+  const std::vector<VariantMatcher> Args;
 };
 
 VariantMatcher::VariantMatcher() {}
@@ -106,13 +121,18 @@ VariantMatcher VariantMatcher::SingleMatcher(const DynTypedMatcher &Matcher) {
 }
 
 VariantMatcher
-VariantMatcher::PolymorphicMatcher(ArrayRef<const DynTypedMatcher *> Matchers) {
+VariantMatcher::PolymorphicMatcher(ArrayRef<DynTypedMatcher> Matchers) {
   return VariantMatcher(new PolymorphicPayload(Matchers));
 }
 
-bool VariantMatcher::getSingleMatcher(const DynTypedMatcher *&Out) const {
-  if (Value) return Value->getSingleMatcher(Out);
-  return false;
+VariantMatcher VariantMatcher::VariadicOperatorMatcher(
+    ast_matchers::internal::VariadicOperatorFunction Func,
+    ArrayRef<VariantMatcher> Args) {
+  return VariantMatcher(new VariadicOpPayload(Func, Args));
+}
+
+llvm::Optional<DynTypedMatcher> VariantMatcher::getSingleMatcher() const {
+  return Value ? Value->getSingleMatcher() : llvm::Optional<DynTypedMatcher>();
 }
 
 void VariantMatcher::reset() { Value.reset(); }

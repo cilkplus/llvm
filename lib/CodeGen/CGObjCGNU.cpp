@@ -796,8 +796,7 @@ class CGObjCGNUstep : public CGObjCGNU {
     }
 };
 
-/// Support for the ObjFW runtime. Support here is due to
-/// Jonathan Schleifer <js@webkeks.org>, the ObjFW maintainer.
+/// Support for the ObjFW runtime.
 class CGObjCObjFW: public CGObjCGNU {
 protected:
   /// The GCC ABI message lookup function.  Returns an IMP pointing to the
@@ -1439,8 +1438,7 @@ CGObjCGNU::GenerateMessageSend(CodeGenFunction &CGF,
   imp = EnforceType(Builder, imp, MSI.MessengerType);
 
   llvm::Instruction *call;
-  RValue msgRet = CGF.EmitCall(MSI.CallInfo, imp, Return, ActualArgs,
-      0, &call);
+  RValue msgRet = CGF.EmitCall(MSI.CallInfo, imp, Return, ActualArgs, 0, &call);
   call->setMetadata(msgSendMDKind, node);
 
 

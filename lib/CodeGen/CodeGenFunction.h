@@ -166,6 +166,7 @@ public:
   /// AllocaInsertPoint - This is an instruction in the entry block before which
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
+  llvm::AssertingVH<llvm::Instruction> FirstprivateInsertPt;
 
   /// \brief API for captured statement code generation.
   class CGCapturedStmtInfo {
@@ -212,6 +213,9 @@ public:
 
     static bool classof(const CGCapturedStmtInfo *) { return true; }
 
+    virtual void addCachedVar(const VarDecl *VD, llvm::Value *Addr) { }
+    virtual llvm::Value *getCachedVar(const VarDecl *VD) { return 0; }
+
   private:
     /// \brief The kind of captured statement being generated.
     CapturedRegionKind Kind;
@@ -228,51 +232,205 @@ public:
   };
   CGCapturedStmtInfo *CapturedStmtInfo;
 
+  class CGSIMDForStmtInfo; // Defined below, after simd wrappers.
+
+  /// \brief Wrapper for "#pragma simd" and "#pragma omp simd".
+  class CGPragmaSimdWrapper {
+    public:
+      // \brief Helper for EmitPragmaSimd - process 'safelen' clause.
+      virtual bool emitSafelen(CodeGenFunction *CGF) const = 0;
+
+      // \brief Helper for EmitPragmaSimd - emit Intel intrinsic.
+      virtual void emitIntelIntrinsic(CodeGenFunction *CGF,
+          CodeGenModule *CGM, llvm::Value *LoopIndex,
+          llvm::Value *LoopCount) const = 0;
+      // \brief Emit updates of local variables from clauses
+      // and loop counters in the beginning of __simd_helper.
+      virtual bool walkLocalVariablesToEmit(
+                      CodeGenFunction *CGF,
+                      CGSIMDForStmtInfo *Info) const = 0;
+
+      /// \brief Emit the SIMD loop initalization, loop stride expression
+      /// as loop invariants, and cache those values.
+      virtual void emitInit(CodeGenFunction &CGF,
+          llvm::Value *&LoopIndex, llvm::Value *&LoopCount) = 0;
+
+      /// \brief Emit the loop increment.
+      virtual void emitIncrement(CodeGenFunction &CGF,
+                                 llvm::Value *IndexVar) const = 0;
+
+      // \brief Emit final values of loop counters and linear vars.
+      virtual void emitLinearFinal(CodeGenFunction &CGF) const = 0;
+
+      /// \brief Get the beginning location of for stmt.
+      virtual SourceLocation getForLoc() const = 0;
+
+      /// \brief Get the source range.
+      virtual SourceRange getSourceRange() const = 0;
+
+      /// \brief Retrieve the initialization expression.
+      virtual const Stmt *getInit() const = 0;
+
+      /// \brief Retrieve the loop condition expression.
+      virtual const Expr *getCond() const = 0;
+
+      /// \brief Retrieve the loop body.
+      virtual const CapturedStmt *getAssociatedStmt() const = 0;
+
+      /// \brief Retrieve the loop count expression.
+      virtual const Expr *getLoopCount() const = 0;
+
+      /// \brief Extract the loop body from the collapsed loop nest.
+      /// Useful for openmp (it is noop for SIMDForStmt).
+      virtual Stmt *extractLoopBody(Stmt *S) const = 0;
+
+      /// \brief Return true if it is openmp pragma.
+      virtual bool isOmp() const = 0;
+
+      /// \brief Get the wrapped SIMDForStmt or OMPSimdDirective.
+      virtual const Stmt *getStmt() const = 0;
+
+      virtual ~CGPragmaSimdWrapper() { };
+  };
+
+  class CGPragmaSimd : public CGPragmaSimdWrapper {
+    public:
+      CGPragmaSimd(const SIMDForStmt *S)
+        : SimdFor(S) {}
+
+      virtual bool emitSafelen(CodeGenFunction *CGF) const LLVM_OVERRIDE;
+      virtual void emitIntelIntrinsic(CodeGenFunction *CGF,
+                                      CodeGenModule *CGM,
+                                      llvm::Value *LoopIndex,
+                                      llvm::Value *LoopCount) const LLVM_OVERRIDE;
+      virtual bool walkLocalVariablesToEmit(
+                      CodeGenFunction *CGF,
+                      CGSIMDForStmtInfo *Info) const LLVM_OVERRIDE;
+
+      virtual void emitInit(CodeGenFunction &CGF,
+          llvm::Value *&LoopIndex, llvm::Value *&LoopCount) LLVM_OVERRIDE;
+
+      virtual void emitIncrement(CodeGenFunction &CGF,
+                                 llvm::Value *IndexVar) const LLVM_OVERRIDE;
+
+      virtual void emitLinearFinal(CodeGenFunction &CGF) const LLVM_OVERRIDE { }
+
+      virtual SourceLocation getForLoc() const LLVM_OVERRIDE {
+        return SimdFor->getForLoc();
+      }
+
+      virtual SourceRange getSourceRange() const LLVM_OVERRIDE {
+        return SimdFor->getSourceRange();
+      }
+
+      virtual const Stmt *getInit() const LLVM_OVERRIDE {
+        return SimdFor->getInit();
+      }
+
+      virtual const Expr *getCond() const LLVM_OVERRIDE {
+        return SimdFor->getCond();
+      }
+
+      virtual const CapturedStmt *getAssociatedStmt() const LLVM_OVERRIDE {
+        return SimdFor->getBody();
+      }
+
+      virtual const Expr *getLoopCount() const LLVM_OVERRIDE {
+        return SimdFor->getLoopCount();
+      }
+
+      virtual Stmt *extractLoopBody(Stmt *S) const LLVM_OVERRIDE {
+        return S;
+      }
+
+      virtual bool isOmp() const LLVM_OVERRIDE { return false; }
+      virtual const Stmt *getStmt() const LLVM_OVERRIDE { return SimdFor; }
+
+      virtual ~CGPragmaSimd() LLVM_OVERRIDE { }
+
+    private:
+      /// \brief Corresponding stmt.
+      const SIMDForStmt *SimdFor;
+
+      /// \brief The address of the loop control variable.
+      llvm::Value *LCVAddr;
+
+      /// \brief The cached loop control variable initial value.
+      llvm::Value *LCVInitVal;
+
+      /// \brief The cached (normalized) loop stride value.
+      llvm::Value *LCVStrideVal;
+  };
   /// \brief API for SIMD for statement code generation.
+  /// This class is intended to provide an interface to CG to work in the
+  /// same manner with "#pragma simd" and "#pragma omp simd", using wrapper
+  /// (CGPragmaSimdWrapper) for addressing any differences between them.
   class CGSIMDForStmtInfo : public CGCapturedStmtInfo {
   public:
-    CGSIMDForStmtInfo(const SIMDForStmt &S, llvm::MDNode *LoopID)
-      : CGCapturedStmtInfo(*S.getBody(), CR_SIMDFor),
-        TheSIMDFor(S), LoopID(LoopID), ShouldReplaceWithLocal(true) { }
+    CGSIMDForStmtInfo(const CGPragmaSimdWrapper &Wr, llvm::MDNode *LoopID,
+                      bool LoopParallel)
+      : CGCapturedStmtInfo(*(Wr.getAssociatedStmt()), CR_SIMDFor),
+        Wrapper(Wr), LoopID(LoopID), LoopParallel(LoopParallel),
+        ShouldReplaceWithLocal(true) { }
 
     virtual StringRef getHelperName() const { return "__simd_for_helper"; }
 
     virtual void EmitBody(CodeGenFunction &CGF, Stmt *S) {
-      CGF.EmitSIMDForHelperBody(S);
+      CGF.EmitSIMDForHelperBody(Wrapper.extractLoopBody(S));
     }
 
-    const SIMDForStmt &getSIMDForStmt() const { return TheSIMDFor; }
-
     llvm::MDNode *getLoopID() const { return LoopID; }
+    bool getLoopParallel() const { return LoopParallel; }
 
     /// \brief Update the address of a SIMD variable's local copy, such
     /// that the captured body can use this local variable instead.
     void updateLocalAddr(const VarDecl *VD, llvm::Value *Addr) {
+      assert(!isOmp());
       assert(VD && Addr && "null values unexpected");
       assert(!SIMDVars.count(VD) && "already exists");
       SIMDVars[VD] = Addr;
     }
 
     llvm::Value *lookupLocalAddr(const VarDecl *VD) const {
+      assert(!isOmp());
       llvm::SmallDenseMap<const VarDecl *, llvm::Value *>::const_iterator
         I = SIMDVars.find(VD);
-      if (I != SIMDVars.end())
+      if (I != SIMDVars.end()) {
         return I->second;
-
+      }
       return 0;
     }
 
-    bool shouldReplaceWithLocal() const { return ShouldReplaceWithLocal; }
-    void setShouldReplaceWithLocal(bool S) { ShouldReplaceWithLocal = S; }
+    bool shouldReplaceWithLocal() const {
+      if (isOmp()) return false;
+      return ShouldReplaceWithLocal;
+    }
+    void setShouldReplaceWithLocal(bool S) {
+      assert(!isOmp());
+      ShouldReplaceWithLocal = S;
+    }
+
+    bool isOmp() const { return Wrapper.isOmp(); }
+    const Stmt *getStmt() const { return Wrapper.getStmt(); }
+
+    // \brief Emit updates of local variables from clauses
+    // and loop counters in the beginning of __simd_helper.
+    bool walkLocalVariablesToEmit(CodeGenFunction *CGF) {
+      return Wrapper.walkLocalVariablesToEmit(CGF, this);
+    }
 
     static bool classof(const CGSIMDForStmtInfo *) { return true; }
     static bool classof(const CGCapturedStmtInfo *I) {
       return I->getKind() == CR_SIMDFor;
     }
   private:
-    const SIMDForStmt &TheSIMDFor;
+    /// \brief Wrapper around SIMDForStmt/OMPSimdDirective.
+    const CGPragmaSimdWrapper &Wrapper;
     /// \brief The loop id metadata.
     llvm::MDNode *LoopID;
+    /// \brief Is loop parallel.
+    bool LoopParallel;
+    /// Note: the following fields are used by SIMDForStmt only.
     /// \brief Keep the map between a SIMD variable and its local variable
     /// address.
     llvm::SmallDenseMap<const VarDecl *, llvm::Value *> SIMDVars;
@@ -997,7 +1155,28 @@ private:
   /// The last regular (non-return) debug location (breakpoint) in the function.
   SourceLocation LastStopPoint;
 
+  /// The location for one and only ReturnStmt.
+  llvm::DebugLoc ReturnLoc;
+
 public:
+  /// This class is used for instantiation of local variables, but restores
+  /// LocalDeclMap state after instantiation. If Empty is true, the LocalDeclMap
+  /// is cleared completely and then restored to original state upon
+  /// destruction.
+  class LocalVarsDeclGuard {
+    CodeGenFunction &CGF;
+    DeclMapTy LocalDeclMap;
+    public:
+      LocalVarsDeclGuard(CodeGenFunction &CGF, bool Empty = false)
+        : CGF(CGF), LocalDeclMap() {
+          if (Empty) {
+            LocalDeclMap.swap(CGF.LocalDeclMap);
+          } else {
+            LocalDeclMap.copyFrom(CGF.LocalDeclMap);
+          }
+        }
+      ~LocalVarsDeclGuard() { CGF.LocalDeclMap.swap(LocalDeclMap); }
+  };
   /// A scope within which we are constructing the fields of an object which
   /// might use a CXXDefaultInitExpr. This stashes away a 'this' value to use
   /// if we need to evaluate a CXXDefaultInitExpr within the evaluation.
@@ -1092,14 +1271,6 @@ public:
 
   CodeGenTypes &getTypes() const { return CGM.getTypes(); }
   ASTContext &getContext() const { return CGM.getContext(); }
-  /// Returns true if DebugInfo is actually initialized.
-  bool maybeInitializeDebugInfo() {
-    if (CGM.getModuleDebugInfo()) {
-      DebugInfo = CGM.getModuleDebugInfo();
-      return true;
-    }
-    return false;
-  }
   CGDebugInfo *getDebugInfo() { 
     if (DisableDebugInfo) 
       return NULL;
@@ -1171,10 +1342,10 @@ public:
                                    bool useEHCleanupForArray);
   void emitDestroy(llvm::Value *addr, QualType type, Destroyer *destroyer,
                    bool useEHCleanupForArray);
-  llvm::Function *generateDestroyHelper(llvm::Constant *addr,
-                                        QualType type,
+  llvm::Function *generateDestroyHelper(llvm::Constant *addr, QualType type,
                                         Destroyer *destroyer,
-                                        bool useEHCleanupForArray);
+                                        bool useEHCleanupForArray,
+                                        const VarDecl *VD);
   void emitArrayDestroy(llvm::Value *begin, llvm::Value *end,
                         QualType type, Destroyer *destroyer,
                         bool checkZeroLength, bool useEHCleanup);
@@ -1286,9 +1457,9 @@ public:
   void EmitConstructorBody(FunctionArgList &Args);
   void EmitDestructorBody(FunctionArgList &Args);
   void emitImplicitAssignmentOperatorBody(FunctionArgList &Args);
-  void EmitFunctionBody(FunctionArgList &Args);
+  void EmitFunctionBody(FunctionArgList &Args, const Stmt *Body);
 
-  void EmitForwardingCallToLambda(const CXXRecordDecl *Lambda,
+  void EmitForwardingCallToLambda(const CXXMethodDecl *LambdaCallOperator,
                                   CallArgList &CallArgs);
   void EmitLambdaToBlockPointerBody(FunctionArgList &Args);
   void EmitLambdaBlockInvokeBody();
@@ -1303,6 +1474,11 @@ public:
   /// legal to call this function even if there is no current insertion point.
   void FinishFunction(SourceLocation EndLoc=SourceLocation());
 
+  void StartThunk(llvm::Function *Fn, GlobalDecl GD, const CGFunctionInfo &FnInfo);
+
+  void EmitCallAndReturnForThunk(GlobalDecl GD, llvm::Value *Callee,
+                                 const ThunkInfo *Thunk);
+
   /// GenerateThunk - Generate a thunk for the given method.
   void GenerateThunk(llvm::Function *Fn, const CGFunctionInfo &FnInfo,
                      GlobalDecl GD, const ThunkInfo &Thunk);
@@ -1313,7 +1489,7 @@ public:
   void EmitCtorPrologue(const CXXConstructorDecl *CD, CXXCtorType Type,
                         FunctionArgList &Args);
 
-  void EmitInitializerForField(FieldDecl *Field, LValue LHS, Expr *Init,
+  void EmitInitializerForField(const FieldDecl *Field, LValue LHS, Expr *Init,
                                ArrayRef<VarDecl *> ArrayIndexes);
 
   /// InitializeVTablePointer - Initialize the vtable pointer of the given
@@ -1371,7 +1547,8 @@ public:
 
   /// EmitFunctionEpilog - Emit the target specific LLVM code to return the
   /// given temporary.
-  void EmitFunctionEpilog(const CGFunctionInfo &FI, bool EmitRetDbgLoc);
+  void EmitFunctionEpilog(const CGFunctionInfo &FI, bool EmitRetDbgLoc,
+                          SourceLocation EndLoc);
 
   /// EmitStartEHSpec - Emit the start of the exception spec.
   void EmitStartEHSpec(const Decl *D);
@@ -1512,10 +1689,6 @@ public:
   /// CreateMemTemp - Create a temporary memory object of the given type, with
   /// appropriate alignment.
   llvm::AllocaInst *CreateMemTemp(QualType T, const Twine &Name = "tmp");
-
-  /// \brief Create a temporary for InitializedDecl.
-  llvm::Value *CreateReferenceTemporary(QualType Type,
-                                        const NamedDecl *InitializedDecl);
 
   /// CreateAggTemp - Create a temporary memory object for the given
   /// aggregate type.
@@ -1722,7 +1895,8 @@ public:
 
   void EmitDelegateCXXConstructorCall(const CXXConstructorDecl *Ctor,
                                       CXXCtorType CtorType,
-                                      const FunctionArgList &Args);
+                                      const FunctionArgList &Args,
+                                      SourceLocation Loc);
   // It's important not to confuse this and the previous function. Delegating
   // constructors are the C++0x feature. The constructor delegate optimization
   // is used to reduce duplication in the base and complete consturctors where
@@ -1775,6 +1949,12 @@ public:
   llvm::Value* EmitCXXTypeidExpr(const CXXTypeidExpr *E);
   llvm::Value *EmitDynamicCast(llvm::Value *V, const CXXDynamicCastExpr *DCE);
   llvm::Value* EmitCXXUuidofExpr(const CXXUuidofExpr *E);
+
+  void EmitCEANBuiltinExprBody(const CEANBuiltinExpr *E);
+
+  void MaybeEmitStdInitializerListCleanup(llvm::Value *loc, const Expr *init);
+  void EmitStdInitializerListCleanup(llvm::Value *loc,
+                                     const InitListExpr *init);
 
   /// \brief Situations in which we might emit a check for the suitability of a
   ///        pointer or glvalue.
@@ -1992,24 +2172,35 @@ public:
   void ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock = false);
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
+  void EmitSEHTryStmt(const SEHTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
 
   LValue InitCapturedStruct(const CapturedStmt &S);
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedDecl *CD,
-                                               const RecordDecl *RD);
+                                               const RecordDecl *RD,
+                                               SourceLocation Loc);
 
   llvm::Function *EmitSpawnCapturedStmt(const CapturedStmt &S, VarDecl *VD);
   void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
   void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);
   void EmitCilkForHelperBody(const Stmt *S);
+  void EmitPragmaSimd(CGPragmaSimdWrapper &W);
+  llvm::Function *EmitSimdFunction(CGPragmaSimdWrapper &W);
   void EmitSIMDForStmt(const SIMDForStmt &S);
-  void EmitSIMDForHelperCall(const SIMDForStmt &S, llvm::Function *BodyFunc,
+  void EmitSIMDForHelperCall(llvm::Function *BodyFunc,
                              LValue CapStruct, llvm::Value *LoopIndex,
                              bool IsLastIter);
   void EmitSIMDForHelperBody(const Stmt *S);
   void EmitCilkSpawnExpr(const CilkSpawnExpr *E);
   void EmitCilkSpawnDecl(const CilkSpawnDecl *D);
+
+  void EmitCilkRankedStmt(const CilkRankedStmt &S);
+
+  llvm::Value *GenerateCapturedStmtArgument(const CapturedStmt &S);
+  LValue GetCapturedField(const VarDecl *VD);
+  void EmitUniversalStore(llvm::Value *Dst, llvm::Value *Src, QualType ExprTy);
+  void EmitUniversalStore(LValue Dst, llvm::Value *Src, QualType ExprTy);
 
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
@@ -2052,11 +2243,12 @@ public:
   /// that the address will be used to access the object.
   LValue EmitCheckedLValue(const Expr *E, TypeCheckKind TCK);
 
-  RValue convertTempToRValue(llvm::Value *addr, QualType type);
+  RValue convertTempToRValue(llvm::Value *addr, QualType type,
+                             SourceLocation Loc);
 
   void EmitAtomicInit(Expr *E, LValue lvalue);
 
-  RValue EmitAtomicLoad(LValue lvalue,
+  RValue EmitAtomicLoad(LValue lvalue, SourceLocation loc,
                         AggValueSlot slot = AggValueSlot::ignored());
 
   void EmitAtomicStore(RValue rvalue, LValue lvalue, bool isInit);
@@ -2074,6 +2266,7 @@ public:
   /// the LLVM value representation.
   llvm::Value *EmitLoadOfScalar(llvm::Value *Addr, bool Volatile,
                                 unsigned Alignment, QualType Ty,
+                                SourceLocation Loc,
                                 llvm::MDNode *TBAAInfo = 0,
                                 QualType TBAABaseTy = QualType(),
                                 uint64_t TBAAOffset = 0);
@@ -2082,7 +2275,7 @@ public:
   /// care to appropriately convert from the memory representation to
   /// the LLVM value representation.  The l-value must be a simple
   /// l-value.
-  llvm::Value *EmitLoadOfScalar(LValue lvalue);
+  llvm::Value *EmitLoadOfScalar(LValue lvalue, SourceLocation Loc);
 
   /// EmitStoreOfScalar - Store a scalar value to an address, taking
   /// care to appropriately convert from the memory representation to
@@ -2103,7 +2296,7 @@ public:
   /// EmitLoadOfLValue - Given an expression that represents a value lvalue,
   /// this method emits the address of the lvalue, then loads the result as an
   /// rvalue, returning the rvalue.
-  RValue EmitLoadOfLValue(LValue V);
+  RValue EmitLoadOfLValue(LValue V, SourceLocation Loc);
   RValue EmitLoadOfExtVectorElementLValue(LValue V);
   RValue EmitLoadOfBitfieldLValue(LValue LV);
 
@@ -2113,8 +2306,8 @@ public:
   void EmitStoreThroughLValue(RValue Src, LValue Dst, bool isInit=false);
   void EmitStoreThroughExtVectorComponentLValue(RValue Src, LValue Dst);
 
-  /// EmitStoreThroughLValue - Store Src into Dst with same constraints as
-  /// EmitStoreThroughLValue.
+  /// EmitStoreThroughBitfieldLValue - Store Src into Dst with same constraints
+  /// as EmitStoreThroughLValue.
   ///
   /// \param Result [out] - If non-null, this will be set to a Value* for the
   /// bit-field contents after the store, appropriate for use as the result of
@@ -2152,7 +2345,7 @@ public:
   LValue EmitMaterializeTemporaryExpr(const MaterializeTemporaryExpr *E);
   LValue EmitOpaqueValueLValue(const OpaqueValueExpr *e);
 
-  RValue EmitRValueForField(LValue LV, const FieldDecl *FD);
+  RValue EmitRValueForField(LValue LV, const FieldDecl *FD, SourceLocation Loc);
 
   class ConstantEmission {
     llvm::PointerIntPair<llvm::Constant*, 1, bool> ValueAndIsReference;
@@ -2235,12 +2428,12 @@ public:
                   bool IsCilkSpawnCall = false);
 
   RValue EmitCall(QualType FnType, llvm::Value *Callee,
+                  SourceLocation CallLoc,
                   ReturnValueSlot ReturnValue,
                   CallExpr::const_arg_iterator ArgBeg,
                   CallExpr::const_arg_iterator ArgEnd,
                   const Decl *TargetDecl = 0,
                   bool IsCilkSpawnCall = false);
-
   RValue EmitCallExpr(const CallExpr *E,
                       ReturnValueSlot ReturnValue = ReturnValueSlot());
 
@@ -2311,6 +2504,11 @@ public:
   /// is unhandled by the current target.
   llvm::Value *EmitTargetBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
 
+  llvm::Value *EmitAArch64CompareBuiltinExpr(llvm::Value *Op, llvm::Type *Ty,
+                                             const llvm::CmpInst::Predicate Fp,
+                                             const llvm::CmpInst::Predicate Ip,
+                                             const llvm::Twine &Name = "");
+  llvm::Value *EmitAArch64CompareBuiltinExpr(llvm::Value *Op, llvm::Type *Ty);
   llvm::Value *EmitAArch64BuiltinExpr(unsigned BuiltinID, const CallExpr *E);
   llvm::Value *EmitARMBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
   llvm::Value *EmitNeonCall(llvm::Function *F,
@@ -2320,6 +2518,8 @@ public:
   llvm::Value *EmitNeonSplat(llvm::Value *V, llvm::Constant *Idx);
   llvm::Value *EmitNeonShiftVector(llvm::Value *V, llvm::Type *Ty,
                                    bool negateForRightShift);
+  llvm::Value *EmitNeonRShiftImm(llvm::Value *Vec, llvm::Value *Amt,
+                                 llvm::Type *Ty, bool usgn, const char *name);
 
   llvm::Value *BuildVector(ArrayRef<llvm::Value*> Ops);
   llvm::Value *EmitX86BuiltinExpr(unsigned BuiltinID, const CallExpr *E);
@@ -2452,7 +2652,7 @@ public:
   void EmitStoreOfComplex(ComplexPairTy V, LValue dest, bool isInit);
 
   /// EmitLoadOfComplex - Load a complex number from the specified l-value.
-  ComplexPairTy EmitLoadOfComplex(LValue src);
+  ComplexPairTy EmitLoadOfComplex(LValue src, SourceLocation loc);
 
   /// CreateStaticVarDecl - Create a zero-initialized LLVM global for
   /// a static local variable.
@@ -2476,7 +2676,8 @@ public:
 
   /// Call atexit() with a function that passes the given argument to
   /// the given function.
-  void registerGlobalDtorWithAtExit(llvm::Constant *fn, llvm::Constant *addr);
+  void registerGlobalDtorWithAtExit(const VarDecl &D, llvm::Constant *fn,
+                                    llvm::Constant *addr);
 
   /// Emit code in this function to perform a guarded variable
   /// initialization.  Guarded initializations are used when it's not
@@ -2616,7 +2817,8 @@ public:
   /// EmitDelegateCallArg - We are performing a delegate call; that
   /// is, the current function is delegating to another one.  Produce
   /// a r-value suitable for passing the given parameter.
-  void EmitDelegateCallArg(CallArgList &args, const VarDecl *param);
+  void EmitDelegateCallArg(CallArgList &args, const VarDecl *param,
+                           SourceLocation loc);
 
   /// SetFPAccuracy - Set the minimum required accuracy of the given floating
   /// point operation, expressed as the maximum relative error in ulp.
@@ -2648,7 +2850,8 @@ private:
 
   llvm::Value* EmitAsmInputLValue(const TargetInfo::ConstraintInfo &Info,
                                   LValue InputValue, QualType InputType,
-                                  std::string &ConstraintStr);
+                                  std::string &ConstraintStr,
+                                  SourceLocation Loc);
 
   /// EmitCallArgs - Emit call arguments for a function.
   /// The CallArgTypeInfo parameter is used for iterating over the known
@@ -2728,6 +2931,10 @@ private:
   /// GetPointeeAlignment - Given an expression with a pointer type, emit the
   /// value and compute our best estimate of the alignment of the pointee.
   std::pair<llvm::Value*, unsigned> EmitPointerWithAlignment(const Expr *Addr);
+
+//AVT: maybe we'll support it later
+//***INTEL: pragma support
+//#include "../../intel/lib/CodeGenFunction.h"
 };
 
 /// Helper class with most of the code for saving a value for a

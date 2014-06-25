@@ -515,6 +515,47 @@ void ASTStmtWriter::VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
   Code = serialization::EXPR_ARRAY_SUBSCRIPT;
 }
 
+void ASTStmtWriter::VisitCEANIndexExpr(CEANIndexExpr *E) {
+  VisitExpr(E);
+  Writer.AddStmt(E->getLowerBound());
+  Writer.AddSourceLocation(E->getColonLoc1(), Record);
+  Writer.AddStmt(E->getLength());
+  Writer.AddSourceLocation(E->getColonLoc2(), Record);
+  Writer.AddStmt(E->getStride());
+  Writer.AddStmt(E->getIndexExpr());
+  Record.push_back(E->getRank());
+  Code = serialization::EXPR_CEAN_INDEX;
+}
+
+void ASTStmtWriter::VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getRank());
+  Record.push_back(E->getArgsSize());
+  Record.push_back(E->getBuiltinKind());
+  Writer.AddSourceLocation(E->getLocStart(), Record);
+  Writer.AddSourceLocation(E->getLocEnd(), Record);
+  ArrayRef<Expr *> Args = E->getArgs();
+  for (ArrayRef<Expr *>::const_iterator I = Args.begin(), E = Args.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  Args = E->getLengths();
+  for (ArrayRef<Expr *>::const_iterator I = Args.begin(), E = Args.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  ArrayRef<Stmt *> Vars = E->getVars();
+  for (ArrayRef<Stmt *>::const_iterator I = Vars.begin(), E = Vars.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  Vars = E->getIncrements();
+  for (ArrayRef<Stmt *>::const_iterator I = Vars.begin(), E = Vars.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  Writer.AddStmt(E->getInit());
+  Writer.AddStmt(E->getBody());
+  Writer.AddStmt(E->getReturnExpr());
+  Code = serialization::EXPR_CEAN_BUILTIN;
+}
+
 void ASTStmtWriter::VisitCallExpr(CallExpr *E) {
   VisitExpr(E);
   Record.push_back(E->getNumArgs());
@@ -792,6 +833,15 @@ void ASTStmtWriter::VisitShuffleVectorExpr(ShuffleVectorExpr *E) {
   Writer.AddSourceLocation(E->getBuiltinLoc(), Record);
   Writer.AddSourceLocation(E->getRParenLoc(), Record);
   Code = serialization::EXPR_SHUFFLE_VECTOR;
+}
+
+void ASTStmtWriter::VisitConvertVectorExpr(ConvertVectorExpr *E) {
+  VisitExpr(E);
+  Writer.AddSourceLocation(E->getBuiltinLoc(), Record);
+  Writer.AddSourceLocation(E->getRParenLoc(), Record);
+  Writer.AddTypeSourceInfo(E->getTypeSourceInfo(), Record);
+  Writer.AddStmt(E->getSrcExpr());
+  Code = serialization::EXPR_CONVERT_VECTOR;
 }
 
 void ASTStmtWriter::VisitBlockExpr(BlockExpr *E) {
@@ -1152,7 +1202,7 @@ void ASTStmtWriter::VisitCXXConstructExpr(CXXConstructExpr *E) {
   Record.push_back(E->isListInitialization());
   Record.push_back(E->requiresZeroInitialization());
   Record.push_back(E->getConstructionKind()); // FIXME: stable encoding
-  Writer.AddSourceRange(E->getParenRange(), Record);
+  Writer.AddSourceRange(E->getParenOrBraceRange(), Record);
   Code = serialization::EXPR_CXX_CONSTRUCT;
 }
 
@@ -1642,6 +1692,22 @@ void ASTStmtWriter::VisitSIMDForStmt(SIMDForStmt *S) {
   llvm_unreachable("not implemented yet");
 }
 
+void ASTStmtWriter::VisitCilkRankedStmt(CilkRankedStmt *S) {
+  VisitStmt(S);
+  Record.push_back(S->getRank());
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getLengths()[i]);
+  }
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getVars()[i]);
+  }
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getIncrements()[i]);
+  }
+  Writer.AddStmt(S->getAssociatedStmt());
+  Writer.AddStmt(S->getInits());
+}
+
 //===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements.
 //===----------------------------------------------------------------------===//
@@ -1725,8 +1791,26 @@ void OMPClauseWriter::VisitOMPDefaultClause(OMPDefaultClause *C) {
 void OMPClauseWriter::VisitOMPPrivateClause(OMPPrivateClause *C) {
   Record.push_back(C->varlist_size());
   Writer->Writer.AddSourceLocation(C->getLParenLoc(), Record);
-  for (OMPVarList<OMPPrivateClause>::varlist_iterator I = C->varlist_begin(),
-                                                      E = C->varlist_end();
+  for (OMPPrivateClause::varlist_iterator I = C->varlist_begin(),
+                                          E = C->varlist_end();
+       I != E; ++I)
+    Writer->Writer.AddStmt(*I);
+}
+
+void OMPClauseWriter::VisitOMPFirstprivateClause(OMPFirstprivateClause *C) {
+  Record.push_back(C->varlist_size());
+  Writer->Writer.AddSourceLocation(C->getLParenLoc(), Record);
+  for (OMPFirstprivateClause::varlist_iterator I = C->varlist_begin(),
+                                               E = C->varlist_end();
+       I != E; ++I)
+    Writer->Writer.AddStmt(*I);
+}
+
+void OMPClauseWriter::VisitOMPSharedClause(OMPSharedClause *C) {
+  Record.push_back(C->varlist_size());
+  Writer->Writer.AddSourceLocation(C->getLParenLoc(), Record);
+  for (OMPSharedClause::varlist_iterator I = C->varlist_begin(),
+                                         E = C->varlist_end();
        I != E; ++I)
     Writer->Writer.AddStmt(*I);
 }

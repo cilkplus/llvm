@@ -37,7 +37,6 @@ static FrontendAction *CreateFrontendBaseAction(CompilerInstance &CI) {
   switch (CI.getFrontendOpts().ProgramAction) {
   case ASTDeclList:            return new ASTDeclListAction();
   case ASTDump:                return new ASTDumpAction();
-  case ASTDumpXML:             return new ASTDumpXMLAction();
   case ASTPrint:               return new ASTPrintAction();
   case ASTView:                return new ASTViewAction();
   case DumpRawTokens:          return new DumpRawTokensAction();
@@ -142,29 +141,29 @@ static FrontendAction *CreateFrontendAction(CompilerInstance &CI) {
 #endif
   
 #ifdef CLANG_ENABLE_ARCMT
-  // Potentially wrap the base FE action in an ARC Migrate Tool action.
-  switch (FEOpts.ARCMTAction) {
-  case FrontendOptions::ARCMT_None:
-    break;
-  case FrontendOptions::ARCMT_Check:
-    Act = new arcmt::CheckAction(Act);
-    break;
-  case FrontendOptions::ARCMT_Modify:
-    Act = new arcmt::ModifyAction(Act);
-    break;
-  case FrontendOptions::ARCMT_Migrate:
-    Act = new arcmt::MigrateAction(Act,
-                                   FEOpts.MTMigrateDir,
-                                   FEOpts.ARCMTMigrateReportOut,
-                                   FEOpts.ARCMTMigrateEmitARCErrors);
-    break;
-  }
+  if (CI.getFrontendOpts().ProgramAction != frontend::MigrateSource) {
+    // Potentially wrap the base FE action in an ARC Migrate Tool action.
+    switch (FEOpts.ARCMTAction) {
+    case FrontendOptions::ARCMT_None:
+      break;
+    case FrontendOptions::ARCMT_Check:
+      Act = new arcmt::CheckAction(Act);
+      break;
+    case FrontendOptions::ARCMT_Modify:
+      Act = new arcmt::ModifyAction(Act);
+      break;
+    case FrontendOptions::ARCMT_Migrate:
+      Act = new arcmt::MigrateAction(Act,
+                                     FEOpts.MTMigrateDir,
+                                     FEOpts.ARCMTMigrateReportOut,
+                                     FEOpts.ARCMTMigrateEmitARCErrors);
+      break;
+    }
 
-  if (FEOpts.ObjCMTAction != FrontendOptions::ObjCMT_None) {
-    Act = new arcmt::ObjCMigrateAction(Act, FEOpts.MTMigrateDir,
-                   FEOpts.ObjCMTAction & FrontendOptions::ObjCMT_Literals,
-                   FEOpts.ObjCMTAction & FrontendOptions::ObjCMT_Subscripting,
-                   FEOpts.ObjCMTAction & FrontendOptions::ObjCMT_Property);
+    if (FEOpts.ObjCMTAction != FrontendOptions::ObjCMT_None) {
+      Act = new arcmt::ObjCMigrateAction(Act, FEOpts.MTMigrateDir,
+                                         FEOpts.ObjCMTAction);
+    }
   }
 #endif
 

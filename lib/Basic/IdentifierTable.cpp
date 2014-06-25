@@ -106,6 +106,7 @@ namespace {
     KEYNOMS = 0x01000,
     WCHARSUPPORT = 0x02000,
     KEYCILKPLUS = 0x04000,
+    KEYFLOAT128 = 0x08000,
     KEYALL = (0xffff & ~KEYNOMS) // Because KEYNOMS is used to exclude.
   };
 }
@@ -140,6 +141,7 @@ static void AddKeyword(StringRef Keyword,
   else if (LangOpts.ObjC2 && (Flags & KEYARC)) AddResult = 2;
   else if (LangOpts.CPlusPlus && (Flags & KEYCXX11)) AddResult = 3;
   else if (LangOpts.CilkPlus && (Flags & KEYCILKPLUS)) AddResult = 1;
+  else if (LangOpts.Float128 && (Flags & KEYFLOAT128)) AddResult = 1;
 
   // Don't add this keyword under MicrosoftMode.
   if (LangOpts.MicrosoftMode && (Flags & KEYNOMS))
@@ -463,24 +465,17 @@ ObjCInstanceTypeFamily Selector::getInstTypeMethodFamily(Selector sel) {
   if (name.empty()) return OIT_None;
   switch (name.front()) {
     case 'a':
-      if (startsWithWord(name, "alloc")) return OIT_MemManage;
-      else
-        if (startsWithWord(name, "array")) return OIT_Array;
+      if (startsWithWord(name, "array")) return OIT_Array;
       break;
     case 'd':
+      if (startsWithWord(name, "default")) return OIT_ReturnsSelf;
       if (startsWithWord(name, "dictionary")) return OIT_Dictionary;
-      if (startsWithWord(name, "default")) return OIT_Singleton;
-      break;
-    case 'i':
-      if (startsWithWord(name, "init")) return OIT_MemManage;
-      break;
-    case 'r':
-      if (startsWithWord(name, "retain")) return OIT_MemManage;
       break;
     case 's':
-      if (startsWithWord(name, "shared") ||
-          startsWithWord(name, "standard"))
-        return OIT_Singleton;
+      if (startsWithWord(name, "shared")) return OIT_ReturnsSelf;
+      if (startsWithWord(name, "standard")) return OIT_Singleton;
+    case 'i':
+      if (startsWithWord(name, "init")) return OIT_Init;
     default:
       break;
   }

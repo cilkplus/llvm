@@ -36,12 +36,13 @@
 #define LLVM_CLANG_AST_MATCHERS_AST_MATCHERS_INTERNAL_H
 
 #include "clang/AST/ASTTypeTraits.h"
-#include "clang/AST/DeclCXX.h"
 #include "clang/AST/Decl.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
-#include "clang/AST/StmtCXX.h"
 #include "clang/AST/Stmt.h"
+#include "clang/AST/StmtCXX.h"
 #include "clang/AST/Type.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/VariadicFunction.h"
 #include "llvm/Support/type_traits.h"
 #include <map>
@@ -97,7 +98,6 @@ public:
     return NodeMap < Other.NodeMap;
   }
 
-private:
   /// \brief A map from IDs to the bound nodes.
   ///
   /// Note that we're using std::map here, as for memoization:
@@ -105,6 +105,11 @@ private:
   /// - we need an assignment operator
   typedef std::map<std::string, ast_type_traits::DynTypedNode> IDToNodeMap;
 
+  const IDToNodeMap &getMap() const {
+    return NodeMap;
+  }
+
+private:
   IDToNodeMap NodeMap;
 };
 
@@ -200,38 +205,6 @@ private:
   }
 };
 
-/// \brief Base class for all matchers that works on a \c DynTypedNode.
-///
-/// Matcher implementations will check whether the \c DynTypedNode is
-/// convertible into the respecitve types and then do the actual match
-/// on the actual node, or return false if it is not convertible.
-class DynTypedMatcher {
-public:
-  virtual ~DynTypedMatcher();
-
-  /// \brief Returns true if the matcher matches the given \c DynNode.
-  virtual bool matches(const ast_type_traits::DynTypedNode DynNode,
-                       ASTMatchFinder *Finder,
-                       BoundNodesTreeBuilder *Builder) const = 0;
-
-  /// \brief Makes a copy of this matcher object.
-  virtual DynTypedMatcher *clone() const = 0;
-
-  /// \brief Returns a unique ID for the matcher.
-  virtual uint64_t getID() const = 0;
-
-  /// \brief Bind the specified \p ID to the matcher.
-  /// \return A new matcher with the \p ID bound to it if this matcher supports
-  ///   binding. Otherwise, returns NULL. Returns NULL by default.
-  virtual DynTypedMatcher* tryBind(StringRef ID) const;
-
-  /// \brief Returns the type this matcher works on.
-  ///
-  /// \c matches() will always return false unless the node passed is of this
-  /// or a derived type.
-  virtual ast_type_traits::ASTNodeKind getSupportedKind() const = 0;
-};
-
 /// \brief Wrapper of a MatcherInterface<T> *that allows copying.
 ///
 /// A Matcher<Base> can be used anywhere a Matcher<Derived> is
@@ -241,7 +214,7 @@ public:
 /// operator rather than a type hierarchy to be able to templatize the
 /// type hierarchy instead of spelling it out.
 template <typename T>
-class Matcher : public DynTypedMatcher {
+class Matcher {
 public:
   /// \brief Takes ownership of the provided implementation pointer.
   explicit Matcher(MatcherInterface<T> *Implementation)
@@ -267,27 +240,6 @@ public:
             llvm::is_same<TypeT, Type>::value >::type* = 0)
       : Implementation(new TypeToQualType<TypeT>(Other)) {}
 
-  /// \brief Returns \c true if the passed DynTypedMatcher can be converted
-  ///   to a \c Matcher<T>.
-  ///
-  /// This method verifies that the underlying matcher in \c Other can process
-  /// nodes of types T.
-  static bool canConstructFrom(const DynTypedMatcher &Other) {
-    return Other.getSupportedKind()
-        .isBaseOf(ast_type_traits::ASTNodeKind::getFromNodeKind<T>());
-  }
-
-  /// \brief Construct a Matcher<T> interface around the dynamic matcher
-  ///   \c Other.
-  ///
-  /// This method asserts that canConstructFrom(Other) is \c true. Callers
-  /// should call canConstructFrom(Other) first to make sure that Other is
-  /// compatible with T.
-  static Matcher<T> constructFrom(const DynTypedMatcher &Other) {
-    assert(canConstructFrom(Other));
-    return Matcher<T>(new WrappedMatcher(Other));
-  }
-
   /// \brief Forwards the call to the underlying MatcherInterface<T> pointer.
   bool matches(const T &Node,
                ASTMatchFinder *Finder,
@@ -307,23 +259,6 @@ public:
     /// implementations (no new() implementation_ during a Matches()).
     return reinterpret_cast<uint64_t>(Implementation.getPtr());
   }
-
-  /// \brief Returns the type this matcher works on.
-  ast_type_traits::ASTNodeKind getSupportedKind() const {
-    return ast_type_traits::ASTNodeKind::getFromNodeKind<T>();
-  }
-
-  /// \brief Returns whether the matcher matches on the given \c DynNode.
-  virtual bool matches(const ast_type_traits::DynTypedNode DynNode,
-                       ASTMatchFinder *Finder,
-                       BoundNodesTreeBuilder *Builder) const {
-    const T *Node = DynNode.get<T>();
-    if (!Node) return false;
-    return matches(*Node, Finder, Builder);
-  }
-
-  /// \brief Makes a copy of this matcher object.
-  virtual Matcher<T> *clone() const { return new Matcher<T>(*this); }
 
   /// \brief Allows the conversion of a \c Matcher<Type> to a \c
   /// Matcher<QualType>.
@@ -367,23 +302,6 @@ private:
     const Matcher<Base> From;
   };
 
-  /// \brief Simple MatcherInterface<T> wrapper around a DynTypedMatcher.
-  class WrappedMatcher : public MatcherInterface<T> {
-  public:
-    explicit WrappedMatcher(const DynTypedMatcher &Matcher)
-        : Inner(Matcher.clone()) {}
-    virtual ~WrappedMatcher() {}
-
-    bool matches(const T &Node, ASTMatchFinder *Finder,
-                 BoundNodesTreeBuilder *Builder) const {
-      return Inner->matches(ast_type_traits::DynTypedNode::create(Node), Finder,
-                            Builder);
-    }
-
-  private:
-    const OwningPtr<DynTypedMatcher> Inner;
-  };
-
   IntrusiveRefCntPtr< MatcherInterface<T> > Implementation;
 };  // class Matcher
 
@@ -394,15 +312,168 @@ inline Matcher<T> makeMatcher(MatcherInterface<T> *Implementation) {
   return Matcher<T>(Implementation);
 }
 
+template <typename T> class BindableMatcher;
+
+/// \brief Matcher that works on a \c DynTypedNode.
+///
+/// It is constructed from a \c Matcher<T> object and redirects most calls to
+/// underlying matcher.
+/// It checks whether the \c DynTypedNode is convertible into the type of the
+/// underlying matcher and then do the actual match on the actual node, or
+/// return false if it is not convertible.
+class DynTypedMatcher {
+public:
+  /// \brief Construct from a \c Matcher<T>. Copies the matcher.
+  template <typename T> inline DynTypedMatcher(const Matcher<T> &M);
+
+  /// \brief Construct from a bindable \c Matcher<T>. Copies the matcher.
+  ///
+  /// This version enables \c tryBind() on the \c DynTypedMatcher.
+  template <typename T> inline DynTypedMatcher(const BindableMatcher<T> &M);
+
+  /// \brief Returns true if the matcher matches the given \c DynNode.
+  bool matches(const ast_type_traits::DynTypedNode DynNode,
+               ASTMatchFinder *Finder, BoundNodesTreeBuilder *Builder) const {
+    return Storage->matches(DynNode, Finder, Builder);
+  }
+
+  /// \brief Bind the specified \p ID to the matcher.
+  /// \return A new matcher with the \p ID bound to it if this matcher supports
+  ///   binding. Otherwise, returns an empty \c Optional<>.
+  llvm::Optional<DynTypedMatcher> tryBind(StringRef ID) const {
+    return Storage->tryBind(ID);
+  }
+
+  /// \brief Returns a unique \p ID for the matcher.
+  uint64_t getID() const { return Storage->getID(); }
+
+  /// \brief Returns the type this matcher works on.
+  ///
+  /// \c matches() will always return false unless the node passed is of this
+  /// or a derived type.
+  ast_type_traits::ASTNodeKind getSupportedKind() const {
+    return Storage->getSupportedKind();
+  }
+
+  /// \brief Returns \c true if the passed \c DynTypedMatcher can be converted
+  ///   to a \c Matcher<T>.
+  ///
+  /// This method verifies that the underlying matcher in \c Other can process
+  /// nodes of types T.
+  template <typename T> bool canConvertTo() const {
+    return getSupportedKind().isBaseOf(
+        ast_type_traits::ASTNodeKind::getFromNodeKind<T>());
+  }
+
+  /// \brief Construct a \c Matcher<T> interface around the dynamic matcher.
+  ///
+  /// This method asserts that \c canConvertTo() is \c true. Callers
+  /// should call \c canConvertTo() first to make sure that \c this is
+  /// compatible with T.
+  template <typename T> Matcher<T> convertTo() const {
+    assert(canConvertTo<T>());
+    return unconditionalConvertTo<T>();
+  }
+
+  /// \brief Same as \c convertTo(), but does not check that the underlying
+  ///   matcher can handle a value of T.
+  ///
+  /// If it is not compatible, then this matcher will never match anything.
+  template <typename T> Matcher<T> unconditionalConvertTo() const {
+    return Matcher<T>(new WrappedMatcher<T>(*this));
+  }
+
+private:
+  class MatcherStorage : public RefCountedBaseVPTR {
+  public:
+    MatcherStorage(ast_type_traits::ASTNodeKind SupportedKind, uint64_t ID)
+        : SupportedKind(SupportedKind), ID(ID) {}
+    virtual ~MatcherStorage();
+
+    virtual bool matches(const ast_type_traits::DynTypedNode DynNode,
+                         ASTMatchFinder *Finder,
+                         BoundNodesTreeBuilder *Builder) const = 0;
+
+    virtual llvm::Optional<DynTypedMatcher> tryBind(StringRef ID) const = 0;
+
+    ast_type_traits::ASTNodeKind getSupportedKind() const {
+      return SupportedKind;
+    }
+
+    uint64_t getID() const { return ID; }
+
+  private:
+    const ast_type_traits::ASTNodeKind SupportedKind;
+    const uint64_t ID;
+  };
+
+  /// \brief Typed implementation of \c MatcherStorage.
+  template <typename T> class TypedMatcherStorage;
+
+  /// \brief Simple MatcherInterface<T> wrapper around a DynTypedMatcher.
+  template <typename T> class WrappedMatcher;
+
+  IntrusiveRefCntPtr<const MatcherStorage> Storage;
+};
+
+template <typename T>
+class DynTypedMatcher::TypedMatcherStorage : public MatcherStorage {
+public:
+  TypedMatcherStorage(const Matcher<T> &Other, bool AllowBind)
+      : MatcherStorage(ast_type_traits::ASTNodeKind::getFromNodeKind<T>(),
+                       Other.getID()),
+        InnerMatcher(Other), AllowBind(AllowBind) {}
+
+  bool matches(const ast_type_traits::DynTypedNode DynNode,
+               ASTMatchFinder *Finder, BoundNodesTreeBuilder *Builder) const
+      LLVM_OVERRIDE {
+    if (const T *Node = DynNode.get<T>()) {
+      return InnerMatcher.matches(*Node, Finder, Builder);
+    }
+    return false;
+  }
+
+  llvm::Optional<DynTypedMatcher> tryBind(StringRef ID) const LLVM_OVERRIDE {
+    if (!AllowBind)
+      return llvm::Optional<DynTypedMatcher>();
+    return DynTypedMatcher(BindableMatcher<T>(InnerMatcher).bind(ID));
+  }
+
+private:
+  const Matcher<T> InnerMatcher;
+  const bool AllowBind;
+};
+
+template <typename T>
+inline DynTypedMatcher::DynTypedMatcher(const Matcher<T> &M)
+    : Storage(new TypedMatcherStorage<T>(M, false)) {}
+
+template <typename T>
+inline DynTypedMatcher::DynTypedMatcher(const BindableMatcher<T> &M)
+    : Storage(new TypedMatcherStorage<T>(M, true)) {}
+
+template <typename T>
+class DynTypedMatcher::WrappedMatcher : public MatcherInterface<T> {
+public:
+  explicit WrappedMatcher(const DynTypedMatcher &Matcher) : Inner(Matcher) {}
+  virtual ~WrappedMatcher() {}
+
+  bool matches(const T &Node, ASTMatchFinder *Finder,
+               BoundNodesTreeBuilder *Builder) const {
+    return Inner.matches(ast_type_traits::DynTypedNode::create(Node), Finder,
+                         Builder);
+  }
+
+private:
+  const DynTypedMatcher Inner;
+};
+
 /// \brief Specialization of the conversion functions for QualType.
 ///
 /// These specializations provide the Matcher<Type>->Matcher<QualType>
 /// conversion that the static API does.
-template <>
-inline bool
-Matcher<QualType>::canConstructFrom(const DynTypedMatcher &Other) {
-  ast_type_traits::ASTNodeKind SourceKind = Other.getSupportedKind();
-  // We support implicit conversion from Matcher<Type> to Matcher<QualType>
+template <> inline bool DynTypedMatcher::canConvertTo<QualType>() const {
+  const ast_type_traits::ASTNodeKind SourceKind = getSupportedKind();
   return SourceKind.isSame(
              ast_type_traits::ASTNodeKind::getFromNodeKind<Type>()) ||
          SourceKind.isSame(
@@ -410,16 +481,15 @@ Matcher<QualType>::canConstructFrom(const DynTypedMatcher &Other) {
 }
 
 template <>
-inline Matcher<QualType>
-Matcher<QualType>::constructFrom(const DynTypedMatcher &Other) {
-  assert(canConstructFrom(Other));
-  ast_type_traits::ASTNodeKind SourceKind = Other.getSupportedKind();
+inline Matcher<QualType> DynTypedMatcher::convertTo<QualType>() const {
+  assert(canConvertTo<QualType>());
+  const ast_type_traits::ASTNodeKind SourceKind = getSupportedKind();
   if (SourceKind.isSame(
           ast_type_traits::ASTNodeKind::getFromNodeKind<Type>())) {
     // We support implicit conversion from Matcher<Type> to Matcher<QualType>
-    return Matcher<Type>::constructFrom(Other);
+    return unconditionalConvertTo<Type>();
   }
-  return makeMatcher(new WrappedMatcher(Other));
+  return unconditionalConvertTo<QualType>();
 }
 
 /// \brief Finds the first node in a range that matches the given matcher.
@@ -732,18 +802,21 @@ protected:
                                  AncestorMatchMode MatchMode) = 0;
 };
 
-/// \brief A simple type-list implementation.
+/// \brief A type-list implementation.
 ///
-/// It is implemented as a flat struct with a maximum number of arguments to
-/// simplify compiler error messages.
-/// However, it is used as a "linked list" of types.
-///
-/// Note: If you need to extend for more types, add them as template arguments
-///       and to the "typedef TypeList<...> tail" below. Nothing else is needed.
+/// A list is declared as a tree of type list nodes, where the leafs are the
+/// types.
+/// However, it is used as a "linked list" of types, by using the ::head and
+/// ::tail typedefs.
+/// Each node supports up to 4 children (instead of just 2) to reduce the
+/// nesting required by large lists.
 template <typename T1 = void, typename T2 = void, typename T3 = void,
-          typename T4 = void, typename T5 = void, typename T6 = void,
-          typename T7 = void, typename T8 = void>
+          typename T4 = void>
 struct TypeList {
+  /// \brief Implementation detail. Combined with the specializations below,
+  ///   this typedef allows for flattening of nested structures.
+  typedef TypeList<T1, T2, T3, T4> self;
+
   /// \brief The first type on the list.
   typedef T1 head;
 
@@ -751,29 +824,48 @@ struct TypeList {
   ///
   /// This type is used to do recursion. TypeList<>/EmptyTypeList indicates the
   /// end of the list.
-  typedef TypeList<T2, T3, T4, T5, T6, T7, T8> tail;
-
-  /// \brief Helper meta-function to determine if some type \c T is present or
-  ///   a parent type in the list.
-  template <typename T> struct ContainsSuperOf {
-    static const bool value = llvm::is_base_of<head, T>::value ||
-                              tail::template ContainsSuperOf<T>::value;
-  };
+  typedef typename TypeList<T2, T3, T4>::self tail;
 };
 
-/// \brief Specialization of ContainsSuperOf for the empty list.
-template <> template <typename T> struct TypeList<>::ContainsSuperOf {
-  static const bool value = false;
+/// \brief Template specialization to allow nested lists.
+///
+/// First element is a typelist. Pop its first element.
+template <typename Sub1, typename Sub2, typename Sub3, typename Sub4,
+          typename T2, typename T3, typename T4>
+struct TypeList<TypeList<Sub1, Sub2, Sub3, Sub4>, T2, T3,
+                T4> : public TypeList<Sub1,
+                                      typename TypeList<Sub2, Sub3, Sub4>::self,
+                                      typename TypeList<T2, T3, T4>::self> {};
+
+/// \brief Template specialization to allow nested lists.
+///
+/// First element is an empty typelist. Skip it.
+template <typename T2, typename T3, typename T4>
+struct TypeList<TypeList<>, T2, T3, T4> : public TypeList<T2, T3, T4> {
 };
 
 /// \brief The empty type list.
 typedef TypeList<> EmptyTypeList;
 
+/// \brief Helper meta-function to determine if some type \c T is present or
+///   a parent type in the list.
+template <typename AnyTypeList, typename T>
+struct TypeListContainsSuperOf {
+  static const bool value =
+      llvm::is_base_of<typename AnyTypeList::head, T>::value ||
+      TypeListContainsSuperOf<typename AnyTypeList::tail, T>::value;
+};
+template <typename T>
+struct TypeListContainsSuperOf<EmptyTypeList, T> {
+  static const bool value = false;
+};
+
 /// \brief A "type list" that contains all types.
 ///
 /// Useful for matchers like \c anything and \c unless.
-typedef TypeList<Decl, Stmt, NestedNameSpecifier, NestedNameSpecifierLoc,
-        QualType, Type, TypeLoc, CXXCtorInitializer> AllNodeBaseTypes;
+typedef TypeList<
+    TypeList<Decl, Stmt, NestedNameSpecifier, NestedNameSpecifierLoc>,
+    TypeList<QualType, Type, TypeLoc, CXXCtorInitializer> > AllNodeBaseTypes;
 
 /// \brief Helper meta-function to extract the argument out of a function of
 ///   type void(Arg).
@@ -786,8 +878,17 @@ template <class T> struct ExtractFunctionArgMeta<void(T)> {
 
 /// \brief Default type lists for ArgumentAdaptingMatcher matchers.
 typedef AllNodeBaseTypes AdaptativeDefaultFromTypes;
-typedef TypeList<Decl, Stmt, NestedNameSpecifier, NestedNameSpecifierLoc,
-                 TypeLoc, QualType> AdaptativeDefaultToTypes;
+typedef TypeList<TypeList<Decl, Stmt, NestedNameSpecifier>,
+                 TypeList<NestedNameSpecifierLoc, TypeLoc, QualType> >
+AdaptativeDefaultToTypes;
+
+/// \brief All types that are supported by HasDeclarationMatcher above.
+typedef TypeList<TypeList<CallExpr, CXXConstructExpr, DeclRefExpr, EnumType>,
+                 TypeList<InjectedClassNameType, LabelStmt, MemberExpr>,
+                 TypeList<QualType, RecordType, TagType>,
+                 TypeList<TemplateSpecializationType, TemplateTypeParmType,
+                          TypedefType, UnresolvedUsingType> >
+HasDeclarationSupportedTypes;
 
 /// \brief Converts a \c Matcher<T> to a matcher of desired type \c To by
 /// "adapting" a \c To into a \c T.
@@ -851,7 +952,7 @@ public:
   typedef typename ExtractFunctionArgMeta<ReturnTypesF>::type ReturnTypes;
   template <typename T>
   operator Matcher<T>() const {
-    TOOLING_COMPILE_ASSERT(ReturnTypes::template ContainsSuperOf<T>::value,
+    TOOLING_COMPILE_ASSERT((TypeListContainsSuperOf<ReturnTypes, T>::value),
                            right_polymorphic_conversion);
     return Matcher<T>(new MatcherT<T>());
   }
@@ -869,7 +970,7 @@ public:
 
   template <typename T>
   operator Matcher<T>() const {
-    TOOLING_COMPILE_ASSERT(ReturnTypes::template ContainsSuperOf<T>::value,
+    TOOLING_COMPILE_ASSERT((TypeListContainsSuperOf<ReturnTypes, T>::value),
                            right_polymorphic_conversion);
     return Matcher<T>(new MatcherT<T, P1>(Param1));
   }
@@ -890,7 +991,7 @@ public:
 
   template <typename T>
   operator Matcher<T>() const {
-    TOOLING_COMPILE_ASSERT(ReturnTypes::template ContainsSuperOf<T>::value,
+    TOOLING_COMPILE_ASSERT((TypeListContainsSuperOf<ReturnTypes, T>::value),
                            right_polymorphic_conversion);
     return Matcher<T>(new MatcherT<T, P1, P2>(Param1, Param2));
   }
@@ -920,27 +1021,6 @@ public:
   virtual bool matchesNode(const T &Node) const {
     return true;
   }
-};
-
-/// \brief Provides a MatcherInterface<T> for a Matcher<To> that matches if T is
-/// dyn_cast'able into To and the given Matcher<To> matches on the dyn_cast'ed
-/// node.
-template <typename T, typename To>
-class DynCastMatcher : public MatcherInterface<T> {
-public:
-  explicit DynCastMatcher(const Matcher<To> &InnerMatcher)
-      : InnerMatcher(InnerMatcher) {}
-
-  virtual bool matches(const T &Node,
-                       ASTMatchFinder *Finder,
-                       BoundNodesTreeBuilder *Builder) const {
-    const To *InnerMatchValue = dyn_cast<To>(&Node);
-    return InnerMatchValue != NULL &&
-      InnerMatcher.matches(*InnerMatchValue, Finder, Builder);
-  }
-
-private:
-  const Matcher<To> InnerMatcher;
 };
 
 /// \brief Matcher<T> that wraps an inner Matcher<T> and binds the matched node
@@ -975,7 +1055,8 @@ private:
 template <typename T>
 class BindableMatcher : public Matcher<T> {
 public:
-  BindableMatcher(MatcherInterface<T> *Implementation)
+  explicit BindableMatcher(const Matcher<T> &M) : Matcher<T>(M) {}
+  explicit BindableMatcher(MatcherInterface<T> *Implementation)
     : Matcher<T>(Implementation) {}
 
   /// \brief Returns a matcher that will bind the matched node on a match.
@@ -984,16 +1065,6 @@ public:
   /// bind the matched node on a match.
   Matcher<T> bind(StringRef ID) const {
     return Matcher<T>(new IdMatcher<T>(ID, *this));
-  }
-
-  /// \brief Makes a copy of this matcher object.
-  virtual BindableMatcher<T>* clone() const {
-    return new BindableMatcher<T>(*this);
-  }
-
-  /// \brief Bind the specified \c ID to the matcher.
-  virtual Matcher<T>* tryBind(StringRef ID) const {
-    return new Matcher<T>(bind(ID));
   }
 };
 
@@ -1080,115 +1151,154 @@ private:
   const Matcher<T> InnerMatcher;
 };
 
-/// \brief Matches nodes of type T for which both provided matchers match.
-///
-/// Type arguments MatcherT1 and MatcherT2 are required by
-/// PolymorphicMatcherWithParam2 but not actually used. They will
-/// always be instantiated with types convertible to Matcher<T>.
-template <typename T, typename MatcherT1, typename MatcherT2>
-class AllOfMatcher : public MatcherInterface<T> {
+/// \brief VariadicOperatorMatcher related types.
+/// @{
+
+/// \brief Function signature for any variadic operator. It takes the inner
+///   matchers as an array of DynTypedMatcher.
+typedef bool (*VariadicOperatorFunction)(
+    const ast_type_traits::DynTypedNode DynNode, ASTMatchFinder *Finder,
+    BoundNodesTreeBuilder *Builder, ArrayRef<DynTypedMatcher> InnerMatchers);
+
+/// \brief \c MatcherInterface<T> implementation for an variadic operator.
+template <typename T>
+class VariadicOperatorMatcherInterface : public MatcherInterface<T> {
 public:
-  AllOfMatcher(const Matcher<T> &InnerMatcher1, const Matcher<T> &InnerMatcher2)
-      : InnerMatcher1(InnerMatcher1), InnerMatcher2(InnerMatcher2) {}
-
-  virtual bool matches(const T &Node,
-                       ASTMatchFinder *Finder,
-                       BoundNodesTreeBuilder *Builder) const {
-    // allOf leads to one matcher for each alternative in the first
-    // matcher combined with each alternative in the second matcher.
-    // Thus, we can reuse the same Builder.
-    return InnerMatcher1.matches(Node, Finder, Builder) &&
-           InnerMatcher2.matches(Node, Finder, Builder);
-  }
-
-private:
-  const Matcher<T> InnerMatcher1;
-  const Matcher<T> InnerMatcher2;
-};
-
-/// \brief Matches nodes of type T for which at least one of the two provided
-/// matchers matches.
-///
-/// Type arguments MatcherT1 and MatcherT2 are
-/// required by PolymorphicMatcherWithParam2 but not actually
-/// used. They will always be instantiated with types convertible to
-/// Matcher<T>.
-template <typename T, typename MatcherT1, typename MatcherT2>
-class EachOfMatcher : public MatcherInterface<T> {
-public:
-  EachOfMatcher(const Matcher<T> &InnerMatcher1,
-                const Matcher<T> &InnerMatcher2)
-      : InnerMatcher1(InnerMatcher1), InnerMatcher2(InnerMatcher2) {
+  VariadicOperatorMatcherInterface(VariadicOperatorFunction Func,
+                                   ArrayRef<const Matcher<T> *> InputMatchers)
+      : Func(Func) {
+    for (size_t i = 0, e = InputMatchers.size(); i != e; ++i) {
+      InnerMatchers.push_back(*InputMatchers[i]);
+    }
   }
 
   virtual bool matches(const T &Node, ASTMatchFinder *Finder,
                        BoundNodesTreeBuilder *Builder) const {
-    BoundNodesTreeBuilder Result;
-    BoundNodesTreeBuilder Builder1(*Builder);
-    bool Matched1 = InnerMatcher1.matches(Node, Finder, &Builder1);
-    if (Matched1)
-      Result.addMatch(Builder1);
-
-    BoundNodesTreeBuilder Builder2(*Builder);
-    bool Matched2 = InnerMatcher2.matches(Node, Finder, &Builder2);
-    if (Matched2)
-      Result.addMatch(Builder2);
-
-    *Builder = Result;
-    return Matched1 || Matched2;
+    return Func(ast_type_traits::DynTypedNode::create(Node), Finder, Builder,
+                InnerMatchers);
   }
 
 private:
-  const Matcher<T> InnerMatcher1;
-  const Matcher<T> InnerMatcher2;
+  const VariadicOperatorFunction Func;
+  std::vector<DynTypedMatcher> InnerMatchers;
 };
 
-/// \brief Matches nodes of type T for which at least one of the two provided
-/// matchers matches.
+/// \brief "No argument" placeholder to use as template paratemers.
+struct VariadicOperatorNoArg {};
+
+/// \brief Polymorphic matcher object that uses a \c VariadicOperatorFunction
+///   operator.
 ///
-/// Type arguments MatcherT1 and MatcherT2 are
-/// required by PolymorphicMatcherWithParam2 but not actually
-/// used. They will always be instantiated with types convertible to
-/// Matcher<T>.
-template <typename T, typename MatcherT1, typename MatcherT2>
-class AnyOfMatcher : public MatcherInterface<T> {
+/// Input matchers can have any type (including other polymorphic matcher
+/// types), and the actual Matcher<T> is generated on demand with an implicit
+/// coversion operator.
+template <typename P1, typename P2,
+          typename P3 = VariadicOperatorNoArg,
+          typename P4 = VariadicOperatorNoArg,
+          typename P5 = VariadicOperatorNoArg>
+class VariadicOperatorMatcher {
 public:
-  AnyOfMatcher(const Matcher<T> &InnerMatcher1, const Matcher<T> &InnerMatcher2)
-      : InnerMatcher1(InnerMatcher1), InnerMatcher2(InnerMatcher2) {}
+  VariadicOperatorMatcher(VariadicOperatorFunction Func, const P1 &Param1,
+                          const P2 &Param2,
+                          const P3 &Param3 = VariadicOperatorNoArg(),
+                          const P4 &Param4 = VariadicOperatorNoArg(),
+                          const P5 &Param5 = VariadicOperatorNoArg())
+      : Func(Func), Param1(Param1), Param2(Param2), Param3(Param3),
+        Param4(Param4), Param5(Param5) {}
 
-  virtual bool matches(const T &Node,
-                       ASTMatchFinder *Finder,
-                       BoundNodesTreeBuilder *Builder) const {
-    BoundNodesTreeBuilder Result = *Builder;
-    if (InnerMatcher1.matches(Node, Finder, &Result)) {
-      *Builder = Result;
-      return true;
-    }
-    Result = *Builder;
-    if (InnerMatcher2.matches(Node, Finder, &Result)) {
-      *Builder = Result;
-      return true;
-    }
-    return false;
+  template <typename T> operator Matcher<T>() const {
+    Matcher<T> *Array[5];
+    size_t Size = 0;
+
+    addMatcher<T>(Param1, Array, Size);
+    addMatcher<T>(Param2, Array, Size);
+    addMatcher<T>(Param3, Array, Size);
+    addMatcher<T>(Param4, Array, Size);
+    addMatcher<T>(Param5, Array, Size);
+    Matcher<T> Result(new VariadicOperatorMatcherInterface<T>(
+        Func, ArrayRef<const Matcher<T> *>(Array, Size)));
+    for (size_t i = 0, e = Size; i != e; ++i) delete Array[i];
+    return Result;
   }
 
 private:
-  const Matcher<T> InnerMatcher1;
-  const Matcher<T> InnerMatcher2;
+  template <typename T>
+  static void addMatcher(const Matcher<T> &M, Matcher<T> **Array,
+                         size_t &Size) {
+    Array[Size++] = new Matcher<T>(M);
+  }
+
+  /// \brief Overload to ignore \c VariadicOperatorNoArg arguments.
+  template <typename T>
+  static void addMatcher(VariadicOperatorNoArg, Matcher<T> **Array,
+                         size_t &Size) {}
+
+  const VariadicOperatorFunction Func;
+  const P1 Param1;
+  const P2 Param2;
+  const P3 Param3;
+  const P4 Param4;
+  const P5 Param5;
 };
+
+/// \brief Overloaded function object to generate VariadicOperatorMatcher
+///   objects from arbitrary matchers.
+///
+/// It supports 2-5 argument overloaded operator(). More can be added if needed.
+struct VariadicOperatorMatcherFunc {
+  VariadicOperatorFunction Func;
+
+  template <typename M1, typename M2>
+  VariadicOperatorMatcher<M1, M2> operator()(const M1 &P1, const M2 &P2) const {
+    return VariadicOperatorMatcher<M1, M2>(Func, P1, P2);
+  }
+  template <typename M1, typename M2, typename M3>
+  VariadicOperatorMatcher<M1, M2, M3> operator()(const M1 &P1, const M2 &P2,
+                                                 const M3 &P3) const {
+    return VariadicOperatorMatcher<M1, M2, M3>(Func, P1, P2, P3);
+  }
+  template <typename M1, typename M2, typename M3, typename M4>
+  VariadicOperatorMatcher<M1, M2, M3, M4>
+  operator()(const M1 &P1, const M2 &P2, const M3 &P3, const M4 &P4) const {
+    return VariadicOperatorMatcher<M1, M2, M3, M4>(Func, P1, P2, P3, P4);
+  }
+  template <typename M1, typename M2, typename M3, typename M4, typename M5>
+  VariadicOperatorMatcher<M1, M2, M3, M4, M5>
+  operator()(const M1 &P1, const M2 &P2, const M3 &P3, const M4 &P4,
+             const M5 &P5) const {
+    return VariadicOperatorMatcher<M1, M2, M3, M4, M5>(Func, P1, P2, P3, P4,
+                                                       P5);
+  }
+};
+
+/// @}
+
+/// \brief Matches nodes for which all provided matchers match.
+bool AllOfVariadicOperator(const ast_type_traits::DynTypedNode DynNode,
+                           ASTMatchFinder *Finder,
+                           BoundNodesTreeBuilder *Builder,
+                           ArrayRef<DynTypedMatcher> InnerMatchers);
+
+/// \brief Matches nodes for which at least one of the provided matchers
+/// matches, but doesn't stop at the first match.
+bool EachOfVariadicOperator(const ast_type_traits::DynTypedNode DynNode,
+                            ASTMatchFinder *Finder,
+                            BoundNodesTreeBuilder *Builder,
+                            ArrayRef<DynTypedMatcher> InnerMatchers);
+
+/// \brief Matches nodes for which at least one of the provided matchers
+/// matches.
+bool AnyOfVariadicOperator(const ast_type_traits::DynTypedNode DynNode,
+                           ASTMatchFinder *Finder,
+                           BoundNodesTreeBuilder *Builder,
+                           ArrayRef<DynTypedMatcher> InnerMatchers);
 
 /// \brief Creates a Matcher<T> that matches if all inner matchers match.
 template<typename T>
 BindableMatcher<T> makeAllOfComposite(
     ArrayRef<const Matcher<T> *> InnerMatchers) {
-  if (InnerMatchers.empty())
-    return BindableMatcher<T>(new TrueMatcher<T>);
-  MatcherInterface<T> *InnerMatcher = new TrueMatcher<T>;
-  for (int i = InnerMatchers.size() - 1; i >= 0; --i) {
-    InnerMatcher = new AllOfMatcher<T, Matcher<T>, Matcher<T> >(
-      *InnerMatchers[i], makeMatcher(InnerMatcher));
-  }
-  return BindableMatcher<T>(InnerMatcher);
+  return BindableMatcher<T>(new VariadicOperatorMatcherInterface<T>(
+      AllOfVariadicOperator, InnerMatchers));
 }
 
 /// \brief Creates a Matcher<T> that matches if
@@ -1200,8 +1310,8 @@ BindableMatcher<T> makeAllOfComposite(
 template<typename T, typename InnerT>
 BindableMatcher<T> makeDynCastAllOfComposite(
     ArrayRef<const Matcher<InnerT> *> InnerMatchers) {
-  return BindableMatcher<T>(new DynCastMatcher<T, InnerT>(
-    makeAllOfComposite(InnerMatchers)));
+  return BindableMatcher<T>(DynTypedMatcher(makeAllOfComposite(InnerMatchers))
+                                .unconditionalConvertTo<T>());
 }
 
 /// \brief Matches nodes of type T that have at least one descendant node of

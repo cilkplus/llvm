@@ -96,7 +96,7 @@ void test3() {
   _Cilk_spawn sizeof(int); // expected-error {{the argument to _Cilk_spawn must be a function call}}
 
   int x = 0, y = 1;
-  _Cilk_spawn __sync_fetch_and_add(&x, y); // expected-error {{builtin function cannot be spawned}}
+  _Cilk_spawn __sync_fetch_and_add(&x, y);
 }
 
 void test4() {

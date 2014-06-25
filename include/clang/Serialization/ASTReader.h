@@ -88,7 +88,7 @@ class TypeLocReader;
 struct HeaderFileInfo;
 class VersionTuple;
 class TargetOptions;
-class ASTUnresolvedSet;
+class LazyASTUnresolvedSet;
 
 /// \brief Abstract interface for callback invocations by the ASTReader.
 ///
@@ -875,6 +875,14 @@ private:
   /// been completed.
   std::deque<PendingDeclContextInfo> PendingDeclContextInfos;
 
+  /// \brief The set of NamedDecls that have been loaded, but are members of a
+  /// context that has been merged into another context where the corresponding
+  /// declaration is either missing or has not yet been loaded.
+  ///
+  /// We will check whether the corresponding declaration is in fact missing
+  /// once recursing loading has been completed.
+  llvm::SmallVector<NamedDecl *, 16> PendingOdrMergeChecks;
+
   /// \brief The set of Objective-C categories that have been deserialized
   /// since the last time the declaration chains were linked.
   llvm::SmallPtrSet<ObjCCategoryDecl *, 16> CategoriesDeserialized;
@@ -911,6 +919,15 @@ private:
   /// the given canonical declaration.
   MergedDeclsMap::iterator
   combineStoredMergedDecls(Decl *Canon, serialization::GlobalDeclID CanonID);
+
+  /// \brief A mapping from DeclContexts to the semantic DeclContext that we
+  /// are treating as the definition of the entity. This is used, for instance,
+  /// when merging implicit instantiations of class templates across modules.
+  llvm::DenseMap<DeclContext *, DeclContext *> MergedDeclContexts;
+
+  /// \brief A mapping from canonical declarations of enums to their canonical
+  /// definitions. Only populated when using modules in C++.
+  llvm::DenseMap<EnumDecl *, EnumDecl *> EnumDefinitions;
 
   /// \brief When reading a Stmt tree, Stmt operands are placed in this stack.
   SmallVector<Stmt *, 16> StmtStack;
@@ -1250,6 +1267,9 @@ public:
   
   /// \brief Initializes the ASTContext
   void InitializeContext();
+
+  /// \brief Update the state of Sema after loading some additional modules.
+  void UpdateSema();
 
   /// \brief Add in-memory (virtual file) buffer.
   void addInMemoryBuffer(StringRef &FileName, llvm::MemoryBuffer *Buffer) {
@@ -1745,7 +1765,7 @@ public:
                            unsigned &Idx);
 
   /// \brief Read a UnresolvedSet structure.
-  void ReadUnresolvedSet(ModuleFile &F, ASTUnresolvedSet &Set,
+  void ReadUnresolvedSet(ModuleFile &F, LazyASTUnresolvedSet &Set,
                          const RecordData &Record, unsigned &Idx);
 
   /// \brief Read a C++ base specifier.

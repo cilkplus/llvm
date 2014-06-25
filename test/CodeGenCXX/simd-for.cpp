@@ -213,7 +213,35 @@ void test_last_iteration_optimization() {
 
   // CHECKO2: define void @_Z32test_last_iteration_optimizationv
   // CHECKO2: call void @_Z6anchori(i32 700)
-  // CHECKO2-NEXT: call void @_Z6anchori(i32 701)
+  // CHECKO2: call void @_Z6anchori(i32 701)
   // CHECKO2-NOT: unreachable
   // CHECKO2: ret void 
 }
+
+class Private{
+protected:
+  int i;
+public:
+  Private () {
+    i = 1234;
+  }
+  int change (int x) {
+    i += x;
+    return i;
+  }
+};
+
+void check(){
+  Private lastX;
+
+#pragma simd lastprivate(lastX)
+  for (int i = 0; i < 111; i++)
+    lastX.change(i);
+
+  // CHECK: entry:
+  // CHECK-NOT: %agg-temp.i{{[1-9]*}} = alloca %class.Private
+  // CHECK-NOT: %agg-temp.i = alloca %class.Private
+  // CHECK: if.then:
+
+}
+

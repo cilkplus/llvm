@@ -187,6 +187,7 @@ static bool TypeInfoIsInStandardLibrary(const BuiltinType *Ty) {
     case BuiltinType::Float:
     case BuiltinType::Double:
     case BuiltinType::LongDouble:
+    case BuiltinType::Float128:
     case BuiltinType::Char16:
     case BuiltinType::Char32:
     case BuiltinType::Int128:
@@ -846,7 +847,7 @@ void RTTIBuilder::BuildVMIClassTypeInfo(const CXXRecordDecl *RD) {
     CharUnits Offset;
     if (Base->isVirtual())
       Offset = 
-        CGM.getVTableContext().getVirtualBaseOffsetOffset(RD, BaseDecl);
+        CGM.getItaniumVTableContext().getVirtualBaseOffsetOffset(RD, BaseDecl);
     else {
       const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
       Offset = Layout.getBaseClassOffset(BaseDecl);
@@ -970,7 +971,7 @@ void CodeGenModule::EmitFundamentalRTTIDescriptors() {
                                   Context.UnsignedIntTy, Context.LongTy, 
                                   Context.UnsignedLongTy, Context.LongLongTy, 
                                   Context.UnsignedLongLongTy, Context.FloatTy,
-                                  Context.DoubleTy, Context.LongDoubleTy,
+                                  Context.DoubleTy, Context.LongDoubleTy, Context.Float128Ty,
                                   Context.Char16Ty, Context.Char32Ty };
   for (unsigned i = 0; i < llvm::array_lengthof(FundamentalTypes); ++i)
     EmitFundamentalRTTIDescriptor(FundamentalTypes[i]);

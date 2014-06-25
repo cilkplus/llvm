@@ -7,13 +7,13 @@ namespace test_vectorlength {
 // FIXME: source location of each note is incorrect here.
 
 template <int VL>
-__attribute__((vector(vectorlength(VL))))  // expected-error {{vectorlength expression must be a power of 2}} \
-                                           // expected-error {{vectorlength must be positive}}
-void non_type(); // expected-note 2{{here}}
+__attribute__((vector(vectorlength(VL))))  // expected-error {{vectorlength must be positive}}
+                                           
+void non_type(); // expected-note {{here}}
 
 template <int V1, int V2>
-__attribute__((vector(vectorlength(V1 + V2)))) // expected-error {{vectorlength expression must be a power of 2}}
-void non_type(); // expected-note {{here}}
+__attribute__((vector(vectorlength(V1 + V2))))
+void non_type();
 
 template <typename T>
 __attribute__((vector(vectorlength(sizeof(T)))))
@@ -25,8 +25,8 @@ enum {
 
 const int VL = 4;
 template <int C>
-__attribute__((vector(vectorlength(VL + C)))) // expected-error 3{{vectorlength expression must be a power of 2}}
-void constant(); // expected-note 3{{here}}
+__attribute__((vector(vectorlength(VL + C))))
+void constant();
 
 extern const int E;
 
@@ -55,8 +55,8 @@ void test1() {
 }
 
 template <typename... Ts>
-__attribute__((vector(vectorlength(sizeof...(Ts))))) // expected-error {{vectorlength expression must be a power of 2}}
-void pack(); // expected-note {{here}}
+__attribute__((vector(vectorlength(sizeof...(Ts)))))
+void pack();
 
 void test2() {
   pack<char, int>();        // OK
@@ -90,7 +90,6 @@ struct Y {
 } // test_no_instantiation
 
 // tests with instantiation
-
 template <int I>
 ATTR(vector(vectorlength(I))) // OK
 void test_template_vectorlength1();
@@ -113,11 +112,14 @@ void test_template_mixed1(T linear_var, N uniform_var);
 
 template <typename T, int I>
 struct S {
+  ATTR(vector(uniform(uniform_var)))
+  void test_template_struct1(T uniform_var);
+
   ATTR(vector(vectorlength(I), linear(linear_var:I))) // expected-error {{linear parameter type 'X' is not an integer or pointer type}}
-  void test_template_struct1(T linear_var);
+  void test_template_struct2(T linear_var);
 
   ATTR(vector(vectorlength(I)))
-  void test_template_struct2();
+  void test_template_struct3();
 };
 
 // parameter packs
@@ -178,8 +180,9 @@ void template_tests() {
   test_template_mixed1<decltype(i), sizeof(e), decltype(c)>(i, c); // OK
 
   S<int, 8> s1; // OK
-  s1.test_template_struct1(i); // Not OK
-  s1.test_template_struct2();  // OK
+  s1.test_template_struct1(i); // OK
+  s1.test_template_struct2(i); // Not OK
+  s1.test_template_struct3();  // OK
 
   S<decltype(i), sizeof(int)> s2; // OK
   (void)s2;

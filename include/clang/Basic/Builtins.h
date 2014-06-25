@@ -35,8 +35,10 @@ namespace clang {
     C_LANG = 0x2,    // builtin for c only.
     CXX_LANG = 0x4,  // builtin for cplusplus only.
     OBJC_LANG = 0x8, // builtin for objective-c and objective-c++
+    MS_LANG = 0x10,  // builtin requires MS mode.
     ALL_LANGUAGES = C_LANG | CXX_LANG | OBJC_LANG, // builtin for all languages.
-    ALL_GNU_LANGUAGES = ALL_LANGUAGES | GNU_LANG   // builtin requires GNU mode.
+    ALL_GNU_LANGUAGES = ALL_LANGUAGES | GNU_LANG,  // builtin requires GNU mode.
+    ALL_MS_LANGUAGES = ALL_LANGUAGES | MS_LANG     // builtin requires MS mode.
   };
   
 namespace Builtin {
@@ -64,6 +66,8 @@ struct Info {
 class Context {
   const Info *TSRecords;
   unsigned NumTSRecords;
+//***INTEL: Intel specific builtins
+  bool IsIntelTBAA;
 public:
   Context();
 
@@ -119,14 +123,20 @@ public:
   /// \brief Return true if this is a builtin for a libc/libm function,
   /// with a "__builtin_" prefix (e.g. __builtin_abs).
   bool isLibFunction(unsigned ID) const {
-    return strchr(GetRecord(ID).Attributes, 'F') != 0;
+    return strchr(GetRecord(ID).Attributes, 'F') != 0
+//***INTEL: Intel specific builtins
+      || (!IsIntelTBAA && (strchr(GetRecord(ID).Attributes, 'I') != 0));
+//***INTEL: Intel specific builtins
   }
 
   /// \brief Determines whether this builtin is a predefined libc/libm
   /// function, such as "malloc", where we know the signature a
   /// priori.
   bool isPredefinedLibFunction(unsigned ID) const {
-    return strchr(GetRecord(ID).Attributes, 'f') != 0;
+    return strchr(GetRecord(ID).Attributes, 'f') != 0
+//***INTEL: Intel specific builtins
+      || (IsIntelTBAA && (strchr(GetRecord(ID).Attributes, 'I') != 0));
+//***INTEL: Intel specific builtins
   }
 
   /// \brief Determines whether this builtin is a predefined compiler-rt/libgcc

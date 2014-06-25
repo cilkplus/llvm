@@ -278,6 +278,7 @@ TypeSpecifierType BuiltinTypeLoc::getWrittenTypeSpec() const {
   case BuiltinType::Float:
   case BuiltinType::Double:
   case BuiltinType::LongDouble:
+  case BuiltinType::Float128:
     llvm_unreachable("Builtin type needs extra local data!");
     // Fall through, if the impossible happens.
       
@@ -378,18 +379,16 @@ void TemplateSpecializationTypeLoc::initializeArgLocs(ASTContext &Context,
     case TemplateArgument::Template:
     case TemplateArgument::TemplateExpansion: {
       NestedNameSpecifierLocBuilder Builder;
-      TemplateName Template = Args[i].getAsTemplate();
+      TemplateName Template = Args[i].getAsTemplateOrTemplatePattern();
       if (DependentTemplateName *DTN = Template.getAsDependentTemplateName())
         Builder.MakeTrivial(Context, DTN->getQualifier(), Loc);
       else if (QualifiedTemplateName *QTN = Template.getAsQualifiedTemplateName())
         Builder.MakeTrivial(Context, QTN->getQualifier(), Loc);
-      
+
       ArgInfos[i] = TemplateArgumentLocInfo(
-                                           Builder.getWithLocInContext(Context),
-                                            Loc, 
-                                Args[i].getKind() == TemplateArgument::Template
-                                            ? SourceLocation()
-                                            : Loc);
+          Builder.getWithLocInContext(Context), Loc,
+          Args[i].getKind() == TemplateArgument::Template ? SourceLocation()
+                                                          : Loc);
       break;
     }
 

@@ -36,7 +36,7 @@ std::string getClangRepositoryPath() {
 
   // If the SVN_REPOSITORY is empty, try to use the SVN keyword. This helps us
   // pick up a tag in an SVN export, for example.
-  StringRef SVNRepository("$URL$");
+  StringRef SVNRepository("$URL: http://llvm.org/svn/llvm-project/cfe/tags/RELEASE_34/final/lib/Basic/Version.cpp $");
   if (URL.empty()) {
     URL = SVNRepository.slice(SVNRepository.find(':'),
                               SVNRepository.find("/lib/Basic"));
@@ -121,7 +121,7 @@ std::string getClangFullVersion() {
 #ifdef CLANG_VENDOR
   OS << CLANG_VENDOR;
 #endif
-  OS << "clang version " CLANG_VERSION_STRING " "
+  OS << "Clang Front-End version " CLANG_VERSION_STRING " "
      << getClangFullRepositoryVersion();
 
   // If vendor supplied, include the base LLVM version as well.

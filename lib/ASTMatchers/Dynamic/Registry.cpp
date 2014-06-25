@@ -77,16 +77,12 @@ RegistryMaps::RegistryMaps() {
   //
   // Polymorphic + argument overload:
   // unless
-  // eachOf
-  // anyOf
-  // allOf
   // findAll
   //
   // Other:
   // loc
   // equals
   // equalsNode
-  // hasDeclaration
 
   REGISTER_OVERLOADED_2(callee);
   REGISTER_OVERLOADED_2(hasPrefix);
@@ -99,6 +95,8 @@ RegistryMaps::RegistryMaps() {
 
   REGISTER_MATCHER(accessSpecDecl);
   REGISTER_MATCHER(alignOfExpr);
+  REGISTER_MATCHER(allOf);
+  REGISTER_MATCHER(anyOf);
   REGISTER_MATCHER(anything);
   REGISTER_MATCHER(argumentCountIs);
   REGISTER_MATCHER(arraySubscriptExpr);
@@ -141,6 +139,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(destructorDecl);
   REGISTER_MATCHER(doStmt);
   REGISTER_MATCHER(dynamicCastExpr);
+  REGISTER_MATCHER(eachOf);
   REGISTER_MATCHER(elaboratedType);
   REGISTER_MATCHER(enumConstantDecl);
   REGISTER_MATCHER(enumDecl);
@@ -174,6 +173,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasCondition);
   REGISTER_MATCHER(hasConditionVariableStatement);
   REGISTER_MATCHER(hasDeclContext);
+  REGISTER_MATCHER(hasDeclaration);
   REGISTER_MATCHER(hasDeducedType);
   REGISTER_MATCHER(hasDescendant);
   REGISTER_MATCHER(hasDestinationType);
@@ -329,10 +329,10 @@ VariantMatcher Registry::constructBoundMatcher(StringRef MatcherName,
   VariantMatcher Out = constructMatcher(MatcherName, NameRange, Args, Error);
   if (Out.isNull()) return Out;
 
-  const DynTypedMatcher *Result;
-  if (Out.getSingleMatcher(Result)) {
-    OwningPtr<DynTypedMatcher> Bound(Result->tryBind(BindID));
-    if (Bound) {
+  llvm::Optional<DynTypedMatcher> Result = Out.getSingleMatcher();
+  if (Result.hasValue()) {
+    llvm::Optional<DynTypedMatcher> Bound = Result->tryBind(BindID);
+    if (Bound.hasValue()) {
       return VariantMatcher::SingleMatcher(*Bound);
     }
   }

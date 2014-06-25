@@ -54,7 +54,7 @@ void test1() {
   //
   // Make sure Cilk exits the function properly
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
-  // CHECK-NEXT: ret 
+  // CHECK-NEXT: ret
   //
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
   // CHECK-NEXT: br
@@ -95,7 +95,7 @@ void test2() {
   //
   // Make sure Cilk exits the function properly
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
-  // CHECK-NEXT: ret 
+  // CHECK-NEXT: ret
   //
   // CHECK: call void @__cilk_parent_epilogue(%__cilkrts_stack_frame* %__cilkrts_sf)
   // CHECK: resume

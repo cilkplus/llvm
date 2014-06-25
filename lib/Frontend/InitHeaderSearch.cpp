@@ -14,7 +14,7 @@
 #include "clang/Frontend/Utils.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/LangOptions.h"
-#include "clang/Config/config.h" // C_INCLUDE_DIRS
+#include "clang/Config/config.h" // C_INCLUDE_DIRS, CXX_INCLUDE_DIRS
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -247,6 +247,8 @@ void InitHeaderSearch::AddDefaultCIncludePaths(const llvm::Triple &triple,
     SmallString<128> P = StringRef(HSOpts.ResourceDir);
     llvm::sys::path::append(P, "include");
     AddUnmappedPath(P.str(), ExternCSystem, false);
+    llvm::sys::path::append(P, "clang");
+    AddUnmappedPath(P.str(), ExternCSystem, false);
   }
 
   // All remaining additions are for system include directories, early exit if
@@ -408,6 +410,7 @@ AddDefaultCPlusPlusIncludePaths(const llvm::Triple &triple, const HeaderSearchOp
     // mingw.org C++ include paths
     AddMinGWCPlusPlusIncludePaths("/mingw/lib/gcc", "mingw32", "4.5.2"); //MSYS
 #if defined(_WIN32)
+    AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.8.1");
     AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.6.2");
     AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.6.1");
     AddMinGWCPlusPlusIncludePaths("c:/MinGW/lib/gcc", "mingw32", "4.5.2");
@@ -474,15 +477,17 @@ void InitHeaderSearch::AddDefaultIncludePaths(const LangOptions &Lang,
     if (HSOpts.UseLibcxx) {
       if (triple.isOSDarwin()) {
         // On Darwin, libc++ may be installed alongside the compiler in
-        // lib/c++/v1.
+        // include/c++/v1.
         if (!HSOpts.ResourceDir.empty()) {
           // Remove version from foo/lib/clang/version
           StringRef NoVer = llvm::sys::path::parent_path(HSOpts.ResourceDir);
           // Remove clang from foo/lib/clang
-          SmallString<128> P = llvm::sys::path::parent_path(NoVer);
-          
-          // Get foo/lib/c++/v1
-          llvm::sys::path::append(P, "c++", "v1");
+          StringRef Lib = llvm::sys::path::parent_path(NoVer);
+          // Remove lib from foo/lib
+          SmallString<128> P = llvm::sys::path::parent_path(Lib);
+
+          // Get foo/include/c++/v1
+          llvm::sys::path::append(P, "include", "c++", "v1");
           AddUnmappedPath(P.str(), CXXSystem, false);
         }
       }
@@ -492,6 +497,19 @@ void InitHeaderSearch::AddDefaultIncludePaths(const LangOptions &Lang,
         AddPath("/usr/include/c++/v1/support/solaris", CXXSystem, false);
       
       AddPath("/usr/include/c++/v1", CXXSystem, false);
+//AVT: it's better to use proper configure
+#ifdef CXX_INCLUDE_DIRS
+      // Add dirs specified via 'configure --with-cxx-include-dirs'.
+      StringRef CxxIncludeDirs(CXX_INCLUDE_DIRS);
+      if (CxxIncludeDirs != "") {
+        SmallVector<StringRef, 5> dirs;
+        CxxIncludeDirs.split(dirs, ":");
+        for (SmallVectorImpl<StringRef>::iterator i = dirs.begin();
+             i != dirs.end();
+             ++i)
+          AddUnmappedPath((*i).str(), CXXSystem, false);
+      }
+#endif
     } else {
       AddDefaultCPlusPlusIncludePaths(triple, HSOpts);
     }

@@ -321,4 +321,3 @@ void test_nested_loop_20(float* vec, int n) {
     }
   }
 }
-

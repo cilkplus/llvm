@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fno-rtti -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
+// RUN: %clang_cc1 -fno-rtti -emit-llvm %s -o - -mconstructor-aliases -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
 
 struct Left {
   virtual void left();
@@ -88,7 +88,7 @@ void ChildOverride::right() {
 // need to adjust 'this' before use.
 //
 // CHECK: %[[THIS_ADDR:.*]] = alloca %struct.ChildOverride*, align 4
-// CHECK: %[[THIS_i8:.*]] = getelementptr i8* %[[ECX:.*]], i64 -4
+// CHECK: %[[THIS_i8:.*]] = getelementptr inbounds i8* %[[ECX:.*]], i32 -4
 // CHECK: %[[THIS:.*]] = bitcast i8* %[[THIS_i8]] to %struct.ChildOverride*
 // CHECK: store %struct.ChildOverride* %[[THIS]], %struct.ChildOverride** %[[THIS_ADDR]], align 4
 
@@ -109,14 +109,14 @@ void call_right_override(ChildOverride *child) {
 //
 // CHECK: %[[CHILD_i8:.*]] = bitcast %struct.ChildOverride* %[[CHILD]] to i8*
 //
-// CHECK: %[[VFPTR_i8:.*]] = getelementptr inbounds i8* %[[CHILD_i8]], i64 4
+// CHECK: %[[VFPTR_i8:.*]] = getelementptr inbounds i8* %[[CHILD_i8]], i32 4
 // CHECK: %[[VFPTR:.*]] = bitcast i8* %[[VFPTR_i8]] to void (i8*)***
 // CHECK: %[[VFTABLE:.*]] = load void (i8*)*** %[[VFPTR]]
 // CHECK: %[[VFUN:.*]] = getelementptr inbounds void (i8*)** %[[VFTABLE]], i64 0
 // CHECK: %[[VFUN_VALUE:.*]] = load void (i8*)** %[[VFUN]]
 //
 // CHECK: %[[CHILD_i8:.*]] = bitcast %struct.ChildOverride* %[[CHILD]] to i8*
-// CHECK: %[[RIGHT:.*]] = getelementptr inbounds i8* %[[CHILD_i8]], i64 4
+// CHECK: %[[RIGHT:.*]] = getelementptr inbounds i8* %[[CHILD_i8]], i32 4
 //
 // CHECK: call x86_thiscallcc void %[[VFUN_VALUE]](i8* %[[RIGHT]])
 // CHECK: ret
@@ -130,7 +130,7 @@ void GrandchildOverride::right() {
 // CHECK: define x86_thiscallcc void @"\01?right@GrandchildOverride@@UAEXXZ"(i8*
 //
 // CHECK: %[[THIS_ADDR:.*]] = alloca %struct.GrandchildOverride*, align 4
-// CHECK: %[[THIS_i8:.*]] = getelementptr i8* %[[ECX:.*]], i64 -4
+// CHECK: %[[THIS_i8:.*]] = getelementptr inbounds i8* %[[ECX:.*]], i32 -4
 // CHECK: %[[THIS:.*]] = bitcast i8* %[[THIS_i8]] to %struct.GrandchildOverride*
 // CHECK: store %struct.GrandchildOverride* %[[THIS]], %struct.GrandchildOverride** %[[THIS_ADDR]], align 4
 
@@ -144,4 +144,58 @@ void GrandchildOverride::right() {
 void call_grandchild_right(GrandchildOverride *obj) {
   // Just make sure we don't crash.
   obj->right();
+}
+
+void emit_ctors() {
+  Left l;
+  // CHECK: define {{.*}} @"\01??0Left@@QAE@XZ"
+  // CHECK-NOT: getelementptr
+  // CHECK:   store [1 x i8*]* @"\01??_7Left@@6B@"
+  // CHECK: ret
+
+  Right r;
+  // CHECK: define {{.*}} @"\01??0Right@@QAE@XZ"
+  // CHECK-NOT: getelementptr
+  // CHECK:   store [1 x i8*]* @"\01??_7Right@@6B@"
+  // CHECK: ret
+
+  ChildOverride co;
+  // CHECK: define {{.*}} @"\01??0ChildOverride@@QAE@XZ"
+  // CHECK:   %[[THIS:.*]] = load %struct.ChildOverride**
+  // CHECK:   %[[VFPTR:.*]] = bitcast %struct.ChildOverride* %[[THIS]] to [1 x i8*]**
+  // CHECK:   store [1 x i8*]* @"\01??_7ChildOverride@@6BLeft@@@", [1 x i8*]** %[[VFPTR]]
+  // CHECK:   %[[THIS_i8:.*]] = bitcast %struct.ChildOverride* %[[THIS]] to i8*
+  // CHECK:   %[[VFPTR_i8:.*]] = getelementptr inbounds i8* %[[THIS_i8]], i32 4
+  // CHECK:   %[[VFPTR:.*]] = bitcast i8* %[[VFPTR_i8]] to [1 x i8*]**
+  // CHECK:   store [1 x i8*]* @"\01??_7ChildOverride@@6BRight@@@", [1 x i8*]** %[[VFPTR]]
+  // CHECK: ret
+
+  GrandchildOverride gc;
+  // CHECK: define {{.*}} @"\01??0GrandchildOverride@@QAE@XZ"
+  // CHECK:   %[[THIS:.*]] = load %struct.GrandchildOverride**
+  // CHECK:   %[[VFPTR:.*]] = bitcast %struct.GrandchildOverride* %[[THIS]] to [1 x i8*]**
+  // CHECK:   store [1 x i8*]* @"\01??_7GrandchildOverride@@6BLeft@@@", [1 x i8*]** %[[VFPTR]]
+  // CHECK:   %[[THIS_i8:.*]] = bitcast %struct.GrandchildOverride* %[[THIS]] to i8*
+  // CHECK:   %[[VFPTR_i8:.*]] = getelementptr inbounds i8* %[[THIS_i8]], i32 4
+  // CHECK:   %[[VFPTR:.*]] = bitcast i8* %[[VFPTR_i8]] to [1 x i8*]**
+  // CHECK:   store [1 x i8*]* @"\01??_7GrandchildOverride@@6BRight@@@", [1 x i8*]** %[[VFPTR]]
+  // CHECK: ret
+}
+
+struct LeftWithNonVirtualDtor {
+  virtual void left();
+  ~LeftWithNonVirtualDtor();
+};
+
+struct AsymmetricChild : LeftWithNonVirtualDtor, Right {
+  virtual ~AsymmetricChild();
+};
+
+void call_asymmetric_child_complete_dtor() {
+  // CHECK-LABEL: define void @"\01?call_asymmetric_child_complete_dtor@@YAXXZ"
+  AsymmetricChild obj;
+  // CHECK: call x86_thiscallcc %struct.AsymmetricChild* @"\01??0AsymmetricChild@@QAE@XZ"(%struct.AsymmetricChild* %[[OBJ:.*]])
+  // CHECK-NOT: getelementptr
+  // CHECK: call x86_thiscallcc void @"\01??1AsymmetricChild@@UAE@XZ"(%struct.AsymmetricChild* %[[OBJ]])
+  // CHECK: ret
 }

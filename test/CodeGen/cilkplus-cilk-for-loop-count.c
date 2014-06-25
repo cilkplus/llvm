@@ -101,4 +101,3 @@ void test_cilk_for_ir() {
   // CHECK: [[LOOP_LIMIT:%[A-Za-z0-9]+]] = sdiv i32 [[SPAN]], [[STRIDE]]
   // CHECK: call void @__cilkrts_cilk_for_32({{.*}}, i32 [[LOOP_LIMIT]],
 }
-

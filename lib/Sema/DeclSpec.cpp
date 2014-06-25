@@ -13,6 +13,7 @@
 
 #include "clang/Sema/DeclSpec.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/TypeLoc.h"
@@ -271,6 +272,7 @@ bool Declarator::isDeclarationOfFunction() const {
     case TST_decimal32:
     case TST_decimal64:
     case TST_double:
+    case TST_float128:
     case TST_enum:
     case TST_error:
     case TST_float:
@@ -325,6 +327,19 @@ bool Declarator::isDeclarationOfFunction() const {
   llvm_unreachable("Invalid TypeSpecType!");
 }
 
+bool Declarator::isStaticMember() {
+  assert(getContext() == MemberContext);
+  return getDeclSpec().getStorageClassSpec() == DeclSpec::SCS_static ||
+         CXXMethodDecl::isStaticOverloadedOperator(
+             getName().OperatorFunctionId.Operator);
+}
+
+bool DeclSpec::hasTagDefinition() const {
+  if (!TypeSpecOwned)
+    return false;
+  return cast<TagDecl>(getRepAsDecl())->isCompleteDefinition();
+}
+
 /// getParsedSpecifiers - Return a bitmask of which flavors of specifiers this
 /// declaration specifier includes.
 ///
@@ -341,7 +356,7 @@ unsigned DeclSpec::getParsedSpecifiers() const {
     Res |= PQ_TypeSpecifier;
 
   if (FS_inline_specified || FS_virtual_specified || FS_explicit_specified ||
-      FS_noreturn_specified)
+      FS_noreturn_specified || FS_forceinline_specified)
     Res |= PQ_FunctionSpecifier;
   return Res;
 }
@@ -425,6 +440,7 @@ const char *DeclSpec::getSpecifierName(DeclSpec::TST T) {
   case DeclSpec::TST_half:        return "half";
   case DeclSpec::TST_float:       return "float";
   case DeclSpec::TST_double:      return "double";
+  case DeclSpec::TST_float128:    return "_Quad";
   case DeclSpec::TST_bool:        return "_Bool";
   case DeclSpec::TST_decimal32:   return "_Decimal32";
   case DeclSpec::TST_decimal64:   return "_Decimal64";
@@ -731,9 +747,10 @@ bool DeclSpec::SetTypeSpecError() {
 
 bool DeclSpec::SetTypeQual(TQ T, SourceLocation Loc, const char *&PrevSpec,
                            unsigned &DiagID, const LangOptions &Lang) {
-  // Duplicates are permitted in C99, but are not permitted in C++. However,
-  // since this is likely not what the user intended, we will always warn.  We
-  // do not need to set the qualifier's location since we already have it.
+  // Duplicates are permitted in C99 onwards, but are not permitted in C89 or
+  // C++.  However, since this is likely not what the user intended, we will
+  // always warn.  We do not need to set the qualifier's location since we
+  // already have it.
   if (TypeQualifiers & T) {
     bool IsExtension = true;
     if (Lang.C99)
@@ -753,29 +770,72 @@ bool DeclSpec::SetTypeQual(TQ T, SourceLocation Loc, const char *&PrevSpec,
   llvm_unreachable("Unknown type qualifier!");
 }
 
-bool DeclSpec::setFunctionSpecInline(SourceLocation Loc) {
-  // 'inline inline' is ok.
+bool DeclSpec::setFunctionSpecInline(SourceLocation Loc, const char *&PrevSpec,
+                                     unsigned &DiagID) {
+  // 'inline inline' is ok.  However, since this is likely not what the user
+  // intended, we will always warn, similar to duplicates of type qualifiers.
+  if (FS_inline_specified) {
+    DiagID = diag::warn_duplicate_declspec;
+    PrevSpec = "inline";
+    return true;
+  }
   FS_inline_specified = true;
   FS_inlineLoc = Loc;
   return false;
 }
 
-bool DeclSpec::setFunctionSpecVirtual(SourceLocation Loc) {
-  // 'virtual virtual' is ok.
+bool DeclSpec::setFunctionSpecForceInline(SourceLocation Loc, const char *&PrevSpec,
+                                          unsigned &DiagID) {
+  if (FS_forceinline_specified) {
+    DiagID = diag::warn_duplicate_declspec;
+    PrevSpec = "__forceinline";
+    return true;
+  }
+  FS_forceinline_specified = true;
+  FS_forceinlineLoc = Loc;
+  return false;
+}
+
+bool DeclSpec::setFunctionSpecVirtual(SourceLocation Loc,
+                                      const char *&PrevSpec,
+                                      unsigned &DiagID) {
+  // 'virtual virtual' is ok, but warn as this is likely not what the user
+  // intended.
+  if (FS_virtual_specified) {
+    DiagID = diag::warn_duplicate_declspec;
+    PrevSpec = "virtual";
+    return true;
+  }
   FS_virtual_specified = true;
   FS_virtualLoc = Loc;
   return false;
 }
 
-bool DeclSpec::setFunctionSpecExplicit(SourceLocation Loc) {
-  // 'explicit explicit' is ok.
+bool DeclSpec::setFunctionSpecExplicit(SourceLocation Loc,
+                                       const char *&PrevSpec,
+                                       unsigned &DiagID) {
+  // 'explicit explicit' is ok, but warn as this is likely not what the user
+  // intended.
+  if (FS_explicit_specified) {
+    DiagID = diag::warn_duplicate_declspec;
+    PrevSpec = "explicit";
+    return true;
+  }
   FS_explicit_specified = true;
   FS_explicitLoc = Loc;
   return false;
 }
 
-bool DeclSpec::setFunctionSpecNoreturn(SourceLocation Loc) {
-  // '_Noreturn _Noreturn' is ok.
+bool DeclSpec::setFunctionSpecNoreturn(SourceLocation Loc,
+                                       const char *&PrevSpec,
+                                       unsigned &DiagID) {
+  // '_Noreturn _Noreturn' is ok, but warn as this is likely not what the user
+  // intended.
+  if (FS_noreturn_specified) {
+    DiagID = diag::warn_duplicate_declspec;
+    PrevSpec = "_Noreturn";
+    return true;
+  }
   FS_noreturn_specified = true;
   FS_noreturnLoc = Loc;
   return false;
@@ -978,7 +1038,8 @@ void DeclSpec::Finish(DiagnosticsEngine &D, Preprocessor &PP) {
       // Note that this intentionally doesn't include _Complex _Bool.
       if (!PP.getLangOpts().CPlusPlus)
         Diag(D, TSTLoc, diag::ext_integer_complex);
-    } else if (TypeSpecType != TST_float && TypeSpecType != TST_double) {
+    } else if (TypeSpecType != TST_float && TypeSpecType != TST_double &&
+               TypeSpecType != TST_float128) {
       Diag(D, TSCLoc, diag::err_invalid_complex_spec)
         << getSpecifierName((TST)TypeSpecType);
       TypeSpecComplex = TSC_unspecified;
@@ -1110,6 +1171,7 @@ bool VirtSpecifiers::SetSpecifier(Specifier VS, SourceLocation Loc,
   switch (VS) {
   default: llvm_unreachable("Unknown specifier!");
   case VS_Override: VS_overrideLoc = Loc; break;
+  case VS_Sealed:
   case VS_Final:    VS_finalLoc = Loc; break;
   }
 
@@ -1121,5 +1183,6 @@ const char *VirtSpecifiers::getSpecifierName(Specifier VS) {
   default: llvm_unreachable("Unknown specifier");
   case VS_Override: return "override";
   case VS_Final: return "final";
+  case VS_Sealed: return "sealed";
   }
 }

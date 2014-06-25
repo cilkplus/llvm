@@ -251,7 +251,6 @@ class CodeGenModule : public CodeGenTypeCache {
  
   /// VTables - Holds information about C++ vtables.
   CodeGenVTables VTables;
-  friend class CodeGenVTables;
 
   CGObjCRuntime* ObjCRuntime;
   CGOpenCLRuntime* OpenCLRuntime;
@@ -297,6 +296,13 @@ class CodeGenModule : public CodeGenTypeCache {
   /// is done.
   std::vector<GlobalDecl> DeferredDeclsToEmit;
 
+  /// List of alias we have emitted. Used to make sure that what they point to
+  /// is defined once we get to the end of the of the translation unit.
+  std::vector<GlobalDecl> Aliases;
+
+  typedef llvm::StringMap<llvm::TrackingVH<llvm::Constant> > ReplacementsTy;
+  ReplacementsTy Replacements;
+
   /// DeferredVTables - A queue of (optional) vtables to consider emitting.
   std::vector<const CXXRecordDecl*> DeferredVTables;
 
@@ -332,6 +338,9 @@ class CodeGenModule : public CodeGenTypeCache {
 
   llvm::DenseMap<QualType, llvm::Constant *> AtomicSetterHelperFnMap;
   llvm::DenseMap<QualType, llvm::Constant *> AtomicGetterHelperFnMap;
+
+  /// Map used to get unique type descriptor constants for sanitizers.
+  llvm::DenseMap<QualType, llvm::Constant *> TypeDescriptorMap;
 
   /// Map used to track internal linkage functions declared within
   /// extern "C" regions.
@@ -477,6 +486,68 @@ public:
     return *CilkPlusRuntime;
   }
 
+  // A common data structure to represent vector function attributes in
+  // cilk vector functions and 'omp declare simd' functions.
+  struct CilkElementalGroup {
+    typedef SmallVector<CilkProcessorAttr::CilkProcessor, 1> ProcessorVector;
+    typedef SmallVector<QualType, 1> VecLengthForVector;
+    typedef SmallVector<unsigned, 1> VecLengthVector;
+    // Masking: 0-nomask/notinbranch, 1-mask/inbranch
+    typedef SmallVector<unsigned, 2> MaskVector;
+    typedef std::map<std::string, std::pair<int,std::string> > LinearMap;
+    typedef std::map<std::string, unsigned> AlignedMap;
+    typedef std::set<std::string> UniformSet;
+
+    ProcessorVector Processor;
+    VecLengthVector VecLength;
+    VecLengthForVector VecLengthFor;
+    LinearMap  LinearParms;
+    AlignedMap AlignedParms;
+    UniformSet UniformParms;
+    MaskVector Mask;
+
+    bool getUniformAttr(std::string Name) const {
+      return UniformParms.count(Name) != 0;
+    }
+
+    bool getLinearAttr(std::string Name, std::pair<int,std::string> *out_step) const {
+      const LinearMap::const_iterator it = LinearParms.find(Name);
+      if (it == LinearParms.end()) return false;
+      *out_step = it->second;
+      return true;
+    }
+
+    bool getAlignedAttr(std::string Name, unsigned *out_alignment) const {
+      const AlignedMap::const_iterator I = AlignedParms.find(Name);
+      if (I == AlignedParms.end()) return false;
+      *out_alignment = I->second;
+      return true;
+    }
+
+    void setLinear(std::string Name, std::string Idname, int Step) {
+      LinearParms[Name].first = Step;
+      LinearParms[Name].second = Idname;
+    }
+
+    void setAligned(std::string Name, unsigned Alignment) {
+      AlignedParms[Name] = Alignment;
+    }
+
+    void setUniform(std::string Name) {
+      UniformParms.insert(Name);
+    }
+  };
+
+  typedef llvm::SmallDenseMap<unsigned, CilkElementalGroup, 4> GroupMap;
+
+  // The following is common part for 'cilk vector functions' and
+  // 'omp declare simd' functions metadata generation.
+  //
+  void EmitVectorVariantsMetadata(const CGFunctionInfo &FnInfo,
+                                  const FunctionDecl *FD,
+                                  llvm::Function *Fn,
+                                  GroupMap &Groups);
+
   /// Add an elemental function metadata node to the named metadata node
   /// 'cilk.functions'.
   void EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
@@ -527,6 +598,13 @@ public:
     AtomicGetterHelperFnMap[Ty] = Fn;
   }
 
+  llvm::Constant *getTypeDescriptor(QualType Ty) {
+    return TypeDescriptorMap[Ty];
+  }
+  void setTypeDescriptor(QualType Ty, llvm::Constant *C) {
+    TypeDescriptorMap[Ty] = C;
+  }
+
   CGDebugInfo *getModuleDebugInfo() { return DebugInfo; }
 
   llvm::MDNode *getNoObjCARCExceptionsMetadata() {
@@ -555,10 +633,12 @@ public:
  
   CodeGenVTables &getVTables() { return VTables; }
 
-  VTableContext &getVTableContext() { return VTables.getVTableContext(); }
+  ItaniumVTableContext &getItaniumVTableContext() {
+    return VTables.getItaniumVTableContext();
+  }
 
-  MicrosoftVFTableContext &getVFTableContext() {
-    return VTables.getVFTableContext();
+  MicrosoftVTableContext &getMicrosoftVTableContext() {
+    return VTables.getMicrosoftVTableContext();
   }
 
   llvm::MDNode *getTBAAInfo(QualType QTy);
@@ -795,6 +875,9 @@ public:
                                             const CGFunctionInfo *fnInfo = 0,
                                             llvm::FunctionType *fnType = 0);
 
+//AVT: maybe we'll include it later
+//***INTEL: support Intel builtins
+//#include "../../intel/lib/CodeGenModule.h"
   /// getBuiltinLibFunction - Given a builtin id for a function like
   /// "__builtin_fabsf", return a Function* for "fabsf".
   llvm::Value *getBuiltinLibFunction(const FunctionDecl *FD,
@@ -945,10 +1028,15 @@ public:
   StringRef getMangledName(GlobalDecl GD);
   void getBlockMangledName(GlobalDecl GD, MangleBuffer &Buffer,
                            const BlockDecl *BD);
+  void registerAsMangled(StringRef Name, GlobalDecl GD);
 
   void EmitTentativeDefinition(const VarDecl *D);
 
   void EmitVTable(CXXRecordDecl *Class, bool DefinitionRequired);
+
+  /// EmitFundamentalRTTIDescriptors - Emit the RTTI descriptors for the
+  /// builtin types.
+  void EmitFundamentalRTTIDescriptors();
 
   /// \brief Appends Opts to the "Linker Options" metadata value.
   void AppendLinkerOptions(StringRef Opts);
@@ -1018,7 +1106,6 @@ public:
   /// EmitGlobal - Emit code for a singal global function or var decl. Forward
   /// declarations are emitted lazily.
   void EmitGlobal(GlobalDecl D);
-
 private:
   llvm::GlobalValue *GetGlobalValue(StringRef Ref);
 
@@ -1060,7 +1147,8 @@ private:
   
   // C++ related functions.
 
-  bool TryEmitDefinitionAsAlias(GlobalDecl Alias, GlobalDecl Target);
+  bool TryEmitDefinitionAsAlias(GlobalDecl Alias, GlobalDecl Target,
+                                bool InEveryTU);
   bool TryEmitBaseDestructorAsAlias(const CXXDestructorDecl *D);
 
   void EmitNamespace(const NamespaceDecl *D);
@@ -1103,13 +1191,14 @@ private:
   /// given type.
   void EmitFundamentalRTTIDescriptor(QualType Type);
 
-  /// EmitFundamentalRTTIDescriptors - Emit the RTTI descriptors for the
-  /// builtin types.
-  void EmitFundamentalRTTIDescriptors();
-
   /// EmitDeferred - Emit any needed decls for which code generation
   /// was deferred.
   void EmitDeferred();
+
+  /// Call replaceAllUsesWith on all pairs in Replacements.
+  void applyReplacements();
+
+  void checkAliases();
 
   /// EmitDeferredVTables - Emit any vtables which we deferred and
   /// still have a use for.
@@ -1127,6 +1216,9 @@ private:
   void EmitStaticExternCAliases();
 
   void EmitDeclMetadata();
+
+  /// \brief Emit the Clang version as llvm.ident metadata.
+  void EmitVersionIdentMetadata();
 
   /// EmitCoverageFile - Emit the llvm.gcov metadata used to tell LLVM where
   /// to emit the .gcno and .gcda files in a way that persists in .bc files.

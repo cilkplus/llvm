@@ -165,33 +165,33 @@ void test_init() {
 
 template <typename T>
 void test_vectorlengthfor_template() {
-  #pragma simd vectorlengthfor(T)
+  #pragma simd
   for (int i = 0; i < 10; ++i);
 }
 
 template <typename T>
 void test_vectorlengthfor_template2(T t) {
-  #pragma simd vectorlengthfor(T)
+  #pragma simd
   for (int i = 0; i < 10; ++i);
 }
 
 void test_vectorlengthfor() {
-  #pragma simd vectorlengthfor(A)
+  #pragma simd
   for (int i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(B)
+  #pragma simd
   for (int i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(decltype(makeB))
+  #pragma simd
   for (int i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(decltype(nullptr))
+  #pragma simd
   for (int i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(int &)
+  #pragma simd
   for (int i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(int &&)
+  #pragma simd
   for (int i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(const int&)
+  #pragma simd
   for (int i = 0; i < 10; ++i);
 
-  #pragma simd vectorlengthfor(auto) // expected-error {{'auto' not allowed here}}
+  #pragma simd
   for (int i = 0; i < 10; ++i);
 
   test_vectorlengthfor_template<A>();
@@ -199,8 +199,8 @@ void test_vectorlengthfor() {
   A a;
   test_vectorlengthfor_template2<>([&](int, void*) { const A& aa = a; });
 
-  test_vectorlengthfor_template<void>(); // expected-error@168 {{cannot select vector length for void type}} \
-                                         // expected-note {{in instantiation of function template specialization 'test_vectorlengthfor_template<void>' requested here}}
+  test_vectorlengthfor_template<void>(); //
+                                         //
 }
 
 struct BoolWithCleanups {

@@ -278,4 +278,3 @@ void test_wraparound() {
 
   wraparound7<-1>(); // OK
 }
-

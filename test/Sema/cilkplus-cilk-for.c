@@ -488,4 +488,3 @@ void test_cilk_spawn_in_cilk_for() {
     int j = _Cilk_spawn bar(), k = _Cilk_spawn baz(j), x = 0; // OK
   }
 }
-

@@ -47,8 +47,8 @@ namespace CodeGen {
 /// and is responsible for emitting to llvm globals or pass directly to
 /// the backend.
 class CGDebugInfo {
-  friend class NoLocation;
   friend class ArtificialLocation;
+  friend class SaveAndRestoreLocation;
   CodeGenModule &CGM;
   const CodeGenOptions::DebugInfoKind DebugKind;
   llvm::DIBuilder DBuilder;
@@ -126,7 +126,7 @@ class CGDebugInfo {
   llvm::DIType CreateType(const RValueReferenceType *Ty, llvm::DIFile Unit);
   llvm::DIType CreateType(const MemberPointerType *Ty, llvm::DIFile F);
   llvm::DIType CreateType(const AtomicType *Ty, llvm::DIFile F);
-  llvm::DIType CreateEnumType(const EnumDecl *ED);
+  llvm::DIType CreateEnumType(const EnumType *Ty);
   llvm::DIType CreateSelfType(const QualType &QualTy, llvm::DIType Ty);
   llvm::DIType getTypeOrNull(const QualType);
   llvm::DIType getCompletedTypeOrNull(const QualType);
@@ -155,11 +155,6 @@ class CGDebugInfo {
                                  SmallVectorImpl<llvm::Value *> &E,
                                  llvm::DIType T);
 
-  void CollectCXXFriends(const CXXRecordDecl *Decl,
-                       llvm::DIFile F,
-                       SmallVectorImpl<llvm::Value *> &EltTys,
-                       llvm::DIType RecordTy);
-
   void CollectCXXBases(const CXXRecordDecl *Decl,
                        llvm::DIFile F,
                        SmallVectorImpl<llvm::Value *> &EltTys,
@@ -179,7 +174,7 @@ class CGDebugInfo {
                                uint64_t sizeInBitsOverride, SourceLocation loc,
                                AccessSpecifier AS, uint64_t offsetInBits,
                                llvm::DIFile tunit,
-                               llvm::DIDescriptor scope);
+                               llvm::DIScope scope);
 
   // Helpers for collecting fields of a record.
   void CollectRecordLambdaFields(const CXXRecordDecl *CXXDecl,
@@ -309,7 +304,7 @@ private:
   llvm::DIScope getCurrentContextDescriptor(const Decl *Decl);
 
   /// \brief Create a forward decl for a RecordType in a given context.
-  llvm::DICompositeType getOrCreateRecordFwdDecl(const RecordDecl *,
+  llvm::DICompositeType getOrCreateRecordFwdDecl(const RecordType *,
                                                  llvm::DIDescriptor);
 
   /// createContextChain - Create a set of decls for the context chain.
@@ -361,7 +356,7 @@ private:
   getOrCreateStaticDataMemberDeclarationOrNull(const VarDecl *D);
 
   /// getFunctionName - Get function name for the given FunctionDecl. If the
-  /// name is constructred on demand (e.g. C++ destructor) then the name
+  /// name is constructed on demand (e.g. C++ destructor) then the name
   /// is stored on the side.
   StringRef getFunctionName(const FunctionDecl *FD);
 
@@ -387,18 +382,38 @@ private:
   /// invalid then use current location.
   /// \param Force  Assume DebugColumnInfo option is true.
   unsigned getColumnNumber(SourceLocation Loc, bool Force=false);
+
+  /// internString - Allocate a copy of \p A using the DebugInfoNames allocator
+  /// and return a reference to it. If multiple arguments are given the strings
+  /// are concatenated.
+  StringRef internString(StringRef A, StringRef B = StringRef()) {
+    char *Data = DebugInfoNames.Allocate<char>(A.size() + B.size());
+    std::memcpy(Data, A.data(), A.size());
+    std::memcpy(Data + A.size(), B.data(), B.size());
+    return StringRef(Data, A.size() + B.size());
+  }
+};
+
+/// SaveAndRestoreLocation - An RAII object saves the current location
+/// and automatically restores it to the original value.
+class SaveAndRestoreLocation {
+protected:
+  SourceLocation SavedLoc;
+  CGDebugInfo *DI;
+  CGBuilderTy &Builder;
+public:
+  SaveAndRestoreLocation(CodeGenFunction &CGF, CGBuilderTy &B);
+  /// Autorestore everything back to normal.
+  ~SaveAndRestoreLocation();
 };
 
 /// NoLocation - An RAII object that temporarily disables debug
 /// locations. This is useful for emitting instructions that should be
 /// counted towards the function prologue.
-class NoLocation {
-  SourceLocation SavedLoc;
-  CGDebugInfo *DI;
-  CGBuilderTy &Builder;
+class NoLocation : public SaveAndRestoreLocation {
 public:
   NoLocation(CodeGenFunction &CGF, CGBuilderTy &B);
-  /// ~NoLocation - Autorestore everything back to normal.
+  /// Autorestore everything back to normal.
   ~NoLocation();
 };
 
@@ -413,10 +428,7 @@ public:
 /// This is necessary because passing an empty SourceLocation to
 /// CGDebugInfo::setLocation() will result in the last valid location
 /// being reused.
-class ArtificialLocation {
-  SourceLocation SavedLoc;
-  CGDebugInfo *DI;
-  CGBuilderTy &Builder;
+class ArtificialLocation : public SaveAndRestoreLocation {
 public:
   ArtificialLocation(CodeGenFunction &CGF, CGBuilderTy &B);
 
@@ -424,10 +436,9 @@ public:
   /// (= the top of the LexicalBlockStack).
   void Emit();
 
-  /// ~ArtificialLocation - Autorestore everything back to normal.
+  /// Autorestore everything back to normal.
   ~ArtificialLocation();
 };
-
 
 } // namespace CodeGen
 } // namespace clang

@@ -113,6 +113,12 @@ struct BadTy {
   BadTy& operator++();
 };
 
+struct A {
+  bool operator<(int);
+  A& operator+=(int);
+  A& operator+=(float);
+};
+int operator-(int, const A&); // expected-note {{candidate function not viable: no known conversion from 'BadTy' to 'const A' for 2nd argument}}
 void ops() {
   // Need to check these here, since they create a CXXOperatorCallExpr, rather
   // than a BinaryOperator.
@@ -169,12 +175,6 @@ void ops() {
   };
   _Cilk_for (int i = 0; i < 10; i += S()); // OK
 
-  struct A {
-    bool operator<(int);
-    A& operator+=(int);
-    A& operator+=(float);
-  };
-  int operator-(int, const A&);
   _Cilk_for (A a; a < 100; a += 1); // OK
 }
 

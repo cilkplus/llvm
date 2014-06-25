@@ -232,11 +232,21 @@ def act_on_decl(declaration, comment, allowed_types):
 
     # Parse ArgumentAdapting matchers.
     m = re.match(
-        r"""^.*ArgumentAdaptingMatcherFunc<.*>\s*([a-zA-Z]*)\s*=\s*{};$""",
+        r"""^.*ArgumentAdaptingMatcherFunc<.*>\s*(?:LLVM_ATTRIBUTE_UNUSED\s*)
+              ([a-zA-Z]*)\s*=\s*{};$""",
         declaration, flags=re.X)
     if m:
       name = m.groups()[0]
       add_matcher('*', name, 'Matcher<*>', comment)
+      return
+
+    # Parse Variadic operator matchers.
+    m = re.match(
+        r"""^.*VariadicOperatorMatcherFunc\s*([a-zA-Z]*)\s*=\s*{.*};$""",
+        declaration, flags=re.X)
+    if m:
+      name = m.groups()[0]
+      add_matcher('*', name, 'Matcher<*>, ..., Matcher<*>', comment)
       return
 
 
@@ -309,7 +319,7 @@ for line in open(MATCHERS_FILE).read().splitlines():
     declaration += ' ' + line
     if ((not line.strip()) or 
         line.rstrip()[-1] == ';' or
-        line.rstrip()[-1] == '{'):
+        (line.rstrip()[-1] == '{' and line.rstrip()[-3:] != '= {')):
       if line.strip() and line.rstrip()[-1] == '{':
         body = True
       else:

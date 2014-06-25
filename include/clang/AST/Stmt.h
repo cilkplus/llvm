@@ -350,6 +350,7 @@ protected:
   }
 
 public:
+
   Stmt(StmtClass SC) {
     StmtBits.sClass = SC;
     if (StatisticsEnabled) Stmt::addStmtClass(SC);
@@ -550,7 +551,7 @@ public:
   CompoundStmt(const ASTContext &C, ArrayRef<Stmt*> Stmts,
                SourceLocation LB, SourceLocation RB);
 
-  // \brief Build an empty compound statment with a location.
+  // \brief Build an empty compound statement with a location.
   explicit CompoundStmt(SourceLocation Loc)
     : Stmt(CompoundStmtClass), Body(0), LBracLoc(Loc), RBracLoc(Loc) {
     CompoundStmtBits.NumStmts = 0;
@@ -1914,14 +1915,12 @@ public:
   /// \brief The different capture forms: by 'this' or by reference, etc.
   enum VariableCaptureKind {
     VCK_This,       // Capture 'this'
-    VCK_ByRef,      // Capture by reference
-    VCK_ByCopy      // Capture by copy
+    VCK_ByRef      // Capture by reference
   };
 
   /// \brief Describes the capture of either a variable or 'this'.
   class Capture {
-    VarDecl *Var;
-    VariableCaptureKind Kind;
+    llvm::PointerIntPair<VarDecl *, 1, VariableCaptureKind> VarAndKind;
     SourceLocation Loc;
 
   public:
@@ -1934,20 +1933,19 @@ public:
     /// \param Var The variable being captured, or null if capturing this.
     ///
     Capture(SourceLocation Loc, VariableCaptureKind Kind, VarDecl *Var = 0)
-      : Var(Var), Kind(Kind), Loc(Loc) {
+      : VarAndKind(Var, Kind), Loc(Loc) {
       switch (Kind) {
       case VCK_This:
         assert(Var == 0 && "'this' capture cannot have a variable!");
         break;
       case VCK_ByRef:
-      case VCK_ByCopy:
-        assert(Var && "capturing by reference / copy must have a variable!");
+        assert(Var && "capturing by reference must have a variable!");
         break;
       }
     }
 
     /// \brief Determine the kind of capture.
-    VariableCaptureKind getCaptureKind() const { return Kind; }
+    VariableCaptureKind getCaptureKind() const { return VarAndKind.getInt(); }
 
     /// \brief Retrieve the source location at which the variable or 'this' was
     /// first used.
@@ -1964,7 +1962,7 @@ public:
     /// This operation is only valid if this capture does not capture 'this'.
     VarDecl *getCapturedVar() const {
       assert(!capturesThis() && "No variable available for 'this' capture");
-      return Var;
+      return VarAndKind.getPointer();
     }
     friend class ASTStmtReader;
   };
@@ -2349,10 +2347,13 @@ public:
 private:
   /// \brief An enumeration for accessing stored statements in a SIMD for
   /// statement.
-  enum { INIT, COND, INC, BODY, LOOP_COUNT, LAST };
+  enum { INIT, COND, INC, BODY, LOOP_COUNT, LOOP_STRIDE, LAST };
 
   Stmt *SubExprs[LAST]; // SubExprs[INIT] is an expression or declstmt.
                         // SubExprs[BODY] is a CapturedStmt.
+
+  /// \brief The control variable of the loop.
+  VarDecl *LoopControlVar;
 
   /// \brief The source location of '#pragma'.
   SourceLocation PragmaLoc;
@@ -2377,8 +2378,9 @@ private:
 
   SIMDForStmt(SourceLocation PragmaLoc, ArrayRef<Attr *> SIMDAttrs,
               ArrayRef<SIMDVariable> SIMDVars, Stmt *Init, Expr *Cond,
-              Expr *Inc, CapturedStmt *Body, Expr *LoopCount,
-              SourceLocation FL, SourceLocation LP, SourceLocation RP);
+              Expr *Inc, CapturedStmt *Body, Expr *LoopCount, Expr *LoopStride,
+              VarDecl *LoopControlVar, SourceLocation FL, SourceLocation LP,
+              SourceLocation RP);
 
   Attr **getStoredSIMDAttrs() const {
     return reinterpret_cast<Attr **>(const_cast<SIMDForStmt *>(this) + 1);
@@ -2388,15 +2390,16 @@ private:
 
 public:
   /// \brief Construct a SIMD for statement.
-  static SIMDForStmt *Create(ASTContext &C, SourceLocation PragmaLoc,
+  static SIMDForStmt *Create(const ASTContext &C, SourceLocation PragmaLoc,
                              ArrayRef<Attr *> SIMDAttrs,
                              ArrayRef<SIMDVariable> SIMDVars, Stmt *Init,
                              Expr *Cond, Expr *Inc, CapturedStmt *Body,
-                             Expr *LoopCount, SourceLocation FL,
+                             Expr *LoopCount, Expr *LoopStride,
+                             VarDecl *LoopControlVar, SourceLocation FL,
                              SourceLocation LP, SourceLocation RP);
 
   /// \brief Construct an empty SIMD for statement.
-  static SIMDForStmt *CreateEmpty(ASTContext &C, unsigned NumSIMDAttrs,
+  static SIMDForStmt *CreateEmpty(const ASTContext &C, unsigned NumSIMDAttrs,
                                   unsigned NumSIMDVars);
 
   ArrayRef<Attr *> getSIMDAttrs() const {
@@ -2445,6 +2448,22 @@ public:
     return reinterpret_cast<Expr *>(SubExprs[LOOP_COUNT]);
   }
 
+  /// \brief Retrieve the loop control variable stride expression.
+  Expr *getLoopStride() {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_STRIDE]);
+  }
+  const Expr *getLoopStride() const {
+    return reinterpret_cast<Expr *>(SubExprs[LOOP_STRIDE]);
+  }
+
+  /// \brief Retrieve the loop control variable.
+  VarDecl *getLoopControlVar() {
+    return LoopControlVar;
+  }
+  const VarDecl *getLoopControlVar() const {
+    return const_cast<SIMDForStmt *>(this)->getLoopControlVar();
+  }
+
   SourceLocation getPragmaLoc() const LLVM_READONLY { return PragmaLoc; }
   SourceLocation getForLoc() const LLVM_READONLY { return ForLoc; }
   SourceLocation getLParenLoc() const LLVM_READONLY { return LParenLoc; }
@@ -2466,6 +2485,140 @@ public:
 
   child_range children() {
     return child_range(SubExprs, SubExprs + LAST);
+  }
+};
+
+/// \brief This represents special ranked statements.
+///
+class CilkRankedStmt : public Stmt {
+  friend class ASTStmtReader;
+  SourceLocation StartLoc, EndLoc;
+  unsigned Rank;
+
+  /// \brief Build statement with the given start and end location.
+  ///
+  /// \param StartLoc Starting location.
+  /// \param EndLoc Ending Location.
+  /// \param Rank Rank of the statement.
+  ///
+  CilkRankedStmt(SourceLocation StartLoc, SourceLocation EndLoc, unsigned Rank)
+    : Stmt(CilkRankedStmtClass), StartLoc(StartLoc), EndLoc(EndLoc), Rank(Rank) { }
+
+  /// \brief Build an empty statement.
+  ///
+  /// \param Rank Number of clause.
+  ///
+  explicit CilkRankedStmt(unsigned Rank)
+    : Stmt(CilkRankedStmtClass), StartLoc(), EndLoc(), Rank(Rank) { }
+
+  /// \brief Sets lengths.
+  ///
+  void setLengths(ArrayRef<Expr *> L);
+
+  /// \brief Sets pseudo vars.
+  ///
+  void setVars(ArrayRef<Stmt *> L);
+
+  /// \brief Sets increments for vars.
+  ///
+  void setIncrements(ArrayRef<Stmt *> L);
+
+  /// \brief Set the associated statement for the directive.
+  ///
+  void setAssociatedStmt(Stmt *S) {
+    reinterpret_cast<Stmt **>(this + 1)[0] = S;
+  }
+
+  /// \brief Set the init for ranked statement.
+  ///
+  void setInits(Stmt *S) {
+    reinterpret_cast<Stmt **>(this + 1)[1] = S;
+  }
+
+public:
+  /// \brief Creates statement.
+  ///
+  /// \param C AST context.
+  /// \param StartLoc Starting location of the directive kind.
+  /// \param EndLoc Ending Location of the directive.
+  /// \param Lengths List of lengths.
+  /// \param AssociatedStmt Statement, associated with the statement.
+  ///
+  static CilkRankedStmt *Create(const ASTContext &C,
+                                SourceLocation StartLoc,
+                                SourceLocation EndLoc,
+                                ArrayRef<Expr *> Lengths,
+                                ArrayRef<Stmt *> Vars,
+                                ArrayRef<Stmt *> Increments,
+                                Stmt *AssociatedStmt,
+                                Stmt *Inits);
+
+  /// \brief Creates an empty statement.
+  ///
+  /// \param C AST context.
+  /// \param N Rank of the statement.
+  ///
+  static CilkRankedStmt *CreateEmpty(const ASTContext &C, unsigned N,
+                                     EmptyShell);
+
+  unsigned getRank() const { return Rank; }
+
+  /// \brief Fetches the list of lengths.
+  ArrayRef<const Expr *> getLengths() const {
+    return ArrayRef<const Expr *>(
+                reinterpret_cast<const Expr *const *>(this + 1) + 2, Rank);
+  }
+  ArrayRef<Expr *> getLengths() {
+    return ArrayRef<Expr *>(
+                reinterpret_cast<Expr **>(this + 1) + 2, Rank);
+  }
+
+  /// \brief Fetches the list of vars.
+  ArrayRef<const Stmt *> getVars() const {
+    return ArrayRef<const Stmt *>(
+                reinterpret_cast<const Stmt *const *>(this + 1) + 2 + Rank, Rank);
+  }
+  ArrayRef<Stmt *> getVars() {
+    return ArrayRef<Stmt *>(
+                reinterpret_cast<Stmt **>(this + 1) + 2 + Rank, Rank);
+  }
+
+  /// \brief Fetches the list of vars.
+  ArrayRef<const Stmt *> getIncrements() const {
+    return ArrayRef<const Stmt *>(
+                reinterpret_cast<const Stmt *const *>(this + 1) + 2 + 2 * Rank, Rank);
+  }
+  ArrayRef<Stmt *> getIncrements() {
+    return ArrayRef<Stmt *>(
+                reinterpret_cast<Stmt **>(this + 1) + 2 + 2 * Rank, Rank);
+  }
+
+  const Stmt *getAssociatedStmt() const {
+    return reinterpret_cast<const Stmt *const *>(this + 1)[0];
+  }
+
+  Stmt *getAssociatedStmt() {
+    return reinterpret_cast<Stmt **>(this + 1)[0];
+  }
+
+  const Stmt *getInits() const {
+    return reinterpret_cast<const Stmt *const *>(this + 1)[1];
+  }
+
+  Stmt *getInits() {
+    return reinterpret_cast<Stmt **>(this + 1)[1];
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CilkRankedStmtClass;
+  }
+
+  SourceLocation getLocStart() const LLVM_READONLY { return StartLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return EndLoc; }
+
+  child_range children() {
+    return child_range(reinterpret_cast<Stmt **>(this + 1),
+                       reinterpret_cast<Stmt **>(this + 1) + 2 +  2 * Rank);
   }
 };
 

@@ -18,6 +18,7 @@
 #include "CXString.h"
 #include "CXType.h"
 #include "clang-c/Index.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
@@ -48,6 +49,7 @@ static CXCursorKind GetCursorKind(const Attr *A) {
     case attr::Override: return CXCursor_CXXOverrideAttr;
     case attr::Annotate: return CXCursor_AnnotateAttr;
     case attr::AsmLabel: return CXCursor_AsmLabelAttr;
+    case attr::Packed: return CXCursor_PackedAttr;
   }
 
   return CXCursor_UnexposedAttr;
@@ -96,6 +98,9 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   CXCursorKind K = CXCursor_NotImplemented;
   
   switch (S->getStmtClass()) {
+//AVT: maybe later we'll support it
+//***INTEL: pragma support
+//#include "../../intel/tools/CXCursor.cpp"
   case Stmt::NoStmtClass:
     break;
   
@@ -232,6 +237,7 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::ParenListExprClass:
   case Stmt::PredefinedExprClass:
   case Stmt::ShuffleVectorExprClass:
+  case Stmt::ConvertVectorExprClass:
   case Stmt::UnaryExprOrTypeTraitExprClass:
   case Stmt::UnaryTypeTraitExprClass:
   case Stmt::VAArgExprClass:
@@ -239,6 +245,8 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::ObjCDictionaryLiteralClass:
   case Stmt::ObjCBoxedExprClass:
   case Stmt::ObjCSubscriptRefExprClass:
+  case Stmt::CEANIndexExprClass:
+  case Stmt::CEANBuiltinExprClass:
     K = CXCursor_UnexposedExpr;
     break;
 
@@ -518,6 +526,9 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     K = CXCursor_OMPParallelDirective;
     break;
   
+  case Stmt::CilkRankedStmtClass:
+    K = CXCursor_CilkRankedStmt;
+    break;
   }
   
   CXCursor C = { K, 0, { Parent, S, TU } };

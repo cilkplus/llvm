@@ -559,6 +559,10 @@ getLocationForCaller(const StackFrameContext *SFC,
     return PathDiagnosticLocation::createEnd(Dtor.getTriggerStmt(),
                                              SM, CallerCtx);
   }
+  case CFGElement::DeleteDtor: {
+    const CFGDeleteDtor &Dtor = Source.castAs<CFGDeleteDtor>();
+    return PathDiagnosticLocation(Dtor.getDeleteExpr(), SM, CallerCtx);
+  }
   case CFGElement::BaseDtor:
   case CFGElement::MemberDtor: {
     const AnalysisDeclContext *CallerInfo = CallerCtx->getAnalysisDeclContext();

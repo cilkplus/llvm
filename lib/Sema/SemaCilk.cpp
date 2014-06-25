@@ -10,10 +10,14 @@
 /// \brief This file implements Cilk Plus related semantic analysis.
 ///
 //===----------------------------------------------------------------------===//
+#include "llvm/ADT/SmallString.h"
 #include "clang/AST/ParentMap.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/AST/StmtVisitor.h"
+#include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Overload.h"
+#include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaInternal.h"
 
 using namespace clang;
@@ -27,7 +31,6 @@ typedef llvm::SmallVectorImpl<VarDecl const *> VarDeclVec;
 class CilkForControlVarVisitor
     : public RecursiveASTVisitor<CilkForControlVarVisitor> {
 private:
-
   // This visitor looks for potential errors and warnings about the modification
   // of the loop control variable.
   class ControlVarUsageVisitor
@@ -124,8 +127,8 @@ private:
         //   int *p = (func(0), &i);
         // will generate a false positive in the 'func(0)' function call
         for (unsigned i = 0, len = Call->getNumArgs(); i != len; ++i) {
-          Expr *Arg = Call->getArg(i)->IgnoreImpCasts()
-              ->IgnoreParenNoopCasts(S.Context);
+          Expr *Arg = Call->getArg(i)->IgnoreImpCasts()->IgnoreParenNoopCasts(
+              S.Context);
 
           // Remove the & from the argument so that we can compare the argument
           // with the LCV to see if they are the same
@@ -187,7 +190,7 @@ public:
       bool AddressOf = false;
       // Check to see if the address of the loop control variable was taken and
       // strip off any casts from its parent.
-      if (UnaryOperator *UO = dyn_cast<UnaryOperator>(P)) {
+      if (UnaryOperator *UO = dyn_cast_or_null<UnaryOperator>(P)) {
         if (UO->getOpcode() == UO_AddrOf) {
           AddressOf = true;
           P = PMap.getParentIgnoreParenImpCasts(P);
@@ -221,9 +224,8 @@ private:
 
 } // namespace
 
-static bool CheckForInit(Sema &S, Stmt *Init,
-                         VarDecl *&ControlVar, Expr *&ControlVarInit,
-                         bool IsCilkFor) {
+static bool CheckForInit(Sema &S, Stmt *Init, VarDecl *&ControlVar,
+                         Expr *&ControlVarInit, bool IsCilkFor) {
   // Location of loop control variable/expression in the initializer
   SourceLocation InitLoc;
 
@@ -245,7 +247,7 @@ static bool CheckForInit(Sema &S, Stmt *Init,
       S.Diag(Init->getLocStart(),
              IsCilkFor ? diag::err_cilk_for_initializer_expected_decl
                        : diag::err_simd_for_initializer_expected_decl)
-        << Init->getSourceRange();
+          << Init->getSourceRange();
       return false;
     }
 
@@ -305,19 +307,19 @@ static bool CheckForInit(Sema &S, Stmt *Init,
       S.Diag(Op->getLHS()->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_control_variable_not_initialized
                        : diag::err_simd_for_control_variable_not_initialized)
-        << Init->getSourceRange();
+          << Init->getSourceRange();
       return false;
     }
 
     // Get the decl for the LHS of the control variable initialization
     assert(Op->getLHS() && "BinaryOperator has no LHS!");
-    DeclRefExpr *LHS = dyn_cast<DeclRefExpr>(
-      Op->getLHS()->IgnoreParenNoopCasts(S.Context));
+    DeclRefExpr *LHS =
+        dyn_cast<DeclRefExpr>(Op->getLHS()->IgnoreParenNoopCasts(S.Context));
     if (!LHS) {
       S.Diag(Op->getLHS()->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_initializer_expected_variable
                        : diag::err_simd_for_expect_loop_control_variable)
-        << Init->getSourceRange();
+          << Init->getSourceRange();
       return false;
     }
 
@@ -330,7 +332,7 @@ static bool CheckForInit(Sema &S, Stmt *Init,
       S.Diag(Op->getLHS()->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_initializer_expected_variable
                        : diag::err_simd_for_expect_loop_control_variable)
-        << Init->getSourceRange();
+          << Init->getSourceRange();
       return false;
     }
     ControlVarInit = Op->getRHS();
@@ -342,21 +344,20 @@ static bool CheckForInit(Sema &S, Stmt *Init,
   // initialization clause.
   StorageClass SC = ControlVar->getStorageClass();
   if (SC != SC_None) {
-    S.Diag(InitLoc,
-           IsCilkFor ? diag::err_cilk_for_control_variable_storage_class
-                     : diag::err_simd_for_control_variable_storage_class)
-      << ControlVar->getStorageClassSpecifierString(SC);
+    S.Diag(InitLoc, IsCilkFor
+                        ? diag::err_cilk_for_control_variable_storage_class
+                        : diag::err_simd_for_control_variable_storage_class)
+        << ControlVar->getStorageClassSpecifierString(SC);
     if (!IsDeclStmt)
       S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
-        << ControlVar->getIdentifier();
+          << ControlVar->getIdentifier();
     return false;
   }
 
   // Don't allow non-local variables to be used as the control variable
   if (!ControlVar->isLocalVarDecl()) {
-    S.Diag(InitLoc,
-           IsCilkFor ? diag::err_cilk_for_control_variable_not_local
-                     : diag::err_simd_for_control_variable_not_local);
+    S.Diag(InitLoc, IsCilkFor ? diag::err_cilk_for_control_variable_not_local
+                              : diag::err_simd_for_control_variable_not_local);
     return false;
   }
 
@@ -370,13 +371,12 @@ static bool CheckForInit(Sema &S, Stmt *Init,
   // The variable may not be const or volatile.
   // Assignment to const variables is checked before sema for cilk_for
   if (VarType.isVolatileQualified()) {
-    S.Diag(InitLoc,
-           IsCilkFor ? diag::err_cilk_for_control_variable_qualifier
-                     : diag::err_simd_for_control_variable_qualifier)
-      << "volatile";
+    S.Diag(InitLoc, IsCilkFor ? diag::err_cilk_for_control_variable_qualifier
+                              : diag::err_simd_for_control_variable_qualifier)
+        << "volatile";
     if (!IsDeclStmt)
       S.Diag(ControlVar->getLocation(), diag::note_local_variable_declared_here)
-        << ControlVar->getIdentifier();
+          << ControlVar->getIdentifier();
     return false;
   }
 
@@ -398,22 +398,20 @@ static bool CheckForInit(Sema &S, Stmt *Init,
         if (!IsDeclStmt)
           S.Diag(ControlVar->getLocation(),
                  diag::note_local_variable_declared_here)
-            << ControlVar->getIdentifier();
+              << ControlVar->getIdentifier();
         return false;
       }
     }
   } else {
     // simd for -- the variable shall have integer or pointer type.
     bool ValidTy = VarType->isIntegerType() || VarType->isPointerType();
-    if (VarType->isAggregateType() || VarType->isReferenceType()
-                                   || (!ValidTy &&
-                                       !VarType->isDependentType())) {
-      S.Diag(InitLoc, diag::err_simd_for_invalid_lcv_type)
-        << VarType;
+    if (VarType->isAggregateType() || VarType->isReferenceType() ||
+        (!ValidTy && !VarType->isDependentType())) {
+      S.Diag(InitLoc, diag::err_simd_for_invalid_lcv_type) << VarType;
       if (!IsDeclStmt)
         S.Diag(ControlVar->getLocation(),
                diag::note_local_variable_declared_here)
-          << ControlVar->getIdentifier();
+            << ControlVar->getIdentifier();
       return false;
     }
   }
@@ -421,12 +419,8 @@ static bool CheckForInit(Sema &S, Stmt *Init,
   return true;
 }
 
-static bool ExtractForCondition(Sema &S,
-                                Expr *Cond,
-                                BinaryOperatorKind &CondOp,
-                                SourceLocation &OpLoc,
-                                Expr *&LHS,
-                                Expr *&RHS,
+static bool ExtractForCondition(Sema &S, Expr *Cond, BinaryOperatorKind &CondOp,
+                                SourceLocation &OpLoc, Expr *&LHS, Expr *&RHS,
                                 bool IsCilkFor) {
   if (BinaryOperator *BO = dyn_cast<BinaryOperator>(Cond)) {
     CondOp = BO->getOpcode();
@@ -454,13 +448,15 @@ static bool ExtractForCondition(Sema &S,
                                     /*InOverloadResolution=*/false,
                                     /*CStyle=*/false,
                                     /*AllowObjCWritebackConversion=*/false);
-        assert(!ICS.isBad() && ICS.getKind() ==
-                             ImplicitConversionSequence::UserDefinedConversion);
+        assert(!ICS.isBad() &&
+               ICS.getKind() ==
+                   ImplicitConversionSequence::UserDefinedConversion);
         S.Diag(Cond->getExprLoc(), diag::warn_cilk_for_cond_user_defined_conv)
-          << From->getType() << ICE->getType() << Cond->getSourceRange();
-        FunctionDecl *FD = ICS.UserDefined.ConversionFunction->getCanonicalDecl();
+            << From->getType() << ICE->getType() << Cond->getSourceRange();
+        FunctionDecl *FD =
+            ICS.UserDefined.ConversionFunction->getCanonicalDecl();
         S.Diag(FD->getLocation(), diag::note_cilk_for_conversion_here)
-          << ICE->getType();
+            << ICE->getType();
       }
       Cond = ICE->getSubExpr();
     } else
@@ -480,7 +476,7 @@ static bool ExtractForCondition(Sema &S,
 
   S.Diag(Cond->getExprLoc(), IsCilkFor ? diag::err_cilk_for_invalid_cond_expr
                                        : diag::err_simd_for_invalid_cond_expr)
-    << Cond->getSourceRange();
+      << Cond->getSourceRange();
   return false;
 }
 
@@ -519,9 +515,8 @@ static bool IsControlVarRef(Expr *E, const VarDecl *ControlVar) {
 }
 
 static bool CanonicalizeForCondOperands(Sema &S, const VarDecl *ControlVar,
-                                        Expr *Cond, Expr *&LHS,
-                                        Expr *&RHS, int &Direction,
-                                        unsigned CondDiagError,
+                                        Expr *Cond, Expr *&LHS, Expr *&RHS,
+                                        int &Direction, unsigned CondDiagError,
                                         unsigned CondDiagNote) {
 
   // The condition shall have one of the following two forms:
@@ -538,18 +533,14 @@ static bool CanonicalizeForCondOperands(Sema &S, const VarDecl *ControlVar,
   }
 
   S.Diag(Cond->getLocStart(), CondDiagError) << ControlVar
-    << Cond->getSourceRange();
+                                             << Cond->getSourceRange();
   S.Diag(Cond->getLocStart(), CondDiagNote) << ControlVar;
   return false;
 }
 
-static void CheckForCondition(Sema &S,
-                              VarDecl *ControlVar,
-                              Expr *Cond,
-                              Expr *&Limit,
-                              int &Direction,
-                              BinaryOperatorKind &Opcode,
-                              bool IsCilkFor) {
+static void CheckForCondition(Sema &S, VarDecl *ControlVar, Expr *Cond,
+                              Expr *&Limit, int &Direction,
+                              BinaryOperatorKind &Opcode, bool IsCilkFor) {
   SourceLocation OpLoc;
   Expr *LHS = 0;
   Expr *RHS = 0;
@@ -591,8 +582,7 @@ static bool IsValidForIncrement(Sema &S, Expr *Increment,
                                 const VarDecl *ControlVar,
                                 bool &HasConstantIncrement,
                                 llvm::APSInt &Stride, Expr *&StrideExpr,
-                                SourceLocation &RHSLoc,
-                                bool IsCilkFor) {
+                                SourceLocation &RHSLoc, bool IsCilkFor) {
   Increment = Increment->IgnoreParens();
   if (ExprWithCleanups *E = dyn_cast<ExprWithCleanups>(Increment))
     Increment = E->getSubExpr();
@@ -605,8 +595,8 @@ static bool IsValidForIncrement(Sema &S, Expr *Increment,
       S.Diag(U->getSubExpr()->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_increment_not_control_var
                        : diag::err_simd_for_increment_not_control_var)
-             << ControlVar;
-       return false;
+          << ControlVar;
+      return false;
     }
 
     if (U->isIncrementDecrementOp()) {
@@ -635,7 +625,7 @@ static bool IsValidForIncrement(Sema &S, Expr *Increment,
       S.Diag(C->getArg(0)->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_increment_not_control_var
                        : diag::err_simd_for_increment_not_control_var)
-             << ControlVar;
+          << ControlVar;
       return false;
     }
 
@@ -663,7 +653,7 @@ static bool IsValidForIncrement(Sema &S, Expr *Increment,
       S.Diag(B->getLHS()->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_increment_not_control_var
                        : diag::err_simd_for_increment_not_control_var)
-             << ControlVar;
+          << ControlVar;
       return false;
     }
 
@@ -685,7 +675,7 @@ static bool IsValidForIncrement(Sema &S, Expr *Increment,
       S.Diag(Increment->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_invalid_increment_rhs
                        : diag::err_simd_for_invalid_increment_rhs)
-             << OperatorName;
+          << OperatorName;
       return false;
     }
 
@@ -706,16 +696,16 @@ static bool IsValidForIncrement(Sema &S, Expr *Increment,
   }
 
   // If we reached this point, the basic form is invalid. Issue a diagnostic.
-  S.Diag(Increment->getExprLoc(),
-         IsCilkFor ? diag::err_cilk_for_invalid_increment
-                   : diag::err_simd_for_invalid_increment);
+  S.Diag(Increment->getExprLoc(), IsCilkFor
+                                      ? diag::err_cilk_for_invalid_increment
+                                      : diag::err_simd_for_invalid_increment);
   return false;
 }
 
-ExprResult
-Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
-                                Expr *Increment, Expr *StrideExpr, int Dir,
-                                BinaryOperatorKind Opcode) {
+ExprResult Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc,
+                                           Expr *Span, Expr *Increment,
+                                           Expr *StrideExpr, int Dir,
+                                           BinaryOperatorKind Opcode) {
   // Generate the loop count expression according to the following:
   // ===========================================================================
   // |     Condition syntax             |       Loop count                     |
@@ -774,9 +764,8 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
                              ActOnIntegerConstant(CilkForLoc, 1).get()).get();
 
     // Build "span/stride" if Dir==1, otherwise "span/-stride"
-    LoopCount =
-      BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span,
-                 (Dir == 1) ? StrideExpr : NegativeStride);
+    LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Div, Span,
+                           (Dir == 1) ? StrideExpr : NegativeStride);
 
     // Build "span/stride + 1"
     LoopCount = BuildBinOp(getCurScope(), CilkForLoc, BO_Add, LoopCount.get(),
@@ -788,7 +777,7 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
   // Loop count should be either u32 or u64 in Cilk Plus.
   if (Context.getTypeSize(LoopCountExprType) > 64)
     Diag(CilkForLoc, diag::warn_cilk_for_loop_count_downcast)
-      << LoopCountExprType << LoopCountType;
+        << LoopCountExprType << LoopCountType;
   else if (Context.getTypeSize(LoopCountExprType) <= 32)
     LoopCountType = Context.UnsignedIntTy;
 
@@ -796,9 +785,8 @@ Sema::CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
   return ImpCastExprToType(LoopCount.get(), LoopCountType, CK_IntegralCast);
 }
 
-StmtResult
-Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor,
-                                  SourceLocation LocStart) {
+StmtResult Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor,
+                                             SourceLocation LocStart) {
   SourceLocation GrainSizeStart = GrainsizeExpr->getLocStart();
 
   // Negative grainsize has unspecified behavior and is reserved for future
@@ -819,22 +807,20 @@ Sema::ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr, Stmt *CilkFor,
 
   AddInitializerToDecl(Grainsize, GrainsizeExpr, true, false);
   if (Grainsize->isInvalidDecl()) {
-    Context.Deallocate(reinterpret_cast<void*>(Grainsize));
-    Diag(GrainSizeStart, diag::note_cilk_for_grainsize_conversion) << GrainsizeTy;
+    Context.Deallocate(reinterpret_cast<void *>(Grainsize));
+    Diag(GrainSizeStart, diag::note_cilk_for_grainsize_conversion)
+        << GrainsizeTy;
     return StmtError();
   }
 
   GrainsizeExpr = Grainsize->getInit();
-  Context.Deallocate(reinterpret_cast<void*>(Grainsize));
+  Context.Deallocate(reinterpret_cast<void *>(Grainsize));
   return new (Context) CilkForGrainsizeStmt(GrainsizeExpr, CilkFor, LocStart);
 }
 
-static void CheckForSignedUnsignedWraparounds(const VarDecl *ControlVar,
-                                              const Expr *ControlVarInit,
-                                              const Expr *Limit, Sema &S,
-                                              int CondDirection,
-                                              llvm::APSInt Stride,
-                                              const Expr *StrideExpr) {
+static void CheckForSignedUnsignedWraparounds(
+    const VarDecl *ControlVar, const Expr *ControlVarInit, const Expr *Limit,
+    Sema &S, int CondDirection, llvm::APSInt Stride, const Expr *StrideExpr) {
   llvm::APSInt InitVal;
   llvm::APSInt LimitVal;
   if (!ControlVar->getType()->isDependentType() &&
@@ -845,9 +831,9 @@ static void CheckForSignedUnsignedWraparounds(const VarDecl *ControlVar,
         CondDirection == 0) {
       // Make InitVal, LimitVal, and Stride have the same width
       // so that they can be compared.
-      unsigned MaxBitWidth = std::max(std::max(InitVal.getMinSignedBits(),
-                                               LimitVal.getMinSignedBits()),
-                                      Stride.getMinSignedBits());
+      unsigned MaxBitWidth = std::max(
+          std::max(InitVal.getMinSignedBits(), LimitVal.getMinSignedBits()),
+          Stride.getMinSignedBits());
       InitVal = InitVal.sextOrTrunc(MaxBitWidth);
       LimitVal = LimitVal.sextOrTrunc(MaxBitWidth);
       Stride = Stride.sextOrTrunc(MaxBitWidth);
@@ -902,9 +888,8 @@ bool Sema::CheckIfBodyModifiesLoopControlVar(Stmt *Body) {
 
 static bool CheckForIncrement(Sema &S, Expr *Increment, const Expr *Limit,
                               const VarDecl *ControlVar,
-                              const Expr *ControlVarInit,
-                              int CondDirection, Expr *&StrideExpr,
-                              bool IsCilkFor) {
+                              const Expr *ControlVarInit, int CondDirection,
+                              Expr *&StrideExpr, bool IsCilkFor) {
   // Check increment
   // For dependent types since we can't get the actual type, we default to a
   // 64bit signed type.
@@ -937,19 +922,18 @@ static bool CheckForIncrement(Sema &S, Expr *Increment, const Expr *Limit,
       S.Diag(Increment->getExprLoc(),
              IsCilkFor ? diag::err_cilk_for_increment_inconsistent
                        : diag::err_simd_for_increment_inconsistent)
-             << (CondDirection > 0);
+          << (CondDirection > 0);
       S.Diag(Increment->getExprLoc(), diag::note_constant_stride)
-        << Stride.toString(10, true)
-        << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
+          << Stride.toString(10, true)
+          << SourceRange(Increment->getExprLoc(), Increment->getLocEnd());
       return false;
     }
 
     // For simd, do not check unsigned wrap around here, since OpenMP does not
     // support operation '!=' for the condition.
     if (IsCilkFor)
-      CheckForSignedUnsignedWraparounds(ControlVar, ControlVarInit, Limit,
-                                        S, CondDirection, Stride,
-                                        StrideExpr);
+      CheckForSignedUnsignedWraparounds(ControlVar, ControlVarInit, Limit, S,
+                                        CondDirection, Stride, StrideExpr);
   }
 
   return true;
@@ -1011,7 +995,7 @@ void Sema::ActOnStartOfCilkForStmt(SourceLocation CilkForLoc, Scope *CurScope,
                                    StmtResult FirstPart) {
 
   CapturedDecl *CD = 0;
-  RecordDecl *RD = CreateCapturedStmtRecordDecl(CD, CilkForLoc, /*NumArgs*/3);
+  RecordDecl *RD = CreateCapturedStmtRecordDecl(CD, CilkForLoc, /*NumArgs*/ 3);
 
   const VarDecl *VD = getLoopControlVariable(*this, FirstPart);
   PushCilkForScope(CurScope, CD, RD, VD, CilkForLoc);
@@ -1056,12 +1040,13 @@ bool extendsLifetimeOfTemporary(const VarDecl *VD) {
 //
 /// FIXME: Check OpenMP directive and construct.
 class DiagnoseSIMDForBodyHelper
-  : public RecursiveASTVisitor<DiagnoseSIMDForBodyHelper> {
+    : public RecursiveASTVisitor<DiagnoseSIMDForBodyHelper> {
 public:
   enum BodyKind {
     BK_SIMDFor,
     BK_Elemental
   };
+
 private:
   Sema &SemaRef;
   /// \brief The current simd for loop location.
@@ -1071,14 +1056,14 @@ private:
 
   void Diag(SourceLocation L, const char *Msg, SourceRange Range) {
     SemaRef.Diag(L, SemaRef.PDiag(diag::err_simd_for_body_no_construct)
-                      << Msg << Kind << Range);
+                        << Msg << Kind << Range);
     IsValid = true;
   }
 
 public:
   DiagnoseSIMDForBodyHelper(Sema &S, bool &IsValid, SourceLocation Loc,
                             enum BodyKind K)
-    : SemaRef(S), LoopLoc(Loc), IsValid(IsValid), Kind(K) { }
+      : SemaRef(S), LoopLoc(Loc), IsValid(IsValid), Kind(K) {}
 
   bool VisitGotoStmt(GotoStmt *S) {
     Diag(S->getLocStart(), "goto", S->getSourceRange());
@@ -1104,12 +1089,9 @@ public:
         return true;
 
       StringRef Name = II->getName();
-      if (Name.equals("setjmp") ||
-          Name.equals("_setjmp") ||
-          Name.equals("__builtin_setjmp") ||
-          Name.equals("longjmp") ||
-          Name.equals("_longjmp") ||
-          Name.equals("__builtin_longjmp")) {
+      if (Name.equals("setjmp") || Name.equals("_setjmp") ||
+          Name.equals("__builtin_setjmp") || Name.equals("longjmp") ||
+          Name.equals("_longjmp") || Name.equals("__builtin_longjmp")) {
 #if 0
         // Cannot find a realiable way to check if this call is a setjmp
         // or longjmp call. Although the spec declares this being ill-formed,
@@ -1149,8 +1131,8 @@ public:
   // a (non-trivial) destructor.
   //
   bool VisitDeclStmt(DeclStmt *S) {
-    for (DeclStmt::decl_iterator I = S->decl_begin(), E = S->decl_end();
-        I != E; ++I) {
+    for (DeclStmt::decl_iterator I = S->decl_begin(), E = S->decl_end(); I != E;
+         ++I) {
       VarDecl *VD = dyn_cast<VarDecl>(*I);
 
       // An extern variable should be allowed, although spec does not say so.
@@ -1170,9 +1152,10 @@ public:
 
       if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
         if (RD->hasNonTrivialDestructor()) {
-          SemaRef.Diag(VD->getLocStart(),
+          SemaRef.Diag(
+              VD->getLocStart(),
               SemaRef.PDiag(diag::err_simd_for_body_no_nontrivial_destructor)
-              << Kind << VD->getSourceRange());
+                  << Kind << VD->getSourceRange());
           IsValid = false;
         }
     }
@@ -1231,17 +1214,12 @@ void Sema::DiagnoseCilkElemental(FunctionDecl *F, Stmt *Body) {
   CheckElementalFunctionBody(*this, F, Body);
 }
 
-static
-bool CommonActOnForStmt(Sema &S,
-                        SourceLocation ForLoc,
-                        SourceLocation LParenLoc,
-                        Stmt *First, Expr *Cond, Expr *Increment,
-                        SourceLocation RParenLoc,
-                        Stmt *Body,
-                        ExprResult &LoopCount,
-                        Expr *&StrideExpr,
-                        ExprResult &Span,
-                        bool IsCilkFor) {
+static bool CommonActOnForStmt(Sema &S, SourceLocation ForLoc,
+                               SourceLocation LParenLoc, Stmt *First,
+                               Expr *Cond, Expr *Increment,
+                               SourceLocation RParenLoc, Stmt *Body,
+                               ExprResult &LoopCount, Expr *&StrideExpr,
+                               ExprResult &Span, bool IsCilkFor) {
   assert(First && "expected init");
   assert(Cond && "expected cond");
   assert(Increment && "expected increment");
@@ -1267,9 +1245,8 @@ bool CommonActOnForStmt(Sema &S,
   // Remove any implicit AST node introduced by semantic analysis.
   Limit = Limit->getSubExprAsWritten();
 
-  if (!CheckForIncrement(S, Increment, Limit, ControlVar,
-                         ControlVarInit, CondDirection, StrideExpr,
-                         IsCilkFor))
+  if (!CheckForIncrement(S, Increment, Limit, ControlVar, ControlVarInit,
+                         CondDirection, StrideExpr, IsCilkFor))
     return false;
 
   if (!IsCilkFor && !CheckSIMDForBody(S, Body, ForLoc))
@@ -1282,10 +1259,9 @@ bool CommonActOnForStmt(Sema &S,
     EnterExpressionEvaluationContext EvalContext(S, S.PotentiallyEvaluated);
 
     // Build end - begin
-    Expr *Begin = S.BuildDeclRefExpr(ControlVar,
-                                     ControlVar->getType().getNonReferenceType(),
-                                     VK_LValue,
-                                     ControlVar->getLocation()).release();
+    Expr *Begin = S.BuildDeclRefExpr(
+                        ControlVar, ControlVar->getType().getNonReferenceType(),
+                        VK_LValue, ControlVar->getLocation()).release();
     Expr *End = Limit;
     if (CondDirection < 0)
       std::swap(Begin, End);
@@ -1296,20 +1272,20 @@ bool CommonActOnForStmt(Sema &S,
       // error getting operator-()
       S.Diag(ForLoc, diag::err_cilk_for_difference_ill_formed);
       S.Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-        << Begin->getSourceRange();
+          << Begin->getSourceRange();
       S.Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-        << End->getSourceRange();
+          << End->getSourceRange();
       return false;
     }
 
     if (!Span.get()->getType()->isIntegralOrEnumerationType()) {
       // non-integral type
       S.Diag(ForLoc, diag::err_non_integral_cilk_for_difference_type)
-        << Span.get()->getType();
+          << Span.get()->getType();
       S.Diag(Begin->getLocStart(), diag::note_cilk_for_begin_expr)
-        << Begin->getSourceRange();
+          << Begin->getSourceRange();
       S.Diag(End->getLocStart(), diag::note_cilk_for_end_expr)
-        << End->getSourceRange();
+          << End->getSourceRange();
       return false;
     }
 
@@ -1344,38 +1320,33 @@ bool CommonActOnForStmt(Sema &S,
   return true;
 }
 
-StmtResult
-Sema::ActOnCilkForStmt(SourceLocation CilkForLoc, SourceLocation LParenLoc,
-                       Stmt *First, FullExprArg Second, FullExprArg Third,
-                       SourceLocation RParenLoc, Stmt *Body) {
+StmtResult Sema::ActOnCilkForStmt(SourceLocation CilkForLoc,
+                                  SourceLocation LParenLoc, Stmt *First,
+                                  FullExprArg Second, FullExprArg Third,
+                                  SourceLocation RParenLoc, Stmt *Body) {
   ExprResult LoopCount, Span;
   Expr *StrideExpr = 0;
-  if (!CommonActOnForStmt(*this, CilkForLoc, LParenLoc,
-                          First, Second.get(), Third.get(),
-                          RParenLoc, Body,
-                          LoopCount, StrideExpr, Span,
+  if (!CommonActOnForStmt(*this, CilkForLoc, LParenLoc, First, Second.get(),
+                          Third.get(), RParenLoc, Body, LoopCount, StrideExpr,
+                          Span,
                           /* IsCilkFor */ true))
     return StmtError();
   return BuildCilkForStmt(CilkForLoc, LParenLoc, First, Second.get(),
                           Third.get(), RParenLoc, Body, LoopCount.get(),
-                          StrideExpr, Span.isUsable() ? Span.get()->getType()
-                                                      : QualType());
+                          StrideExpr,
+                          Span.isUsable() ? Span.get()->getType() : QualType());
 }
 
-StmtResult
-Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
-                       ArrayRef<Attr *> Attrs,
-                       SourceLocation ForLoc,
-                       SourceLocation LParenLoc,
-                       Stmt *First, FullExprArg Second, FullExprArg Third,
-                       SourceLocation RParenLoc,
-                       Stmt *Body) {
+StmtResult Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
+                                  ArrayRef<Attr *> Attrs, SourceLocation ForLoc,
+                                  SourceLocation LParenLoc, Stmt *First,
+                                  FullExprArg Second, FullExprArg Third,
+                                  SourceLocation RParenLoc, Stmt *Body) {
   ExprResult LoopCount, Span;
   Expr *StrideExpr = 0;
-  if (!CommonActOnForStmt(*this, ForLoc, LParenLoc,
-                          First, Second.get(), Third.get(),
-                          RParenLoc, Body,
-                          LoopCount, StrideExpr, Span,
+  if (!CommonActOnForStmt(*this, ForLoc, LParenLoc, First, Second.get(),
+                          Third.get(), RParenLoc, Body, LoopCount, StrideExpr,
+                          Span,
                           /* IsCilkFor */ false))
     return StmtError();
 
@@ -1383,29 +1354,26 @@ Sema::ActOnSIMDForStmt(SourceLocation PragmaLoc,
   // SIMD variables capture a local copy inside of the loop, and all
   // modifications are done on that capture. In the case that the LCV is the
   // subject of a SIMD clause, the LCV itself will not be updated.
-  {
-    SIMDForScopeInfo *FSI = getCurSIMDFor();
-    VarDecl *LCV = const_cast<VarDecl *>(getLoopControlVariable(*this, First));
-    if (FSI->IsSIMDVariable(LCV)) {
-      if (FSI->isReduction(LCV) || FSI->isFirstPrivate(LCV)) {
-        Diag(FSI->GetLocation(LCV), diag::err_simd_for_lcv_invalid_clause)
+  SIMDForScopeInfo *FSI = getCurSIMDFor();
+  VarDecl *LCV = const_cast<VarDecl *>(getLoopControlVariable(*this, First));
+  if (FSI->IsSIMDVariable(LCV)) {
+    if (FSI->isReduction(LCV) || FSI->isFirstPrivate(LCV)) {
+      Diag(FSI->GetLocation(LCV), diag::err_simd_for_lcv_invalid_clause)
           << FSI->isFirstPrivate(LCV);
-        return StmtError();
-      }
-      Diag(FSI->GetLocation(LCV), diag::warn_simd_for_variable_lcv);
-      FSI->SetInvalid(LCV);
+      return StmtError();
     }
+    Diag(FSI->GetLocation(LCV), diag::warn_simd_for_variable_lcv);
+    FSI->SetInvalid(LCV);
   }
 
   return BuildSIMDForStmt(PragmaLoc, Attrs, ForLoc, LParenLoc, First,
                           Second.get(), Third.get(), RParenLoc, Body,
-                          LoopCount.get());
+                          LoopCount.get(), StrideExpr, LCV);
 }
-
 
 AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
                                        Expr *VectorLengthExpr) {
-  /* Perform checks that Expr is a constant, power of 2 */
+  /* Perform checks that Expr is a constant */
   if (VectorLengthExpr->getType().isNull())
     return AttrError();
 
@@ -1416,16 +1384,19 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
     Constant.setIsUnsigned(true);
     if (!VectorLengthExpr->isIntegerConstantExpr(Constant, Context,
                                                  &BadConstantLoc)) {
-      Diag(BadConstantLoc, diag::err_invalid_vectorlength_expr) << 0;
+      Diag(BadConstantLoc, diag::err_invalid_vectorlength_expr);
       return AttrError();
     }
+/*	
     if (!Constant.isPowerOf2()) {
       Diag(VectorLengthExpr->getLocStart(),
            diag::err_invalid_vectorlength_expr) << 1;
       return AttrError();
     }
+*/	
     E = Owned(IntegerLiteral::Create(
-        Context, Constant, Context.getCanonicalType(VectorLengthExpr->getType()),
+        Context, Constant,
+        Context.getCanonicalType(VectorLengthExpr->getType()),
         VectorLengthExpr->getLocStart()));
     if (E.isInvalid())
       return AttrError();
@@ -1437,27 +1408,6 @@ AttrResult Sema::ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
 
   return AttrResult(::new (Context)
                     SIMDLengthAttr(VectorLengthLoc, Context, E.get()));
-}
-
-AttrResult Sema::ActOnPragmaSIMDLengthFor(SourceLocation VectorLengthForLoc,
-                                          SourceLocation TypeLoc,
-                                          QualType &VectorLengthForType) {
-  if (VectorLengthForType.isNull())
-    return AttrError();
-
-  QualType Ty = VectorLengthForType.getCanonicalType();
-  if (Ty->isVoidType()) {
-    Diag(TypeLoc, diag::err_simd_for_length_for_void);
-    return AttrError();
-  }
-  if (!VectorLengthForType->isInstantiationDependentType() &&
-      Ty->isIncompleteType()) {
-    Diag(TypeLoc, diag::err_simd_for_length_for_incomplete) << Ty;
-    return AttrError();
-  }
-
-  return AttrResult(::new (Context) SIMDLengthForAttr(
-      VectorLengthForLoc, Context, VectorLengthForType, TypeLoc));
 }
 
 AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
@@ -1472,9 +1422,10 @@ AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
 
     // linear-step must be either an integer constant expression,
     // or be a reference to a variable with integral type.
-    if (Expr *Step = Exprs[i+1]) {
+    if (Expr *Step = Exprs[i + 1]) {
       llvm::APSInt Constant;
-      if (!Step->isInstantiationDependent() && !Step->EvaluateAsInt(Constant, Context)) {
+      if (!Step->isInstantiationDependent() &&
+          !Step->EvaluateAsInt(Constant, Context)) {
         if (!isa<DeclRefExpr>(Step)) {
           Diag(Step->getLocStart(), diag::err_pragma_simd_invalid_linear_step);
           return AttrError();
@@ -1493,15 +1444,25 @@ AttrResult Sema::ActOnPragmaSIMDLinear(SourceLocation LinearLoc,
       LinearLoc, Context, const_cast<Expr **>(Exprs.data()), Exprs.size()));
 }
 
+namespace {
+enum ConstructorKind {
+  DefaultConstructor = 0,
+  CopyConstructor,
+  CopyAssignment
+};
+}
+
 ExprResult Sema::ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
                                                 DeclarationNameInfo Name,
                                                 SIMDPrivateKind Kind) {
   SourceLocation NameLoc = Name.getLoc();
-  StringRef KindName = (Kind == SIMD_Private) ? "private" :
-                   (Kind == SIMD_LastPrivate) ? "lastprivate" : "firstprivate";
+  StringRef KindName =
+      (Kind == SIMD_Private) ? "private" : (Kind == SIMD_LastPrivate)
+                                               ? "lastprivate"
+                                               : "firstprivate";
 
   LookupResult Lookup(*this, Name, LookupOrdinaryName);
-  LookupParsedName(Lookup, CurScope, &SS, /*AllowBuiltinCreation*/false);
+  LookupParsedName(Lookup, CurScope, &SS, /*AllowBuiltinCreation*/ false);
   if (Lookup.isAmbiguous())
     return ExprError();
 
@@ -1528,8 +1489,7 @@ ExprResult Sema::ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
   }
 
   if (!VarType->isInstantiationDependentType() && VarType->isIncompleteType()) {
-    Diag(NameLoc, diag::err_pragma_simd_var_incomplete)
-      << KindName << VarType;
+    Diag(NameLoc, diag::err_pragma_simd_var_incomplete) << KindName << VarType;
     return ExprError();
   }
 
@@ -1565,12 +1525,6 @@ ExprResult Sema::ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
       Class = cast<CXXRecordDecl>(RD)->getDefinition();
   }
 
-  enum {
-    DefaultConstructor = 0,
-    CopyConstructor,
-    CopyAssignment
-  };
-
   // A variable of class type (or array thereof) that appears in a private
   // clause requires an accessible, unambiguous default constructor for the
   // class type.
@@ -1581,18 +1535,18 @@ ExprResult Sema::ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
   // clause.
   if (Class && (Kind == SIMD_Private || Kind == SIMD_LastPrivate)) {
     SpecialMemberOverloadResult *Result =
-      LookupSpecialMember(Class, CXXDefaultConstructor, /*ConstArg=*/false,
-                          /*VolatileThis=*/false, /*RValueThis*/false,
-                          /*ConstThis*/false, /*VolatileThis*/false);
+        LookupSpecialMember(Class, CXXDefaultConstructor, /*ConstArg=*/false,
+                            /*VolatileThis=*/false, /*RValueThis*/ false,
+                            /*ConstThis*/ false, /*VolatileThis*/ false);
 
     switch (Result->getKind()) {
     case SpecialMemberOverloadResult::NoMemberOrDeleted:
-      Diag(NameLoc, diag::err_pragma_simd_var_no_member) << KindName
-        << DefaultConstructor << ElementTy;
+      Diag(NameLoc, diag::err_pragma_simd_var_no_member)
+          << KindName << DefaultConstructor << ElementTy;
       return ExprError();
     case SpecialMemberOverloadResult::Ambiguous:
       Diag(NameLoc, diag::err_pragma_simd_var_ambiguous_member)
-        << KindName << DefaultConstructor << ElementTy;
+          << KindName << DefaultConstructor << ElementTy;
       return ExprError();
     default:
       // Access check will be deferred until its first use.
@@ -1605,18 +1559,18 @@ ExprResult Sema::ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
   // class type.
   if (Class && (Kind == SIMD_FirstPrivate)) {
     SpecialMemberOverloadResult *Result =
-      LookupSpecialMember(Class, CXXCopyConstructor, /*ConstArg=*/false,
-                          /*VolatileThis=*/false, /*RValueThis*/false,
-                          /*ConstThis*/false, /*VolatileThis*/false);
+        LookupSpecialMember(Class, CXXCopyConstructor, /*ConstArg=*/false,
+                            /*VolatileThis=*/false, /*RValueThis*/ false,
+                            /*ConstThis*/ false, /*VolatileThis*/ false);
 
     switch (Result->getKind()) {
     case SpecialMemberOverloadResult::NoMemberOrDeleted:
-      Diag(NameLoc, diag::err_pragma_simd_var_no_member) << KindName
-        << CopyConstructor << ElementTy;
+      Diag(NameLoc, diag::err_pragma_simd_var_no_member)
+          << KindName << CopyConstructor << ElementTy;
       return ExprError();
     case SpecialMemberOverloadResult::Ambiguous:
       Diag(NameLoc, diag::err_pragma_simd_var_ambiguous_member)
-        << KindName << CopyConstructor << ElementTy;
+          << KindName << CopyConstructor << ElementTy;
       return ExprError();
     default:
       // Access check will be deferred until its first use.
@@ -1629,18 +1583,18 @@ ExprResult Sema::ActOnPragmaSIMDPrivateVariable(CXXScopeSpec SS,
   // class type.
   if (Class && (Kind == SIMD_LastPrivate)) {
     SpecialMemberOverloadResult *Result =
-      LookupSpecialMember(Class, CXXCopyAssignment, /*ConstArg=*/false,
-                          /*VolatileThis=*/false, /*RValueThis*/false,
-                          /*ConstThis*/false, /*VolatileThis*/false);
+        LookupSpecialMember(Class, CXXCopyAssignment, /*ConstArg=*/false,
+                            /*VolatileThis=*/false, /*RValueThis*/ false,
+                            /*ConstThis*/ false, /*VolatileThis*/ false);
 
     switch (Result->getKind()) {
     case SpecialMemberOverloadResult::NoMemberOrDeleted:
-      Diag(NameLoc, diag::err_pragma_simd_var_no_member) << KindName
-        << CopyAssignment << ElementTy;
+      Diag(NameLoc, diag::err_pragma_simd_var_no_member)
+          << KindName << CopyAssignment << ElementTy;
       return ExprError();
     case SpecialMemberOverloadResult::Ambiguous:
       Diag(NameLoc, diag::err_pragma_simd_var_ambiguous_member)
-        << KindName << CopyAssignment << ElementTy;
+          << KindName << CopyAssignment << ElementTy;
       return ExprError();
     default:
       // Access check will be deferred until its first use.
@@ -1659,16 +1613,16 @@ AttrResult Sema::ActOnPragmaSIMDPrivate(SourceLocation ClauseLoc,
   Attr *Clause = 0;
   switch (Kind) {
   case SIMD_Private:
-    Clause = ::new (Context) SIMDPrivateAttr(ClauseLoc, Context,
-                                             Exprs.data(), Exprs.size());
+    Clause = ::new (Context)
+        SIMDPrivateAttr(ClauseLoc, Context, Exprs.data(), Exprs.size());
     break;
   case SIMD_LastPrivate:
-    Clause = ::new (Context) SIMDLastPrivateAttr(ClauseLoc, Context,
-                                                 Exprs.data(), Exprs.size());
+    Clause = ::new (Context)
+        SIMDLastPrivateAttr(ClauseLoc, Context, Exprs.data(), Exprs.size());
     break;
   case SIMD_FirstPrivate:
-    Clause = ::new (Context) SIMDFirstPrivateAttr(ClauseLoc, Context,
-                                                  Exprs.data(), Exprs.size());
+    Clause = ::new (Context)
+        SIMDFirstPrivateAttr(ClauseLoc, Context, Exprs.data(), Exprs.size());
     break;
   }
 
@@ -1714,10 +1668,10 @@ Sema::ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
     case SIMDReductionAttr::max:
     case SIMDReductionAttr::min:
       // For a max or min reduction in C/C++, the type of the list item must
-      // be an allowed arithmetic data type
-      if (!QT->isArithmeticType()) {
+      // be an allowed arithmetic data type (but not a complex one)
+      if (!QT->isArithmeticType() || QT->isAnyComplexType()) {
         Diag(E->getLocStart(), diag::err_pragma_simd_reduction_maxmin)
-            << (Operator == SIMDReductionAttr::max);
+            << (Operator == SIMDReductionAttr::max) << E->getSourceRange();
         return AttrError();
       }
       break;
@@ -1747,11 +1701,10 @@ Sema::ActOnPragmaSIMDReduction(SourceLocation ReductionLoc,
       break;
     }
     if (Operator != SIMDReductionAttr::max &&
-        Operator != SIMDReductionAttr::min && getLangOpts().CPlusPlus &&
-        QT->isRecordType()) {
-      // Test that the given operator is overloaded for this type
-      if (BuildBinOp(getCurScope(), E->getLocStart(), ReductionOp, E, E)
-              .isInvalid()) {
+        Operator != SIMDReductionAttr::min) {
+      // Test that the given operator is valid for these type of expressions
+      if (BuildBinOp(
+            getCurScope(), E->getLocStart(), ReductionOp, E, E).isInvalid()) {
         return AttrError();
       }
     }
@@ -1776,8 +1729,8 @@ struct UsedDecl {
   UsedDecl(bool CanConflict, const Attr *Attribute, const Expr *Usage)
       : CanConflict(CanConflict), Attribute(Attribute), Usage(Usage) {}
 };
-typedef llvm::SmallDenseMap<const ValueDecl *,
-                            llvm::SmallVector<UsedDecl, 4> > DeclMapTy;
+typedef llvm::SmallDenseMap<const ValueDecl *, llvm::SmallVector<UsedDecl, 4> >
+DeclMapTy;
 
 void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
   const SIMDLinearAttr *LA = static_cast<const SIMDLinearAttr *>(A);
@@ -1801,7 +1754,8 @@ void HandleSIMDLinearAttr(const Attr *A, DeclMapTy &UsedDecls) {
 void HandleGenericSIMDAttr(const Attr *A, DeclMapTy &UsedDecls,
                            bool CanConflict = false) {
   const SIMDReductionAttr *RA = static_cast<const SIMDReductionAttr *>(A);
-  for (Expr **i = RA->variables_begin(), **e = RA->variables_end(); i < e; ++i) {
+  for (Expr **i = RA->variables_begin(), **e = RA->variables_end(); i < e;
+       ++i) {
     const Expr *RE = *i;
     if (const DeclRefExpr *D = dyn_cast_or_null<DeclRefExpr>(RE)) {
       const ValueDecl *VD = D->getDecl();
@@ -1813,15 +1767,17 @@ void HandleGenericSIMDAttr(const Attr *A, DeclMapTy &UsedDecls,
   }
 }
 
-void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema &S) {
-  enum {
-    Opt_Private = 0,
-    Opt_LastPrivate,
-    Opt_FirstPrivate,
-    Opt_Linear,
-    Opt_Reduction
-  };
+namespace {
+enum ClauseKind {
+  Opt_Private = 0,
+  Opt_LastPrivate,
+  Opt_FirstPrivate,
+  Opt_Linear,
+  Opt_Reduction
+};
+}
 
+void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema &S) {
   for (DeclMapTy::iterator it = UsedDecls.begin(), end = UsedDecls.end();
        it != end; it++) {
     llvm::SmallVectorImpl<UsedDecl> &Usages = it->second;
@@ -1837,39 +1793,39 @@ void EnforcePragmaSIMDConstraints(DeclMapTy &UsedDecls, Sema &S) {
       switch (Use.Attribute->getKind()) {
       case attr::SIMDPrivate:
         S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-          << Opt_Private << Use.Usage->getSourceRange();
+            << Opt_Private << Use.Usage->getSourceRange();
         break;
       case attr::SIMDLastPrivate:
         S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-          << Opt_LastPrivate << Use.Usage->getSourceRange();
+            << Opt_LastPrivate << Use.Usage->getSourceRange();
         break;
       case attr::SIMDFirstPrivate:
         S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-          << Opt_FirstPrivate << Use.Usage->getSourceRange();
+            << Opt_FirstPrivate << Use.Usage->getSourceRange();
         break;
       case attr::SIMDLinear:
         if (Use.CanConflict || (First.CanConflict &&
                                 First.Attribute->getKind() == attr::SIMDLinear))
           // This is a linear step, or in conflict with a linear step
           S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_conflict_step)
-            << !Use.CanConflict << Use.Usage->getSourceRange();
+              << !Use.CanConflict << Use.Usage->getSourceRange();
         else
           // Re-using linear variable in another simd clause
           S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-            << Opt_Linear << Use.Usage->getSourceRange();
+              << Opt_Linear << Use.Usage->getSourceRange();
         break;
       case attr::SIMDReduction:
         // Any number of reduction clauses can be specified on the directive,
         // but a list item can appear only once in the reduction clauses for
         // that directive.
         S.Diag(Use.Usage->getLocStart(), diag::err_pragma_simd_reuse_var)
-          << Opt_Reduction << Use.Usage->getSourceRange();
+            << Opt_Reduction << Use.Usage->getSourceRange();
         break;
       default:
         ;
       }
       S.Diag(First.Usage->getLocStart(), diag::note_pragma_simd_used_here)
-        << First.Attribute->getRange() << First.Usage->getSourceRange();
+          << First.Attribute->getRange() << First.Usage->getSourceRange();
     }
   }
 }
@@ -1885,19 +1841,18 @@ void Sema::CheckSIMDPragmaClauses(SourceLocation PragmaLoc,
       continue;
     const Attr *A = Attrs[i];
 
-    switch(A->getKind()) {
+    switch (A->getKind()) {
     case attr::SIMDLinear:
       HandleSIMDLinearAttr(A, UsedDecls);
       break;
     case attr::SIMDLength:
-    case attr::SIMDLengthFor:
       if (VectorLengthAttr) {
         attr::Kind ThisKind = A->getKind(),
                    PrevKind = VectorLengthAttr->getKind();
 
         if (ThisKind == PrevKind)
           Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_multiple)
-            << (ThisKind == attr::SIMDLength) << A->getRange();
+              << (ThisKind == attr::SIMDLength) << A->getRange();
         else
           Diag(A->getLocation(), diag::err_pragma_simd_vectorlength_conflict)
               << (ThisKind == attr::SIMDLength) << A->getRange();
@@ -1923,16 +1878,16 @@ void Sema::CheckSIMDPragmaClauses(SourceLocation PragmaLoc,
 }
 
 #define ADD_SIMD_VAR_LIST(ATTR, FUNC)                                          \
-do {                                                                           \
-  const ATTR *PA = static_cast<const ATTR *>(A);                               \
-  for (Expr **I = PA->variables_begin(), **E = PA->variables_end();            \
-    I != E; ++I) {                                                             \
-    Expr *DE = *I;                                                             \
-    assert (DE && isa<DeclRefExpr>(DE) && "reference to a variable expected"); \
-    VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());             \
-    getCurSIMDFor()->FUNC(VD, A->getLocation());                               \
-  }                                                                            \
-} while (0)
+  do {                                                                         \
+    const ATTR *PA = static_cast<const ATTR *>(A);                             \
+    for (Expr **I = PA->variables_begin(), **E = PA->variables_end(); I != E;  \
+         ++I) {                                                                \
+      Expr *DE = *I;                                                           \
+      assert(DE &&isa<DeclRefExpr>(DE) && "reference to a variable expected"); \
+      VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());           \
+      getCurSIMDFor()->FUNC(VD, A->getLocation());                             \
+    }                                                                          \
+  } while (0)
 
 void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
                                    ArrayRef<Attr *> SIMDAttrList) {
@@ -1948,7 +1903,7 @@ void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
     const Attr *A = SIMDAttrList[I];
     if (!A)
       continue;
-    switch(A->getKind()) {
+    switch (A->getKind()) {
     case attr::SIMDPrivate:
       ADD_SIMD_VAR_LIST(SIMDPrivateAttr, addPrivateVar);
       break;
@@ -1971,7 +1926,8 @@ void Sema::ActOnStartOfSIMDForStmt(SourceLocation PragmaLoc, Scope *CurScope,
                                            E = LA->vars_end();
            I != E; ++I) {
         Expr *DE = *I;
-        assert (DE && isa<DeclRefExpr>(DE) && "reference to a variable expected");
+        assert(DE && isa<DeclRefExpr>(DE) &&
+               "reference to a variable expected");
         VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(DE)->getDecl());
         getCurSIMDFor()->addLinearVar(VD, A->getLocation());
       }
@@ -2001,9 +1957,10 @@ static void ActOnForStmtError(Sema &S, RecordDecl *Record) {
 
   Record->setInvalidDecl();
 
-  SmallVector<Decl*, 4> Fields;
+  SmallVector<Decl *, 4> Fields;
   for (RecordDecl::field_iterator I = Record->field_begin(),
-                                  E = Record->field_end(); I != E; ++I)
+                                  E = Record->field_end();
+       I != E; ++I)
     Fields.push_back(*I);
   S.ActOnFields(/*Scope=*/0, Record->getLocation(), Record, Fields,
                 SourceLocation(), SourceLocation(), /*AttributeList=*/0);
@@ -2021,14 +1978,1659 @@ void Sema::ActOnSIMDForStmtError() {
   ActOnForStmtError(*this, getCurSIMDFor()->TheRecordDecl);
 }
 
+void Sema::ActOnStartCEANExpr(Sema::CEANSupportState Flag) { StartCEAN(Flag); }
+
+namespace {
+class CEANExprChecker : public StmtVisitor<CEANExprChecker, bool> {
+  bool HasImplicitIndex;
+
+public:
+  bool VisitCEANIndexExpr(CEANIndexExpr *E) { return true; }
+  bool VisitOpaqueValueExpr(OpaqueValueExpr *E) {
+    return E->getSourceExpr() && Visit(E->getSourceExpr());
+  }
+  bool VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
+    return E->getExpr() && Visit(E->getExpr());
+  }
+  bool VisitCXXDefaultInitExpr(CXXDefaultInitExpr *E) {
+    return E->getExpr() && Visit(E->getExpr());
+  }
+  bool VisitExpressionTraitExpr(ExpressionTraitExpr *E) {
+    return E->getQueriedExpression() && Visit(E->getQueriedExpression());
+  }
+  bool VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
+    HasImplicitIndex = HasImplicitIndex ||
+                       (E->getBuiltinKind() == CEANBuiltinExpr::ImplicitIndex);
+    return false;
+  }
+  unsigned VisitUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *E) {
+    if (!E->isArgumentType())
+      return (E->getKind() == UETT_SizeOf) ? false
+                                           : Visit(E->getArgumentExpr());
+    return VisitStmt(E);
+  }
+  unsigned VisitLambdaExpr(LambdaExpr *E) { return false; }
+  bool VisitStmt(Stmt *S) {
+    for (Stmt::child_iterator I = S->child_begin(), E = S->child_end(); I != E;
+         ++I) {
+      if (*I && Visit(*I))
+        return true;
+    }
+    return false;
+  }
+  CEANExprChecker() : HasImplicitIndex(false) {}
+  bool hasImplicitIndex() const { return HasImplicitIndex; }
+};
+}
+
+bool Sema::CheckCEANExpr(Scope *S, Expr *E) {
+  if (!E || E->isTypeDependent() || E->isInstantiationDependent() ||
+      E->isValueDependent()) {
+    return false;
+  }
+
+  CEANExprChecker Checker;
+  bool Res = E && (Checker.Visit(E) || Checker.hasImplicitIndex());
+  if (Res && ((S && !S->isFunctionPrototypeScope() &&
+               !(S->getFlags() & Scope::FunctionDeclarationScope) &&
+               !(S->getFlags() & Scope::FnScope) && !S->getFnParent()) ||
+              (S && S->getFnParent() && !IsCEANAllowed()) ||
+              (!S && !IsCEANAllowed()))) {
+    Diag(E->getExprLoc(), diag::err_cean_not_in_statement)
+        << E->getSourceRange();
+    return true;
+  }
+  return false;
+}
+
+void Sema::ActOnEndCEANExpr(Expr *E) {
+  if (!E || E->isTypeDependent() || E->isInstantiationDependent() ||
+      E->isValueDependent()) {
+    EndCEAN();
+    return;
+  }
+
+  CEANExprChecker Checker;
+  if (E && Checker.Visit(E) && (GetCEANState() == FullCEANAllowed)) {
+    if (UnaryExprOrTypeTraitExpr *UE = dyn_cast<UnaryExprOrTypeTraitExpr>(E)) {
+      if (UE->getKind() != UETT_SizeOf)
+        ++CEANLevelCounter;
+    } else
+      ++CEANLevelCounter;
+  }
+  EndCEAN();
+}
+
+namespace {
+class CEANRankCalculator : public StmtVisitor<CEANRankCalculator, unsigned> {
+public:
+  typedef SmallVector<CEANIndexExpr *, 2> ExprList;
+  typedef SmallVector<ExprList, 2> ExprListVec;
+  typedef SmallVector<CEANBuiltinExpr *, 2> BuiltinExprList;
+  typedef SmallVector<BuiltinExprList, 2> BuiltinExprListVec;
+  typedef llvm::DenseSet<Stmt *> ExprListRank0;
+
+private:
+  Sema &SemaRef;
+  ExprListVec CEANExprs;
+  BuiltinExprListVec BuiltinCEANExprs;
+  bool ErrorFound, RankMismatch;
+  CEANIndexExpr *LastCIE;
+  unsigned Offset;
+  ExprListRank0 Rank0Exprs;
+
+  void RegisterRank0Expr(Expr *E) {
+    // Do not outline simple expressions and CEAN builtin __implicit_index().
+    if (!E->HasSideEffects(SemaRef.getASTContext()) ||
+        (isa<CEANBuiltinExpr>(E) &&
+         cast<CEANBuiltinExpr>(E)->getBuiltinKind() ==
+             CEANBuiltinExpr::ImplicitIndex))
+      return;
+    CEANExprChecker Checker;
+    (void)Checker.Visit(E);
+    if (!Checker.hasImplicitIndex())
+      Rank0Exprs.insert(E);
+  }
+
+public:
+  unsigned VisitOpaqueValueExpr(OpaqueValueExpr *E) {
+    return E->getSourceExpr() ? Visit(E->getSourceExpr()) : 0;
+  }
+  unsigned VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
+    return E->getExpr() ? Visit(E->getExpr()) : 0;
+  }
+  unsigned VisitCXXDefaultInitExpr(CXXDefaultInitExpr *E) {
+    return E->getExpr() ? Visit(E->getExpr()) : 0;
+  }
+  unsigned VisitExpressionTraitExpr(ExpressionTraitExpr *E) {
+    return E->getQueriedExpression() ? Visit(E->getQueriedExpression()) : 0;
+  }
+  unsigned VisitUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *E) {
+    if (!E->isArgumentType())
+      return (E->getKind() == UETT_SizeOf) ? 0 : Visit(E->getArgumentExpr());
+    return VisitStmt(E);
+  }
+  unsigned VisitLambdaExpr(LambdaExpr *E) { return 0; }
+  unsigned VisitCEANIndexExpr(CEANIndexExpr *E) {
+    LastCIE = E;
+    return 1;
+  }
+  unsigned VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
+    unsigned LocalRank = 0;
+    if (E->getBase())
+      LocalRank = Visit(E->getBase());
+    if (E->getIdx()) {
+      Offset += LocalRank;
+      unsigned ChildRank = Visit(E->getIdx());
+      Offset -= LocalRank;
+      if (ChildRank > 1) {
+        SemaRef.Diag(E->getIdx()->getExprLoc(),
+                     diag::err_cean_rank_not_zero_or_one)
+            << E->getIdx()->getSourceRange();
+        ErrorFound = true;
+        return 0;
+      }
+      if (ChildRank != 0) {
+        LocalRank += ChildRank;
+        if (LastCIE) {
+          while (CEANExprs.size() < LocalRank + Offset)
+            CEANExprs.push_back(ExprList());
+          CEANExprs[Offset + LocalRank - 1].push_back(LastCIE);
+          LastCIE->setRank(Offset + LocalRank);
+          LastCIE = 0;
+        }
+        if (LocalRank == 0) {
+          RegisterRank0Expr(E->getBase());
+        }
+      } else {
+        RegisterRank0Expr(E->getIdx());
+      }
+    }
+    return (LocalRank);
+  }
+  unsigned VisitBinaryOperator(BinaryOperator *E) {
+    if (E->isAssignmentOp()) {
+      unsigned LocalRank = Visit(E->getLHS());
+      unsigned ChildRank = Visit(E->getRHS());
+      if (ChildRank != 0 && LocalRank != ChildRank) {
+        RankMismatch = true;
+        return 0;
+      }
+      if (ChildRank == 0 && LocalRank != 0) {
+        RegisterRank0Expr(E->getRHS());
+      }
+      return LocalRank == 0 ? ChildRank : LocalRank;
+    }
+    if (E->getOpcode() == BO_Comma) {
+      unsigned ChildRank = Visit(E->getRHS());
+      RegisterRank0Expr(E->getLHS());
+      if (ChildRank == 0) {
+        RegisterRank0Expr(E->getRHS());
+      }
+      return ChildRank;
+    }
+    return VisitStmt(E);
+  }
+  unsigned VisitCompoundAssignOperator(CompoundAssignOperator *E) {
+    unsigned LocalRank = Visit(E->getLHS());
+    unsigned ChildRank = Visit(E->getRHS());
+    if (ChildRank != 0 && LocalRank != ChildRank) {
+      RankMismatch = true;
+      return 0;
+    }
+    if (LocalRank == 0 && ChildRank != 0) {
+      RegisterRank0Expr(E->getLHS());
+    }
+    if (LocalRank != 0 && ChildRank == 0) {
+      RegisterRank0Expr(E->getRHS());
+    }
+    return LocalRank == 0 ? ChildRank : LocalRank;
+  }
+  unsigned VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
+    if (E->getOperator() == OO_Subscript) {
+      if (E->getCallee() && VisitStmt(E->getCallee()) != 0) {
+        SemaRef.Diag(E->getCallee()->getExprLoc(),
+                     diag::err_cean_expr_rank_not_zero)
+            << E->getCallee()->getSourceRange();
+        ErrorFound = true;
+        return 0;
+      }
+      unsigned LocalRank = 0;
+      if (E->getArg(0))
+        LocalRank = Visit(E->getArg(0));
+      if (E->getArg(1)) {
+        Offset += LocalRank;
+        unsigned ChildRank = Visit(E->getArg(1));
+        Offset -= LocalRank;
+        if (ChildRank > 0) {
+          SemaRef.Diag(E->getArg(1)->getExprLoc(), diag::err_cean_rank_not_zero)
+              << E->getArg(1)->getSourceRange();
+          ErrorFound = true;
+          return 0;
+        }
+        if (LocalRank == 0 && ChildRank != 0) {
+          RegisterRank0Expr(E->getArg(0));
+        }
+        if (LocalRank != 0 && ChildRank == 0) {
+          RegisterRank0Expr(E->getArg(1));
+        }
+        LocalRank += ChildRank;
+        if (ChildRank != 0 && LastCIE) {
+          while (CEANExprs.size() < LocalRank + Offset)
+            CEANExprs.push_back(ExprList());
+          CEANExprs[LocalRank + Offset - 1].push_back(LastCIE);
+          LastCIE->setRank(LocalRank + Offset);
+          LastCIE = 0;
+        }
+      }
+      return LocalRank;
+    }
+    return VisitCallExpr(E);
+  }
+  unsigned VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    unsigned LocalRank = VisitStmt(E->getSpawnStmt());
+    if (LocalRank != 0) {
+      SemaRef.Diag(E->getExprLoc(), diag::err_cean_not_in_statement)
+          << E->getSourceRange();
+      ErrorFound = true;
+      return 0;
+    }
+    return LocalRank;
+  }
+  unsigned VisitCallExpr(CallExpr *E) {
+    unsigned LocalRank = VisitStmt(E);
+    if (E->isCilkSpawnCall() && LocalRank != 0) {
+      SemaRef.Diag(E->getExprLoc(), diag::err_cean_not_in_statement)
+          << E->getSourceRange();
+      ErrorFound = true;
+      return 0;
+    }
+    return LocalRank;
+  }
+  unsigned VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
+    if (E->getBuiltinKind() == CEANBuiltinExpr::ImplicitIndex) {
+      unsigned LocalRank = E->getReturnExpr()
+                               ->EvaluateKnownConstInt(SemaRef.getASTContext())
+                               .getLimitedValue();
+      while (BuiltinCEANExprs.size() <= LocalRank + Offset)
+        BuiltinCEANExprs.push_back(BuiltinExprList());
+      BuiltinCEANExprs[LocalRank + Offset].push_back(E);
+    }
+    return 0;
+  }
+  unsigned VisitStmt(Stmt *S) {
+    unsigned LocalRank = 0;
+    bool IsExpr = isa<Expr>(S);
+    SmallVector<Stmt *, 2> ExprsWithRank0;
+    Stmt::child_iterator I = S->child_begin(), E = S->child_end();
+    if (!isa<CXXMemberCallExpr>(S)) {
+      if (CallExpr *CE = dyn_cast_or_null<CallExpr>(S)) {
+        if (CE->getCallee() && VisitStmt(CE->getCallee()) != 0) {
+          SemaRef.Diag(CE->getCallee()->getExprLoc(),
+                       diag::err_cean_expr_rank_not_zero)
+              << CE->getCallee()->getSourceRange();
+          ErrorFound = true;
+          return 0;
+        }
+        // Skip callee analysis, already done.
+        if (I != E)
+          ++I;
+      }
+    }
+    for (; I != E; ++I) {
+      if (*I) {
+        unsigned ChildRank = Visit(*I);
+        if (ChildRank == 0 && IsExpr)
+          ExprsWithRank0.push_back(*I);
+        if (ChildRank != 0 && LocalRank != 0 && ChildRank != LocalRank) {
+          RankMismatch = true;
+          return 0;
+        }
+        if (LocalRank == 0)
+          LocalRank = ChildRank;
+      }
+    }
+    if (LocalRank != 0)
+      for (SmallVectorImpl<Stmt *>::iterator I = ExprsWithRank0.begin(),
+                                             E = ExprsWithRank0.end();
+           I != E; ++I)
+        if (isa<Expr>(*I))
+          RegisterRank0Expr(cast<Expr>(*I));
+    return LocalRank;
+  }
+  CEANRankCalculator(Sema &SemaRef)
+      : SemaRef(SemaRef), CEANExprs(), BuiltinCEANExprs(), ErrorFound(false),
+        RankMismatch(false), LastCIE(0), Offset(0) {}
+  ExprListVec &getCEANExprs() { return CEANExprs; }
+  BuiltinExprListVec &getBuiltinCEANExprs() { return BuiltinCEANExprs; }
+  bool isRankMismatch() { return RankMismatch; }
+  bool isErrorFound() { return ErrorFound; }
+  ExprListRank0 &getRank0Exprs() { return Rank0Exprs; }
+};
+
+class CEANExprSimplifier : public StmtVisitor<CEANExprSimplifier> {
+public:
+  typedef llvm::DenseSet<Stmt *> ExprListRank0;
+  typedef SmallVector<Stmt *, 4> DeclStmtList;
+
+private:
+  Sema &SemaRef;
+  ExprListRank0 &Rank0Exprs;
+  DeclStmtList DeclStmts;
+
+  Stmt *SimplifyExpr(Stmt *S) {
+    // Do not outline simple expressions and CEAN builtin __implicit_index().
+    if (Rank0Exprs.find(S) == Rank0Exprs.end()) {
+      VisitStmt(S);
+      return S;
+    }
+
+    assert(isa<Expr>(S) && "Only exprs should be translated");
+    Expr *E = cast<Expr>(S);
+    QualType VarTy = E->getType();
+    if (E->isGLValue())
+      VarTy = SemaRef.BuildReferenceType(VarTy, true, E->getExprLoc(),
+                                         DeclarationName());
+    VarDecl *TempVD = VarDecl::Create(
+        SemaRef.getASTContext(), SemaRef.CurContext, SourceLocation(),
+        SourceLocation(), &SemaRef.getASTContext().Idents.get(".tmp."), VarTy,
+        SemaRef.getASTContext().getTrivialTypeSourceInfo(VarTy), SC_Auto);
+    SemaRef.AddInitializerToDecl(TempVD, E, true, true);
+    StmtResult Res =
+        SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef(TempVD)),
+                              SourceLocation(), SourceLocation());
+    DeclStmts.push_back(Res.take());
+    ExprResult ERes = SemaRef.BuildDeclRefExpr(TempVD, E->getType(), VK_LValue,
+                                               SourceLocation());
+    if (!E->isGLValue()) {
+      ERes = SemaRef.DefaultLvalueConversion(ERes.take());
+    }
+    return ERes.take();
+  }
+
+public:
+  void VisitStmt(Stmt *S) {
+    for (Stmt::child_iterator I = S->child_begin(), E = S->child_end(); I != E;
+         ++I) {
+      if (*I) {
+        Stmt *Res = SimplifyExpr(*I);
+        if (Res != *I)
+          (&(*I))[0] = Res;
+      }
+    }
+  }
+  CEANExprSimplifier(Sema &SemaRef, ExprListRank0 &Rank0Exprs)
+      : SemaRef(SemaRef), Rank0Exprs(Rank0Exprs) {}
+  DeclStmtList &getDeclStmts() { return DeclStmts; }
+};
+}
+
+ExprResult Sema::ActOnCEANIndexExpr(Scope *S, Expr *Base, Expr *LowerBound,
+                                    SourceLocation ColonLoc1, Expr *Length,
+                                    SourceLocation ColonLoc2, Expr *Stride) {
+  bool ArgsDep =
+      (Base && (Base->isTypeDependent() || Base->isValueDependent() ||
+                Base->isInstantiationDependent() ||
+                Base->containsUnexpandedParameterPack())) ||
+      (LowerBound &&
+       (LowerBound->isTypeDependent() || LowerBound->isValueDependent() ||
+        LowerBound->isInstantiationDependent() ||
+        LowerBound->containsUnexpandedParameterPack())) ||
+      (Length && (Length->isTypeDependent() || Length->isValueDependent() ||
+                  Length->isInstantiationDependent() ||
+                  Length->containsUnexpandedParameterPack())) ||
+      (Stride && (Stride->isTypeDependent() || Stride->isValueDependent() ||
+                  Stride->isInstantiationDependent() ||
+                  Stride->containsUnexpandedParameterPack()));
+
+  if (ArgsDep)
+    return Owned(new (Context) CEANIndexExpr(
+        Base, LowerBound, ColonLoc1, Length, ColonLoc2, Stride, Context.IntTy));
+
+  SourceLocation SLoc;
+  if (LowerBound)
+    SLoc = LowerBound->getExprLoc();
+  else
+    SLoc = ColonLoc1;
+  SourceLocation ELoc;
+  if (Stride)
+    ELoc = Stride->getLocEnd();
+  else if (ColonLoc2.isValid())
+    ELoc = ColonLoc2;
+  else if (Length)
+    ELoc = Length->getLocEnd();
+  else
+    ELoc = ColonLoc1;
+
+  QualType BaseType =
+      Base ? Base->getType().getNonReferenceType().getCanonicalType() :
+             QualType();
+  if ((Base && ((Base->isGLValue() && Base->getObjectKind() != OK_Ordinary) ||
+                !BaseType->isCompoundType())) ||
+      (S && !S->isFunctionPrototypeScope() &&
+       !(S->getFlags() & Scope::FunctionDeclarationScope) &&
+       !(S->getFlags() & Scope::FnScope) && !S->getFnParent()) ||
+      (S && S->getFnParent() && !IsCEANAllowed())) {
+    Diag(SLoc, diag::err_cean_not_in_statement) << SourceRange(SLoc, ELoc);
+    return ExprError();
+  }
+
+  if (!IsCEANAllowed() || GetCEANState() == FullCEANAllowed) {
+    // Check format of full CEAN construction.
+    // expression : expression : expression
+    // expression : expression
+    // :
+    if (!LowerBound) {
+      if (Length || Stride) {
+        Diag(SLoc, diag::err_cean_incorrect_form) << SourceRange(SLoc, ELoc);
+        return ExprError();
+      }
+    }
+    if (LowerBound) {
+      if (!Length) {
+        Diag(SLoc, diag::err_cean_incorrect_form) << SourceRange(SLoc, ELoc);
+        return ExprError();
+      }
+    }
+  }
+  /*
+  if (GetCEANState() == OMP4_0_CEANAllowed) {
+    // Check format of CEAN construction in OpenMP 4.0.
+    // expression : expression
+    // expression :
+    // : expression
+    // :
+    if (Stride) {
+      Diag(SLoc, diag::err_cean_incorrect_form) << SourceRange(SLoc, ELoc);
+      return ExprError();
+    }
+  }
+  */
+  if (!LowerBound)
+    LowerBound = ActOnIntegerConstant(ColonLoc1, 0).take();
+  else {
+    CEANRankCalculator RankCalc(*this);
+    unsigned Rank = RankCalc.Visit(LowerBound);
+    if (RankCalc.isErrorFound())
+      return ExprError();
+    if (Rank != 0 || RankCalc.isRankMismatch()) {
+      Diag(LowerBound->getExprLoc(), diag::err_cean_rank_not_zero)
+          << LowerBound->getSourceRange();
+      return ExprError();
+    }
+  }
+  if (!Length) {
+    if (!Base)
+      return ExprError();
+    QualType Type = Base->getType().getCanonicalType();
+    if (DeclRefExpr *DRE =
+            dyn_cast_or_null<DeclRefExpr>(Base->IgnoreParenLValueCasts())) {
+      if (ParmVarDecl *PVD = dyn_cast_or_null<ParmVarDecl>(DRE->getDecl())) {
+        Type = PVD->getOriginalType().getNonReferenceType().getCanonicalType();
+      }
+    }
+    if (!Type->isConstantArrayType() && !Type->isVariableArrayType()) {
+      Diag(ColonLoc1, diag::err_cean_no_length_for_non_array)
+          << Base->getType();
+      return ExprError();
+    }
+    const ArrayType *ArrType = Type->castAsArrayTypeUnsafe();
+    if (const ConstantArrayType *ConstArrType =
+            dyn_cast<ConstantArrayType>(ArrType))
+      Length = ActOnIntegerConstant(
+          ColonLoc1, ConstArrType->getSize().getZExtValue()).take();
+    else if (const VariableArrayType *VarArrType =
+                 dyn_cast<VariableArrayType>(ArrType))
+      Length = VarArrType->getSizeExpr();
+    Length = CreateBuiltinBinOp(ColonLoc1, BO_Sub, Length, LowerBound).take();
+    if (!Length)
+      return ExprError();
+  } else {
+    CEANRankCalculator RankCalc(*this);
+    unsigned Rank = RankCalc.Visit(Length);
+    if (RankCalc.isErrorFound())
+      return ExprError();
+    if (Rank != 0 || RankCalc.isRankMismatch()) {
+      Diag(Length->getExprLoc(), diag::err_cean_rank_not_zero)
+          << Length->getSourceRange();
+      return ExprError();
+    }
+  }
+  if (!Stride)
+    Stride = ActOnIntegerConstant(SourceLocation(), 1).take();
+  else {
+    CEANRankCalculator RankCalc(*this);
+    unsigned Rank = RankCalc.Visit(Stride);
+    if (RankCalc.isErrorFound())
+      return ExprError();
+    if (Rank != 0 || RankCalc.isRankMismatch()) {
+      Diag(Stride->getExprLoc(), diag::err_cean_rank_not_zero)
+          << Stride->getSourceRange();
+      return ExprError();
+    }
+  }
+
+  if (!LowerBound->getType()->isIntegerType()) {
+    Diag(LowerBound->getExprLoc(), diag::err_cean_lower_bound_not_integer)
+        << LowerBound->getType();
+    return ExprError();
+  }
+  if (!Length->getType()->isIntegerType()) {
+    Diag(Length->getExprLoc(), diag::err_cean_length_not_integer)
+        << Length->getType();
+    return ExprError();
+  }
+  if (!Stride->getType()->isIntegerType()) {
+    Diag(Stride->getExprLoc(), diag::err_cean_stride_not_integer)
+        << Stride->getType();
+    return ExprError();
+  }
+
+  ExprResult LowerBoundRes(LowerBound);
+  ExprResult LengthRes(Length);
+  ExprResult StrideRes(Stride);
+  QualType ResType = UsualArithmeticConversions(LowerBoundRes, LengthRes);
+  ResType = UsualArithmeticConversions(LowerBoundRes, StrideRes);
+  ResType = UsualArithmeticConversions(LowerBoundRes, LengthRes);
+  return Owned(new (Context) CEANIndexExpr(Base, LowerBoundRes.get(), ColonLoc1,
+                                           LengthRes.get(), ColonLoc2,
+                                           StrideRes.get(), ResType));
+}
+
+StmtResult Sema::ActOnCEANExpr(Expr *E) {
+  if (!E)
+    return StmtError();
+
+  if (E->isTypeDependent() || E->isInstantiationDependent() ||
+      E->isValueDependent())
+    return Owned(cast<Stmt>(E));
+
+  CEANRankCalculator RankCalc(*this);
+  unsigned Rank = RankCalc.Visit(E);
+  // MaxAllowedRank can be not equal Rank iff there is comma expression with
+  // CEAN.
+  unsigned MaxAllowedRank = RankCalc.getCEANExprs().size();
+  if (RankCalc.isErrorFound()) {
+    --CEANLevelCounter;
+    return StmtError();
+  }
+  if (RankCalc.isRankMismatch()) {
+    Diag(E->getExprLoc(), diag::err_cean_rank_mismatch) << E->getSourceRange();
+    assert(CEANLevelCounter && "Level counter is 0.");
+    --CEANLevelCounter;
+    return StmtError();
+  }
+  if (Rank > 0 || MaxAllowedRank > 0) {
+    assert(CEANLevelCounter && "Level counter is 0.");
+    --CEANLevelCounter;
+  }
+  if (!CEANLevelCounter &&
+      (Rank < RankCalc.getBuiltinCEANExprs().size() ||
+       MaxAllowedRank < RankCalc.getBuiltinCEANExprs().size())) {
+    Diag(RankCalc.getBuiltinCEANExprs().back().back()->getExprLoc(),
+         diag::err_cean_rank_mismatch)
+        << RankCalc.getBuiltinCEANExprs().back().back()->getSourceRange();
+    return StmtError();
+  }
+
+  StmtResult Res;
+  if ((Rank > 0 || MaxAllowedRank > 0) && !CEANLevelCounter) {
+    CEANRankCalculator::ExprListVec &CEANExprs = RankCalc.getCEANExprs();
+    CEANRankCalculator::BuiltinExprListVec &BuiltinCEANExprs =
+        RankCalc.getBuiltinCEANExprs();
+    SmallVector<Expr *, 4> Lengths;
+    SmallVector<Stmt *, 4> Vars;
+    SmallVector<Stmt *, 4> Incs;
+    CEANRankCalculator::BuiltinExprListVec::iterator BI =
+        BuiltinCEANExprs.begin();
+    bool BIEndFound = false;
+    unsigned Level = 0;
+    for (CEANRankCalculator::ExprListVec::iterator I = CEANExprs.begin(),
+                                                   E = CEANExprs.end();
+         I != E; ++I, ++BI, ++Level) {
+      BIEndFound = BIEndFound || (BI == BuiltinCEANExprs.end());
+      Expr *Length = 0;
+      llvm::APSInt Res;
+      CEANRankCalculator::ExprList::iterator II = I->begin(), EE = I->end();
+      bool LengthSet = false;
+      while (II != EE &&
+             (!(*II) ||
+              !(*II)->getLength() ||
+              !(*II)->getLength()->EvaluateAsInt(Res, Context))) {
+        Length = (*II)->getLength();
+        ++II;
+        if (Length && !LengthSet) {
+          Lengths.push_back(Length);
+          LengthSet = true;
+        }
+      }
+      Length = 0;
+      SmallString<64> S;
+      llvm::raw_svector_ostream OS(S);
+      if (II != EE) {
+        Length = (*II)->getLength();
+        if (!LengthSet) {
+          Lengths.push_back(Length);
+          LengthSet = true;
+        }
+        if ((Res.isSigned() && Res.isNegative()) || Res.getActiveBits() == 0) {
+          Diag(Length->getExprLoc(), diag::warn_cean_wrong_length)
+              << (Res.getActiveBits() == 0) << Length->getSourceRange();
+        }
+        llvm::APSInt Res1;
+        Expr *Length1 = 0;
+        for (++II; II != EE; ++II) {
+          if (*II && (Length1 = (*II)->getLength()) &&
+              Length1->EvaluateAsInt(Res1, Context) &&
+              (!llvm::APSInt::isSameValue(Res, Res1))) {
+            Diag(Length1->getExprLoc(), diag::err_cean_different_length)
+                << Length1->getSourceRange();
+            Diag(Length->getExprLoc(), diag::note_cean_different_length)
+                << Length->getSourceRange();
+            return StmtError();
+          }
+        }
+      } else if (I->begin() != I->end()) {
+        assert (LengthSet && "No length set for CEAN expr stmt.");
+        Length = Lengths.back();
+      }
+      if (Length) {
+        OS << "cean.i." << Level << ".";
+        VarDecl *VD = VarDecl::Create(
+            Context, CurContext, SourceLocation(), SourceLocation(),
+            &Context.Idents.get(OS.str()), Length->getType(),
+            Context.getTrivialTypeSourceInfo(Length->getType(),
+                                             SourceLocation()),
+            SC_Auto);
+        VD->setInit(IntegerLiteral::Create(
+            Context, llvm::APInt(Context.getTypeSize(Length->getType()), 0),
+            Length->getType(), SourceLocation()));
+        DeclStmt *DS = new (Context)
+            DeclStmt(DeclGroupRef(VD), SourceLocation(), SourceLocation());
+        Vars.push_back(DS);
+        Expr *DRE = BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation())
+                        .take();
+        Incs.push_back(
+            CreateBuiltinUnaryOp(SourceLocation(), UO_PreInc, DRE).take());
+        for (II = I->begin(), EE = I->end(); II != EE; ++II) {
+          if (*II) {
+            QualType QTy = (*II)->getType();
+            ExprResult Res = DefaultLvalueConversion(DRE);
+            Res = PerformImplicitConversion(Res.take(), QTy, AA_Casting);
+            Res = CreateBuiltinBinOp(SourceLocation(), BO_Mul,
+                                     (*II)->getStride(), Res.take());
+            Res = CreateBuiltinBinOp(SourceLocation(), BO_Add,
+                                     (*II)->getLowerBound(), Res.take());
+            (*II)->setIndexExpr(Res.take());
+          }
+        }
+        if (!BIEndFound) {
+          for (CEANRankCalculator::BuiltinExprList::iterator BII = BI->begin(),
+                                                             BEE = BI->end();
+               BII != BEE; ++BII) {
+            if (*BII) {
+              Expr *Ret = (*BII)->getReturnExpr();
+              ExprResult Res = DefaultLvalueConversion(DRE);
+              Res = PerformImplicitConversion(Res.take(), Ret->getType(),
+                                              AA_Casting);
+              (*BII)->setReturnExpr(Res.take());
+            }
+          }
+        }
+      }
+    }
+    CEANExprSimplifier Simplifier(*this, RankCalc.getRank0Exprs());
+    Simplifier.Visit(E);
+    StmtResult Inits = ActOnCompoundStmt(SourceLocation(), SourceLocation(),
+                                         Simplifier.getDeclStmts(), false);
+    Res =
+        Owned(CilkRankedStmt::Create(Context, E->getLocStart(), E->getLocEnd(),
+                                     Lengths, Vars, Incs, E, Inits.take()));
+  } else
+    Res = Owned(cast<Stmt>(E));
+
+  return Res;
+}
+
+namespace {
+class CEANRankStmtChecker : public StmtVisitor<CEANRankStmtChecker, bool> {
+public:
+  typedef SmallVector<CEANIndexExpr *, 2> ExprList;
+  typedef SmallVector<ExprList, 2> ExprListVec;
+  typedef SmallVector<CEANBuiltinExpr *, 2> BuiltinExprList;
+  typedef SmallVector<BuiltinExprList, 2> BuiltinExprListVec;
+
+private:
+  ExprListVec CEANExprs;
+  BuiltinExprListVec BuiltinCEANExprs;
+  Sema &Actions;
+  SourceRange CondRange;
+  unsigned Rank;
+
+public:
+  bool VisitExpr(Expr *E) {
+    CEANRankCalculator RankCalc(Actions);
+    unsigned ERank = RankCalc.Visit(E);
+    if (RankCalc.isErrorFound())
+      return false;
+    if (RankCalc.isRankMismatch()) {
+      Actions.Diag(E->getExprLoc(), diag::err_cean_rank_mismatch)
+          << E->getSourceRange();
+      return false;
+    }
+
+    if (ERank != 0 && Rank != ERank) {
+      Actions.Diag(E->getLocStart(), diag::err_cean_rank_mismatch)
+          << E->getSourceRange();
+      Actions.Diag(CondRange.getBegin(), diag::note_cean_if_rank) << CondRange;
+      return false;
+    }
+
+    if (Rank < RankCalc.getBuiltinCEANExprs().size()) {
+      Actions.Diag(RankCalc.getBuiltinCEANExprs().back().back()->getExprLoc(),
+                   diag::err_cean_rank_mismatch)
+          << RankCalc.getBuiltinCEANExprs().back().back()->getSourceRange();
+      Actions.Diag(CondRange.getBegin(), diag::note_cean_if_rank) << CondRange;
+      return false;
+    }
+
+    if (ERank > 0 && RankCalc.getCEANExprs().size() > 0)
+      for (unsigned i = 0; i < Rank; ++i)
+        CEANExprs[i].append(RankCalc.getCEANExprs()[i].begin(),
+                            RankCalc.getCEANExprs()[i].end());
+
+    if (RankCalc.getBuiltinCEANExprs().size() > 0)
+      for (unsigned i = 0; i < Rank; ++i) {
+        if (i >= BuiltinCEANExprs.size())
+          BuiltinCEANExprs.push_back(BuiltinExprList());
+        BuiltinCEANExprs[i].append(RankCalc.getBuiltinCEANExprs()[i].begin(),
+                                   RankCalc.getBuiltinCEANExprs()[i].end());
+      }
+    return true;
+  }
+  bool VisitStmt(Stmt *S) {
+    for (Stmt::child_iterator I = S->child_begin(), E = S->child_end(); I != E;
+         ++I) {
+      if (*I && ((isa<Expr>(*I) && !VisitExpr(cast<Expr>(*I))) ||
+                 (!isa<Expr>(*I) && !Visit(*I))))
+        return false;
+    }
+    return true;
+  }
+  CEANRankStmtChecker(ExprListVec &CEANExprs,
+                      BuiltinExprListVec &BuiltinCEANExprs, Sema &Actions,
+                      SourceRange CondRange, unsigned Rank)
+      : CEANExprs(CEANExprs), BuiltinCEANExprs(BuiltinCEANExprs),
+        Actions(Actions), CondRange(CondRange), Rank(Rank) {}
+  ExprListVec &getCEANExprs() { return CEANExprs; }
+  BuiltinExprListVec &getBuiltinCEANExprs() { return BuiltinCEANExprs; }
+};
+}
+
+StmtResult Sema::ActOnCEANIfStmt(Stmt *S) {
+  if (!S)
+    return StmtError();
+
+  assert(isa<IfStmt>(S) && "Must be if statement.");
+  IfStmt *If = cast<IfStmt>(S);
+  Expr *E = If->getCond();
+
+  if (E->isTypeDependent() || E->isInstantiationDependent() ||
+      E->isValueDependent())
+    return Owned(S);
+
+  CEANRankCalculator RankCalc(*this);
+  unsigned Rank = RankCalc.Visit(E);
+  // MaxAllowedRank can be not equal Rank iff there is comma expression with
+  // CEAN.
+  unsigned MaxAllowedRank = RankCalc.getCEANExprs().size();
+  if (RankCalc.isErrorFound()) {
+    --CEANLevelCounter;
+    return StmtError();
+  }
+  if (RankCalc.isRankMismatch()) {
+    Diag(E->getExprLoc(), diag::err_cean_rank_mismatch) << E->getSourceRange();
+    assert(CEANLevelCounter && "Level counter is 0.");
+    --CEANLevelCounter;
+    return StmtError();
+  }
+
+  if (Rank > 0 || MaxAllowedRank > 0) {
+    assert(CEANLevelCounter && "Level counter is 0.");
+    --CEANLevelCounter;
+  }
+  if (!CEANLevelCounter &&
+      (Rank < RankCalc.getBuiltinCEANExprs().size() ||
+       MaxAllowedRank < RankCalc.getBuiltinCEANExprs().size())) {
+    Diag(RankCalc.getBuiltinCEANExprs().back().back()->getExprLoc(),
+         diag::err_cean_rank_mismatch)
+        << RankCalc.getBuiltinCEANExprs().back().back()->getSourceRange();
+    return StmtError();
+  }
+
+  StmtResult Res;
+  if ((Rank > 0 || MaxAllowedRank > 0) && !CEANLevelCounter) {
+    CEANRankStmtChecker Checker(RankCalc.getCEANExprs(),
+                                RankCalc.getBuiltinCEANExprs(), *this,
+                                E->getSourceRange(), MaxAllowedRank);
+    if ((If->getThen() && !Checker.Visit(If->getThen())) ||
+        (If->getElse() && !Checker.Visit(If->getElse())))
+      return StmtError();
+
+    CEANRankStmtChecker::ExprListVec &CEANExprs = Checker.getCEANExprs();
+    CEANRankStmtChecker::BuiltinExprListVec &BuiltinCEANExprs =
+        Checker.getBuiltinCEANExprs();
+    SmallVector<Expr *, 4> Lengths;
+    SmallVector<Stmt *, 4> Vars;
+    SmallVector<Stmt *, 4> Incs;
+    CEANRankStmtChecker::BuiltinExprListVec::iterator BI =
+        BuiltinCEANExprs.begin();
+    bool BIEndFound = false;
+    unsigned Level = 0;
+    for (CEANRankStmtChecker::ExprListVec::iterator I = CEANExprs.begin(),
+                                                    E = CEANExprs.end();
+         I != E; ++I, ++BI, ++Level) {
+      BIEndFound = BIEndFound || (BI == BuiltinCEANExprs.end());
+      Expr *Length = 0;
+      llvm::APSInt Res;
+      CEANRankCalculator::ExprList::iterator II = I->begin(), EE = I->end();
+      bool LengthSet = false;
+      while (II != EE &&
+             (!(*II) ||
+              !(*II)->getLength() ||
+              !(*II)->getLength()->EvaluateAsInt(Res, Context))) {
+        Length = (*II)->getLength();
+        ++II;
+        if (Length && !LengthSet) {
+          Lengths.push_back(Length);
+          LengthSet = true;
+        }
+      }
+      Length = 0;
+      SmallString<64> S;
+      llvm::raw_svector_ostream OS(S);
+      if (II != EE) {
+        Length = (*II)->getLength();
+        if (!LengthSet) {
+          Lengths.push_back(Length);
+          LengthSet = true;
+        }
+        if ((Res.isSigned() && Res.isNegative()) || Res.getActiveBits() == 0) {
+          Diag(Length->getExprLoc(), diag::warn_cean_wrong_length)
+              << (Res.getActiveBits() == 0) << Length->getSourceRange();
+        }
+        llvm::APSInt Res1;
+        Expr *Length1 = 0;
+        for (++II; II != EE; ++II) {
+          if (*II && (Length1 = (*II)->getLength()) &&
+              Length1->EvaluateAsInt(Res1, Context) &&
+              (!llvm::APSInt::isSameValue(Res, Res1))) {
+            Diag(Length1->getExprLoc(), diag::err_cean_different_length)
+                << Length1->getSourceRange();
+            Diag(Length->getExprLoc(), diag::note_cean_different_length)
+                << Length->getSourceRange();
+            return StmtError();
+          }
+        }
+      } else if (I->begin() != I->end()) {
+        assert(LengthSet && "No length set for CEAN if stmt.");
+        Length = Lengths.back();
+      }
+      if (Length) {
+        OS << "cean.i." << Level << ".";
+        VarDecl *VD = VarDecl::Create(
+            Context, CurContext, SourceLocation(), SourceLocation(),
+            &Context.Idents.get(OS.str()), Length->getType(),
+            Context.getTrivialTypeSourceInfo(Length->getType(),
+                                             SourceLocation()),
+            SC_Auto);
+        VD->setInit(IntegerLiteral::Create(
+            Context, llvm::APInt(Context.getTypeSize(Length->getType()), 0),
+            Length->getType(), SourceLocation()));
+        DeclStmt *DS = new (Context)
+            DeclStmt(DeclGroupRef(VD), SourceLocation(), SourceLocation());
+        Vars.push_back(DS);
+        Expr *DRE = BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation())
+                        .take();
+        Incs.push_back(
+            CreateBuiltinUnaryOp(SourceLocation(), UO_PreInc, DRE).take());
+        for (II = I->begin(), EE = I->end(); II != EE; ++II) {
+          if (*II) {
+            QualType QTy = (*II)->getType();
+            ExprResult Res = DefaultLvalueConversion(DRE);
+            Res = PerformImplicitConversion(Res.take(), QTy, AA_Casting);
+            Res = CreateBuiltinBinOp(SourceLocation(), BO_Mul,
+                                     (*II)->getStride(), Res.take());
+            Res = CreateBuiltinBinOp(SourceLocation(), BO_Add,
+                                     (*II)->getLowerBound(), Res.take());
+            (*II)->setIndexExpr(Res.take());
+          }
+        }
+        if (!BIEndFound) {
+          for (CEANRankCalculator::BuiltinExprList::iterator BII = BI->begin(),
+                                                             BEE = BI->end();
+               BII != BEE; ++BII) {
+            if (*BII) {
+              Expr *Ret = (*BII)->getReturnExpr();
+              ExprResult Res = DefaultLvalueConversion(DRE);
+              Res = PerformImplicitConversion(Res.take(), Ret->getType(),
+                                              AA_Casting);
+              (*BII)->setReturnExpr(Res.take());
+            }
+          }
+        }
+      }
+    }
+    CEANExprSimplifier Simplifier(*this, RankCalc.getRank0Exprs());
+    Simplifier.Visit(E);
+    StmtResult Inits = ActOnCompoundStmt(SourceLocation(), SourceLocation(),
+                                         Simplifier.getDeclStmts(), false);
+    Res =
+        Owned(CilkRankedStmt::Create(Context, E->getLocStart(), E->getLocEnd(),
+                                     Lengths, Vars, Incs, S, Inits.take()));
+  } else
+    Res = Owned(S);
+
+  return Res;
+}
+
+/// Checks that a call expression's argument count is the desired number.
+/// This is useful when doing custom type-checking.  Returns true on error.
+static bool checkArgCount(Sema &S, SourceLocation Start, SourceLocation End,
+                          ArrayRef<Expr *> Args, unsigned DesiredArgCount) {
+  if (Args.size() == DesiredArgCount)
+    return false;
+
+  if (Args.size() < DesiredArgCount)
+    return S.Diag(Start, diag::err_typecheck_call_too_few_args)
+           << 0 /*function call*/ << DesiredArgCount
+           << static_cast<unsigned>(Args.size()) << SourceRange(Start, End);
+
+  // Highlight all the excess arguments.
+  SourceRange Range(Args[DesiredArgCount]->getLocStart(),
+                    Args.back()->getLocEnd());
+
+  return S.Diag(Range.getBegin(), diag::err_typecheck_call_too_many_args)
+         << 0 /*function call*/ << DesiredArgCount
+         << static_cast<unsigned>(Args.size()) << Range;
+}
+
+ExprResult Sema::ActOnCEANBuiltinExpr(Scope *S, SourceLocation StartLoc,
+                                      unsigned Kind, ArrayRef<Expr *> Args,
+                                      SourceLocation RParenLoc) {
+  CEANBuiltinExpr::CEANKindType CKind =
+      static_cast<CEANBuiltinExpr::CEANKindType>(Kind);
+  llvm::SmallVector<Expr *, 4> CallArgs;
+  llvm::SmallVector<Expr *, 4> Lengths;
+  llvm::SmallVector<Stmt *, 4> Vars;
+  llvm::SmallVector<Stmt *, 4> Incs;
+  for (ArrayRef<Expr *>::iterator I = Args.begin(), E = Args.end(); I != E;
+       ++I) {
+    if (!(*I))
+      return ExprError();
+    if ((*I)->isTypeDependent() || (*I)->isInstantiationDependent() ||
+        (*I)->isValueDependent())
+      return CEANBuiltinExpr::Create(Context, StartLoc, RParenLoc, 0, CKind,
+                                     Args, Lengths, Vars, Incs, 0, 0, 0,
+                                     Context.IntTy);
+  }
+
+  CEANRankCalculator RankCalc(*this);
+  Expr *RankedExpr;
+  ExprResult ImplicitIndex;
+  switch (CKind) {
+  case CEANBuiltinExpr::ReduceAdd:
+  case CEANBuiltinExpr::ReduceMul:
+  case CEANBuiltinExpr::ReduceMax:
+  case CEANBuiltinExpr::ReduceMin:
+  case CEANBuiltinExpr::ReduceAllZero:
+  case CEANBuiltinExpr::ReduceAllNonZero:
+  case CEANBuiltinExpr::ReduceAnyZero:
+  case CEANBuiltinExpr::ReduceAnyNonZero:
+  case CEANBuiltinExpr::ReduceMaxIndex:
+  case CEANBuiltinExpr::ReduceMinIndex:
+    if (checkArgCount(*this, StartLoc, RParenLoc, Args, 1))
+      return ExprError();
+    RankedExpr = Args[0];
+    break;
+  case CEANBuiltinExpr::Reduce:
+  case CEANBuiltinExpr::ReduceMutating: {
+    if (checkArgCount(*this, StartLoc, RParenLoc, Args, 3))
+      return ExprError();
+    CEANRankCalculator RankCalc0(*this);
+    unsigned Rank = RankCalc0.Visit(Args[0]);
+    // MaxAllowedRank can be not equal Rank iff there is comma expression with
+    // CEAN.
+    unsigned MaxAllowedRank = RankCalc.getCEANExprs().size();
+    if (RankCalc0.isErrorFound())
+      return ExprError();
+    if (RankCalc0.isRankMismatch() || Rank > 0 || MaxAllowedRank > 0) {
+      Diag(Args[0]->getExprLoc(), diag::err_cean_not_in_statement)
+          << Args[0]->getSourceRange();
+      return ExprError();
+    }
+    CEANRankCalculator RankCalc2(*this);
+    Rank = RankCalc2.Visit(Args[2]);
+    // MaxAllowedRank can be not equal Rank iff there is comma expression with
+    // CEAN.
+    MaxAllowedRank = RankCalc.getCEANExprs().size();
+    if (RankCalc2.isErrorFound())
+      return ExprError();
+    if (RankCalc2.isRankMismatch() || Rank > 0 || MaxAllowedRank > 0) {
+      Diag(Args[2]->getExprLoc(), diag::err_cean_not_in_statement)
+          << Args[2]->getSourceRange();
+      return ExprError();
+    }
+
+    RankedExpr = Args[1];
+  } break;
+  case CEANBuiltinExpr::ImplicitIndex: {
+    if (checkArgCount(*this, StartLoc, RParenLoc, Args, 1))
+      return ExprError();
+    if (!Args[0]->getType()->isIntegerType()) {
+      Diag(Args[0]->getExprLoc(), diag::err_cean_not_integer)
+          << Args[0]->getSourceRange();
+      return ExprError();
+    }
+    llvm::APSInt Res;
+    ImplicitIndex = VerifyIntegerConstantExpression(Args[0], &Res);
+    if (ImplicitIndex.isInvalid())
+      return ExprError();
+    if (Res.isSigned() && Res.isNegative()) {
+      Diag(Args[0]->getExprLoc(), diag::err_cean_less_zero)
+          << Args[0]->getSourceRange();
+      return ExprError();
+    }
+    ImplicitIndex = PerformImplicitConversion(
+        ImplicitIndex.take(), Context.getIntPtrType(), AA_Converting);
+    RankedExpr = 0;
+  } break;
+  case CEANBuiltinExpr::Unknown:
+    llvm_unreachable("Unknown expression.");
+  }
+  unsigned Rank = 0;
+  if (RankedExpr) {
+    Rank = RankCalc.Visit(RankedExpr);
+    if (RankCalc.isErrorFound())
+      return ExprError();
+    if (RankCalc.isRankMismatch()) {
+      Diag(RankedExpr->getExprLoc(), diag::err_cean_rank_mismatch)
+          << RankedExpr->getSourceRange();
+      return ExprError();
+    }
+    if (Rank == 0) {
+      Diag(RankedExpr->getExprLoc(), diag::err_cean_rank_zero)
+          << RankedExpr->getSourceRange();
+      return ExprError();
+    }
+    if ((CKind == CEANBuiltinExpr::ReduceMaxIndex ||
+         CKind == CEANBuiltinExpr::ReduceMinIndex) &&
+        Rank != 1) {
+      Diag(RankedExpr->getExprLoc(), diag::err_cean_rank_not_one)
+          << RankedExpr->getSourceRange();
+      return ExprError();
+    }
+  }
+  ExprResult Res = ExprError();
+  if (Rank > 0) {
+    CEANRankCalculator::ExprListVec &CEANExprs = RankCalc.getCEANExprs();
+    Stmt *InitStmt = 0;
+    Stmt *Body = 0;
+    Expr *Return = 0;
+    ExprResult IndExpr;
+    unsigned Level = 0;
+    for (CEANRankCalculator::ExprListVec::iterator I = CEANExprs.begin(),
+                                                   E = CEANExprs.end();
+         I != E; ++I, ++Level) {
+      Expr *Length = 0;
+      llvm::APSInt Res;
+      CEANRankCalculator::ExprList::iterator II = I->begin(), EE = I->end();
+      bool LengthSet = false;
+      while (II != EE &&
+             (!(*II) ||
+              !(*II)->getLength() ||
+              !(*II)->getLength()->EvaluateAsInt(Res, Context))) {
+        Length = (*II)->getLength();
+        ++II;
+        if (Length && !LengthSet) {
+          Lengths.push_back(Length);
+          LengthSet = true;
+        }
+      }
+      Length = 0;
+      SmallString<64> S;
+      llvm::raw_svector_ostream OS(S);
+      if (II != EE) {
+        Length = (*II)->getLength();
+        if (!LengthSet) {
+          Lengths.push_back(Length);
+          LengthSet = true;
+        }
+        if ((Res.isSigned() && Res.isNegative()) || Res.getActiveBits() == 0) {
+          Diag(Length->getExprLoc(), diag::warn_cean_wrong_length)
+              << (Res.getActiveBits() == 0) << Length->getSourceRange();
+        }
+        llvm::APSInt Res1;
+        Expr *Length1 = 0;
+        for (++II; II != EE; ++II) {
+          if (*II && (Length1 = (*II)->getLength()) &&
+              Length1->EvaluateAsInt(Res1, Context) &&
+              (!llvm::APSInt::isSameValue(Res, Res1))) {
+            Diag(Length1->getExprLoc(), diag::err_cean_different_length)
+                << Length1->getSourceRange();
+            Diag(Length->getExprLoc(), diag::note_cean_different_length)
+                << Length->getSourceRange();
+            return ExprError();
+          }
+        }
+      } else if (I->begin() != I->end()) {
+        assert (LengthSet && "No length set for CEAN in builtin.");
+        Length = Lengths.back();
+      }
+      if (Length) {
+        OS << "cean.i." << Level << ".";
+        VarDecl *VD = VarDecl::Create(
+            Context, CurContext, SourceLocation(), SourceLocation(),
+            &Context.Idents.get(OS.str()), Length->getType(),
+            Context.getTrivialTypeSourceInfo(Length->getType(),
+                                             SourceLocation()),
+            SC_Auto);
+        VD->setInit(IntegerLiteral::Create(
+            Context, llvm::APInt(Context.getTypeSize(Length->getType()), 0),
+            Length->getType(), SourceLocation()));
+        DeclStmt *DS = new (Context)
+            DeclStmt(DeclGroupRef(VD), SourceLocation(), SourceLocation());
+        Vars.push_back(DS);
+        Expr *DRE = BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation())
+                        .take();
+        Incs.push_back(
+            CreateBuiltinUnaryOp(SourceLocation(), UO_PreInc, DRE).take());
+        for (II = I->begin(); II != EE; ++II) {
+          if (*II) {
+            QualType QTy = (*II)->getType();
+            ExprResult Res = DefaultLvalueConversion(DRE);
+            Res = PerformImplicitConversion(Res.take(), QTy, AA_Casting);
+            Res = CreateBuiltinBinOp(SourceLocation(), BO_Mul,
+                                     (*II)->getStride(), Res.take());
+            Res = CreateBuiltinBinOp(SourceLocation(), BO_Add,
+                                     (*II)->getLowerBound(), Res.take());
+            IndExpr = PerformImplicitConversion(
+                Res.take(), Context.getIntPtrType(), AA_Converting);
+            (*II)->setIndexExpr(IndExpr.get());
+          }
+        }
+      }
+    }
+    QualType ResType = RankedExpr->getType().getUnqualifiedType();
+    ExprResult InitExpr;
+    switch (CKind) {
+    case CEANBuiltinExpr::ReduceAdd: {
+      if (!ResType->isScalarType() && !ResType->isAnyComplexType()) {
+        Diag(RankedExpr->getExprLoc(), diag::err_cean_not_scalar_or_complex)
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      InitExpr = ActOnIntegerConstant(RankedExpr->getExprLoc(), 0);
+      InitExpr =
+          PerformImplicitConversion(InitExpr.take(), ResType, AA_Casting);
+    } break;
+    case CEANBuiltinExpr::ReduceMul: {
+      if (!ResType->isScalarType() && !ResType->isAnyComplexType()) {
+        Diag(RankedExpr->getExprLoc(), diag::err_cean_not_scalar_or_complex)
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      InitExpr = ActOnIntegerConstant(RankedExpr->getExprLoc(), 1);
+      InitExpr =
+          PerformImplicitConversion(InitExpr.take(), ResType, AA_Casting);
+    } break;
+    case CEANBuiltinExpr::ReduceMaxIndex:
+    case CEANBuiltinExpr::ReduceMax: {
+      if (!ResType->isScalarType()) {
+        Diag(RankedExpr->getExprLoc(), diag::err_cean_not_scalar)
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      if (ResType->hasSignedIntegerRepresentation()) {
+        llvm::APInt Val =
+            llvm::APInt::getSignedMinValue(Context.getTypeSize(ResType));
+        InitExpr = Owned(
+            IntegerLiteral::Create(Context, Val, ResType, SourceLocation()));
+      } else if (ResType->hasUnsignedIntegerRepresentation()) {
+        llvm::APInt Val =
+            llvm::APInt::getMinValue(Context.getTypeSize(ResType));
+        InitExpr = Owned(
+            IntegerLiteral::Create(Context, Val, ResType, SourceLocation()));
+      } else if (ResType->hasFloatingRepresentation()) {
+        llvm::APFloat Val = llvm::APFloat::getLargest(
+            Context.getFloatTypeSemantics(ResType), true);
+        InitExpr = Owned(FloatingLiteral::Create(Context, Val, true, ResType,
+                                                 SourceLocation()));
+      } else if (ResType->isPointerType()) {
+        InitExpr = ActOnIntegerConstant(RankedExpr->getExprLoc(), 0);
+      } else
+        llvm_unreachable("Unsupported type of __sec_reduce_max");
+      InitExpr =
+          PerformImplicitConversion(InitExpr.take(), ResType, AA_Casting);
+    } break;
+    case CEANBuiltinExpr::ReduceMinIndex:
+    case CEANBuiltinExpr::ReduceMin: {
+      if (!ResType->isScalarType()) {
+        Diag(RankedExpr->getExprLoc(), diag::err_cean_not_scalar)
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      if (ResType->hasSignedIntegerRepresentation()) {
+        llvm::APInt Val =
+            llvm::APInt::getSignedMaxValue(Context.getTypeSize(ResType));
+        InitExpr = Owned(
+            IntegerLiteral::Create(Context, Val, ResType, SourceLocation()));
+      } else if (ResType->hasUnsignedIntegerRepresentation()) {
+        llvm::APInt Val =
+            llvm::APInt::getMaxValue(Context.getTypeSize(ResType));
+        InitExpr = Owned(
+            IntegerLiteral::Create(Context, Val, ResType, SourceLocation()));
+      } else if (ResType->hasFloatingRepresentation()) {
+        llvm::APFloat Val = llvm::APFloat::getLargest(
+            Context.getFloatTypeSemantics(ResType), false);
+        InitExpr = Owned(FloatingLiteral::Create(Context, Val, true, ResType,
+                                                 SourceLocation()));
+      } else if (ResType->isPointerType()) {
+        llvm::APInt Val =
+            llvm::APInt::getMaxValue(Context.getTypeSize(Context.IntTy));
+        InitExpr = Owned(
+            IntegerLiteral::Create(Context, Val, ResType, SourceLocation()));
+      } else
+        llvm_unreachable("Unsupported type of __sec_reduce_max");
+      InitExpr =
+          PerformImplicitConversion(InitExpr.take(), ResType, AA_Casting);
+    } break;
+    case CEANBuiltinExpr::ReduceAllZero:
+    case CEANBuiltinExpr::ReduceAllNonZero:
+      if (!ResType->isScalarType() && !ResType->isAnyComplexType()) {
+        Diag(RankedExpr->getExprLoc(), diag::err_cean_not_scalar_or_complex)
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      if (ScalarTypeToBooleanCastKind(RankedExpr->getType()) == CK_Invalid) {
+        Diag(RankedExpr->getExprLoc(), diag::err_typecheck_nonviable_condition)
+            << RankedExpr->getType() << Context.IntTy
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      InitExpr = ActOnIntegerConstant(RankedExpr->getExprLoc(), 1);
+      ResType = Context.IntTy;
+      break;
+    case CEANBuiltinExpr::ReduceAnyZero:
+    case CEANBuiltinExpr::ReduceAnyNonZero:
+      if (!ResType->isScalarType() && !ResType->isAnyComplexType()) {
+        Diag(RankedExpr->getExprLoc(), diag::err_cean_not_scalar_or_complex)
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      if (ScalarTypeToBooleanCastKind(RankedExpr->getType()) == CK_Invalid) {
+        Diag(RankedExpr->getExprLoc(), diag::err_typecheck_nonviable_condition)
+            << RankedExpr->getType() << Context.IntTy
+            << RankedExpr->getSourceRange();
+        return ExprError();
+      }
+      InitExpr = ActOnIntegerConstant(RankedExpr->getExprLoc(), 0);
+      ResType = Context.IntTy;
+      break;
+    case CEANBuiltinExpr::Reduce:
+      InitExpr = DefaultLvalueConversion(Args[0]);
+      break;
+    case CEANBuiltinExpr::ReduceMutating:
+      if (!Args[0]->isLValue()) {
+        Diag(Args[0]->getExprLoc(), diag::err_cean_arg_not_lvalue)
+            << Args[0]->getSourceRange();
+        return ExprError();
+      }
+      break;
+    case CEANBuiltinExpr::ImplicitIndex:
+    case CEANBuiltinExpr::Unknown:
+      llvm_unreachable("Unsupported kind of expression.");
+    }
+    if (CKind != CEANBuiltinExpr::ReduceMutating) {
+      VarDecl *VD = VarDecl::Create(
+          Context, CurContext, StartLoc, RParenLoc,
+          &Context.Idents.get("cean.acc."), ResType,
+          Context.getTrivialTypeSourceInfo(ResType, SourceLocation()), SC_Auto);
+      AddInitializerToDecl(VD, InitExpr.take(), true, false);
+      Decl *Vars[2];
+      Vars[0] = VD;
+      int Size = 1;
+      Expr *IndDRE = 0;
+      if (CKind == CEANBuiltinExpr::ReduceMaxIndex ||
+          CKind == CEANBuiltinExpr::ReduceMinIndex) {
+        VarDecl *IndVD = VarDecl::Create(
+            Context, CurContext, SourceLocation(), SourceLocation(),
+            &Context.Idents.get("cean.ind."), IndExpr.get()->getType(),
+            Context.getTrivialTypeSourceInfo(IndExpr.get()->getType(),
+                                             SourceLocation()),
+            SC_Auto);
+        Size = 2;
+        Vars[1] = IndVD;
+        IndDRE = BuildDeclRefExpr(IndVD, IndVD->getType(), VK_LValue,
+                                  SourceLocation()).take();
+      }
+      DeclStmt *DS =
+          new (Context) DeclStmt(DeclGroupRef::Create(Context, Vars, Size),
+                                 SourceLocation(), SourceLocation());
+      InitStmt = DS;
+      ExprResult ReturnRes = BuildDeclRefExpr(VD, VD->getType(), VK_LValue,
+                                              RankedExpr->getExprLoc());
+      Return = ReturnRes.take();
+      Expr *RetVal = DefaultLvalueConversion(Return).take();
+      ExprResult CalcExpr;
+      switch (CKind) {
+      case CEANBuiltinExpr::ReduceAdd:
+        CalcExpr =
+            BuildBinOp(S, RankedExpr->getExprLoc(), BO_Add, RetVal, RankedExpr);
+        break;
+      case CEANBuiltinExpr::ReduceMul:
+        CalcExpr =
+            BuildBinOp(S, RankedExpr->getExprLoc(), BO_Mul, RetVal, RankedExpr);
+        break;
+      case CEANBuiltinExpr::ReduceMax:
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            BuildBinOp(S, RankedExpr->getExprLoc(), BO_GT, RetVal, RankedExpr)
+                .take(),
+            RetVal, RankedExpr);
+        break;
+      case CEANBuiltinExpr::ReduceMin:
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            BuildBinOp(S, RankedExpr->getExprLoc(), BO_LT, RetVal, RankedExpr)
+                .take(),
+            RetVal, RankedExpr);
+        break;
+      case CEANBuiltinExpr::ReduceAllZero: {
+        CastKind CK = ScalarTypeToBooleanCastKind(RankedExpr->getType());
+        ExprResult Res = DefaultLvalueConversion(RankedExpr);
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            BuildUnaryOp(S, RankedExpr->getExprLoc(), UO_LNot,
+                         ImpCastExprToType(Res.take(),
+                                           Context.getLogicalOperationType(),
+                                           CK).take()).take(),
+            RetVal, ActOnIntegerConstant(RankedExpr->getExprLoc(), 0).take());
+      } break;
+      case CEANBuiltinExpr::ReduceAllNonZero: {
+        CastKind CK = ScalarTypeToBooleanCastKind(RankedExpr->getType());
+        ExprResult Res = DefaultLvalueConversion(RankedExpr);
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            ImpCastExprToType(Res.take(), Context.getLogicalOperationType(), CK)
+                .take(),
+            RetVal, ActOnIntegerConstant(RankedExpr->getExprLoc(), 0).take());
+      } break;
+      case CEANBuiltinExpr::ReduceAnyZero: {
+        CastKind CK = ScalarTypeToBooleanCastKind(RankedExpr->getType());
+        ExprResult Res = DefaultLvalueConversion(RankedExpr);
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            BuildUnaryOp(S, RankedExpr->getExprLoc(), UO_LNot,
+                         ImpCastExprToType(Res.take(),
+                                           Context.getLogicalOperationType(),
+                                           CK).take()).take(),
+            ActOnIntegerConstant(RankedExpr->getExprLoc(), 1).take(), RetVal);
+      } break;
+      case CEANBuiltinExpr::ReduceAnyNonZero: {
+        CastKind CK = ScalarTypeToBooleanCastKind(RankedExpr->getType());
+        ExprResult Res = DefaultLvalueConversion(RankedExpr);
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            ImpCastExprToType(Res.take(), Context.getLogicalOperationType(), CK)
+                .take(),
+            ActOnIntegerConstant(RankedExpr->getExprLoc(), 1).take(), RetVal);
+      } break;
+      case CEANBuiltinExpr::ReduceMaxIndex: {
+        ExprResult AssignInd =
+            BuildBinOp(S, SourceLocation(), BO_Assign, IndDRE, IndExpr.take());
+        ExprResult ResExpr = CreateBuiltinBinOp(SourceLocation(), BO_Comma,
+                                                AssignInd.take(), RankedExpr);
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            BuildBinOp(S, RankedExpr->getExprLoc(), BO_GT, RetVal, RankedExpr)
+                .take(),
+            RetVal, ResExpr.take());
+      } break;
+      case CEANBuiltinExpr::ReduceMinIndex: {
+        ExprResult AssignInd =
+            BuildBinOp(S, SourceLocation(), BO_Assign, IndDRE, IndExpr.take());
+        ExprResult ResExpr = CreateBuiltinBinOp(SourceLocation(), BO_Comma,
+                                                AssignInd.take(), RankedExpr);
+        CalcExpr = ActOnConditionalOp(
+            RankedExpr->getExprLoc(), RankedExpr->getExprLoc(),
+            BuildBinOp(S, RankedExpr->getExprLoc(), BO_LT, RetVal, RankedExpr)
+                .take(),
+            RetVal, ResExpr.take());
+      } break;
+      case CEANBuiltinExpr::Reduce: {
+        ExprResult Res = DefaultLvalueConversion(RankedExpr);
+        UnresolvedLookupExpr *ULE = dyn_cast<UnresolvedLookupExpr>(Args[2]);
+        if (ULE && ULE->getNamingClass() &&
+            (Context.hasSameUnqualifiedType(
+                 Context.getRecordType(
+                     ULE->getNamingClass()->getCanonicalDecl()),
+                 Args[0]->getType().getCanonicalType()) ||
+             IsDerivedFrom(Args[0]->getType(),
+                           Context.getRecordType(
+                               ULE->getNamingClass()->getCanonicalDecl())))) {
+          CXXScopeSpec SS;
+          UnqualifiedId Name;
+          switch (ULE->getName().getNameKind()) {
+          case DeclarationName::Identifier:
+            Name.setIdentifier(ULE->getName().getAsIdentifierInfo(),
+                               ULE->getNameLoc());
+            break;
+          case DeclarationName::CXXConversionFunctionName:
+            Name.setConversionFunctionId(
+                ULE->getNameLoc(),
+                ParsedType::make(ULE->getName().getCXXNameType()), RParenLoc);
+            break;
+          case DeclarationName::CXXOperatorName: {
+            SourceLocation SymbolLocations[] = { ULE->getNameLoc(),
+                                                 ULE->getNameLoc(), RParenLoc };
+            Name.setOperatorFunctionId(
+                ULE->getNameLoc(), ULE->getName().getCXXOverloadedOperator(),
+                SymbolLocations);
+          } break;
+          case DeclarationName::CXXLiteralOperatorName:
+            Name.setLiteralOperatorId(ULE->getName().getCXXLiteralIdentifier(),
+                                      ULE->getNameLoc(), RParenLoc);
+            break;
+          default:
+            llvm_unreachable("Unknown kind of name");
+          }
+          ExprResult MemberExpr = ActOnMemberAccessExpr(
+              S, Return, ULE->getNameLoc(), tok::period, SS,
+              ULE->getTemplateKeywordLoc(), Name, 0, true);
+          if (MemberExpr.isInvalid())
+            return ExprError();
+          CallArgs.clear();
+          CallArgs.push_back(Res.take());
+          Expr *Callee = MemberExpr.take();
+          CalcExpr =
+              ActOnCallExpr(S, Callee, ULE->getNameLoc(), CallArgs, RParenLoc);
+        } else if (isa<DeclRefExpr>(Args[2]) &&
+                   isa<CXXMethodDecl>(cast<DeclRefExpr>(Args[2])->getDecl())) {
+          CXXMethodDecl *MD =
+              cast<CXXMethodDecl>(cast<DeclRefExpr>(Args[2])->getDecl());
+          CXXScopeSpec SS;
+          QualType BaseType = Return->getType();
+          LookupResult R(*this, MD->getNameInfo(), LookupMemberName);
+          R.addDecl(MD);
+          R.resolveKind();
+          ExprResult MemberExpr = BuildMemberReferenceExpr(
+              Return, BaseType, Args[2]->getExprLoc(), false, SS,
+              SourceLocation(), 0, R, 0, true);
+          if (MemberExpr.isInvalid())
+            return ExprError();
+          CallArgs.clear();
+          CallArgs.push_back(Res.take());
+          Expr *Callee = MemberExpr.take();
+          CalcExpr = ActOnCallExpr(S, Callee, Args[2]->getLocStart(), CallArgs,
+                                   RParenLoc);
+        } else {
+          CallArgs.clear();
+          CallArgs.push_back(RetVal);
+          CallArgs.push_back(Res.take());
+
+          CalcExpr = ActOnCallExpr(S, Args[2], Args[2]->getLocStart(), CallArgs,
+                                   Args[2]->getLocEnd());
+        }
+        if (CalcExpr.isInvalid())
+          return ExprError();
+      } break;
+      case CEANBuiltinExpr::ReduceMutating:
+      case CEANBuiltinExpr::ImplicitIndex:
+      case CEANBuiltinExpr::Unknown:
+        llvm_unreachable("Unknown expression.");
+      }
+      CalcExpr = BuildBinOp(S, RankedExpr->getExprLoc(), BO_Assign, Return,
+                            CalcExpr.take());
+      if (CalcExpr.isInvalid())
+        return ExprError();
+      Body =
+          ImpCastExprToType(CalcExpr.take(), Context.VoidTy, CK_ToVoid).take();
+      if (CKind == CEANBuiltinExpr::ReduceAnyZero ||
+          CKind == CEANBuiltinExpr::ReduceAnyNonZero) {
+        FullExprArg Cond = MakeFullExpr(BuildBinOp(
+            S, SourceLocation(), BO_EQ, RetVal,
+            ActOnIntegerConstant(SourceLocation(), 1).take()).take());
+        Stmt *IfStmt = ActOnIfStmt(SourceLocation(), Cond, 0,
+                                   new (Context) BreakStmt(SourceLocation()),
+                                   SourceLocation(), 0).take();
+        Stmt *Stmts[] = { Body, IfStmt };
+        Body = new (Context) CompoundStmt(Context, llvm::makeArrayRef(Stmts),
+                                          SourceLocation(), SourceLocation());
+      } else if (CKind == CEANBuiltinExpr::ReduceMaxIndex ||
+                 CKind == CEANBuiltinExpr::ReduceMinIndex) {
+        Return = IndDRE;
+        ResType = IndDRE->getType();
+      }
+    } else {
+      Return = 0;
+      ResType = Context.VoidTy;
+      ExprResult CallExpr = ExprError();
+      ExprResult Res = DefaultLvalueConversion(RankedExpr);
+      UnresolvedLookupExpr *ULE = dyn_cast<UnresolvedLookupExpr>(Args[2]);
+      if (ULE && ULE->getNamingClass() &&
+          (Context.hasSameUnqualifiedType(
+               Context.getRecordType(ULE->getNamingClass()->getCanonicalDecl()),
+               Args[0]->getType().getCanonicalType()) ||
+           IsDerivedFrom(Args[0]->getType(),
+                         Context.getRecordType(
+                             ULE->getNamingClass()->getCanonicalDecl())))) {
+        CXXScopeSpec SS;
+        UnqualifiedId Name;
+        switch (ULE->getName().getNameKind()) {
+        case DeclarationName::Identifier:
+          Name.setIdentifier(ULE->getName().getAsIdentifierInfo(),
+                             ULE->getNameLoc());
+          break;
+        case DeclarationName::CXXConversionFunctionName:
+          Name.setConversionFunctionId(
+              ULE->getNameLoc(),
+              ParsedType::make(ULE->getName().getCXXNameType()), RParenLoc);
+          break;
+        case DeclarationName::CXXOperatorName: {
+          SourceLocation SymbolLocations[] = { ULE->getNameLoc(),
+                                               ULE->getNameLoc(), RParenLoc };
+          Name.setOperatorFunctionId(ULE->getNameLoc(),
+                                     ULE->getName().getCXXOverloadedOperator(),
+                                     SymbolLocations);
+        } break;
+        case DeclarationName::CXXLiteralOperatorName:
+          Name.setLiteralOperatorId(ULE->getName().getCXXLiteralIdentifier(),
+                                    ULE->getNameLoc(), RParenLoc);
+          break;
+        default:
+          llvm_unreachable("Unknown kind of name");
+        }
+        ExprResult MemberExpr = ActOnMemberAccessExpr(
+            S, Args[0], ULE->getNameLoc(), tok::period, SS,
+            ULE->getTemplateKeywordLoc(), Name, 0, true);
+        if (MemberExpr.isInvalid())
+          return ExprError();
+        CallArgs.clear();
+        CallArgs.push_back(Res.take());
+        Expr *Callee = MemberExpr.take();
+        CallExpr =
+            ActOnCallExpr(S, Callee, ULE->getNameLoc(), CallArgs, RParenLoc);
+      } else if (isa<DeclRefExpr>(Args[2]) &&
+                 isa<CXXMethodDecl>(cast<DeclRefExpr>(Args[2])->getDecl())) {
+        CXXMethodDecl *MD =
+            cast<CXXMethodDecl>(cast<DeclRefExpr>(Args[2])->getDecl());
+        CXXScopeSpec SS;
+        QualType BaseType = Args[0]->getType();
+        LookupResult R(*this, MD->getNameInfo(), LookupMemberName);
+        R.addDecl(MD);
+        R.resolveKind();
+        ExprResult MemberExpr = BuildMemberReferenceExpr(
+            Args[0], BaseType, Args[2]->getExprLoc(), false, SS,
+            SourceLocation(), 0, R, 0, true);
+        if (MemberExpr.isInvalid())
+          return ExprError();
+        CallArgs.clear();
+        CallArgs.push_back(Res.take());
+        Expr *Callee = MemberExpr.take();
+        CallExpr = ActOnCallExpr(S, Callee, Args[2]->getLocStart(), CallArgs,
+                                 RParenLoc);
+      } else {
+        if (Args[2] && isa<DeclRefExpr>(Args[2]) &&
+            isa<FunctionDecl>(cast<DeclRefExpr>(Args[2])->getDecl())) {
+          FunctionDecl *FD =
+              cast<FunctionDecl>(cast<DeclRefExpr>(Args[2])->getDecl());
+          if (FD->getNumParams() > 0 &&
+              FD->getParamDecl(0)->getType()->isReferenceType()) {
+            CallArgs.clear();
+            CallArgs.push_back(Args[0]);
+            CallArgs.push_back(Res.take());
+            CallExpr = ActOnCallExpr(S, Args[2], Args[2]->getExprLoc(),
+                                     CallArgs, Args[2]->getExprLoc());
+          } else {
+            CallArgs.clear();
+            CallArgs.push_back(CreateBuiltinUnaryOp(Args[0]->getExprLoc(),
+                                                    UO_AddrOf, Args[0]).take());
+            CallArgs.push_back(Res.take());
+            CallExpr = ActOnCallExpr(S, Args[2], Args[2]->getExprLoc(),
+                                     CallArgs, Args[2]->getExprLoc());
+          }
+        } else {
+          CallArgs.clear();
+          CallArgs.push_back(CreateBuiltinUnaryOp(Args[0]->getExprLoc(),
+                                                  UO_AddrOf, Args[0]).take());
+          CallArgs.push_back(Res.take());
+          CallExpr = ActOnCallExpr(S, Args[2], Args[2]->getExprLoc(), CallArgs,
+                                   Args[2]->getExprLoc());
+        }
+      }
+      if (CallExpr.isInvalid())
+        return ExprError();
+      Body =
+          ImpCastExprToType(CallExpr.take(), Context.VoidTy, CK_ToVoid).take();
+    }
+    Res = Owned(CEANBuiltinExpr::Create(Context, StartLoc, RParenLoc, Rank,
+                                        CKind, Args, Lengths, Vars, Incs,
+                                        InitStmt, Body, Return, ResType));
+  } else if (CKind == CEANBuiltinExpr::ImplicitIndex) {
+    Res = Owned(CEANBuiltinExpr::Create(
+        Context, StartLoc, RParenLoc, 0, CEANBuiltinExpr::ImplicitIndex, Args,
+        Lengths, Vars, Incs, 0, 0, ImplicitIndex.take(),
+        Context.getIntPtrType()));
+  }
+  return Res;
+}
+
 static bool CheckUnsupportedCall(Sema &S, CallExpr *Call) {
   assert(Call->isCilkSpawnCall() && "Cilk spawn expected");
 
   SourceLocation SpawnLoc = Call->getCilkSpawnLoc();
-  if (Call->isBuiltinCall()) {
-    S.Diag(SpawnLoc, diag::err_cannot_spawn_builtin);
-    return false;
-  } else if (isa<UserDefinedLiteral>(Call) || isa<CUDAKernelCallExpr>(Call)) {
+  if (isa<UserDefinedLiteral>(Call) || isa<CUDAKernelCallExpr>(Call)) {
     S.Diag(SpawnLoc, diag::err_cannot_spawn_function);
     return false;
   }
@@ -2119,7 +3721,7 @@ bool Sema::DiagCilkSpawnFullExpr(Expr *EE) {
 
 namespace {
 
-class CaptureBuilder: public RecursiveASTVisitor<CaptureBuilder> {
+class CaptureBuilder : public RecursiveASTVisitor<CaptureBuilder> {
   Sema &S;
 
 public:
@@ -2134,14 +3736,14 @@ public:
     LambdaExpr::capture_init_iterator CI = E->capture_init_begin();
 
     for (LambdaExpr::capture_iterator C = E->capture_begin(),
-                                   CEnd = E->capture_end();
-                                     C != CEnd; ++C, ++CI) {
+                                      CEnd = E->capture_end();
+         C != CEnd; ++C, ++CI) {
       if (C->capturesVariable())
         S.MarkVariableReferenced((*CI)->getLocStart(), C->getCapturedVar());
       else {
         assert(C->capturesThis() && "Capturing this expected");
         assert(isa<CXXThisExpr>(*CI) && "CXXThisExpr expected");
-        S.CheckCXXThisCapture((*CI)->getLocStart(), /*explicit*/false);
+        S.CheckCXXThisCapture((*CI)->getLocStart(), /*explicit*/ false);
       }
     }
     assert(CI == E->capture_init_end() && "out of sync");
@@ -2153,7 +3755,7 @@ public:
   bool TraverseCapturedStmt(CapturedStmt *) { return true; }
 
   bool VisitCXXThisExpr(CXXThisExpr *E) {
-    S.CheckCXXThisCapture(E->getLocStart(), /*explicit*/false);
+    S.CheckCXXThisCapture(E->getLocStart(), /*explicit*/ false);
     return true;
   }
 };
@@ -2175,7 +3777,7 @@ void MarkFunctionAsSpawning(Sema &S) {
     CapturedDecl::castFromDeclContext(DC)->setSpawning();
   else {
     S.Diag(SourceLocation(), diag::err_spawn_invalid_decl)
-      << DC->getDeclKindName();
+        << DC->getDeclKindName();
   }
 }
 
@@ -2196,8 +3798,8 @@ ExprResult Sema::BuildCilkSpawnExpr(Expr *E) {
   Stmt *Body = 0;
   {
     // Capture variables used in this full expression.
-    ActOnCapturedRegionStart(E->getLocStart(), /*Scope*/0, CR_CilkSpawn,
-                             /*NumParams*/1);
+    ActOnCapturedRegionStart(E->getLocStart(), /*Scope*/ 0, CR_CilkSpawn,
+                             /*NumParams*/ 1);
     CaptureVariablesInStmt(*this, E);
     Body = ActOnCapturedRegionEnd(E).get();
   }
@@ -2231,22 +3833,20 @@ static QualType GetReceiverTmpType(const Expr *E) {
 }
 
 static void addReceiverParams(Sema &SemaRef, CapturedDecl *CD,
-                              QualType ReceiverType,
-                              QualType ReceiverTmpType) {
+                              QualType ReceiverType, QualType ReceiverTmpType) {
   if (!ReceiverType.isNull()) {
     DeclContext *DC = CapturedDecl::castToDeclContext(CD);
     assert(CD->getNumParams() >= 2);
-    ImplicitParamDecl *Receiver
-      = ImplicitParamDecl::Create(SemaRef.getASTContext(), DC, SourceLocation(),
-                                  /*IdInfo*/0, ReceiverType);
+    ImplicitParamDecl *Receiver =
+        ImplicitParamDecl::Create(SemaRef.getASTContext(), DC, SourceLocation(),
+                                  /*IdInfo*/ 0, ReceiverType);
     DC->addDecl(Receiver);
     CD->setParam(1, Receiver);
     if (!ReceiverTmpType.isNull()) {
       assert(CD->getNumParams() == 3);
-      ImplicitParamDecl *ReceiverTmp
-        = ImplicitParamDecl::Create(SemaRef.getASTContext(), DC,
-                                    SourceLocation(), /*IdInfo*/0,
-                                    ReceiverTmpType);
+      ImplicitParamDecl *ReceiverTmp = ImplicitParamDecl::Create(
+          SemaRef.getASTContext(), DC, SourceLocation(), /*IdInfo*/ 0,
+          ReceiverTmpType);
       DC->addDecl(ReceiverTmp);
       CD->setParam(2, ReceiverTmp);
     }
@@ -2262,7 +3862,7 @@ CilkSpawnDecl *Sema::BuildCilkSpawnDecl(Decl *D) {
 
   if (VD->isStaticLocal()) {
     Diag(VD->getLocation(), diag::err_cannot_init_static_variable)
-      << VD->getSourceRange();
+        << VD->getSourceRange();
     return 0;
   }
 
@@ -2285,13 +3885,12 @@ CilkSpawnDecl *Sema::BuildCilkSpawnDecl(Decl *D) {
   }
 
   // Start building the Captured statement.
-  ActOnCapturedRegionStart(D->getLocStart(), /*Scope*/0, CR_CilkSpawn,
+  ActOnCapturedRegionStart(D->getLocStart(), /*Scope*/ 0, CR_CilkSpawn,
                            NumParams);
 
   // Create a DeclStmt as the CapturedStatement body.
-  DeclStmt *Body = new (Context) DeclStmt(DeclGroupRef(VD),
-                                          VD->getLocStart(),
-                                          VD->getLocEnd());
+  DeclStmt *Body = new (Context)
+      DeclStmt(DeclGroupRef(VD), VD->getLocStart(), VD->getLocEnd());
   CaptureVariablesInStmt(*this, Body);
 
   StmtResult R = ActOnCapturedRegionEnd(Body);
@@ -2316,16 +3915,18 @@ namespace {
 // Diagnose any _Cilk_spawn expressions (see comment below). InSpawn indicates
 // that S is contained within a spawn, e.g. _Cilk_spawn foo(_Cilk_spawn bar())
 class DiagnoseCilkSpawnHelper
-  : public RecursiveASTVisitor<DiagnoseCilkSpawnHelper> {
+    : public RecursiveASTVisitor<DiagnoseCilkSpawnHelper> {
   Sema &SemaRef;
+
 public:
-  explicit DiagnoseCilkSpawnHelper(Sema &S) : SemaRef(S) { }
+  explicit DiagnoseCilkSpawnHelper(Sema &S) : SemaRef(S) {}
 
   bool TraverseCompoundStmt(CompoundStmt *) { return true; }
   bool VisitCallExpr(CallExpr *E) {
     if (E->isCilkSpawnCall())
       SemaRef.Diag(E->getCilkSpawnLoc(),
-          SemaRef.PDiag(diag::err_spawn_not_whole_expr) << E->getSourceRange());
+                   SemaRef.PDiag(diag::err_spawn_not_whole_expr)
+                       << E->getSourceRange());
     return true;
   }
   bool VisitCilkSpawnDecl(CilkSpawnDecl *D) {
@@ -2442,7 +4043,7 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   // Cache the function parameter with names.
   llvm::SmallDenseMap<IdentifierInfo *, const ParmVarDecl *, 8> Params;
   for (FunctionDecl::param_iterator I = FD->param_begin(), E = FD->param_end();
-      I != E; ++I)
+       I != E; ++I)
     if (IdentifierInfo *II = (*I)->getIdentifier())
       Params[II] = *I;
 
@@ -2451,15 +4052,12 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   typedef llvm::SmallDenseMap<unsigned, AttrVec, 4> GroupMap;
 
   GroupMap Groups;
-  for (Decl::attr_iterator AI = FD->attr_begin(), AE = FD->attr_end();
-       AI != AE; ++AI) {
+  for (Decl::attr_iterator AI = FD->attr_begin(), AE = FD->attr_end(); AI != AE;
+       ++AI) {
     if (CilkElementalAttr *A = dyn_cast<CilkElementalAttr>(*AI)) {
       unsigned key = A->getGroup().getRawEncoding();
       Groups.FindAndConstruct(key);
     } else if (CilkProcessorAttr *A = dyn_cast<CilkProcessorAttr>(*AI)) {
-      unsigned key = A->getGroup().getRawEncoding();
-      Groups[key].push_back(A);
-    } else if (CilkVecLengthForAttr *A = dyn_cast<CilkVecLengthForAttr>(*AI)) {
       unsigned key = A->getGroup().getRawEncoding();
       Groups[key].push_back(A);
     } else if (CilkVecLengthAttr *A = dyn_cast<CilkVecLengthAttr>(*AI)) {
@@ -2491,8 +4089,8 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
   //     nomask clause.
   //
   bool Valid = true;
-  for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end();
-       GI != GE; ++GI) {
+  for (GroupMap::iterator GI = Groups.begin(), GE = Groups.end(); GI != GE;
+       ++GI) {
     AttrVec &Attrs = GI->second;
 
     typedef llvm::SmallDenseMap<IdentifierInfo *, Attr *> SubjectAttrMapTy;
@@ -2515,10 +4113,9 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
         // Check (4)
         if (PrevMaskAttr && PrevMaskAttr->getMask() != MA->getMask()) {
           Diag(MA->getLocation(), diag::err_cilk_elemental_both_mask_nomask)
-            << MA->getRange();
-          Diag(PrevMaskAttr->getLocation(),
-               diag::note_cilk_elemental_mask_here)
-            << PrevMaskAttr->getMask() << PrevMaskAttr->getRange();
+              << MA->getRange();
+          Diag(PrevMaskAttr->getLocation(), diag::note_cilk_elemental_mask_here)
+              << PrevMaskAttr->getMask() << PrevMaskAttr->getRange();
           Valid = false;
         } else
           PrevMaskAttr = MA;
@@ -2534,28 +4131,29 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
         const ParmVarDecl *VD = Params[II];
         if (!VD) {
           // If II is not a parameter name, then it is "this".
-          assert(getLangOpts().CPlusPlus && II->getName().equals("this")
-                                         && "invalid attribute");
+          assert(getLangOpts().CPlusPlus && II->getName().equals("this") &&
+                 "invalid attribute");
           Diag(SubjectLoc, diag::err_cilk_elemental_this_subject);
         } else
           Diag(SubjectLoc, diag::err_cilk_elemental_subject) << VD;
 
         if (CilkUniformAttr *UA = dyn_cast<CilkUniformAttr>(PrevA))
           Diag(UA->getParameterLoc(), diag::note_cilk_elemental_subject_clause)
-            << 0;
+              << 0;
         else if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(PrevA))
           Diag(LA->getParameterLoc(), diag::note_cilk_elemental_subject_clause)
-            << 1;
+              << 1;
 
         // Only emit a note if II is a parameter name.
         if (VD)
           Diag(VD->getLocation(), diag::note_cilk_elemental_subject_parameter);
-       } else
-         SubjectNames[II] = CurA;
+      } else if (II)
+        SubjectNames[II] = CurA;
     }
 
     for (SubjectAttrMapTy::iterator I = SubjectNames.begin(),
-                                    E = SubjectNames.end(); I != E; ++I) {
+                                    E = SubjectNames.end();
+         I != E; ++I) {
       Attr *CurA = I->second;
       if (CilkLinearAttr *LA = dyn_cast<CilkLinearAttr>(CurA)) {
         // Check (2).
@@ -2565,11 +4163,12 @@ bool Sema::DiagnoseElementalAttributes(FunctionDecl *FD) {
         //
         IdentifierInfo *Subject = LA->getParameter();
         if (const ParmVarDecl *Param = Params.lookup(Subject)) {
-          QualType Ty = Param->getType();
-          if (!Ty->isDependentType() && !Ty->isIntegralType(Context)
-                                     && !Ty->isPointerType()) {
+          QualType Ty = Param->getType().getNonReferenceType();
+          if (!Ty->isDependentType() && !Ty->isIntegralType(Context) &&
+              !Ty->isPointerType()) {
             Diag(LA->getParameterLoc(),
-                 diag::err_cilk_elemental_linear_parameter_type) << Ty;
+                 diag::err_cilk_elemental_linear_parameter_type)
+                << Ty;
             Valid = false;
           }
         }
@@ -2607,31 +4206,35 @@ Expr *Sema::CheckCilkVecLengthArg(Expr *E) {
   if (!E->isTypeDependent()) {
     if (!Ty->isIntegralOrEnumerationType()) {
       Diag(ExprLoc, diag::err_attribute_argument_type)
-        << "vectorlength" << AANT_ArgumentIntegerConstant << E->getSourceRange();
+          << "vectorlength" << AANT_ArgumentIntegerConstant
+          << E->getSourceRange();
       return 0;
     }
   }
 
   // Check value if it is not inside a template.
   if (!E->isInstantiationDependent()) {
-    llvm::APSInt Val(Context.getTypeSize(Ty), /*isUnsigned*/false);
+    llvm::APSInt Val(Context.getTypeSize(Ty), /*isUnsigned*/ false);
     SourceLocation BadExprLoc;
 
     if (!E->isIntegerConstantExpr(Val, Context, &BadExprLoc)) {
       Diag(BadExprLoc, diag::err_attribute_argument_type)
-        << "vectorlength" << AANT_ArgumentIntegerConstant << E->getSourceRange();
+          << "vectorlength" << AANT_ArgumentIntegerConstant
+          << E->getSourceRange();
       return 0;
     }
 
     if (!Val.isStrictlyPositive()) {
       Diag(ExprLoc, diag::err_cilk_elemental_vectorlength)
         << E->getSourceRange();
+/*
       return 0;
     }
 
     if (!Val.isPowerOf2()) {
       Diag(ExprLoc, diag::err_invalid_vectorlength_expr)
         << 1 << E->getSourceRange();
+*/		
       return 0;
     }
 
@@ -2653,7 +4256,7 @@ Expr *Sema::CheckCilkLinearArg(Expr *E) {
   // Check type.
   if (!E->isTypeDependent() && !Ty->isIntegralOrEnumerationType()) {
     Diag(ExprLoc, diag::err_cilk_elemental_linear_step_not_integral)
-      << E->getType() << E->getSourceRange();
+        << E->getType() << E->getSourceRange();
     return 0;
   }
 
@@ -2664,10 +4267,10 @@ Expr *Sema::CheckCilkLinearArg(Expr *E) {
       if (isa<ParmVarDecl>(DRE->getDecl()))
         return E;
 
-    llvm::APSInt Val(Context.getTypeSize(Ty), /*isUnsigned*/false);
+    llvm::APSInt Val(Context.getTypeSize(Ty), /*isUnsigned*/ false);
     if (!E->isIntegerConstantExpr(Val, Context)) {
       Diag(ExprLoc, diag::err_cilk_elemental_linear_step_not_constant)
-        << E->getSourceRange();
+          << E->getSourceRange();
       return 0;
     }
 

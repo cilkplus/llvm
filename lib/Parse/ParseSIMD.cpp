@@ -27,9 +27,9 @@ bool ParseSIMDListItems(Parser &P, Sema &S, T &ItemParser) {
     bool ParsedItem = ItemParser.Parse(P, S);
 
     if (!ParsedItem) {
-      P.SkipUntil(tok::comma, tok::r_paren, tok::annot_pragma_simd_end,
-                  false, // StopAtSemi
-                  true); // DontConsume
+      while (P.getCurToken().isNot(tok::eof) &&
+             !P.SkipUntil(tok::comma, tok::r_paren, tok::annot_pragma_simd_end,
+                          Parser::StopBeforeMatch));
     }
 
     if (Tok.is(tok::r_paren) || Tok.is(tok::annot_pragma_simd_end))
@@ -73,9 +73,9 @@ static bool ParseSIMDExpression(Parser &P, Sema &S, T &ItemParser) {
 
   bool ParsedItem = ItemParser.Parse(P, S);
   if (!ParsedItem) {
-    P.SkipUntil(tok::r_paren, tok::annot_pragma_simd_end,
-                false, // StopAtSemi
-                true); // DontConsume
+    while (P.getCurToken().isNot(tok::eof) &&
+           !P.SkipUntil(tok::r_paren, tok::annot_pragma_simd_end,
+                        Parser::StopBeforeMatch));
     return false;
   }
 
@@ -84,7 +84,8 @@ static bool ParseSIMDExpression(Parser &P, Sema &S, T &ItemParser) {
     if (ParsedItem) {
       P.Diag(Tok, diag::err_expected_rparen);
       P.Diag(BDT.getOpenLocation(), diag::note_matching) << "(";
-      P.SkipUntil(tok::annot_pragma_simd_end, false, true);
+      while (P.getCurToken().isNot(tok::eof) &&
+             !P.SkipUntil(tok::annot_pragma_simd_end, Parser::StopBeforeMatch));
     }
     return false;
   } else {
@@ -104,19 +105,6 @@ struct SIMDVectorLengthItemParser {
       return false;
     E = C.get();
     return E;
-  }
-};
-
-struct SIMDVectorLengthForItemParser {
-  QualType T;
-  SourceLocation Loc;
-  bool Parse(Parser &P, Sema &S) {
-    Loc = P.getCurToken().getLocation();
-    TypeResult TN = P.ParseTypeName();
-    if (TN.isInvalid())
-      return false;
-    T = TN.get().get();
-    return true;
   }
 };
 
@@ -255,7 +243,8 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
 
     if (!II) {
       P.Diag(Tok, diag::err_expected_ident);
-      P.SkipUntil(tok::annot_pragma_simd_end, false, true);
+      while (P.getCurToken().isNot(tok::eof) &&
+             !P.SkipUntil(tok::annot_pragma_simd_end, Parser::StopBeforeMatch));
       return false;
     }
 
@@ -266,13 +255,6 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
       if (!ParseSIMDExpression(P, S, ItemParser) || !ItemParser.E)
         return false;
       A = S.ActOnPragmaSIMDLength(ILoc, ItemParser.E);
-    }
-    else if (II->isStr("vectorlengthfor")) {
-      P.ConsumeToken();
-      SIMDVectorLengthForItemParser ItemParser;
-      if (!ParseSIMDExpression(P, S, ItemParser))
-        return false;
-      A = S.ActOnPragmaSIMDLengthFor(ILoc, ItemParser.Loc, ItemParser.T);
     }
     else if (II->isStr("linear")) {
       P.ConsumeToken();
@@ -329,7 +311,7 @@ static bool ParseSIMDClauses(Parser &P, Sema &S, SourceLocation BeginLoc,
 void Parser::HandlePragmaSIMD() {
   assert(Tok.is(tok::annot_pragma_simd));
   SourceLocation Loc = Tok.getLocation();
-  SkipUntil(tok::annot_pragma_simd_end);
+  while (Tok.isNot(tok::eof) && !SkipUntil(tok::annot_pragma_simd_end));
   PP.Diag(Loc, diag::err_pragma_simd_expected_for_loop);
 }
 
@@ -363,7 +345,6 @@ static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
 ///
 /// vectorlength-clause:
 ///   'vectorlength' '(' constant-expression ')'
-///   'vectorlengthfor' '(' type-name ')' (deprecated)
 ///
 /// linear-clause:
 ///   'linear' '(' linear-variable-list ')'
@@ -395,7 +376,8 @@ StmtResult Parser::ParseSIMDDirective() {
   SIMDAttrList.push_back(::new SIMDAttr(Loc, Actions.Context));
 
   if (!ParseSIMDClauses(*this, Actions, Loc, SIMDAttrList)) {
-    SkipUntil(tok::annot_pragma_simd_end, false, true);
+    while (Tok.isNot(tok::eof) &&
+           !SkipUntil(tok::annot_pragma_simd_end, StopBeforeMatch));
     FinishPragmaSIMD(*this, Loc);
     return StmtError();
   }
@@ -413,7 +395,7 @@ StmtResult Parser::ParseSIMDDirective() {
 
   if (Tok.isNot(tok::l_paren)) {
     Diag(Tok, diag::err_expected_lparen_after) << "for";
-    SkipUntil(tok::semi);
+    while(Tok.isNot(tok::eof) && !SkipUntil(tok::semi));
     return StmtError();
   }
 
@@ -487,7 +469,8 @@ StmtResult Parser::ParseSIMDDirective() {
       Diag(Tok, diag::err_simd_for_missing_semi);
     else {
       // Skip until semicolon or rparen, don't consume it.
-      SkipUntil(tok::r_paren, true, true);
+      while (Tok.isNot(tok::eof) &&
+             !SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch));
       if (Tok.is(tok::semi))
         ConsumeToken();
     }
@@ -517,7 +500,8 @@ StmtResult Parser::ParseSIMDDirective() {
           Diag(Tok, diag::err_simd_for_missing_semi);
         else
           // Skip until semicolon or rparen, don't consume it.
-          SkipUntil(tok::r_paren, true, true);
+          while (Tok.isNot(tok::eof) &&
+                 !SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch));
       }
 
       if (Tok.is(tok::semi))

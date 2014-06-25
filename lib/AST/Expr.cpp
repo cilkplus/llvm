@@ -20,6 +20,7 @@
 #include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/Mangle.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/Builtins.h"
@@ -314,6 +315,9 @@ static void computeDeclRefDependence(const ASTContext &Ctx, NamedDecl *D,
         Var->getDeclContext()->isDependentContext()) {
       ValueDependent = true;
       InstantiationDependent = true;
+      TypeSourceInfo *TInfo = Var->getFirstDecl()->getTypeSourceInfo();
+      if (TInfo->getType()->isIncompleteArrayType())
+        TypeDependent = true;
     }
     
     return;
@@ -478,6 +482,30 @@ SourceLocation DeclRefExpr::getLocEnd() const {
 std::string PredefinedExpr::ComputeName(IdentType IT, const Decl *CurrentDecl) {
   ASTContext &Context = CurrentDecl->getASTContext();
 
+  if (IT == PredefinedExpr::FuncDName) {
+    if (const NamedDecl *ND = dyn_cast<NamedDecl>(CurrentDecl)) {
+      OwningPtr<MangleContext> MC;
+      MC.reset(Context.createMangleContext());
+
+      if (MC->shouldMangleDeclName(ND)) {
+        SmallString<256> Buffer;
+        llvm::raw_svector_ostream Out(Buffer);
+        if (const CXXConstructorDecl *CD = dyn_cast<CXXConstructorDecl>(ND))
+          MC->mangleCXXCtor(CD, Ctor_Base, Out);
+        else if (const CXXDestructorDecl *DD = dyn_cast<CXXDestructorDecl>(ND))
+          MC->mangleCXXDtor(DD, Dtor_Base, Out);
+        else
+          MC->mangleName(ND, Out);
+
+        Out.flush();
+        if (!Buffer.empty() && Buffer.front() == '\01')
+          return Buffer.substr(1);
+        return Buffer.str();
+      } else
+        return ND->getIdentifier()->getName();
+    }
+    return "";
+  }
   if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(CurrentDecl)) {
     if (IT != PrettyFunction && IT != PrettyFunctionNoVirtual)
       return FD->getNameAsString();
@@ -2025,9 +2053,18 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     R2 = BO->getRHS()->getSourceRange();
     return true;
   }
+  case CEANBuiltinExprClass: {
+    if (getType()->isVoidType())
+      return false;
+    WarnE = this;
+    Loc = getLocStart();
+    R1 = getSourceRange();
+    return true;
+  }
   case CompoundAssignOperatorClass:
   case VAArgExprClass:
   case AtomicExprClass:
+  case CEANIndexExprClass:
     return false;
 
   case ConditionalOperatorClass: {
@@ -2732,9 +2769,6 @@ bool Expr::isConstantInitializer(ASTContext &Ctx, bool IsForRef) const {
     return Exp->isConstantInitializer(Ctx, false);
   }
   case InitListExprClass: {
-    // FIXME: This doesn't deal with fields with reference types correctly.
-    // FIXME: This incorrectly allows pointers cast to integers to be assigned
-    // to bitfields.
     const InitListExpr *ILE = cast<InitListExpr>(this);
     if (ILE->getType()->isArrayType()) {
       unsigned numInits = ILE->getNumInits();
@@ -2905,6 +2939,8 @@ bool Expr::HasSideEffects(const ASTContext &Ctx) const {
   case BlockExprClass:
   case CilkSpawnExprClass:
   case CUDAKernelCallExprClass:
+  case CEANIndexExprClass:
+  case CEANBuiltinExprClass:
     // These always have a side-effect.
     return true;
 
@@ -2922,6 +2958,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx) const {
   case SubstNonTypeTemplateParmExprClass:
   case MaterializeTemporaryExprClass:
   case ShuffleVectorExprClass:
+  case ConvertVectorExprClass:
   case AsTypeExprClass:
     // These have a side-effect if any subexpression does.
     break;
@@ -3107,7 +3144,8 @@ bool Expr::hasNonTrivialCall(ASTContext &Ctx) {
 Expr::NullPointerConstantKind
 Expr::isNullPointerConstant(ASTContext &Ctx,
                             NullPointerConstantValueDependence NPC) const {
-  if (isValueDependent() && !Ctx.getLangOpts().CPlusPlus11) {
+  if (isValueDependent() &&
+      (!Ctx.getLangOpts().CPlusPlus11 || Ctx.getLangOpts().MicrosoftMode)) {
     switch (NPC) {
     case NPC_NeverValueDependent:
       llvm_unreachable("Unexpected value dependent expression!");
@@ -3189,8 +3227,13 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
   if (Ctx.getLangOpts().CPlusPlus11) {
     // C++11 [conv.ptr]p1: A null pointer constant is an integer literal with
     // value zero or a prvalue of type std::nullptr_t.
+    // Microsoft mode permits C++98 rules reflecting MSVC behavior.
     const IntegerLiteral *Lit = dyn_cast<IntegerLiteral>(this);
-    return (Lit && !Lit->getValue()) ? NPCK_ZeroLiteral : NPCK_NotNull;
+    if (Lit && !Lit->getValue())
+      return NPCK_ZeroLiteral;
+    else if (!Ctx.getLangOpts().MicrosoftMode ||
+             !isCXX98IntegralConstantExpr(Ctx))
+      return NPCK_NotNull;
   } else {
     // If we have an integer constant expression, we need to *evaluate* it and
     // test for the value 0.
@@ -4225,4 +4268,79 @@ unsigned AtomicExpr::getNumSubExprs(AtomicOp Op) {
     return 6;
   }
   llvm_unreachable("unknown atomic op");
+}
+
+CEANBuiltinExpr *CEANBuiltinExpr::Create(ASTContext &C,
+                                         SourceLocation StartLoc,
+                                         SourceLocation EndLoc,
+                                         unsigned Rank,
+                                         CEANKindType Kind,
+                                         ArrayRef<Expr *> Args,
+                                         ArrayRef<Expr *> Lengths,
+                                         ArrayRef<Stmt *> Vars,
+                                         ArrayRef<Stmt *> Increments,
+                                         Stmt *Init, Stmt *Body, Expr *Return,
+                                         QualType QTy) {
+  void *Mem = C.Allocate(sizeof(CEANBuiltinExpr) + 2 * sizeof(Stmt *) +
+                         sizeof(Expr *) +
+                         sizeof(Expr *) * Args.size() +
+                         sizeof(Expr *) * Lengths.size() +
+                         sizeof(Stmt *) * Vars.size() +
+                         sizeof(Stmt *) * Increments.size(),
+                         llvm::alignOf<CEANBuiltinExpr>());
+  CEANBuiltinExpr *E = new (Mem) CEANBuiltinExpr(StartLoc, Rank, Args.size(),
+                                                 Kind, QTy, EndLoc);
+  E->setInit(Init);
+  E->setBody(Body);
+  E->setReturnExpr(Return);
+  E->setArgs(Args);
+  E->setLengths(Lengths);
+  E->setVars(Vars);
+  E->setIncrements(Increments);
+  for (ArrayRef<Expr *>::iterator I = Args.begin(), End = Args.end();
+       I != End; ++I) {
+    if ((*I)->isValueDependent())
+      E->setValueDependent(true);
+    if ((*I)->isTypeDependent())
+      E->setTypeDependent(true);
+    if ((*I)->isInstantiationDependent())
+      E->setInstantiationDependent(true);
+    if ((*I)->containsUnexpandedParameterPack())
+      E->setContainsUnexpandedParameterPack();
+  }
+  return E;
+}
+
+CEANBuiltinExpr *CEANBuiltinExpr::CreateEmpty(ASTContext &C, unsigned Rank, unsigned ArgsSize) {
+  void *Mem = C.Allocate(sizeof(CEANBuiltinExpr) + 2 * sizeof(Stmt *) +
+                         sizeof(Expr *) +
+                         sizeof(Expr *) * ArgsSize +
+                         sizeof(Expr *) * Rank +
+                         sizeof(Stmt *) * 2 * Rank,
+                         llvm::alignOf<CEANBuiltinExpr>());
+  return new (Mem) CEANBuiltinExpr(Rank, ArgsSize);
+}
+
+void CEANBuiltinExpr::setArgs(ArrayRef<Expr *> Args) {
+  assert(Args.size() == ArgsSize &&
+         "Number of args is not the same as the preallocated buffer");
+  std::copy(Args.begin(), Args.end(), &reinterpret_cast<Expr **>(this + 1)[3]);
+}
+
+void CEANBuiltinExpr::setLengths(ArrayRef<Expr *> Lengths) {
+  assert(Lengths.size() == Rank &&
+         "Number of lengths is not the same as the preallocated buffer");
+  std::copy(Lengths.begin(), Lengths.end(), &reinterpret_cast<Expr **>(this + 1)[3 + ArgsSize]);
+}
+
+void CEANBuiltinExpr::setVars(ArrayRef<Stmt *> Vars) {
+  assert(Vars.size() == Rank &&
+         "Number of vars is not the same as the preallocated buffer");
+  std::copy(Vars.begin(), Vars.end(), &reinterpret_cast<Stmt **>(this + 1)[3 + Rank + ArgsSize]);
+}
+
+void CEANBuiltinExpr::setIncrements(ArrayRef<Stmt *> Increments) {
+  assert(Increments.size() == Rank &&
+         "Number of increments is not the same as the preallocated buffer");
+  std::copy(Increments.begin(), Increments.end(), &reinterpret_cast<Stmt **>(this + 1)[3 + 2 * Rank + ArgsSize]);
 }

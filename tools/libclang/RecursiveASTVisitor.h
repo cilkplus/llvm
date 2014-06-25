@@ -410,6 +410,9 @@ private:
 #define OPENMP_CLAUSE(Name, Class)                                      \
   bool Visit##Class(Class *C);
 #include "clang/Basic/OpenMPKinds.def"
+  /// \brief Process clauses with list of variables.
+  template <typename T>
+  void VisitOMPClauseList(T *Node);
 
   typedef SmallVector<Stmt *, 16> StmtsTy;
   typedef SmallVector<StmtsTy *, 4> QueuesTy;
@@ -1216,8 +1219,7 @@ DEF_TRAVERSE_DECL(BlockDecl, {
   })
 
 DEF_TRAVERSE_DECL(CapturedDecl, {
-    // Do not traverse the body, which has been traversed by CapturedStmt.
-    //
+    TRY_TO(TraverseStmt(D->getBody()));
     // This return statement makes sure the traversal of nodes in
     // decls_begin()/decls_end() (done in the DEF_TRAVERSE_DECL macro)
     // is skipped - don't remove it.
@@ -1863,6 +1865,9 @@ DEF_TRAVERSE_DECL(ParmVarDecl, {
       TRY_TO(TraverseStmt(D->getDefaultArg()));
   })
 
+//AVT: maybe we'll support it later
+//***INTEL: pragma support
+//#include "../../intel/include/RecursiveASTVisitor_DECL.h"
 #undef DEF_TRAVERSE_DECL
 
 // ----------------- Stmt traversal -----------------
@@ -2192,6 +2197,8 @@ DEF_TRAVERSE_STMT(CXXMemberCallExpr, { })
 // over the children.
 DEF_TRAVERSE_STMT(AddrLabelExpr, { })
 DEF_TRAVERSE_STMT(ArraySubscriptExpr, { })
+DEF_TRAVERSE_STMT(CEANIndexExpr, { })
+DEF_TRAVERSE_STMT(CEANBuiltinExpr, { })
 DEF_TRAVERSE_STMT(BlockExpr, {
   TRY_TO(TraverseDecl(S->getBlockDecl()));
   return true; // no child statements to loop through.
@@ -2247,6 +2254,7 @@ DEF_TRAVERSE_STMT(ParenExpr, { })
 DEF_TRAVERSE_STMT(ParenListExpr, { })
 DEF_TRAVERSE_STMT(PredefinedExpr, { })
 DEF_TRAVERSE_STMT(ShuffleVectorExpr, { })
+DEF_TRAVERSE_STMT(ConvertVectorExpr, { })
 DEF_TRAVERSE_STMT(StmtExpr, { })
 DEF_TRAVERSE_STMT(UnresolvedLookupExpr, {
   TRY_TO(TraverseNestedNameSpecifierLoc(S->getQualifierLoc()));
@@ -2280,6 +2288,7 @@ DEF_TRAVERSE_STMT(CilkSyncStmt, { })
 DEF_TRAVERSE_STMT(CilkForGrainsizeStmt, { })
 DEF_TRAVERSE_STMT(CilkForStmt, { })
 DEF_TRAVERSE_STMT(SIMDForStmt, { })
+DEF_TRAVERSE_STMT(CilkRankedStmt, { })
 
 // These operators (all of them) do not need any action except
 // iterating over the children.
@@ -2338,19 +2347,33 @@ bool RecursiveASTVisitor<Derived>::VisitOMPDefaultClause(OMPDefaultClause *C) {
   return true;
 }
 
-#define PROCESS_OMP_CLAUSE_LIST(Class, Node)                                   \
-  for (OMPVarList<Class>::varlist_iterator I = Node->varlist_begin(),          \
-                                           E = Node->varlist_end();            \
-         I != E; ++I)                                                          \
+template<typename Derived>
+template<typename T>
+void RecursiveASTVisitor<Derived>::VisitOMPClauseList(T *Node) {
+  for (typename T::varlist_iterator I = Node->varlist_begin(),
+                                    E = Node->varlist_end();
+         I != E; ++I)
     TraverseStmt(*I);
+}
 
 template<typename Derived>
 bool RecursiveASTVisitor<Derived>::VisitOMPPrivateClause(OMPPrivateClause *C) {
-  PROCESS_OMP_CLAUSE_LIST(OMPPrivateClause, C)
+  VisitOMPClauseList(C);
   return true;
 }
 
-#undef PROCESS_OMP_CLAUSE_LIST
+template<typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPFirstprivateClause(
+                                                    OMPFirstprivateClause *C) {
+  VisitOMPClauseList(C);
+  return true;
+}
+
+template<typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPSharedClause(OMPSharedClause *C) {
+  VisitOMPClauseList(C);
+  return true;
+}
 
 // FIXME: look at the following tricky-seeming exprs to see if we
 // need to recurse on anything.  These are ones that have methods

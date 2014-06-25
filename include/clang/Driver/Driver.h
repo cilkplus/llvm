@@ -179,9 +179,6 @@ private:
   /// stored in it, and will clean them up when torn down.
   mutable llvm::StringMap<ToolChain *> ToolChains;
 
-  /// Parsed arguments passed to sanitizer tools.
-  mutable llvm::OwningPtr<SanitizerArgs> SanitizerArguments;
-
 private:
   /// TranslateInputArgs - Create a new derived argument list from the input
   /// arguments, after applying the standard argument translations.
@@ -318,9 +315,6 @@ public:
   /// \param ShowHidden - Show hidden options.
   void PrintHelp(bool ShowHidden) const;
 
-  /// PrintOptions - Print the list of arguments.
-  void PrintOptions(const llvm::opt::ArgList &Args) const;
-
   /// PrintVersion - Print the driver version.
   void PrintVersion(const Compilation &C, raw_ostream &OS) const;
 
@@ -409,10 +403,6 @@ private:
   std::pair<unsigned, unsigned> getIncludeExcludeOptionFlagMasks() const;
 
 public:
-  /// \brief Returns parsed arguments to sanitizer tools.
-  const SanitizerArgs &
-  getOrParseSanitizerArgs(const llvm::opt::ArgList &Args) const;
-
   /// GetReleaseVersion - Parse (([0-9]+)(.([0-9]+)(.([0-9]+)?))?)? and
   /// return the grouped values as integers. Numbers which are not
   /// provided are set to 0.

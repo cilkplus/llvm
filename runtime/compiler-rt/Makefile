@@ -19,12 +19,17 @@ include $(CLANG_LEVEL)/Makefile
 CLANG_VERSION := $(word 3,$(shell grep "CLANG_VERSION " \
 	$(PROJ_OBJ_DIR)/$(CLANG_LEVEL)/include/clang/Basic/Version.inc))
 
-ResourceDir := $(PROJ_OBJ_ROOT)/$(BuildMode)/lib/clang/$(CLANG_VERSION)
-PROJ_resources := $(DESTDIR)$(PROJ_prefix)/lib/clang/$(CLANG_VERSION)
+ResourceDir := $(PROJ_OBJ_ROOT)/$(BuildMode)/bin/lib/clang/$(CLANG_VERSION)
+PROJ_resources := $(DESTDIR)$(PROJ_prefix)/bin/lib/clang/$(CLANG_VERSION)
 
 ResourceLibDir := $(ResourceDir)/lib
+ResourceIncludeDir := $(ResourceDir)/include
 PROJ_resources_lib := $(PROJ_resources)/lib
-IncDir := $(PROJ_OBJ_ROOT)/$(BuildMode)/include
+PROJ_resources_include := $(PROJ_resources)/include
+
+# Initialize a variable to use for extra flags to pass to the
+# compiler-rt make process.
+COMPILERRT_MAKE_FLAGS :=
 
 # Expect compiler-rt to be in llvm/projects/compiler-rt
 COMPILERRT_SRC_ROOT := $(LLVM_SRC_ROOT)/projects/compiler-rt
@@ -79,6 +84,23 @@ RuntimeLibrary.darwin.Configs := \
 	asan_osx_dynamic.dylib \
 	profile_osx.a profile_ios.a \
 	ubsan_osx.a
+RuntimeLibrary.darwin_embedded.Configs := \
+	soft_static.a hard_static.a soft_pic.a hard_pic.a
+
+# Support building compiler-rt with relocatable SDKs.
+#
+# This will cause make to put SDKROOT in the environment, and since we
+# are using the built Clang to build compiler-rt, it to pick up that
+# location as the default value for the include system root.
+ACTIVE_SDK_PATH := $(shell xcrun --show-sdk-path 2> /dev/null)
+ifneq ($(ACTIVE_SDK_PATH),)
+COMPILERRT_MAKE_FLAGS := SDKROOT=$(ACTIVE_SDK_PATH)
+endif
+IOSSIM_SDK_PATH := $(shell xcrun --show-sdk-path -sdk iphonesimulator 2> /dev/null)
+ifneq ($(IOSSIM_SDK_PATH),)
+RuntimeLibrary.darwin.Configs += asan_iossim_dynamic.dylib
+endif
+
 endif
 
 # On Linux, include a library which has all the runtime functions.
@@ -142,19 +164,28 @@ BuildRuntimeLibraries:
 	  ProjSrcRoot=$(COMPILERRT_SRC_ROOT) \
 	  ProjObjRoot=$(PROJ_OBJ_DIR) \
 	  CC="$(ToolDir)/clang" \
-	  CXX="$(ToolDir)/clang++" \
 	  LLVM_ANDROID_TOOLCHAIN_DIR="$(LLVM_ANDROID_TOOLCHAIN_DIR)" \
+	  $(COMPILERRT_MAKE_FLAGS) \
 	  $(RuntimeDirs:%=clang_%)
 .PHONY: BuildRuntimeLibraries
 CleanRuntimeLibraries:
 	$(Verb) $(MAKE) -C $(COMPILERRT_SRC_ROOT) \
 	  ProjSrcRoot=$(COMPILERRT_SRC_ROOT) \
 	  ProjObjRoot=$(PROJ_OBJ_DIR) \
+	  $(COMPILERRT_MAKE_FLAGS) \
 	  clean
 .PHONY: CleanRuntimeLibraries
+RuntimeHeader: $(ResourceIncludeDir)/sanitizer
 
 $(PROJ_resources_lib):
 	$(Verb) $(MKDIR) $@
+
+$(ResourceIncludeDir):
+	$(Verb) $(MKDIR) $@
+
+$(ResourceIncludeDir)/sanitizer: $(ResourceIncludeDir)
+	$(Verb) $(MKDIR) $@
+	$(Verb) cp $(COMPILERRT_SRC_ROOT)/include/sanitizer/*.h $@
 
 # Expand rules for copying/installing each individual library. We can't use
 # implicit rules here because we need to match against multiple things.
@@ -212,76 +243,29 @@ RuntimeLibraryInstall.$1: \
 endef
 $(foreach lib,$(RuntimeDirs), $(eval $(call RuntimeLibraryTemplate,$(lib))))
 
-# Rules for building and installing the Cilk runtime.
-CilkRuntimeLibrary.darwin.Dir := cilk_osx
-CilkRuntimeLibrary.linux.Dir := cilk-$(ARCH)
-CilkRuntimeLibrary.linux.Configs += libcilkrts.so
-CilkRuntimeLibrary.darwin.Configs += libcilkrts.dylib
-define CilkTemplate
-$(PROJ_OBJ_DIR)/clang_$1/%/libcompiler_rt.so: BuildRuntimeLibraries
-	@true
-$(PROJ_OBJ_DIR)/clang_$1/%/libcompiler_rt.dylib: BuildRuntimeLibraries
-	@true
-$(PROJ_OBJ_DIR)/clang_$1/%/include: BuildRuntimeLibraries
-	@true
 
-# Place in build directory
-$(LibDir)/libcilkrts.so.5: $(PROJ_OBJ_DIR)/clang_$1/$(CilkRuntimeLibrary.$1.Dir)/libcompiler_rt.so
-	$(Echo) Copying runtime library $$< to build dir
-	$(Verb) cp $$< $$@
-$(LibDir)/libcilkrts.5.dylib: $(PROJ_OBJ_DIR)/clang_$1/$(CilkRuntimeLibrary.$1.Dir)/libcompiler_rt.dylib
-	$(Echo) Copying runtime library $$< to build dir
-	$(Verb) cp $$< $$@
-	$(Echo) Fixing LC_ID_DYLIB of $$@
-	$(Verb) install_name_tool $$@ -id $$@
-$(LibDir)/libcilkrts.so: $(LibDir)/libcilkrts.so.5
-	$(Echo) Symlinking $$@ to $$(notdir $$<)
-	$(Verb) ln -sf $$(notdir $$<) $$@
-$(LibDir)/libcilkrts.dylib: $(LibDir)/libcilkrts.5.dylib
-	$(Echo) Symlinking $$@ to $$(notdir $$<)
-	$(Verb) ln -sf $$(notdir $$<) $$@
 
-# Cilk headers
-$(IncDir)/cilk: $(PROJ_OBJ_DIR)/clang_$1/$(CilkRuntimeLibrary.$1.Dir)/include $(IncDir)/cilk/.dir
-	$(Echo) Copying $$< to build dir
-	$(Verb) cp $$(wildcard $$</*) $(IncDir)/cilk/
 
-CilkRuntimeLibrary.$1: \
-		$(CilkRuntimeLibrary.$1.Configs:%=$(LibDir)/%) \
-		$(IncDir)/cilk
-.PHONY: CilkRuntimeLibrary.$1
 
-# Install
-$(PROJ_libdir)/libcilkrts.so.5: $(LibDir)/libcilkrts.so.5
-	$(Echo) Installing compiler runtime library: $$(notdir $$<)
-	$(Verb) $(DataInstall) $$< $(PROJ_libdir)/
-$(PROJ_libdir)/libcilkrts.so: $(PROJ_libdir)/libcilkrts.so.5
-	$(Echo) Symlinking $$@ to $$(notdir $$<)
-	$(Verb) ln -sf $$(notdir $$<) $$@
-$(PROJ_libdir)/libcilkrts.5.dylib: $(LibDir)/libcilkrts.5.dylib
-	$(Echo) Installing compiler runtime library: $$(notdir $$<)
-	$(Verb) $(DataInstall) $$< $(PROJ_libdir)/
-$(PROJ_libdir)/libcilkrts.dylib: $(PROJ_libdir)/libcilkrts.5.dylib
-	$(Echo) Symlinking $$@ to $$(notdir $$<)
-	$(Verb) ln -sf $$(notdir $$<) $$@
 
-# Install Cilk headers
-$(PROJ_includedir)/cilk: $(IncDir)/cilk $(PROJ_includedir)/cilk/.dir
-	$(Echo) Installing $(IncDir)/cilk
-	$(foreach file,$(wildcard $(IncDir)/cilk/*),
-		$(Verb) $(DataInstall) $(file) $(PROJ_includedir)/cilk/)
 
-# Rule to install runtime libraries.
-CilkRuntimeLibraryInstall.$1: \
-		$(CilkRuntimeLibrary.$1.Configs:%=$(PROJ_libdir)/%) \
-		$(PROJ_includedir)/cilk
-.PHONY: CilkRuntimeLibraryInstall.$1
-endef
-$(foreach lib,$(RuntimeDirs), $(eval $(call CilkTemplate,$(lib))))
+
+
+$(PROJ_resources_include):
+	$(Verb) $(MKDIR) $@
+
+$(PROJ_resources_include)/sanitizer: $(ResourceIncludeDir)/sanitizer $(PROJ_resources_include)
+	$(Verb) $(MKDIR) $@
+	$(Echo) Installing compiler runtime headers
+	$(Verb) $(DataInstall) $(ResourceIncludeDir)/sanitizer/* \
+                               $(PROJ_resources_include)/sanitizer
+
+RuntimeHeaderInstall: $(PROJ_resources_include)/sanitizer
+.PHONY: RuntimeHeaderInstall
 
 # Hook into the standard Makefile rules.
-all-local:: $(RuntimeDirs:%=RuntimeLibrary.%) $(RuntimeDirs:%=CilkRuntimeLibrary.%)
-install-local:: $(RuntimeDirs:%=RuntimeLibraryInstall.%)  $(RuntimeDirs:%=CilkRuntimeLibraryInstall.%)
+all-local:: $(RuntimeDirs:%=RuntimeLibrary.%) RuntimeHeader
+install-local:: $(RuntimeDirs:%=RuntimeLibraryInstall.%) RuntimeHeaderInstall
 clean-local:: CleanRuntimeLibraries
 
 endif

@@ -322,7 +322,7 @@ void test1() {
   anchor(11);
   // CHECK7: call void @_ZN19cilk_for_exceptions6anchorEi(i32 10)
   // CHECK7: call void @__cilkrts_cilk_for_32
-  // CHECK7-NOT: __cilk_sync 
+  // CHECK7-NOT: __cilk_sync
   // CHECK7: call void @_ZN19cilk_for_exceptions6anchorEi(i32 11)
 }
 

@@ -995,6 +995,7 @@ CanThrowResult Sema::canThrow(const Expr *E) {
   case Expr::ParenExprClass:
   case Expr::ParenListExprClass:
   case Expr::ShuffleVectorExprClass:
+  case Expr::ConvertVectorExprClass:
   case Expr::VAArgExprClass:
     return canSubExprsThrow(*this, E);
 
@@ -1089,6 +1090,25 @@ CanThrowResult Sema::canThrow(const Expr *E) {
   case Expr::UnaryTypeTraitExprClass:
     // These expressions can never throw.
     return CT_Cannot;
+
+  case Expr::CEANIndexExprClass: {
+    CanThrowResult CT = E->isTypeDependent() ? CT_Dependent : CT_Cannot;
+    return mergeCanThrow(CT, canSubExprsThrow(*this, E));
+  }
+  case Expr::CEANBuiltinExprClass: {
+    if (E->isTypeDependent() || E->isValueDependent())
+      return CT_Dependent;
+    CanThrowResult CT = E->isTypeDependent() ? CT_Dependent : CT_Cannot;
+    ArrayRef<const Expr *> Args = cast<CEANBuiltinExpr>(E)->getArgs();
+    for (ArrayRef<const Expr *>::const_iterator I = Args.begin(), E = Args.end();
+         I != E; ++I)
+      CT = mergeCanThrow(CT, canSubExprsThrow(*this, *I));
+    Args = cast<CEANBuiltinExpr>(E)->getLengths();
+    for (ArrayRef<const Expr *>::const_iterator I = Args.begin(), E = Args.end();
+         I != E; ++I)
+      CT = mergeCanThrow(CT, canSubExprsThrow(*this, *I));
+    return mergeCanThrow(CT, canSubExprsThrow(*this, cast<CEANBuiltinExpr>(E)->getReturnExpr()));
+  }
 
   case Expr::MSPropertyRefExprClass:
     llvm_unreachable("Invalid class for expression");

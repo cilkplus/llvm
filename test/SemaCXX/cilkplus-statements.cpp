@@ -396,19 +396,22 @@ void test11() {
 
 void test_spawn_initialize() {
   static int a1 = _Cilk_spawn foo();   // expected-error{{cannot spawn initialize a 'static' variable}}
+  int a2 = _Cilk_spawn foo(); // OK
+
   static W w1 = _Cilk_spawn makew();   // expected-error{{cannot spawn initialize a 'static' variable}}
+  W w2 = _Cilk_spawn makew(); // OK
 }
 
 }
 
 namespace unsupported_spawn_calls {
   int foo() {
-    int x = _Cilk_spawn __builtin_ffs(1u); // expected-error {{builtin function cannot be spawned}}
+    int x = _Cilk_spawn __builtin_ffs(1u);
     return x;
   }
 
   void bar() {
-    _Cilk_spawn __builtin_unreachable();  // expected-error {{builtin function cannot be spawned}}
+    _Cilk_spawn __builtin_unreachable();
   }
 
   constexpr long double operator"" _deg(long double deg)

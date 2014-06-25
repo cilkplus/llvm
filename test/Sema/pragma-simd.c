@@ -19,67 +19,13 @@ void test_vectorlength() {
   #pragma simd vectorlength(C1)
   /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(C2+C2)
-  for (i = 0; i < 10; ++i) ;
-
-  /* expected-error@+1 {{vectorlength expression must be a power of 2}} */
-  #pragma simd vectorlength(3)
   /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(j)
   /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(C1+j)
   /* expected-error@+1 {{vectorlength expression must be an integer constant}} */
   #pragma simd vectorlength(I())
-}
-
-void test_vectorlengthfor() {
-  int i;
-  #pragma simd vectorlengthfor(char)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(short)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(int)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(long)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(long long)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(unsigned long long)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(float)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(double)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(void *)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(void ****)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(void const *)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(void * const)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(void const * const)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(short *)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(int[45])
-  for (i = 0; i < 10; ++i);
-  enum E { A, B, C };
-  #pragma simd vectorlengthfor(enum E)
-  for (i = 0; i < 10; ++i);
-  struct S { int a; int b; int c; };
-  #pragma simd vectorlengthfor(struct S)
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(void(int, int))
-  for (i = 0; i < 10; ++i);
-
-  struct Incomplete;
-  #pragma simd vectorlengthfor(struct Incomplete) // expected-error {{cannot select vector length for incomplete type 'struct Incomplete'}}
-  for (i = 0; i < 10; ++i);
-  typedef struct Incomplete I;
-  #pragma simd vectorlengthfor(I) // expected-error {{cannot select vector length for incomplete type 'I' (aka 'struct Incomplete')}}
-  for (i = 0; i < 10; ++i);
-  #pragma simd vectorlengthfor(void) // expected-error {{cannot select vector length for void type}}
-  for (i = 0; i < 10; ++i);
+  for (i = 0; i < 10; ++i) ;
 }
 
 struct A { int a; };
@@ -150,7 +96,7 @@ void test_linear(int arr[]) {
   for (int i = 0; i < 10; ++i);
 
 #pragma clang diagnostic push
-#pragma clang diagnostic warning "-Wcilkplus"
+#pragma clang diagnostic warning "-Wsource-uses-cilk-plus"
   /* expected-warning@+1 {{linear step is zero}} */
   #pragma simd linear(j:0)
   for (int i = 0; i < 10; ++i);
@@ -281,20 +227,6 @@ void test_pragma_simd() {
   #pragma simd linear(e:e)
   for (int i = 0; i < 10; ++i) ;
 
-  /* expected-note@+2 {{vectorlength first specified here}} */
-  /* expected-error@+1 {{cannot specify both vectorlengthfor and vectorlength}} */
-  #pragma simd vectorlength(8) vectorlengthfor(int)
-  for (int i = 0; i < 10; ++i) ;
-  /* expected-note@+2 {{vectorlengthfor first specified here}} */
-  /* expected-error@+1 {{cannot specify both vectorlength and vectorlengthfor}} */
-  #pragma simd vectorlengthfor(int) vectorlength(8)
-  for (int i = 0; i < 10; ++i) ;
-  /* expected-note@+4 {{vectorlengthfor first specified here}} */
-  /* expected-error@+3 {{cannot specify multiple vectorlengthfor clauses}} */
-  /* expected-note@+2 {{vectorlengthfor first specified here}} */
-  /* expected-error@+1 {{cannot specify both vectorlength and vectorlengthfor}} */
-  #pragma simd vectorlengthfor(int) vectorlength(8) vectorlengthfor(int)
-  for (int i = 0; i < 10; ++i) ;
   /* expected-note@+2 {{vectorlength first specified here}} */
   /* expected-error@+1 {{cannot specify multiple vectorlength clauses}} */
   #pragma simd vectorlength(4) vectorlength(8)

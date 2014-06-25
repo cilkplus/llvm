@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 %s -fsyntax-only -verify -std=c++11
+// RUN: %clang_cc1 %s -fsyntax-only -verify -std=c++11 -fms-extensions
 typedef const struct __CFString * CFStringRef;
 #define CFSTR __builtin___CFStringMakeConstantString
 
@@ -37,4 +37,10 @@ namespace addressof {
   int *pbf = __builtin_addressof(u.n); // expected-error {{address of bit-field requested}}
 
   S *ptmp = __builtin_addressof(S{}); // expected-error {{taking the address of a temporary}}
+}
+
+void ms_builtins() {
+  __assume(1);
+  __noop(1);
+  __debugbreak();
 }

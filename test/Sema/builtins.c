@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 %s -fsyntax-only -verify -pedantic -Wno-string-plus-int -triple=i686-apple-darwin9
+// RUN: %clang_cc1 %s -fsyntax-only -verify -pedantic -Wno-string-plus-int -triple=i686-apple-darwin9 -fms-extensions
 // This test needs to set the target because it uses __builtin_ia32_vec_ext_v4si
 
 int test1(float a, int b) {
@@ -190,4 +190,10 @@ void test18() {
   ptr = __builtin___memccpy_chk(dst, src, '\037', sizeof(src));      // expected-error {{too few arguments to function call}}
   ptr = __builtin___strlcpy_chk(dst, src, sizeof(src), sizeof(dst)); // expected-warning {{incompatible integer to pointer conversion}}
   ptr = __builtin___strlcat_chk(dst, src, sizeof(src), sizeof(dst)); // expected-warning {{incompatible integer to pointer conversion}}
+}
+
+void ms_builtins() {
+  __assume(1);
+  __noop(1);
+  __debugbreak();
 }

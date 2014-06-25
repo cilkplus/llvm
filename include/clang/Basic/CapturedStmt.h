@@ -18,7 +18,8 @@ enum CapturedRegionKind {
   CR_Default,
   CR_CilkSpawn,
   CR_CilkFor,
-  CR_SIMDFor
+  CR_SIMDFor,
+  CR_OpenMP
 };
 
 } // end namespace clang
