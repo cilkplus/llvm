@@ -373,10 +373,13 @@ Retry:
   case tok::annot_pragma_cilk_grainsize_begin:
     return ParsePragmaCilkGrainsize();
 
-
   case tok::annot_pragma_simd:
     ProhibitAttributes(Attrs);
     return ParseSIMDDirective();
+  case tok::annot_pragma_openmp:
+    ProhibitAttributes(Attrs);
+    return ParseOpenMPDeclarativeOrExecutableDirective();
+
   }
 
   // If we reached this code, the statement must end in a semicolon.

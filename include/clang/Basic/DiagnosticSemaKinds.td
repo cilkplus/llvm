@@ -7058,7 +7058,7 @@ def err_omp_required_method : Error<
 def note_omp_marked_here : Note<
   "marked as %0 here">;
 def err_omp_clause_ref_type_arg : Error<
-  "arguments of OpenMP clause '%0' cannot be of reference type">;
+  "arguments of OpenMP clause '%0' cannot be of reference type %1">;
 def err_omp_expected_int_or_ptr : Error<
   "argument of a linear clause should be of integral or pointer type">;
 def err_omp_expected_array_or_ptr : Error<
