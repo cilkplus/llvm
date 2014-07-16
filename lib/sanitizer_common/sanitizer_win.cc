@@ -196,6 +196,11 @@ void SetStackSizeLimitInBytes(uptr limit) {
   UNIMPLEMENTED();
 }
 
+char *FindPathToBinary(const char *name) {
+  // Nothing here for now.
+  return 0;
+}
+
 void SleepForSeconds(int seconds) {
   Sleep(seconds * 1000);
 }
@@ -212,6 +217,11 @@ void Abort() {
   abort();
   _exit(-1);  // abort is not NORETURN on Windows.
 }
+
+uptr GetListOfModules(LoadedModule *modules, uptr max_modules,
+                      string_predicate_t filter) {
+  UNIMPLEMENTED();
+};
 
 #ifndef SANITIZER_GO
 int Atexit(void (*function)(void)) {
@@ -366,31 +376,33 @@ void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
 #endif
 }
 
-void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp,
-                   uptr stack_top, uptr stack_bottom, bool fast) {
-  (void)fast;
-  (void)stack_top;
-  (void)stack_bottom;
-  stack->max_size = max_s;
-  void *tmp[kStackTraceMax];
-
+void StackTrace::SlowUnwindStack(uptr pc, uptr max_depth) {
   // FIXME: CaptureStackBackTrace might be too slow for us.
   // FIXME: Compare with StackWalk64.
   // FIXME: Look at LLVMUnhandledExceptionFilter in Signals.inc
-  uptr cs_ret = CaptureStackBackTrace(1, stack->max_size, tmp, 0);
-  uptr offset = 0;
+  size = CaptureStackBackTrace(2, Min(max_depth, kStackTraceMax),
+                               (void**)trace, 0);
   // Skip the RTL frames by searching for the PC in the stacktrace.
-  // FIXME: this doesn't work well for the malloc/free stacks yet.
-  for (uptr i = 0; i < cs_ret; i++) {
-    if (pc != (uptr)tmp[i])
-      continue;
-    offset = i;
-    break;
-  }
+  uptr pc_location = LocatePcInTrace(pc);
+  PopStackFrames(pc_location);
+}
 
-  stack->size = cs_ret - offset;
-  for (uptr i = 0; i < stack->size; i++)
-    stack->trace[i] = (uptr)tmp[i + offset];
+void MaybeOpenReportFile() {
+  // Windows doesn't have native fork, and we don't support Cygwin or other
+  // environments that try to fake it, so the initial report_fd will always be
+  // correct.
+}
+
+void RawWrite(const char *buffer) {
+  static const char *kRawWriteError =
+      "RawWrite can't output requested buffer!\n";
+  uptr length = (uptr)internal_strlen(buffer);
+  if (length != internal_write(report_fd, buffer, length)) {
+    // stderr may be closed, but we may be able to print to the debugger
+    // instead.  This is the case when launching a program from Visual Studio,
+    // and the following routine should write to its console.
+    OutputDebugStringA(buffer);
+  }
 }
 
 }  // namespace __sanitizer

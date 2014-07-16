@@ -9,10 +9,11 @@ set(LSAN_COMMON_SOURCES
   lsan_common_linux.cc)
 
 set(LSAN_SOURCES
-  lsan_interceptors.cc
+  lsan.cc
   lsan_allocator.cc
-  lsan_thread.cc
-  lsan.cc)
+  lsan_interceptors.cc
+  lsan_preinit.cc
+  lsan_thread.cc)
 
 set(LSAN_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -28,10 +29,12 @@ filter_available_targets(LSAN_SUPPORTED_ARCH
 set(LSAN_RUNTIME_LIBRARIES)
 
 if(APPLE)
-  add_compiler_rt_osx_object_library(RTLSanCommon
-    ARCH ${LSAN_COMMON_SUPPORTED_ARCH}
-    SOURCES ${LSAN_COMMON_SOURCES}
-    CFLAGS ${LSAN_CFLAGS})
+  foreach(os ${SANITIZER_COMMON_SUPPORTED_DARWIN_OS})
+    add_compiler_rt_darwin_object_library(RTLSanCommon ${os}
+      ARCH ${LSAN_COMMON_SUPPORTED_ARCH}
+      SOURCES ${LSAN_COMMON_SOURCES}
+      CFLAGS ${LSAN_CFLAGS})
+  endforeach()
 elseif(NOT ANDROID)
   foreach(arch ${LSAN_COMMON_SUPPORTED_ARCH})
     add_compiler_rt_object_library(RTLSanCommon ${arch}

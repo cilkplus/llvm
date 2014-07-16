@@ -111,6 +111,24 @@ TEST(AddressSanitizer, CallocTest) {
   free(a);
 }
 
+TEST(AddressSanitizer, CallocReturnsZeroMem) {
+  size_t sizes[] = {16, 1000, 10000, 100000, 2100000};
+  for (size_t s = 0; s < sizeof(sizes)/sizeof(sizes[0]); s++) {
+    size_t size = sizes[s];
+    for (size_t iter = 0; iter < 5; iter++) {
+      char *x = Ident((char*)calloc(1, size));
+      EXPECT_EQ(x[0], 0);
+      EXPECT_EQ(x[size - 1], 0);
+      EXPECT_EQ(x[size / 2], 0);
+      EXPECT_EQ(x[size / 3], 0);
+      EXPECT_EQ(x[size / 4], 0);
+      memset(x, 0x42, size);
+      free(Ident(x));
+      free(Ident(malloc(Ident(1 << 27))));  // Try to drain the quarantine.
+    }
+  }
+}
+
 TEST(AddressSanitizer, VallocTest) {
   void *a = valloc(100);
   EXPECT_EQ(0U, (uintptr_t)a % kPageSize);
@@ -225,26 +243,6 @@ TEST(AddressSanitizer, BitFieldNegativeTest) {
   x->a = 0;
   x->b = 0;
   delete Ident(x);
-}
-
-static size_t kOOMAllocationSize =
-  SANITIZER_WORDSIZE == 64 ? (size_t)(1ULL << 48) : (0xf0000000);
-
-TEST(AddressSanitizer, OutOfMemoryTest) {
-  EXPECT_EQ(0, realloc(0, kOOMAllocationSize));
-  EXPECT_EQ(0, realloc(0, ~Ident(0)));
-  EXPECT_EQ(0, malloc(kOOMAllocationSize));
-  EXPECT_EQ(0, malloc(~Ident(0)));
-  EXPECT_EQ(0, calloc(1, kOOMAllocationSize));
-  EXPECT_EQ(0, calloc(1, ~Ident(0)));
-}
-
-TEST(AddressSanitizer, BadReallocTest) {
-  int *a = (int*)Ident(malloc(100));
-  a[0] = 42;
-  EXPECT_EQ(0, realloc(a, kOOMAllocationSize));
-  EXPECT_EQ(42, a[0]);
-  free(a);
 }
 
 #if ASAN_NEEDS_SEGV
@@ -671,7 +669,8 @@ TEST(AddressSanitizer, ThreadStackReuseTest) {
   PTHREAD_JOIN(t, 0);
 }
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i686__) || defined(__x86_64__)
+#include <emmintrin.h>
 TEST(AddressSanitizer, Store128Test) {
   char *a = Ident((char*)malloc(Ident(12)));
   char *p = a;
@@ -1101,15 +1100,15 @@ TEST(AddressSanitizer, LargeStructCopyTest) {
   *Ident(&a) = *Ident(&a);
 }
 
-ATTRIBUTE_NO_ADDRESS_SAFETY_ANALYSIS
-static void NoAddressSafety() {
+ATTRIBUTE_NO_SANITIZE_ADDRESS
+static void NoSanitizeAddress() {
   char *foo = new char[10];
   Ident(foo)[10] = 0;
   delete [] foo;
 }
 
-TEST(AddressSanitizer, AttributeNoAddressSafetyTest) {
-  Ident(NoAddressSafety)();
+TEST(AddressSanitizer, AttributeNoSanitizeAddressTest) {
+  Ident(NoSanitizeAddress)();
 }
 
 // It doesn't work on Android, as calls to new/delete go through malloc/free.

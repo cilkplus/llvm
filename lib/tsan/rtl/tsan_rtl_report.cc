@@ -410,7 +410,7 @@ void RestoreStack(int tid, const u64 epoch, StackTrace *stk, MutexSet *mset) {
   const u64 ebegin = RoundDown(eend, kTracePartSize);
   DPrintf("#%d: RestoreStack epoch=%zu ebegin=%zu eend=%zu partidx=%d\n",
           tid, (uptr)epoch, (uptr)ebegin, (uptr)eend, partidx);
-  InternalScopedBuffer<uptr> stack(1024);  // FIXME: de-hardcode 1024
+  InternalScopedBuffer<uptr> stack(kShadowStackSize);
   for (uptr i = 0; i < hdr->stack0.Size(); i++) {
     stack[i] = hdr->stack0.Get(i);
     DPrintf2("  #%02lu: pc=%zx\n", i, stack[i]);
@@ -726,8 +726,8 @@ void PrintCurrentStackSlow() {
 #ifndef TSAN_GO
   __sanitizer::StackTrace *ptrace = new(internal_alloc(MBlockStackTrace,
       sizeof(__sanitizer::StackTrace))) __sanitizer::StackTrace;
-  ptrace->SlowUnwindStack(__sanitizer::StackTrace::GetCurrentPc(),
-      kStackTraceMax);
+  ptrace->Unwind(kStackTraceMax, __sanitizer::StackTrace::GetCurrentPc(),
+                 0, 0, 0, false);
   for (uptr i = 0; i < ptrace->size / 2; i++) {
     uptr tmp = ptrace->trace[i];
     ptrace->trace[i] = ptrace->trace[ptrace->size - i - 1];

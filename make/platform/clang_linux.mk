@@ -75,12 +75,13 @@ Arch.lsan-x86_64 := x86_64
 Arch.cilk-x86_64 := x86_64
 endif
 
+endif
+
 ifneq ($(LLVM_ANDROID_TOOLCHAIN_DIR),)
 Configs += asan-arm-android
 Arch.asan-arm-android := arm-android
 endif
 
-endif
 endif
 
 ###

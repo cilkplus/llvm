@@ -14,6 +14,7 @@
 #include "sanitizer_common/sanitizer_allocator.h"
 #include "sanitizer_common/sanitizer_allocator_internal.h"
 #include "sanitizer_common/sanitizer_common.h"
+#include "sanitizer_common/sanitizer_flags.h"
 
 #include "sanitizer_test_utils.h"
 
@@ -416,11 +417,19 @@ void TestCombinedAllocator() {
   memset(&cache, 0, sizeof(cache));
   a->InitCache(&cache);
 
+  bool allocator_may_return_null = common_flags()->allocator_may_return_null;
+  common_flags()->allocator_may_return_null = true;
   EXPECT_EQ(a->Allocate(&cache, -1, 1), (void*)0);
   EXPECT_EQ(a->Allocate(&cache, -1, 1024), (void*)0);
   EXPECT_EQ(a->Allocate(&cache, (uptr)-1 - 1024, 1), (void*)0);
   EXPECT_EQ(a->Allocate(&cache, (uptr)-1 - 1024, 1024), (void*)0);
   EXPECT_EQ(a->Allocate(&cache, (uptr)-1 - 1023, 1024), (void*)0);
+
+  common_flags()->allocator_may_return_null = false;
+  EXPECT_DEATH(a->Allocate(&cache, -1, 1),
+               "allocator is terminating the process");
+  // Restore the original value.
+  common_flags()->allocator_may_return_null = allocator_may_return_null;
 
   const uptr kNumAllocs = 100000;
   const uptr kNumIter = 10;
@@ -733,6 +742,7 @@ TEST(SanitizerCommon, LargeMmapAllocatorBlockBegin) {
     allocated[i] = (char *)a.Allocate(&stats, size, 1);
   }
 
+  a.ForceLock();
   for (uptr i = 0; i < kNumAllocs  * kNumAllocs; i++) {
     // if ((i & (i - 1)) == 0) fprintf(stderr, "[%zd]\n", i);
     char *p1 = allocated[i % kNumAllocs];
@@ -748,6 +758,7 @@ TEST(SanitizerCommon, LargeMmapAllocatorBlockBegin) {
     p = reinterpret_cast<void *>(~0L - (i % 1024));
     EXPECT_EQ((void *)0, a.GetBlockBeginFastLocked(p));
   }
+  a.ForceUnlock();
 
   for (uptr i = 0; i < kNumAllocs; i++)
     a.Deallocate(&stats, allocated[i]);
