@@ -15,7 +15,8 @@ SubDirs += i386 ppc x86_64 arm
 
 # Add other submodules.
 SubDirs += asan
-SubDirs += cilk
+# This is a temporary decision.
+#SubDirs += cilk
 SubDirs += interception
 SubDirs += profile
 SubDirs += sanitizer_common
