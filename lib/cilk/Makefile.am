@@ -1,8 +1,6 @@
-#  @copyright
-#  Copyright (C) 2011, Intel Corporation
+#  Copyright (C) 2011-2014, Intel Corporation
 #  All rights reserved.
 #  
-#  @copyright
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
 #  are met:
@@ -17,7 +15,6 @@
 #      contributors may be used to endorse or promote products derived
 #      from this software without specific prior written permission.
 #  
-#  @copyright
 #  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 #  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 #  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -40,10 +37,8 @@ AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I m4
 
 # Compiler and linker flags.
-GENERAL_FLAGS = -I$(top_srcdir)/include -DIN_CILK_RUNTIME=1
+GENERAL_FLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/runtime -I$(top_srcdir)/runtime/config/$(config_dir) -DIN_CILK_RUNTIME=1
 GENERAL_FLAGS += -fpic -O3
-GENERAL_FLAGS += -DBUILD_USER=\"$(USER)\"
-GENERAL_FLAGS += -DBUILD_HOST=\"`hostname`\"
 
 # Enable Intel Cilk Plus extension
 GENERAL_FLAGS += -fcilkplus
@@ -56,10 +51,11 @@ AM_LDFLAGS = -lpthread -ldl
 lib_LTLIBRARIES = libcilkrts.la
 
 libcilkrts_la_SOURCES =            \
+  runtime/config/$(config_dir)/cilk-abi-vla.c           \
+  runtime/config/$(config_dir)/os-unix-sysdep.c \
   runtime/bug.cpp                  \
   runtime/cilk-abi.c               \
   runtime/cilk-abi-cilk-for.cpp    \
-  runtime/cilk-abi-vla.c           \
   runtime/cilk-abi-vla-internal.c  \
   runtime/cilk_api.c               \
   runtime/cilk_fiber.cpp           \
@@ -86,12 +82,24 @@ libcilkrts_la_SOURCES =            \
   runtime/sysdep-unix.c            \
   runtime/worker_mutex.c
 
+
 # Load the $(REVISION) value.
 include include/internal/rev.mk
 
-libcilkrts_la_LDFLAGS  = -rpath '$(libdir)'
-libcilkrts_la_LDFLAGS += -version-info 5:$(CILK_REVISION):0
+#libcilkrts_la_LDFLAGS  = -rpath '$(libdir)'
+libcilkrts_la_LDFLAGS = -version-info 5:0:0
 libcilkrts_la_LDFLAGS += -lpthread -ldl
+
+# If we're building on Linux, use the Linux version script
+if LINUX_LINKER_SCRIPT
+    libcilkrts_la_LDFLAGS += -Wl,--version-script,$(srcdir)/runtime/linux-symbols.ver
+endif
+
+# If we're building on MacOS, use the Mac versioning
+if MAC_LINKER_SCRIPT
+  libcilkrts_la_LDFLAGS += -Wl,-exported_symbols_list,$(srcdir)/runtime/mac-symbols.txt
+endif
+
 
 # Hack for Cygwin
 libcilkrts_la_LDFLAGS += -no-undefined

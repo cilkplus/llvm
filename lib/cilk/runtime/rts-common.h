@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -116,10 +113,18 @@
 #   if !defined(__has_extension) || !__has_extension(notify_zc_intrinsic)
 #      undef ENABLE_NOTIFY_ZC_INTRINSIC
 #   endif
-#elif defined(__arm__)
-// __notify_zc_intrinsic not yet supported by gcc for ARM
+#elif ! (defined(__x86_64__) || defined(__i386) \
+         || defined(_M_X64) || defined(_M_IX86))
+// __notify_zc_intrinsic currently supported only for intel architecture
 #   undef ENABLE_NOTIFY_ZC_INTRINSIC
 #endif
 
+// If ENABLE_NOTIFY_ZC_INTRINSIC is defined, use __notify_zc_intrisic
+#ifdef ENABLE_NOTIFY_ZC_INTRINSIC
+#   define NOTIFY_ZC_INTRINSIC(annotation, data) \
+    __notify_zc_intrinsic(annotation, data)
+#else
+#   define NOTIFY_ZC_INTRINSIC(annotation, data)
+#endif
 
 #endif // ! defined(INCLUDED_RTS_COMMON_DOT_H)

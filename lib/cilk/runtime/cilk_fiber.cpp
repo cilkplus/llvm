@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2012, Intel Corporation
+ *  Copyright (C) 2012-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -124,7 +121,6 @@ static void cilk_fiber_pool_free_fibers_from_pool(cilk_fiber_pool* pool,
                             // releasing the lock.
         int num_to_free = 0;
         cilk_fiber* fibers_to_free[B];
-        bool quit_loop = false;
 
         // Stage 1: Grab the lock.
         if (need_lock) {
@@ -434,6 +430,7 @@ void cilk_fiber_set_stack_op(cilk_fiber *fiber,
     fdata->stack_op_data = o.data;
 }
 
+#if 0    // Debugging function
 static
 const char *NameStackOp (enum __cilk_tbb_stack_op op)
 {
@@ -445,7 +442,7 @@ const char *NameStackOp (enum __cilk_tbb_stack_op op)
         default: return "Unknown";
     }
 }
-
+#endif
 
 /*
  * Save TBB interop information for an unbound thread.  It will get picked

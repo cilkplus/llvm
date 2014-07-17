@@ -1,11 +1,9 @@
 /*
  *  abi.h
  *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -20,7 +18,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -96,8 +93,6 @@ typedef struct
 #endif  /* defined(_MSC_VER) */
 
 /* struct tags */
-typedef struct __cilkrts_worker      __cilkrts_worker;      ///< struct tag for worker 
-typedef struct __cilkrts_worker*     __cilkrts_worker_ptr;  ///< struct tag for worker ptr
 typedef struct __cilkrts_stack_frame __cilkrts_stack_frame; ///< struct tag for stack frame
 
 // Forwarded declarations
@@ -618,6 +613,24 @@ __cilkrts_stack_free(__cilkrts_stack_frame *sf,
                      uint32_t align,
                      uint32_t known_from_stack);
 
+/**
+ * @brief System-dependent code to save floating point control information
+ * to an ABI 1 or higher @c __cilkrts_stack_frame.  If possible (and necessary)
+ * the code to save the floating point control information should be inlined.
+ *
+ * Note that this function does *not* save the current floating point
+ * registers.  It saves the floating point control words that control
+ * precision and rounding and stuff like that.
+ *
+ * This function will be a noop for architectures that don't have warts
+ * like the floating point control words, or where the information is
+ * already being saved by the setjmp.
+ *
+ * @param sf  @c __cilkrts_stack_frame for the frame we're saving the
+ * floating point control information in.
+ */
+CILK_ABI(void)
+__cilkrts_save_fp_ctrl_state(__cilkrts_stack_frame *sf);
 
 __CILKRTS_END_EXTERN_C
 #endif /* include guard */

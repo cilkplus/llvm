@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2010-2012, Intel Corporation
+ *  Copyright (C) 2010-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -363,7 +360,9 @@ CILK_ABI_WORKER_PTR BIND_THREAD_RTN(void)
 {
     __cilkrts_worker *w;
     int start_cilkscreen = 0;
+#ifdef USE_ITTNOTIFY
     static int unique_obj;
+#endif
 
     // Cannot set this pointer until after __cilkrts_init_internal() call:
     global_state_t* g;
@@ -389,6 +388,10 @@ CILK_ABI_WORKER_PTR BIND_THREAD_RTN(void)
 
     __cilkrts_set_tls_worker(w);
     __cilkrts_cilkscreen_establish_worker(w);
+
+
+    START_INTERVAL(w, INTERVAL_IN_SCHEDULER);
+    START_INTERVAL(w, INTERVAL_IN_RUNTIME);
     {
         full_frame *ff = __cilkrts_make_full_frame(w, 0);
 
@@ -460,13 +463,10 @@ CILK_ABI_WORKER_PTR BIND_THREAD_RTN(void)
 
     global_os_mutex_unlock();
 
-    /* If there's only 1 worker, the counts will be started in
-     * __cilkrts_scheduler */
-    if (g->P > 1)
-    {
-        START_INTERVAL(w, INTERVAL_IN_SCHEDULER);
-        START_INTERVAL(w, INTERVAL_WORKING);
-    }
+    /* We are about to switch back into user code after binding the
+       thread.  Start working again. */
+    STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
+    START_INTERVAL(w, INTERVAL_WORKING);
 
     ITT_SYNC_RELEASING(&unique_obj);
 
@@ -487,7 +487,7 @@ CILK_ABI_WORKER_PTR BIND_THREAD_RTN(void)
  *
  * For Windows, the aliased symbol is exported in cilk-exports.def.
  */
-#ifdef _DARWIN_C_SOURCE
+#if defined(_DARWIN_C_SOURCE) || defined(__APPLE__)
 /**
  * Mac OS X: Unfortunately, Darwin doesn't allow aliasing, so we just make a
  * call and hope the optimizer does the right thing.
@@ -516,7 +516,7 @@ CILK_ABI_WORKER_PTR __cilkrts_bind_thread (void) {
 CILK_ABI_WORKER_PTR __cilkrts_bind_thread(void)
     ALIASED_NAME(BIND_THREAD_RTN);
 
-#endif // defined _DARWIN_C_SOURCE
+#endif // defined _DARWIN_C_SOURCE || defined __APPLE__
 #endif // !defined _MSC_VER
 
 CILK_API_SIZET
@@ -719,6 +719,13 @@ __cilkrts_bump_loop_rank_internal(__cilkrts_worker* w)
     w->pedigree.rank = 0;
 
     return 0;
+}
+
+CILK_ABI_VOID
+__cilkrts_save_fp_ctrl_state(__cilkrts_stack_frame *sf)
+{
+    // Pass call onto OS/architecture dependent function
+    sysdep_save_fp_ctrl_state(sf);
 }
 
 /* end cilk-abi.c */

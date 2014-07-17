@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -51,6 +48,7 @@
 #include "worker_mutex.h"
 #include "global_state.h"
 #include "record-replay.h"
+#include "signal_node.h"
 
 #include <setjmp.h>
 #include <stddef.h>
@@ -65,8 +63,6 @@ __CILKRTS_BEGIN_EXTERN_C
 
 /* Opaque types. */
 
-/// Opaque type for signal node.
-typedef struct signal_node_t signal_node_t;
 struct full_frame;
 struct free_list;
 struct pending_exception_info;
@@ -130,7 +126,7 @@ typedef enum cilk_worker_type
  * that are involved in synchronization protocols (i.e., the THE
  * protocol).
  */
-typedef struct local_state  /* COMMON_PORTABLE */
+struct local_state  /* COMMON_PORTABLE */
 {
     /** This value should be in the first field in any local_state */
 #   define WORKER_MAGIC_0 ((ls_magic_t)0xe0831a4a940c60b8ULL)
@@ -408,7 +404,7 @@ typedef struct local_state  /* COMMON_PORTABLE */
      * [shared read-only]
      */
     ls_magic_t worker_magic_1;
-} local_state;
+};
 
 /**
  * Perform cleanup according to the function set before the longjmp().

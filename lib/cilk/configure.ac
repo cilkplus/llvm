@@ -1,5 +1,5 @@
 #  @copyright
-#  Copyright (C) 2011, Intel Corporation
+#  Copyright (C) 2011-2013, Intel Corporation
 #  All rights reserved.
 #  
 #  @copyright
@@ -32,8 +32,16 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 
 AC_INIT([Cilk Runtime], [2.0], [cilk@intel.com])
-AC_PREREQ([2.67])
+AC_PREREQ([2.63])
+
+# Needed to define ${target}.  Needs to be very early to avoid annoying
+# warning about calling AC_ARG_PROGRAM before AC_CANONICAL_SYSTEM
+AC_CANONICAL_SYSTEM
+
 AM_INIT_AUTOMAKE([1.11 no-define])
+
+# Check whether alloca.h is available
+AC_FUNC_ALLOCA
 
 # Build a DLL on Windows
 AC_LIBTOOL_WIN32_DLL
@@ -42,4 +50,55 @@ AC_PROG_CC
 AC_PROG_LIBTOOL
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_FILES([Makefile])
+
+# Check whether the target supports protected visibility.
+save_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Werror"
+AC_TRY_COMPILE([void __attribute__((visibility("protected"))) foo(void) { }],
+	       [], libcilkrts_cv_have_attribute_visibility=yes,
+	       libcilkrts_cv_have_attribute_visibility=no)
+CFLAGS="$save_CFLAGS"
+if test $libcilkrts_cv_have_attribute_visibility = yes; then
+  AC_DEFINE(HAVE_ATTRIBUTE_VISIBILITY, 1,
+    [Define to 1 if the target supports __attribute__((visibility(...))).])
+fi
+
+# Set config_dir based on the target.  config_dir specifies where to get
+# target-specific files.  The generic implementation is incomplete, but
+# contains information on what's needed
+case "${target}" in
+
+  x86_64-*-*)
+    config_dir="x86"
+    ;;
+
+  i[456]86-*-*)
+    config_dir="x86"
+    ;;
+
+  *)
+    config_dir="generic"
+    ;;
+
+esac
+AC_SUBST(config_dir)
+
+# We have linker scripts for appropriate operating systems
+linux_linker_script=no
+case "${host}" in
+    *-*-linux*)
+        linux_linker_script=yes
+        ;;
+esac
+AM_CONDITIONAL(LINUX_LINKER_SCRIPT, test "$linux_linker_script" = "yes")
+
+mac_linker_script=no
+case "${host}" in
+    *-*-apple*)
+        mac_linker_script=yes
+        ;;
+esac
+AM_CONDITIONAL(MAC_LINKER_SCRIPT, test "$mac_linker_script" = "yes")
+
+# Must be last
 AC_OUTPUT

@@ -1,10 +1,8 @@
 // cilk_version.h
 //
-//  @copyright
-//  Copyright (C) 2009-2013, Intel Corporation
+//  Copyright (C) 2009-2014, Intel Corporation
 //  All rights reserved.
 //  
-//  @copyright
 //  Redistribution and use in source and binary forms, with or without
 //  modification, are permitted provided that the following conditions
 //  are met:
@@ -19,7 +17,6 @@
 //      contributors may be used to endorse or promote products derived
 //      from this software without specific prior written permission.
 //  
-//  @copyright
 //  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 //  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 //  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -38,10 +35,10 @@
 
 #define VERSION_MAJOR 2
 #define VERSION_MINOR 0
-#define VERSION_BUILD 3365
+#define VERSION_BUILD 4185
 #define VERSION_REV 0
-#define VERSION_STRING "2,0,3365,0"
-#define VERSION_HASH "dd6a75b2c7e3"
+#define VERSION_STRING "2,0,4185,0"
+#define VERSION_HASH "d9687d51bb28"
 #define VERSION_BRANCH "eng"
 #define TBB_REV_NUMBER ""
-#define VERSION_YEAR "2013"
+#define VERSION_YEAR "2014"

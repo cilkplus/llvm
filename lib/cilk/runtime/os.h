@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -47,20 +44,14 @@
 #define INCLUDED_OS_DOT_H
 
 #include "rts-common.h"
-#include <cilk/common.h>
+#include "cilk/common.h"
+#include "cilk-tbb-interop.h"
 
 #ifdef __cplusplus
 #   include <cstddef>
 #else
 #   include <stddef.h>
 #endif
-
-// #ifndef _WIN32
-// #   include <pthread.h>  // For pthread_key_t
-// #endif
-
-/// Forward declaration of stack_op thunk
-typedef struct __cilk_tbb_stack_op_thunk __cilk_tbb_stack_op_thunk;
 
 __CILKRTS_BEGIN_EXTERN_C
 
@@ -78,12 +69,6 @@ __CILKRTS_BEGIN_EXTERN_C
 /* The RTS assumes that some thread-local state exists that stores the
    worker and reducer map currently associated with a thread.  These routines
    manipulate this state. */
-
-/** @brief Thread-local state for worker struct. */
-typedef struct __cilkrts_worker __cilkrts_worker;
-
-/** @brief Thread-local state for pedigree nodes. */
-typedef struct __cilkrts_pedigree __cilkrts_pedigree;
 
 /** @brief Thread-local state for cilk fibers. */
 typedef struct cilk_fiber_sysdep cilk_fiber_sysdep;
@@ -162,39 +147,9 @@ COMMON_SYSDEP void __cilkrts_short_pause(void);
 /// Wrapper for xchg instruction
 COMMON_SYSDEP int __cilkrts_xchg(volatile int *ptr, int x);
 
-/* gcc before 4.4 does not implement __sync_synchronize properly */
-#if (__ICC >= 1110 && !(__MIC__ || __MIC2__))                      \
-    || (!defined __ICC && __GNUC__ * 10 + __GNUC_MINOR__ > 43)
-#   define HAVE_SYNC_INTRINSICS 1
-#endif
-
-/*
- * void __cilkrts_fence(void)
- *
- * Executes an MFENCE instruction to serialize all load and store instructions
- * that were issued prior the MFENCE instruction. This serializing operation
- * guarantees that every load and store instruction that precedes the MFENCE
- * instruction is globally visible before any load or store instruction that
- * follows the MFENCE instruction. The MFENCE instruction is ordered with
- * respect to all load and store instructions, other MFENCE instructions, any
- * SFENCE and LFENCE instructions, and any serializing instructions (such as
- * the CPUID instruction).
- */
-#ifdef HAVE_SYNC_INTRINSICS
-#   define __cilkrts_fence() __sync_synchronize()
-#elif defined __ICC || defined __GNUC__
-    /* mfence is a strict subset of lock add but takes longer on many
-     * processors. */
-// #   define __cilkrts_fence() __asm__ volatile ("mfence")
-    /* On MIC, fence seems to be completely unnecessary.
-     * Just for simplicity of 1st implementation, it defaults to x86 */ 
-#   define __cilkrts_fence() __asm__ volatile ("lock addl $0,(%rsp)")
-// #elif defined _WIN32
-// #   pragma intrinsic(_ReadWriteBarrier)
-// #   define __cilkrts_fence() _ReadWriteBarrier()
-#else
-COMMON_SYSDEP void __cilkrts_fence(void); ///< MFENCE instruction
-#endif
+// Defines __cilkrts_fence - A macro for x86, a function call for other
+// architectures
+#include "os-fence.h"
 
 COMMON_SYSDEP void __cilkrts_sleep(void); ///< Sleep briefly 
 COMMON_SYSDEP void __cilkrts_yield(void); ///< Yield quantum 
@@ -270,7 +225,6 @@ int win_set_thread_group_affinity(/*HANDLE*/ void* hThread,
  * thread-local variable.
  */
 void __cilkrts_per_thread_tls_cleanup(void);
-
 
 #endif // _WIN32
 

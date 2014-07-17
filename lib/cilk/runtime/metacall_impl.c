@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -42,12 +39,12 @@ NOINLINE
 CILK_API_VOID
 __cilkrts_metacall(unsigned int tool, unsigned int code, void *data)
 {
+#ifdef ENABLE_NOTIFY_ZC_INTRINSIC
     // The metacall type, code and data are packed together into a single
     // struct which will be interpreted by the tool. This function is the
     // one and only use of a "cilkscreen_metacall" annotation
     metacall_data_t d = { tool, code, data };
 
-#ifdef ENABLE_NOTIFY_ZC_INTRINSIC
     // Note that Inspector uses probe mode, and is implementing the metacall
     // interface to force the runtime to run with a single worker.  So
     // __cilkrts_metacall must use __notify_intrinsic instead of

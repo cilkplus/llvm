@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2012, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -57,7 +54,7 @@
 
 // TBD: There is a race when multiple threads try to initialize the
 // user_settable_values??
-// 
+//
 // Set to true if the user settable values portion of the global state
 // singleton is initialized, even if the rest of the singleton is not
 // initialized.
@@ -69,9 +66,10 @@ namespace {
 // cilkg_get_user_settable_values() is called and partially-zero-filled until
 // cilkg_init_global_state() is called.  The first field is filled in with
 // the size of a void* for the debugger and must be valid before initialization
-global_state_t global_state_singleton =
+static global_state_t global_state_singleton =
 {
-    sizeof(void *),    // addr_size
+    sizeof(void *),         // addr_size
+    GLOBAL_STATE_VERSION,   // structure version
 };
 
 
@@ -83,6 +81,7 @@ extern "C"
 
     // __cilkrts_global_state is exported and referenced by the debugger.
     // The debugger expects it to be valid when the module loads.
+//    CILK_EXPORT_DATA
     global_state_t *__cilkrts_global_state = &global_state_singleton;
 }
 
@@ -192,7 +191,6 @@ template <typename INT_T, typename CHAR_T>
 int store_int(INT_T *out, const CHAR_T *val, INT_T min, INT_T max)
 {
     errno = 0;
-    char *end = 0;
     long val_as_long = to_long(val);
     if (val_as_long == 0 && errno != 0)
         return __CILKRTS_SET_PARAM_INVALID;
@@ -513,8 +511,6 @@ global_state_t* cilkg_init_global_state()
     // Get partially-initialized global state.
     global_state_t* g = cilkg_get_user_settable_values();
 
-    int i, max_workers;
-
     if (g->max_stacks > 0) {
 
         // nstacks is currently honored on non-Windows systems only.
@@ -537,14 +533,14 @@ global_state_t* cilkg_init_global_state()
 
         // About max_stacks / P stacks, except we require at least 1
         // per pool.
-        if ((g->max_stacks / g->P) < g->fiber_pool_size)
+        if (((int)g->max_stacks / g->P) < g->fiber_pool_size)
             g->fiber_pool_size = g->max_stacks / g->P;
 
         if (g->fiber_pool_size <= 0) {
             g->fiber_pool_size = 1;
         }
         
-        if (g->max_stacks < g->P)
+        if ((int)g->max_stacks < g->P)
             g->max_stacks = g->P;
 
         g->global_fiber_pool_size = g->P * (g->fiber_pool_size+1);
@@ -573,7 +569,6 @@ global_state_t* cilkg_init_global_state()
 
 void cilkg_publish_global_state(global_state_t* g) 
 {
-
     // TBD: which one of these needs to be executed first?  I say
     // cilkg_singleton_ptr needs to be set last, with a mfence in
     // between, since it is the flag that cilkg_is_published_is
@@ -586,7 +581,15 @@ void cilkg_publish_global_state(global_state_t* g)
 void cilkg_deinit_global_state()
 {
     cilkg_singleton_ptr = NULL;
-    __cilkrts_global_state = NULL;
+
+    // The pointer to the global state needs to remain valid for the
+    // debugger.  Thus, we can't clear the following pointer.
+    //    __cilkrts_global_state = NULL;
+
+
+    // We also don't reset the global state, so that if we resume
+    // execution after ending Cilk, user set variables (e.g., # of
+    // workers) remains valid.
 }
 
 int cilkg_is_published(void)

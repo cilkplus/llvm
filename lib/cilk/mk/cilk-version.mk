@@ -1,10 +1,8 @@
 #########################################################################
 #
-#  @copyright
-#  Copyright (C) 2009-2011, Intel Corporation
+#  Copyright (C) 2009-2014, Intel Corporation
 #  All rights reserved.
 #  
-#  @copyright
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
 #  are met:
@@ -19,7 +17,6 @@
 #      contributors may be used to endorse or promote products derived
 #      from this software without specific prior written permission.
 #  
-#  @copyright
 #  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 #  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 #  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR

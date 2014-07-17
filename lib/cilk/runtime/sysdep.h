@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -250,6 +247,35 @@ NORETURN
 sysdep_longjmp_to_sf(char* new_sp,
                      __cilkrts_stack_frame *sf,
                      full_frame *ff_for_exceptions);
+
+/**
+ * @brief System-dependent code to save floating point control information
+ * to a @c __cilkrts_stack_frame.  This function will be called by compilers
+ * that cannot inline the code.
+ *
+ * Note that this function does *not* save the current floating point
+ * registers.  It saves the floating point control words that control
+ * precision and rounding and stuff like that.
+ *
+ * This function will be a noop for architectures that don't have warts
+ * like the floating point control words, or where the information is
+ * already being saved by the setjmp.
+ *
+ * @param sf                 @c __cilkrts_stack_frame for the frame we're
+ * saving the floating point control information in.
+ */
+COMMON_SYSDEP
+void
+sysdep_save_fp_ctrl_state(__cilkrts_stack_frame *sf);
+
+
+/**
+ * @brief restore x86 floating point state
+ *
+ * Only used for x86 and Intel64 processors
+ */
+COMMON_SYSDEP
+void restore_x86_fp_state(__cilkrts_stack_frame *sf);
 
 __CILKRTS_END_EXTERN_C
 

@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2011, 2013, Intel Corporation
+ *  Copyright (C) 2011-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -125,7 +122,7 @@ void call_cilk_for_loop_body(count_t low, count_t high,
                              __cilkrts_pedigree *loop_root_pedigree)
 {
     // Cilkscreen should not report this call in a stack trace
-    __notify_zc_intrinsic((char *)"cilkscreen_hide_call", 0);
+    NOTIFY_ZC_INTRINSIC((char *)"cilkscreen_hide_call", 0);
 
     // The worker is only valid until the first spawn.  Fetch the
     // __cilkrts_stack_frame out of the worker, since it will be stable across
@@ -239,7 +236,7 @@ void cilk_for_recursive(count_t low, count_t high,
 tail_recurse:
     // Cilkscreen should not report this call in a stack trace
     // This needs to be done everytime the worker resumes
-    __notify_zc_intrinsic((char *)"cilkscreen_hide_call", 0);
+    NOTIFY_ZC_INTRINSIC((char *)"cilkscreen_hide_call", 0);
 
     count_t count = high - low;
     // Invariant: count > 0, grain >= 1
@@ -256,9 +253,19 @@ tail_recurse:
         // argument list of the spawned function, hence the call to
         // capture_spawn_arg_stack_frame().
         __cilkrts_stack_frame *sf;
+#if defined(__GNUC__) && ! defined(__INTEL_COMPILER) && ! defined(__clang__)
+        // The current version of gcc initializes the sf structure eagerly.
+        // We can take advantage of this fact to avoid calling
+        // `capture_spawn_arg_stack_frame` when compiling with gcc.
+        // Remove this if the "shrink-wrap" optimization is implemented.
+        sf = w->current_stack_frame;
+        _Cilk_spawn cilk_for_recursive(low, mid, body, data, grain, w,
+                                       loop_root_pedigree);
+#else        
         _Cilk_spawn cilk_for_recursive(low, mid, body, data, grain,
                                        capture_spawn_arg_stack_frame(sf, w),
                                        loop_root_pedigree);
+#endif
         w = sf->worker;
         low = mid;
 
@@ -286,7 +293,7 @@ template <typename count_t, typename F>
 static void cilk_for_root(F body, void *data, count_t count, int grain)
 {
     // Cilkscreen should not report this call in a stack trace
-    __notify_zc_intrinsic((char *)"cilkscreen_hide_call", 0);
+    NOTIFY_ZC_INTRINSIC((char *)"cilkscreen_hide_call", 0);
 
     // Pedigree computation:
     //
@@ -372,6 +379,9 @@ extern "C" {
 CILK_ABI_THROWS_VOID __cilkrts_cilk_for_32(__cilk_abi_f32_t body, void *data,
                                             cilk32_t count, int grain)
 {
+    // Cilkscreen should not report this call in a stack trace
+    NOTIFY_ZC_INTRINSIC((char *)"cilkscreen_hide_call", 0);
+
     // Check for an empty range here as an optimization - don't need to do any
     // __cilkrts_stack_frame initialization
     if (count > 0)
@@ -392,6 +402,9 @@ CILK_ABI_THROWS_VOID __cilkrts_cilk_for_32(__cilk_abi_f32_t body, void *data,
 CILK_ABI_THROWS_VOID __cilkrts_cilk_for_64(__cilk_abi_f64_t body, void *data,
                                             cilk64_t count, int grain)
 {
+    // Cilkscreen should not report this call in a stack trace
+    NOTIFY_ZC_INTRINSIC((char *)"cilkscreen_hide_call", 0);
+
     // Check for an empty range here as an optimization - don't need to do any
     // __cilkrts_stack_frame initialization
     if (count > 0)

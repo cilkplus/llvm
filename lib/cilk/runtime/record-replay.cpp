@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2012, Intel Corporation
+ *  Copyright (C) 2012-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -44,6 +41,15 @@
 #include <cstring>
 #include <vector>
 #include <stdlib.h>
+
+// clang is really strict about printf formats, so use the annoying integer
+// printf macros.  Unfortunately they're not avaiable on Windows
+#ifdef _WIN32
+#define PRIu64 "llu"
+#else
+#define __STDC_FORMAT_MACROS 1
+#include <inttypes.h>
+#endif
 
 #include "record-replay.h"
 #include "bug.h"
@@ -245,7 +251,7 @@ char * walk_pedigree_nodes(char *p, const __cilkrts_pedigree *pnode)
         p += sprintf(p, "_");
     }
 
-    return p + sprintf(p, "%llu", pnode->rank);
+    return p + sprintf(p, "%" PRIu64, pnode->rank);
 }
 
 /**

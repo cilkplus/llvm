@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- * @copyright
- * Copyright (C) 2010-2011, Intel Corporation
+ * Copyright (C) 2010-2014, Intel Corporation
  * All rights reserved.
  * 
- * @copyright
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -21,7 +19,6 @@
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  * 
- * @copyright
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -51,7 +48,7 @@
 #  define __cilkscreen_metacall(annotation,expr) \
     __notify_zc_intrinsic((char *)annotation, expr)
 #else
-#  define __cilkscreen_metacall(annotation,expr) (annotation, (void) (expr))
+#  define __cilkscreen_metacall(annotation,expr) ((void)annotation, (void)(expr))
 #endif
 
 /* Call once when a user thread enters a spawning function */

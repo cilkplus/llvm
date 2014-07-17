@@ -20,8 +20,8 @@ autoconf and automake packages, which are available through your
 favorite package manager.  You also need a C/C++ compiler that
 supports the Intel Cilk Plus language extensions, since the runtime
 uses Intel Cilk Plus features internally.  Use either the Intel(R)
-C++ Compiler (icc command) v12.1 or later, or the "cilkplus" branch
-in GCC (gcc command).
+C++ Compiler (icc command) v12.1 or later, or in GCC 4.9 or later
+(gcc command).
 
 Once you have the necessary prerequisites installed, you can use the
 following commands to create the library:

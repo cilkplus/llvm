@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2012, Intel Corporation
+ *  Copyright (C) 2012-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -55,7 +52,7 @@
 /**
  * @brief Unix-specific fiber class derived from portable fiber class
  */
-class cilk_fiber_sysdep : public cilk_fiber
+struct cilk_fiber_sysdep : public cilk_fiber
 {
   public:
 
@@ -126,13 +123,12 @@ class cilk_fiber_sysdep : public cilk_fiber
     inline char* get_stack_base_sysdep() { return m_stack_base; }
 
   private:
-    char*                       m_stack_base;     ///< The base of this fiber's stack.
-    char*                       m_stack;          // Stack memory (low address)
-    __CILK_JUMP_BUFFER          m_resume_jmpbuf;  // Place to resume fiber
-    unsigned                    m_magic;          // Magic number for checking
+    char*                       m_stack_base;    ///< The base of this fiber's stack.
+    char*                       m_stack;         ///< Stack memory (low address)
+    __CILK_JUMP_BUFFER          m_resume_jmpbuf; ///< Place to resume fiber
+    unsigned                    m_magic;         ///< Magic number for checking
 
-    static int                  s_page_size;      // Page size for
-                                                  // stacks.
+    static long                 s_page_size;     ///< Page size for stacks.
 
     // Allocate memory for a stack.  This method
     // initializes m_stack and m_stack_base.

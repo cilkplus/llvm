@@ -1,9 +1,8 @@
-/*
- *  @copyright
- *  Copyright (C) 2010-2011, Intel Corporation
+/** common.h
+ *
+ *  Copyright (C) 2010-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -18,7 +17,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -31,22 +29,38 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
- *
  */
-
-/**
- * @file common.h
+ 
+/** @file common.h
  *
  * @brief Defines common macros and structures used by the Intel Cilk Plus
  * runtime.
+ *
+ *  @ingroup common
  */
 
-/** Cilk library version = 1.0
+/** @defgroup common Common Definitions
+ *  Definitions for runtime macros, structures, and classes.
+ *  @{
  */
-#define CILK_LIBRARY_VERSION 100
-
+ 
 #ifndef INCLUDED_CILK_COMMON
 #define INCLUDED_CILK_COMMON
+
+#ifdef __cplusplus
+/** Namespace for all Cilk definitions that can be included in user code.
+ */
+namespace cilk {
+    
+    /** Namespace for definitions re-used in other Cilk definitions.
+     */
+    namespace internal {}
+}
+#endif
+
+/** Cilk library version = 1.02
+ */
+#define CILK_LIBRARY_VERSION 102
 
 #ifdef __cplusplus
 #   include <cassert>
@@ -55,7 +69,7 @@
 #endif
 
 /**
- * Prefix standard library function and type names with __STDNS in order to
+ * Prefix standard library function and type names with __STDNS to
  * get correct lookup in both C and C++.
  */
 #ifdef __cplusplus
@@ -79,14 +93,11 @@
 #       define CILK_EXPORT      __declspec(dllimport)
 #       define CILK_EXPORT_DATA __declspec(dllimport)
 #   endif  /* IN_CILK_RUNTIME */
-#elif defined(__CYGWIN__)
-#   define CILK_EXPORT      /* nothing */
-#   define CILK_EXPORT_DATA /* nothing */
-#elif defined(__APPLE__)
+#elif defined(__CYGWIN__) || defined(__APPLE__) || defined(_DARWIN_C_SOURCE)
 #   define CILK_EXPORT      /* nothing */
 #   define CILK_EXPORT_DATA /* nothing */
 #else /* Unix/gcc */
-#   ifdef IN_CILK_RUNTIME
+#   if defined(IN_CILK_RUNTIME) && defined(HAVE_ATTRIBUTE_VISIBILITY)
 #       define CILK_EXPORT      __attribute__((visibility("protected")))
 #       define CILK_EXPORT_DATA __attribute__((visibility("protected")))
 #   else
@@ -99,10 +110,20 @@
  * @def __CILKRTS_BEGIN_EXTERN_C
  * Macro to denote the start of a section in which all names have "C" linkage.
  * That is, none of the names are to be mangled.
+ * @see __CILKRTS_END_EXTERN_C
+ * @see __CILKRTS_EXTERN_C
  *
  * @def __CILKRTS_END_EXTERN_C
  * Macro to denote the end of a section in which all names have "C" linkage.
  * That is, none of the names are to be mangled.
+ * @see __CILKRTS_BEGIN_EXTERN_C
+ * @see __CILKRTS_EXTERN_C
+ *
+ * @def __CILKRTS_EXTERN_C
+ * Macro to prefix a single definition which has "C" linkage.
+ * That is, the defined name is not to be mangled.
+ * @see __CILKRTS_BEGIN_EXTERN_C
+ * @see __CILKRTS_END_EXTERN_C
  */
 #ifdef __cplusplus
 #   define __CILKRTS_BEGIN_EXTERN_C     extern "C" {
@@ -134,17 +155,33 @@
 
 /**
  * Macro to specify alignment of a data member in a structure.
+ * Because of the way that gcc's alignment attribute is defined, @a n must
+ * be a numeric literal, not just a compile-time constant expression.
  */
 #ifdef _WIN32
 #   define CILK_ALIGNAS(n) __declspec(align(n))
 #else /* Unix/gcc */
 #   define CILK_ALIGNAS(n) __attribute__((__aligned__(n)))
-#endif /* Unix/gcc */
+#endif
 
 /**
  * Macro to specify cache-line alignment of a data member in a structure.
  */
 #define __CILKRTS_CACHE_ALIGN CILK_ALIGNAS(__CILKRTS_CACHE_LINE__)
+
+/**
+ * Macro to specify a class as being at least as strictly aligned as some
+ * type on Windows. gcc does not provide a way of doing this, so on Unix, 
+ * this just specifies the largest natural type alignment. Put the macro
+ * between the `class` keyword and the class name:
+ *
+ *      class CILK_ALIGNAS_TYPE(foo) bar { ... };
+ */
+#ifdef _WIN32
+#   define CILK_ALIGNAS_TYPE(t) __declspec(align(__alignof(t)))
+#else /* Unix/gcc */
+#   define CILK_ALIGNAS_TYPE(t) __attribute__((__aligned__))
+#endif
 
 /**
  * @def CILK_API(RET_TYPE)
@@ -265,24 +302,23 @@
 #endif  /* ! defined(_MSC_VER) || (_MSC_VER >= 1600) */
 
 /**
- * @brief Application Binary Interface version of the Cilk runtime library.
+ * @brief Application Binary Interface (ABI) version of the Cilk runtime library.
  *
- * The ABI version is determined by the compiler used.  An object file
- * compiled with a higher ABI version is not compatible with a library that is
- * compiled with a lower ABI version.  An object file compiled with a lower
- * ABI version, however, can be used with a library compiled with a higher ABI
- * version unless otherwise stated.
+ * The compiler determines the ABI version used for compilation.  Object files
+ * compiled with higher ABI versions are not compatible with libraries compiled
+ * with lower ABI versions.  However, an object file compiled with a lower ABI
+ * version can be used with a library compiled with a higher ABI version 
+ * (unless otherwise stated.)
  */
 #ifndef __CILKRTS_ABI_VERSION
 #   ifdef IN_CILK_RUNTIME
 #       define __CILKRTS_ABI_VERSION 1
-#   elif __INTEL_COMPILER > 1200
-        // Intel compiler version >= 12.1
-#       define __CILKRTS_ABI_VERSION 1
-#   else
-        // Compiler does not support ABI version 1
-        // (Non-Intel compiler or Intel compiler prior to version 12.1).
+#   elif defined(__INTEL_COMPILER) && (__INTEL_COMPILER <= 1200)
+        // Intel compilers prior to version 12.1 support only ABI 0
 #       define __CILKRTS_ABI_VERSION 0
+#   else
+        // Non-Intel compiler or Intel compiler after version 12.0.
+#       define __CILKRTS_ABI_VERSION 1
 #   endif
 #endif
 
@@ -290,13 +326,20 @@
 // the internal version of API methods require a worker
 // structure as parameter. 
 __CILKRTS_BEGIN_EXTERN_C
+    /// Worker struct, exported for inlined API methods
+    /// @ingroup api
     struct __cilkrts_worker;
 
     /// Worker struct, exported for inlined API methods
+    /// @ingroup api
     typedef struct __cilkrts_worker __cilkrts_worker;     
 
-    /// Worker pointer, exported for inlined API methods
+    /// Worker struct pointer, exported for inlined API methods
+    /// @ingroup api
     typedef struct __cilkrts_worker *__cilkrts_worker_ptr; 
+    
+    
+    /// Fetch the worker out of TLS.
     CILK_ABI(__cilkrts_worker_ptr) __cilkrts_get_tls_worker(void);
 
     /// void *, defined to work around complaints from the compiler
@@ -309,7 +352,9 @@ __CILKRTS_END_EXTERN_C
 #if __CILKRTS_ABI_VERSION >= 1
 // Pedigree API is available only for compilers that use ABI version >= 1.
 
-/** Pedigree information kept in the worker and stack frame */
+/** Pedigree information kept in the worker and stack frame.
+ *  @ingroup api
+ */
 typedef struct __cilkrts_pedigree
 {
     /** Rank at start of spawn helper. Saved rank for spawning functions */
@@ -320,5 +365,7 @@ typedef struct __cilkrts_pedigree
 } __cilkrts_pedigree;
 
 #endif // __CILKRTS_ABI_VERSION >= 1
+
+/// @}
 
 #endif /* INCLUDED_CILK_COMMON */

@@ -3,11 +3,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2010-2011, Intel Corporation
+ *  Copyright (C) 2010-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -22,7 +20,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -80,11 +77,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <alloca.h>
-
-#ifdef __APPLE__
-//#   include <scheduler.h>  // Angle brackets include Apple's scheduler.h, not ours.
-#endif
+#include "declare-alloca.h"
 
 #ifdef __linux__
 #   include <sys/resource.h>
@@ -192,11 +185,17 @@ NON_COMMON void* scheduler_thread_proc_for_system_worker(void *arg)
     
     __cilkrts_set_tls_worker(w);
 
+    START_INTERVAL(w, INTERVAL_IN_SCHEDULER);
+    START_INTERVAL(w, INTERVAL_IN_RUNTIME);
+    START_INTERVAL(w, INTERVAL_INIT_WORKER);
+
     // Create a cilk fiber for this worker on this thread.
     START_INTERVAL(w, INTERVAL_FIBER_ALLOCATE_FROM_THREAD) {
         w->l->scheduling_fiber = cilk_fiber_allocate_from_thread();
         cilk_fiber_set_owner(w->l->scheduling_fiber, w);
     } STOP_INTERVAL(w, INTERVAL_FIBER_ALLOCATE_FROM_THREAD);
+
+    STOP_INTERVAL(w, INTERVAL_INIT_WORKER);
     
     internal_run_scheduler_with_exceptions(w);
 
@@ -212,33 +211,9 @@ NON_COMMON void* scheduler_thread_proc_for_system_worker(void *arg)
         w->l->scheduling_fiber = NULL;
     } STOP_INTERVAL(w, INTERVAL_FIBER_DEALLOCATE_FROM_THREAD);
     
+    STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
+    STOP_INTERVAL(w, INTERVAL_IN_SCHEDULER);
     return 0;
-}
-
-
-/*
- * __cilkrts_user_worker_scheduling_stub
- *
- * Routine for the scheduling fiber created for an imported user
- * worker thread.  This method is analogous to
- * scheduler_thread_proc_for_system_worker.
- *
- */
-void __cilkrts_user_worker_scheduling_stub(cilk_fiber* fiber, void* null_arg)
-{
-    __cilkrts_worker *w = __cilkrts_get_tls_worker();
-
-    // Sanity check.
-    CILK_ASSERT(WORKER_USER == w->l->type);
-
-    // Enter the scheduling loop on the user worker.
-    // This function will never return.
-    __cilkrts_run_scheduler_with_exceptions(w);
-
-    // A WORKER_USER, at some point, will resume on the original stack and leave
-    // Cilk.  Under no circumstances do we ever exit off of the bottom of this
-    // stack.
-    CILK_ASSERT(0);
 }
 
 /**
@@ -252,8 +227,6 @@ void* __cilkrts_worker_stub(void* arg)
 {
     return scheduler_thread_proc_for_system_worker(arg);
 }
-
-
 
 // /* Return the lesser of the argument and the operating system
 //    limit on the number of workers (threads) that may or ought
@@ -390,23 +363,6 @@ void __cilkrts_stop_workers(global_state_t *g)
 
     return;
 }
-
-#ifdef RESTORE_X86_FP_STATE
-
-/*
- * Restore the floating point state that is stored in a stack frame at each
- * spawn.  This should be called each time a frame is resumed.
- *
- * Only valid for IA32 and Intel64 processors.
- */
-static inline void restore_x86_fp_state (__cilkrts_stack_frame *sf) {
-    __asm__ ( "ldmxcsr %0\n\t"
-              "fnclex\n\t"
-              "fldcw %1"
-              :
-              : "m" (sf->mxcsr), "m" (sf->fpcsr));
-}
-#endif // RESTORE_X86_FP_STATE
 
 
 /*
@@ -680,11 +636,18 @@ static void write_version_file (global_state_t *g, int n)
     char * vxWorksVer = VXWORKS_VERSION; 
     fprintf(fp, "Cross compiled for %s\n",vxWorksVer);
     // user and host not avalible if VxWorks cross compiled on windows build host 
-#else   
+#else
+
+    // User and host are not available for GCC builds
+#ifdef BUILD_USER
     fprintf(fp, "Built by "BUILD_USER" on host "BUILD_HOST"\n");
-#endif
-    
+#endif // BUILD_USER
+#endif // __VXWORKS__
+
+    // GCC has requested that this be removed for GCC builds
+#ifdef BUILD_USER    
     fprintf(fp, "Compilation date: "__DATE__" "__TIME__"\n");
+#endif // BUILD_USER
 
 #ifdef __INTEL_COMPILER
     // Compiled by the Intel C/C++ compiler.
@@ -793,33 +756,6 @@ void internal_enforce_global_visibility()
 
     /* For proper reference counting, close the handle immediately. */
     if( handle) dlclose(handle);
-}
-
-/*
- * Special scheduling entrypoint for a WORKER_USER.  Ensure a new stack has been
- * created and the stack pointer has been placed on it before entering
- * worker_user_scheduler().
- *
- * Call this function the first time a WORKER_USER has returned to a stolen
- * parent and cannot continue.  Every time after that, the worker can simply
- * longjmp() like any other worker.
- */
-static NOINLINE
-void worker_user_scheduler()
-{
-    __cilkrts_worker *w = __cilkrts_get_tls_worker();
-
-    // This must be a user worker
-    CILK_ASSERT(WORKER_USER == w->l->type);
-
-    // Enter the scheduling loop on the user worker.  This function will
-    // never return
-    __cilkrts_run_scheduler_with_exceptions(w);
-
-    // A WORKER_USER, at some point, will resume on the original stack and
-    // leave Cilk.  Under no circumstances do we ever exit off of the bottom
-    // of this stack.
-    CILK_ASSERT(0);
 }
 
 /*

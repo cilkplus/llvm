@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2012, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -70,6 +67,16 @@ enum record_replay_t {
 };
 
 /**
+ * @brief Global state structure version.
+ *
+ * Since the global state is exposed for debugger access, we need a version
+ * number to let it know that the version of the structure is what it expects
+ * to see.  If any of the fields marked as (fixed) below are changed, the
+ * version number needs to be bumped.
+ */
+#define GLOBAL_STATE_VERSION 0
+
+/**
  * @brief The global state is a structure that is shared by all workers in
  * Cilk.
  *
@@ -95,7 +102,7 @@ enum record_replay_t {
  * initialization and after deinitialization.
  */
 
-typedef struct global_state_t { /* COMMON_PORTABLE */
+struct global_state_t { /* COMMON_PORTABLE */
 
     /* Fields described as "(fixed)" should not be changed after
      * initialization.
@@ -109,7 +116,9 @@ typedef struct global_state_t { /* COMMON_PORTABLE */
      * debugger integration library will need to be changed to match!!!
      *************************************************************************/
 
-    int addr_size; ///< Number of bytes for an address, used by debugger (fixed)
+    uint16_t addr_size; ///< Number of bytes for an address, used by debugger (fixed)
+
+    uint16_t version;   ///< Version of this structure (fixed)
 
     int system_workers; ///< Number of system workers (fixed)
 
@@ -244,7 +253,7 @@ typedef struct global_state_t { /* COMMON_PORTABLE */
 
     int P;         ///< USER SETTING: number of system workers + 1 (fixed)
     int Q;         ///< Number of user threads currently bound to workers 
-} global_state_t;
+};
 
 /**
  * @brief Initialize the global state object.  This method must both

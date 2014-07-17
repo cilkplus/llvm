@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2012, Intel Corporation
+ *  Copyright (C) 2012-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -55,6 +52,7 @@
 #include "bug.h"
 #include "cilk-tbb-interop.h"
 #include "spin_mutex.h"
+#include "internal/abi.h"       // Define __cilkrts_stack_frame
 
 /**
  * @brief Debugging level for Cilk fiber code.
@@ -103,12 +101,6 @@
 
 
 __CILKRTS_BEGIN_EXTERN_C
-
-/// @brief By-name declarations of worker.  No compile-time dependency.
-typedef struct __cilkrts_worker      __cilkrts_worker;
-
-/// @brief By-name declarations of stack frame.  No compile-time dependency.
-typedef struct __cilkrts_stack_frame __cilkrts_stack_frame;
 
 /// @brief Forward reference to fiber pool.
 typedef struct cilk_fiber_pool cilk_fiber_pool;
@@ -572,7 +564,7 @@ __CILKRTS_END_EXTERN_C
 // Some C++ implementation details
 
 /// Opaque declaration of a cilk_fiber_sysdep object.
-class cilk_fiber_sysdep;
+struct cilk_fiber_sysdep;
 
 /**
  * cilk_fiber is a base-class for system-dependent fiber implementations.

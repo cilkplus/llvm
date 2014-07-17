@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2007-2012, Intel Corporation
+ *  Copyright (C) 2007-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -857,9 +854,7 @@ void fiber_proc_to_resume_user_code_for_random_steal(cilk_fiber *fiber)
         
         // Notify the Intel tools that we're stealing code
         ITT_SYNC_ACQUIRED(sf->worker);
-#ifdef ENABLE_NOTIFY_ZC_INTRINSIC
-        __notify_zc_intrinsic("cilk_continue", sf);
-#endif // defined ENABLE_NOTIFY_ZC_INTRINSIC
+        NOTIFY_ZC_INTRINSIC("cilk_continue", sf);
 
         // TBD: We'd like to move TBB-interop methods into the fiber
         // eventually.
@@ -1561,9 +1556,7 @@ user_code_resume_after_switch_into_runtime(cilk_fiber *fiber)
 
     // Notify the Intel tools that we're stealing code
     ITT_SYNC_ACQUIRED(sf->worker);
-#ifdef ENABLE_NOTIFY_ZC_INTRINSIC
-    __notify_zc_intrinsic("cilk_continue", sf);
-#endif // defined ENABLE_NOTIFY_ZC_INTRINSIC
+    NOTIFY_ZC_INTRINSIC("cilk_continue", sf);
     cilk_fiber_invoke_tbb_stack_op(fiber, CILK_TBB_STACK_ADOPT);
 
     // Actually jump to user code.
@@ -1604,8 +1597,16 @@ longjmp_into_runtime(__cilkrts_worker *w,
         scheduling_fiber_prepare_to_resume_user_code(w, ff2, w->current_stack_frame);
         cilkrts_resume(w->current_stack_frame, ff2);
         
+// Suppress clang warning that the expression result is unused
+#if defined(__clang__) && (! defined(__INTEL_COMPILER))
+#   pragma clang diagnostic push
+#   pragma clang diagnostic ignored "-Wunused-value"
+#endif // __clang__
         /* no return */
-        CILK_ASSERT(("returned from __cilkrts_resume", 0));
+        CILK_ASSERT(((void)"returned from __cilkrts_resume", 0));
+#if defined(__clang__) && (! defined(__INTEL_COMPILER))
+#   pragma clang diagnostic pop
+#endif // __clang__
     }
 
     w->l->post_suspend = fcn;
@@ -1804,6 +1805,7 @@ static full_frame* search_until_work_found_or_done(__cilkrts_worker *w)
             ff = check_for_work(w);
             break;
         case SCHEDULE_WAIT:            // go into wait-mode.
+            START_INTERVAL(w, INTERVAL_SCHEDULE_WAIT);
             CILK_ASSERT(WORKER_SYSTEM == w->l->type);
             // If we are about to wait, then we better not have
             // a frame that we should execute...
@@ -1814,6 +1816,7 @@ static full_frame* search_until_work_found_or_done(__cilkrts_worker *w)
             // Runtime is waking up.
             notify_children_run(w);
             w->l->steal_failure_count = 0;
+            STOP_INTERVAL(w, INTERVAL_SCHEDULE_WAIT);
             break;
         case SCHEDULE_EXIT:            // exit the scheduler.
             CILK_ASSERT(WORKER_USER != w->l->type);
@@ -2002,9 +2005,6 @@ static void worker_scheduler_init_function(__cilkrts_worker *w)
     // The startup work varies, depending on the worker type.
     switch (w->l->type) {
     case WORKER_USER:
-        // Stop working once we've entered the scheduler.
-        // For user workers, INTERVAL_IN_SCHEDULER counts the time
-        // since we called bind_thread.
         break;
 
     case WORKER_SYSTEM:
@@ -2018,11 +2018,6 @@ static void worker_scheduler_init_function(__cilkrts_worker *w)
         // Runtime is waking up.
         notify_children_run(w);
         w->l->steal_failure_count = 0;
-
-        // For system threads, count all the time this thread is
-        // alive in the scheduling loop.
-        START_INTERVAL(w, INTERVAL_IN_SCHEDULER);
-        START_INTERVAL(w, INTERVAL_WORKING);
         break;
     default:
         __cilkrts_bug("Unknown worker %p of type %d entering scheduling loop\n",
@@ -2043,8 +2038,6 @@ static void worker_scheduler_terminate_function(__cilkrts_worker *w)
     // A user worker should never finish by falling through the
     // scheduling loop.
     CILK_ASSERT(WORKER_USER != w->l->type);
-    STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
-    STOP_INTERVAL(w, INTERVAL_IN_SCHEDULER);
 }
 
 /**
@@ -2056,30 +2049,36 @@ static void worker_scheduler_terminate_function(__cilkrts_worker *w)
  */
 static void worker_scheduler_function(__cilkrts_worker *w)
 {
+    START_INTERVAL(w, INTERVAL_INIT_WORKER);
     worker_scheduler_init_function(w);
-
+    STOP_INTERVAL(w, INTERVAL_INIT_WORKER);
+    
     // The main scheduling loop body.
 
     while (!w->g->work_done) {    
-        // Set intervals.  Now we are in the runtime instead of working.
-        START_INTERVAL(w, INTERVAL_IN_RUNTIME);
-        STOP_INTERVAL(w, INTERVAL_WORKING);
-
         // Execute the "body" of the scheduling loop, and figure
         // out the fiber to jump to next.
+        START_INTERVAL(w, INTERVAL_SCHED_LOOP);
         cilk_fiber* fiber_to_resume
             = worker_scheduling_loop_body(w->l->scheduling_fiber, w);
-
+        STOP_INTERVAL(w, INTERVAL_SCHED_LOOP);
+        
         if (fiber_to_resume) {
             // Suspend the current fiber and resume next one.
             NOTE_INTERVAL(w, INTERVAL_SUSPEND_RESUME_OTHER);
+
+            // Whenever we jump to resume user code, we stop being in
+            // the runtime, and start working.
             STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
             START_INTERVAL(w, INTERVAL_WORKING);
             cilk_fiber_suspend_self_and_resume_other(w->l->scheduling_fiber,
                                                      fiber_to_resume);
-
             // Return here only when this (scheduling) fiber is
             // resumed (i.e., this worker wants to reenter the runtime).
+
+            // We've already switched from WORKING to IN_RUNTIME in
+            // the runtime code that handles the fiber switch.  Thus, at
+            // this point we are IN_RUNTIME already.
         }
     }
 
@@ -2179,6 +2178,8 @@ NORETURN __cilkrts_c_sync(__cilkrts_worker *w,
                           __cilkrts_stack_frame *sf_at_sync)
 {
     full_frame *ff; 
+    STOP_INTERVAL(w, INTERVAL_WORKING);
+    START_INTERVAL(w, INTERVAL_IN_RUNTIME);
 
     // Claim: This read of w->l->frame_ff can occur without
     // holding the worker lock because when w has reached a sync
@@ -2275,7 +2276,7 @@ static void do_sync(__cilkrts_worker *w, full_frame *ff,
     // that we're abandoning the work and will go find something else to do.
     if (ABANDON_EXECUTION == steal_result)
     {
-        __notify_zc_intrinsic("cilk_sync_abandon", 0);
+        NOTIFY_ZC_INTRINSIC("cilk_sync_abandon", 0);
     }
 #endif // defined ENABLE_NOTIFY_ZC_INTRINSIC
 
@@ -2339,6 +2340,11 @@ void __cilkrts_c_THE_exception_check(__cilkrts_worker *w,
     int stolen_p;
     __cilkrts_stack_frame *saved_sf = NULL;
 
+    // For the exception check, stop working and count as time in
+    // runtime.
+    STOP_INTERVAL(w, INTERVAL_WORKING);
+    START_INTERVAL(w, INTERVAL_IN_RUNTIME);
+
     START_INTERVAL(w, INTERVAL_THE_EXCEPTION_CHECK);
 
     BEGIN_WITH_WORKER_LOCK(w) {
@@ -2394,12 +2400,10 @@ void __cilkrts_c_THE_exception_check(__cilkrts_worker *w,
         // reductions.
         update_pedigree_on_leave_frame(w, returning_sf);
 
-#ifdef ENABLE_NOTIFY_ZC_INTRINSIC
         // Notify Inspector that the parent has been stolen and we're
         // going to abandon this work and go do something else.  This
         // will match the cilk_leave_begin in the compiled code
-        __notify_zc_intrinsic("cilk_leave_stolen", saved_sf);
-#endif // defined ENABLE_NOTIFY_ZC_INTRINSIC
+        NOTIFY_ZC_INTRINSIC("cilk_leave_stolen", saved_sf);
 
         DBGPRINTF ("%d: longjmp_into_runtime from __cilkrts_c_THE_exception_check\n", w->self);
         longjmp_into_runtime(w, do_return_from_spawn, 0);
@@ -2408,6 +2412,11 @@ void __cilkrts_c_THE_exception_check(__cilkrts_worker *w,
     else
     {
         NOTE_INTERVAL(w, INTERVAL_THE_EXCEPTION_CHECK_USELESS);
+
+        // If we fail the exception check and return, then switch back
+        // to working.
+        STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
+        START_INTERVAL(w, INTERVAL_WORKING);
         return;
     }
 }
@@ -2417,6 +2426,9 @@ NORETURN __cilkrts_exception_from_spawn(__cilkrts_worker *w,
                                         __cilkrts_stack_frame *returning_sf) 
 {
     full_frame *ff = w->l->frame_ff;
+    STOP_INTERVAL(w, INTERVAL_WORKING);
+    START_INTERVAL(w, INTERVAL_IN_RUNTIME);
+
     // This is almost the same as THE_exception_check, except
     // the detach didn't happen, we don't need to undo the tail
     // update.
@@ -2549,6 +2561,10 @@ __cilkrts_stack_frame *simulate_pop_tail(__cilkrts_worker *w)
 void __cilkrts_return(__cilkrts_worker *w)
 {
     full_frame *ff, *parent_ff;
+
+    // Count time during the return as in the runtime.
+    STOP_INTERVAL(w, INTERVAL_WORKING);
+    START_INTERVAL(w, INTERVAL_IN_RUNTIME);
     START_INTERVAL(w, INTERVAL_RETURNING);
 
     BEGIN_WITH_WORKER_LOCK_OPTIONAL(w) {
@@ -2602,6 +2618,8 @@ void __cilkrts_return(__cilkrts_worker *w)
     } END_WITH_WORKER_LOCK_OPTIONAL(w);
 
     STOP_INTERVAL(w, INTERVAL_RETURNING);
+    STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
+    START_INTERVAL(w, INTERVAL_WORKING);
 }
 
 static void __cilkrts_unbind_thread()
@@ -2617,13 +2635,10 @@ static void __cilkrts_unbind_thread()
         if (w) {
             g = w->g;
 
-            // If there's only 1 worker, the counts will be stopped in
-            // __cilkrts_scheduler
-            if (g->P > 1)
-            {
-                STOP_INTERVAL(w, INTERVAL_WORKING);
-                STOP_INTERVAL(w, INTERVAL_IN_SCHEDULER);
-            }
+
+            // Matches the START in bind_thread in cilk-abi.c.
+            STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
+            STOP_INTERVAL(w, INTERVAL_IN_SCHEDULER);
 
             __cilkrts_set_tls_worker(0);
 
@@ -2655,6 +2670,11 @@ static void __cilkrts_unbind_thread()
 void __cilkrts_c_return_from_initial(__cilkrts_worker *w)
 {
     struct cilkred_map *rm;
+
+    // When we are returning from the initial frame, switch from
+    // INTERVAL_WORKING into INTERVAL_IN_RUNTIME. 
+    STOP_INTERVAL(w, INTERVAL_WORKING);
+    START_INTERVAL(w, INTERVAL_IN_RUNTIME);
 
     /* This is only called on a user thread worker. */
     CILK_ASSERT(w->l->type == WORKER_USER);
@@ -3141,7 +3161,6 @@ static void init_workers(global_state_t *g)
 
 void __cilkrts_init_internal(int start)
 {
-    int i;
     global_state_t *g = NULL;
 
     if (cilkg_is_published()) {
@@ -3477,7 +3496,6 @@ fast_path_reductions_for_spawn_return(__cilkrts_worker *w,
                                       full_frame *ff)
 {
     // ASSERT: we hold ff->parent->lock.
-    full_frame *parent_ff = ff->parent;
     splice_left_ptrs left_ptrs;
 
     CILK_ASSERT(NULL == w->l->pending_exception);
@@ -3629,6 +3647,11 @@ slow_path_reductions_for_spawn_return(__cilkrts_worker *w,
             // We have reductions to execute (and we can't hold locks).
             __cilkrts_frame_unlock(w, ff->parent);
 
+            // After we've released the lock, start counting time as
+            // WORKING again.
+            STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
+            START_INTERVAL(w, INTERVAL_WORKING);
+
             // Merge all reducers into the left map.
             left_map = repeated_merge_reducer_maps(&w,
                                                    left_map,
@@ -3648,6 +3671,9 @@ slow_path_reductions_for_spawn_return(__cilkrts_worker *w,
             CILK_ASSERT(NULL == ff->pending_exception);
             ff->pending_exception = w->l->pending_exception;
             w->l->pending_exception = NULL;
+
+            STOP_INTERVAL(w, INTERVAL_WORKING);
+            START_INTERVAL(w, INTERVAL_IN_RUNTIME);
 
             // Lock ff->parent for the next loop around.
             __cilkrts_frame_lock(w, ff->parent);
@@ -3809,12 +3835,20 @@ slow_path_reductions_for_sync(__cilkrts_worker *w,
                 return w;
             }
         } END_WITH_FRAME_LOCK(w, ff);
+
+        // After we've released the lock, start counting time as
+        // WORKING again.
+        STOP_INTERVAL(w, INTERVAL_IN_RUNTIME);
+        START_INTERVAL(w, INTERVAL_WORKING);
         
         // If we get here, we have a nontrivial reduction to execute.
         middle_map = repeated_merge_reducer_maps(&w,
                                                  left_map,
                                                  middle_map);
         verify_current_wkr(w);
+
+        STOP_INTERVAL(w, INTERVAL_WORKING);
+        START_INTERVAL(w, INTERVAL_IN_RUNTIME);
 
         // Save any exceptions generated because of the reduction
         // process.  These get merged the next time around the

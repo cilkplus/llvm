@@ -1,12 +1,8 @@
-/** @file reducer_opadd.h
+/*  reducer_opadd.h                  -*- C++ -*-
  *
- *  @brief Defines classes for doing parallel addition reductions.
- *
- *  @copyright
- *  Copyright (C) 2009-2012, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +17,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -34,10 +29,15 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/** @file reducer_opadd.h
  *
- *  @ingroup reducers
+ *  @brief Defines classes for doing parallel addition reductions.
  *
- *  @see @ref page_reducer_add
+ *  @ingroup ReducersAdd
+ *
+ *  @see ReducersAdd
  */
 
 #ifndef REDUCER_OPADD_H_INCLUDED
@@ -45,16 +45,16 @@
 
 #include <cilk/reducer.h>
 
-/** @page page_reducer_add Addition Reducers
+/** @defgroup ReducersAdd Addition Reducers
  *
- *  @tableofcontents
+ *  Addition reducers allow the computation of the sum of a set of values in
+ *  parallel.
  *
- *  Header file reducer_opadd.h defines the monoid and view classes for creating Cilk reducers
- *  to add a set of values in parallel.
+ *  @ingroup Reducers
  *
- *  You should be familiar with @ref pagereducers "Cilk reducers", described in file
- *  reducers.md, and particularly with @ref reducers_using, before trying to use the
- *  information in this file.
+ *  You should be familiar with @ref pagereducers "Cilk reducers", described in
+ *  file `reducers.md`, and particularly with @ref reducers_using, before trying
+ *  to use the information in this file.
  *
  *  @section redopadd_usage Usage Example
  *
@@ -64,29 +64,23 @@
  *      }
  *      return r.get_value();
  *
- *  @section redopadd_classes Classes Defined
- *
- *  *   @ref cilk::op_add\<Type\> (monoid)
- *  *   @ref cilk::op_add_view\<Type\> (view)
- *  *   @ref cilk::reducer< cilk::op_add\<Type\> > (reducer) (defined in reducer.h)
- *  *   @ref cilk::reducer_opadd\<Type\> (deprecated reducer)
- *
  *  @section redopadd_monoid The Monoid
  *
  *  @subsection redopadd_monoid_values Value Set
  *
- *  The value set of an addition reducer is the set of values of `Type`, which is
- *  expected to be a builtin numeric type (or something like it, such as `std::complex`).
+ *  The value set of an addition reducer is the set of values of `Type`, which
+ *  is expected to be a builtin numeric type (or something like it, such as
+ *  `std::complex`).
  *
  *  @subsection redopadd_monoid_operator Operator
  *
- *  The operator of an addition reducer is the addition operator, defined by the “`+`” binary
- *  operator on `Type`.
+ *  The operator of an addition reducer is the addition operator, defined by
+ *  the "`+`" binary operator on `Type`.
  *
  *  @subsection redopadd_monoid_identity Identity
  *
- *  The identity value of the reducer is the numeric value “`0`”. This is expected to be the
- *  value of the default constructor `Type()`.
+ *  The identity value of the reducer is the numeric value "`0`". This is
+ *  expected to be the value of the default constructor `Type()`.
  *
  *  @section redopadd_operations Operations
  *
@@ -100,15 +94,14 @@
  *
  *      r.set_value(const Type& value)
  *      const Type& = r.get_value() const
- *      Type& = r.get_value()
  *      r.move_in(Type& variable)
  *      r.move_out(Type& variable)
  *
  *  @subsection redopadd_initial Initial Values
  *
- *  If an addition reducer is constructed without an explicit initial value, then its initial
- *  value will be its identity value, as long as `Type` satisfies the requirements of
- *  @ref redopadd_types.
+ *  If an addition reducer is constructed without an explicit initial value,
+ *  then its initial value will be its identity value, as long as `Type`
+ *  satisfies the requirements of @ref redopadd_types.
  *
  *  @subsection redopadd_view_ops View Operations
  *
@@ -122,31 +115,44 @@
  *      *r = *r - a
  *      *r = *r ± a1 ± a2 … ± an
  *
- *  The post-increment and post-decrement operations do not return a value. (If they did, they
- *  would expose the value contained in the view, which is non-deterministic in the middle of
- *  a reduction.)
+ *  The post-increment and post-decrement operations do not return a value. (If
+ *  they did, they would expose the value contained in the view, which is
+ *  non-deterministic in the middle of a reduction.)
  *
- *  Note that subtraction operations are allowed on an addition reducer because subtraction can
- *  be regarded as equivalent to addition with a negated operand. It is true that `(x - y) - z`
- *  is not equivalent to `x - (y - z)`, but `(x + (-y)) + (-z)` _is_ equivalent to 
- *  `x + ((-y) + (-z))`.
+ *  Note that subtraction operations are allowed on an addition reducer because
+ *  subtraction is equivalent to addition with a negated operand. It is true
+ *  that `(x - y) - z` is not equivalent to `x - (y - z)`, but
+ *  `(x + (-y)) + (-z)` _is_ equivalent to `x + ((-y) + (-z))`.
+ *
+ *  @section redopadd_floating_point Issues with Floating-Point Types
+ *
+ *  Because of precision and round-off issues, floating-point addition is not
+ *  really associative. For example, `(1e30 + -1e30) + 1 == 1`, but
+ *  `1e30 + (-1e30 + 1) == 0`.
+ *
+ *  In many cases, this won't matter, but computations which have been
+ *  carefully ordered to control round-off errors may not deal well with
+ *  being reassociated. In general, you should be sure to understand the
+ *  floating-point behavior of your program before doing any transformation
+ *  that will reassociate its computations.
  *
  *  @section redopadd_types Type and Operator Requirements
  *
- *  `Type` must be `Copy Constructible`, `Default Constructible`, and `Assignable`.
+ *  `Type` must be `Copy Constructible`, `Default Constructible`, and
+ *  `Assignable`.
  *
- *  The operator “`+=`” must be defined on `Type`, with `x += a` having the same
- *  meaning as `x = x + a`. In addition, if the code uses the “`-=`”, pre-increment,
- *  post-increment, pre-decrement, or post-decrement operators, then the corresponding
- *  oerators must be defined on `Type`.
+ *  The operator "`+=`" must be defined on `Type`, with `x += a` having the
+ *  same meaning as `x = x + a`. In addition, if the code uses the "`-=`",
+ *  pre-increment, post-increment, pre-decrement, or post-decrement operators,
+ *  then the corresponding operators must be defined on `Type`.
  *
- *  The expression `Type()` must be a valid expression which yields the identity value (the
- *  value of `Type` whose numeric value is zero).
+ *  The expression `Type()` must be a valid expression which yields the
+ *  identity value (the value of `Type` whose numeric value is zero).
  *
  *  @section redopadd_in_c Addition Reducers in C
  *
- *  The @ref CILK_C_REDUCER_OPADD and @ref CILK_C_REDUCER_OPADD_TYPE macros can be used to do
- *  addition reductions in C. For example:
+ *  The @ref CILK_C_REDUCER_OPADD and @ref CILK_C_REDUCER_OPADD_TYPE macros can
+ *  be used to do addition reductions in C. For example:
  *
  *      CILK_C_REDUCER_OPADD(r, double, 0);
  *      CILK_C_REGISTER_REDUCER(r);
@@ -165,37 +171,45 @@ namespace cilk {
 
 /** The addition reducer view class.
  *
- *  This is the view class for reducers created with `cilk::reducer< cilk::op_add<Type> >`.
- *  It holds the accumulator variable for the reduction, and allows only addition and
- *  subtraction operations to be performed on it.
+ *  This is the view class for reducers created with
+ *  `cilk::reducer< cilk::op_add<Type> >`. It holds the accumulator variable
+ *  for the reduction, and allows only addition and subtraction operations to
+ *  be performed on it.
  *
- *  @note   The reducer “dereference” operation (`reducer::operator *()`) yields a reference 
- *          to the view. Thus, for example, the view class’s `+=` operation would be used in
- *          an expression like `*r += a`, where `r` is an op_add reducer variable.
+ *  @note   The reducer "dereference" operation (`reducer::operator *()`)
+ *          yields a reference to the view. Thus, for example, the view class's
+ *          `+=` operation would be used in an expression like `*r += a`, where
+ *          `r` is an op_add reducer variable.
  *
- *  @tparam Type    The type of the contained accumulator variable. This will be the value type
- *                  of a monoid_with_view that is instantiated with this view.
+ *  @tparam Type    The type of the contained accumulator variable. This will
+ *                  be the value type of a monoid_with_view that is
+ *                  instantiated with this view.
  *
- *  @see @ref page_reducer_add
+ *  @see ReducersAdd
  *  @see op_add
+ *
+ *  @ingroup ReducersAdd
  */
 template <typename Type>
 class op_add_view : public scalar_view<Type>
 {
     typedef scalar_view<Type> base;
-    
+
 public:
-    /** Class to represent the right-hand side of `*reducer = *reducer ± value`.
+    /** Class to represent the right-hand side of
+     *  `*reducer = *reducer ± value`.
      *
-     *  The only assignment operator for the op_add_view class takes an rhs_proxy
-     *  as its operand. This results in the syntactic restriction that the only expressions
-     *  that can be assigned to an op_add_view are ones which generate an rhs_proxy — that is,
-     *  expressions of the form `op_add_view ± value ... ± value`.
+     *  The only assignment operator for the op_add_view class takes an
+     *  rhs_proxy as its operand. This results in the syntactic restriction
+     *  that the only expressions that can be assigned to an op_add_view are
+     *  ones which generate an rhs_proxy - that is, expressions of the form
+     *  `op_add_view ± value ... ± value`.
      *
      *  @warning
-     *  The lhs and rhs views in such an assignment must be the same; otherwise, the
-     *  behavior will be undefined. (I.e., `v1 = v1 + x` is legal; `v1 = v2 + x` is illegal.) 
-     *  This condition will be checked with a runtime assertion when compiled in debug mode.
+     *  The lhs and rhs views in such an assignment must be the same;
+     *  otherwise, the behavior will be undefined. (I.e., `v1 = v1 + x` is
+     *  legal; `v1 = v2 + x` is illegal.) This condition will be checked with a
+     *  runtime assertion when compiled in debug mode.
      *
      *  @see op_add_view
      */
@@ -205,69 +219,75 @@ public:
         const op_add_view* m_view;
         Type               m_value;
 
-        // Constructor is invoked only from op_add_view::operator+() and op_add_view::operator-().
+        // Constructor is invoked only from op_add_view::operator+() and
+        // op_add_view::operator-().
         //
-        rhs_proxy(const op_add_view* view, const Type& value) : m_view(view), m_value(value) {}
+        rhs_proxy(const op_add_view* view, const Type& value) :
+            m_view(view), m_value(value) {}
 
         rhs_proxy& operator=(const rhs_proxy&); // Disable assignment operator
         rhs_proxy();                            // Disable default constructor
 
     public:
-        //@{
-        /** Add or subtract an additional rhs value. If `v` is an op_add_view and `a1` is a
-         *  value, then the expression `v + a1` invokes the view’s `operator+()` to create an
-         *  rhs_proxy for `(v, a1)`; then `v + a1 + a2` invokes the rhs_proxy’s `operator+()`
-         *  to create a new rhs_proxy for `(v, a1+a2)`. This allows the right-hand side of an
-         *  assignment to be not just `view ± value`, but `view ± value ± value ... ± value`.
-         *  The effect is that
+        ///@{
+        /** Adds or subtracts an additional rhs value. If `v` is an op_add_view
+         *  and `a1` is a value, then the expression `v + a1` invokes the view's
+         *  `operator+()` to create an rhs_proxy for `(v, a1)`; then
+         *  `v + a1 + a2` invokes the rhs_proxy's `operator+()` to create a new
+         *  rhs_proxy for `(v, a1+a2)`. This allows the right-hand side of an
+         *  assignment to be not just `view ± value`, but
+         *  `view ± value ± value ... ± value`. The effect is that
          *
          *      v = v ± a1 ± a2 ... ± an;
          *
          *  is evaluated as
          *
-         *      v = v ± (a1 ± a2 ... ± an);
+         *      v = v ± (±a1 ± a2 ... ± an);
          */
         rhs_proxy& operator+(const Type& x) { m_value += x; return *this; }
         rhs_proxy& operator-(const Type& x) { m_value -= x; return *this; }
-        //@}
+        ///@}
     };
 
-    
-    /** Default/identity constructor. This constructor initializes the contained value to
-     *  `Type()`.
+
+    /** Default/identity constructor. This constructor initializes the
+     *  contained value to `Type()`, which is expected to be the identity value
+     *  for addition on `Type`.
      */
     op_add_view() : base() {}
 
     /** Construct with a specified initial value.
      */
     explicit op_add_view(const Type& v) : base(v) {}
-    
-    /** Reduction operation.
+
+    /** Reduces the views of two strands.
      *
-     *  This function is invoked by the @ref op_add monoid to combine the views of two strands
-     *  when the right strand merges with the left one. It adds the value contained in the
-     *  right-strand view to the value contained in the left-strand view, and leaves the
-     *  value in the right-strand view undefined.
+     *  This function is invoked by the @ref op_add monoid to combine the views
+     *  of two strands when the right strand merges with the left one. It adds
+     *  the value contained in the right-strand view to the value contained in
+     *  the left-strand view, and leaves the value in the right-strand view
+     *  undefined.
      *
-     *  @param  right   A pointer to the right-strand view. (`this` points to the left-strand
-     *                  view.)
+     *  @param  right   A pointer to the right-strand view. (`this` points to
+     *                  the left-strand view.)
      *
-     *  @note   Used only by the @ref op_add monoid to implement the monoid reduce operation.
+     *  @note   Used only by the @ref op_add monoid to implement the monoid
+     *          reduce operation.
      */
     void reduce(op_add_view* right) { this->m_value += right->m_value; }
 
     /** @name Accumulator variable updates.
      *
-     *  These functions support the various syntaxes for incrementing or decrementing the
-     *  accumulator variable contained in the view by some value.
+     *  These functions support the various syntaxes for incrementing or
+     *  decrementing the accumulator variable contained in the view.
      */
-    //@{
+    ///@{
 
-    /** Increment the accumulator variable by @a x.
+    /** Increments the accumulator variable by @a x.
      */
     op_add_view& operator+=(const Type& x) { this->m_value += x; return *this; }
 
-    /** Decrement the accumulator variable by @a x.
+    /** Decrements the accumulator variable by @a x.
      */
     op_add_view& operator-=(const Type& x) { this->m_value -= x; return *this; }
 
@@ -275,40 +295,42 @@ public:
      */
     op_add_view& operator++() { ++this->m_value; return *this; }
 
-    /** Post-increment.
+    /** Post-increments.
      *
-     *  @note   Conventionally, post-increment operators return the old value of the incremented
-     *          variable. However, reducer views do not expose their contained values, so
-     *          `view++` does not have a return value.
+     *  @note   Conventionally, post-increment operators return the old value
+     *          of the incremented variable. However, reducer views do not
+     *          expose their contained values, so `view++` does not have a
+     *          return value.
      */
     void operator++(int) { this->m_value++; }
 
-    /** Pre-decrement.
+    /** Pre-decrements.
      */
     op_add_view& operator--() { --this->m_value; return *this; }
 
-    /** Post-decrement.
+    /** Post-decrements.
      *
-     *  @note   Conventionally, post-decrement operators return the old value of the incremented
-     *          variable. However, reducer views do not expose their contained values, so
-     *          `view--` does not have a return value.
+     *  @note   Conventionally, post-decrement operators return the old value
+     *          of the decremented variable. However, reducer views do not
+     *          expose their contained values, so `view--` does not have a
+     *          return value.
      */
     void operator--(int) { this->m_value--; }
 
-    /** Create an object representing `*this + x`.
+    /** Creates an object representing `*this + x`.
      *
      *  @see rhs_proxy
      */
     rhs_proxy operator+(const Type& x) const { return rhs_proxy(this, x); }
 
-    /** Create an object representing `*this - x`.
+    /** Creates an object representing `*this - x`.
      *
      *  @see rhs_proxy
      */
     rhs_proxy operator-(const Type& x) const { return rhs_proxy(this, -x); }
 
-    /** Assign the result of a `view ± value` expression to the view. Note that this is 
-     *  the only assignment operator for this class.
+    /** Assigns the result of a `view ± value` expression to the view. Note that
+     *  this is the only assignment operator for this class.
      *
      *  @see rhs_proxy
      */
@@ -317,46 +339,62 @@ public:
         this->m_value += rhs.m_value;
         return *this;
     }
-    
-    //@}
+
+    ///@}
 };
 
 
-/** Monoid class for addition reductions. Instantiate the cilk::reducer template class
- *  with an op_add monoid to create an addition reducer class. For example, to compute
+/** Monoid class for addition reductions. Instantiate the cilk::reducer
+ *  template class with an op_add monoid to create an addition reducer class.
+ *  For example, to compute
  *  the sum of a set of `int` values:
  *
  *      cilk::reducer< cilk::op_add<int> > r;
  *
- *  @see @ref page_reducer_add
+ *  @tparam Type    The reducer value type.
+ *  @tparam Align   If `false` (the default), reducers instantiated on this
+ *                  monoid will be naturally aligned (the Cilk library 1.0
+ *                  behavior). If `true`, reducers instantiated on this monoid
+ *                  will be cache-aligned for binary compatibility with
+ *                  reducers in Cilk library version 0.9.
+ *
+ *  @see ReducersAdd
  *  @see op_add_view
+ *
+ *  @ingroup ReducersAdd
  */
 template <typename Type, bool Align = false>
 struct op_add : public monoid_with_view<op_add_view<Type>, Align> {};
 
-/** Deprecated addition reducer class.
+/** **Deprecated** addition reducer wrapper class.
  *
- *  reducer_opadd\<Type\> is the same as @ref cilk::reducer< @ref op_add\<Type\> >, except that 
- *  reducer_opadd is a proxy for the contained view, so that accumulator variable update 
- *  operations can be applied directly to the reducer. For example, where a `reducer<op_add>`
- *  is incremented using `*r += a`, you can increment a reducer_opadd with `r += a`.
+ *  reducer_opadd is the same as @ref reducer<@ref op_add>, except that
+ *  reducer_opadd is a proxy for the contained view, so that accumulator
+ *  variable update operations can be applied directly to the reducer. For
+ *  example, a value is added to a `reducer<%op_add>` with `*r += a`, but a
+ *  value can be added to a `%reducer_opadd` with `r += a`.
  *
- *  @deprecated Users are strongly encouraged to use @ref cilk::reducer\<monoid\> reducers
- *              rather than the old reducers like reducer_opadd. The reducer\<monoid\> reducers
- *              show the reducer/monoid/view architecture more clearly, are more consistent in
- *              their implementation, and present a simpler model for new user-implemented
- *              reducers.
+ *  @deprecated Users are strongly encouraged to use `reducer<monoid>`
+ *              reducers rather than the old wrappers like reducer_opadd.
+ *              The `reducer<monoid>` reducers show the reducer/monoid/view
+ *              architecture more clearly, are more consistent in their
+ *              implementation, and present a simpler model for new
+ *              user-implemented reducers.
  *
- *  @note   Implicit conversions are provided between `reducer_opadd\<T\>` and 
- *          `reducer< op_add\<T\> >`. This allows incremental code conversion: old code that used 
- *          `reducer_opadd` can pass a `reducer_opadd` to a converted function that now expects 
- *          a reference to a `reducer<op_add>`, and vice versa.
+ *  @note   Implicit conversions are provided between `%reducer_opadd`
+ *          and `reducer<%op_add>`. This allows incremental code
+ *          conversion: old code that used `%reducer_opadd` can pass a
+ *          `%reducer_opadd` to a converted function that now expects a
+ *          pointer or reference to a `reducer<%op_add>`, and vice
+ *          versa.
  *
  *  @tparam Type    The value type of the reducer.
  *
  *  @see op_add
  *  @see reducer
- *  @see @ref page_reducer_add
+ *  @see ReducersAdd
+ *
+ *  @ingroup ReducersAdd
  */
 template <typename Type>
 class reducer_opadd : public reducer< op_add<Type, true> >
@@ -365,69 +403,142 @@ class reducer_opadd : public reducer< op_add<Type, true> >
     using base::view;
 
   public:
-    typedef typename base::view_type        view_type;  ///< The view type for the reducer.
-    typedef typename view_type::rhs_proxy   rhs_proxy;  ///< The view’s rhs proxy type.
+    /// The view type for the reducer.
+    typedef typename base::view_type        view_type;
 
-    /// Construct with default initial value of `Type()`.
+    /// The view's rhs proxy type.
+    typedef typename view_type::rhs_proxy   rhs_proxy;
+
+    /// The view type for the reducer.
+    typedef view_type                       View;
+
+    /// The monoid type for the reducer.
+    typedef typename base::monoid_type      Monoid;
+
+    /** @name Constructors
+     */
+    ///@{
+
+    /** Default (identity) constructor.
+     *
+     * Constructs the wrapper with the default initial value of `Type()`.
+     */
     reducer_opadd() {}
 
-    /// Construct with a specified initial value.
+    /** Value constructor.
+     *
+     *  Constructs the wrapper with a specified initial value.
+     */
     explicit reducer_opadd(const Type& initial_value) : base(initial_value) {}
 
-    /// @name Forwarding functions
-    //@{
-    /// Functions that are forwarded to the view.
-    reducer_opadd& operator+=(const Type& x)        { view() += x; return *this; }
-    reducer_opadd& operator-=(const Type& x)        { view() -= x; return *this; }
-    reducer_opadd& operator++()                     { ++view(); return *this; }
-    void operator++(int)                            { view()++; }
-    reducer_opadd& operator--()                     { --view(); return *this; }
-    void operator--(int)                            { view()--; }
-    rhs_proxy operator+(const Type& x) const        { return view() + x; }
-    rhs_proxy operator-(const Type& x) const        { return view() - x; }
-    reducer_opadd& operator=(const rhs_proxy& temp) { view() = temp; return *this; }
-    //@}
+    ///@}
 
-    /** @name `*reducer == reducer`.
+    /** @name Forwarded functions
+     *  @details Functions that update the contained accumulator variable are
+     *  simply forwarded to the contained @ref op_add_view. */
+    ///@{
+
+    /// @copydoc op_add_view::operator+=(const Type&)
+    reducer_opadd& operator+=(const Type& x)    { view() += x; return *this; }
+
+    /// @copydoc op_add_view::operator-=(const Type&)
+    reducer_opadd& operator-=(const Type& x)    { view() -= x; return *this; }
+
+    /// @copydoc op_add_view::operator++()
+    reducer_opadd& operator++()                 { ++view(); return *this; }
+
+    /// @copydoc op_add_view::operator++(int)
+    void operator++(int)                        { view()++; }
+
+    /// @copydoc op_add_view::operator-\-()
+    reducer_opadd& operator--()                 { --view(); return *this; }
+
+    /// @copydoc op_add_view::operator-\-(int)
+    void operator--(int)                        { view()--; }
+
+    // The legacy definitions of reducer_opadd::operator+() and
+    // reducer_opadd::operator-() have different behavior and a different
+    // return type than this definition. The legacy version is defined as a
+    // member function, so this new version is defined as a free function to
+    // give it a different signature, so that they won't end up sharing a
+    // single object file entry.
+
+    /// @copydoc op_add_view::operator+(const Type&) const
+    friend rhs_proxy operator+(const reducer_opadd& r, const Type& x)
+    {
+        return r.view() + x;
+    }
+    /// @copydoc op_add_view::operator-(const Type&) const
+    friend rhs_proxy operator-(const reducer_opadd& r, const Type& x)
+    {
+        return r.view() - x;
+    }
+    /// @copydoc op_add_view::operator=(const rhs_proxy&)
+    reducer_opadd& operator=(const rhs_proxy& temp)
+    {
+        view() = temp;
+        return *this;
+    }
+    ///@}
+
+    /** @name Dereference
+     *  @details Dereferencing a wrapper is a no-op. It simply returns the
+     *  wrapper. Combined with the rule that the wrapper forwards view
+     *  operations to its contained view, this means that view operations can
+     *  be written the same way on reducers and wrappers, which is convenient
+     *  for incrementally converting old code using wrappers to use reducers
+     *  instead. That is:
+     *
+     *      reducer< op_add<int> > r;
+     *      *r += a;    // *r returns the view
+     *                  // operator += is a view member function
+     *
+     *      reducer_opadd<int> w;
+     *      *w += a;    // *w returns the wrapper
+     *                  // operator += is a wrapper member function that
+     *                  // calls the corresponding view function
      */
-    //@{
+    ///@{
     reducer_opadd&       operator*()       { return *this; }
     reducer_opadd const& operator*() const { return *this; }
 
     reducer_opadd*       operator->()       { return this; }
     reducer_opadd const* operator->() const { return this; }
-    //@}
-    
-    /** “Upcast” to corresponding unaligned reducer.
+    ///@}
+
+    /** @name Upcast
+     *  @details In Cilk library 0.9, reducers were always cache-aligned. In
+     *  library  1.0, reducer cache alignment is optional. By default, reducers
+     *  are unaligned (i.e., just naturally aligned), but legacy wrappers
+     *  inherit from cache-aligned reducers for binary compatibility.
      *
-     *  @note   Upcast to corresponding _aligned_ reducer is a true upcast, so
-     *          no conversion operator is necessary.
+     *  This means that a wrapper will automatically be upcast to its aligned
+     *  reducer base class. The following conversion operators provide
+     *  pseudo-upcasts to the corresponding unaligned reducer class.
      */
+    ///@{
     operator reducer< op_add<Type, false> >& ()
     {
         return *reinterpret_cast< reducer< op_add<Type, false> >* >(this);
     }
-    
-    /** “Upcast” to corresponding unaligned reducer.
-     *
-     *  @note   Upcast to corresponding _aligned_ reducer is a true upcast, so
-     *          no conversion operator is necessary.
-     */
     operator const reducer< op_add<Type, false> >& () const
     {
         return *reinterpret_cast< const reducer< op_add<Type, false> >* >(this);
     }
+    ///@}
 };
 
 /// @cond internal
 /** Metafunction specialization for reducer conversion.
  *
- *  This specialization of the @ref legacy_reducer_downcast template class defined in
- *  reducer.h causes the `reducer< op_add<Type> >` class to have an 
- *  `operator reducer_opadd<Type>& ()` conversion operator that statically downcasts the 
- *  `reducer<op_add>` to the corresponding `reducer_opadd` type. (The reverse conversion,
- *  from `reducer_opadd` to `reducer<op_add>`, is just an upcast, which is provided for free
- *  by the language.)
+ *  This specialization of the @ref legacy_reducer_downcast template class
+ *  defined in reducer.h causes the `reducer< op_add<Type> >` class to have an
+ *  `operator reducer_opadd<Type>& ()` conversion operator that statically
+ *  downcasts the `reducer<op_add>` to the corresponding `reducer_opadd` type.
+ *  (The reverse conversion, from `reducer_opadd` to `reducer<op_add>`, is just
+ *  an upcast, which is provided for free by the language.)
+ *
+ *  @ingroup ReducersAdd
  */
 template <typename Type, bool Align>
 struct legacy_reducer_downcast<reducer<op_add<Type, Align> > >
@@ -440,43 +551,51 @@ struct legacy_reducer_downcast<reducer<op_add<Type, Align> > >
 
 #endif // __cplusplus
 
-/** @name C language reducer macros.
+
+/** @ingroup ReducersAdd
+ */
+///@{
+
+/** @name C Language Reducer Macros
  *
- *  These macros are used to declare and work with numeric op_add reducers in C code.
+ *  These macros are used to declare and work with numeric op_add reducers in
+ *  C code.
  *
  *  @see @ref page_reducers_in_c
  */
- //@{
- 
+ ///@{
+
 __CILKRTS_BEGIN_EXTERN_C
 
-/** Opadd reducer type name.
+/** Declares opadd reducer type name.
  *
- *  This macro expands into the identifier which is the name of the op_add reducer
- *  type for a specified numeric type.
+ *  This macro expands into the identifier which is the name of the op_add
+ *  reducer type for a specified numeric type.
  *
- *  @param  tn  The @ref reducers_c_type_names "numeric type name" specifying the type of the 
- *              reducer.
+ *  @param  tn  The @ref reducers_c_type_names "numeric type name" specifying
+ *              the type of the reducer.
  *
  *  @see @ref reducers_c_predefined
+ *  @see ReducersAdd
  */
 #define CILK_C_REDUCER_OPADD_TYPE(tn)                                         \
     __CILKRTS_MKIDENT(cilk_c_reducer_opadd_,tn)
 
-/** Declare an op_add reducer object.
+/** Declares an op_add reducer object.
  *
- *  This macro expands into a declaration of an op_add reducer object for a specified numeric
- *  type. For example:
+ *  This macro expands into a declaration of an op_add reducer object for a
+ *  specified numeric type. For example:
  *
  *      CILK_C_REDUCER_OPADD(my_reducer, double, 0.0);
  *
  *  @param  obj The variable name to be used for the declared reducer object.
- *  @param  tn  The @ref reducers_c_type_names "numeric type name" specifying the type of the 
- *              reducer.
- *  @param  v   The initial value for the reducer. (A value which can be assigned to the 
- *              numeric type represented by @a tn.)
+ *  @param  tn  The @ref reducers_c_type_names "numeric type name" specifying
+ *              the type of the reducer.
+ *  @param  v   The initial value for the reducer. (A value which can be
+ *              assigned to the numeric type represented by @a tn.)
  *
  *  @see @ref reducers_c_predefined
+ *  @see ReducersAdd
  */
 #define CILK_C_REDUCER_OPADD(obj,tn,v)                                        \
     CILK_C_REDUCER_OPADD_TYPE(tn) obj =                                       \
@@ -487,28 +606,30 @@ __CILKRTS_BEGIN_EXTERN_C
 
 /// @cond internal
 
-/** Declare the op_add reducer functions for a numeric type.
+/** Declares the op_add reducer functions for a numeric type.
  *
- *  This macro expands into external function declarations for functions which implement
- *  the reducer functionality for the op_add reducer type for a specified numeric type.
+ *  This macro expands into external function declarations for functions which
+ *  implement the reducer functionality for the op_add reducer type for a
+ *  specified numeric type.
  *
  *  @param  t   The value type of the reducer.
- *  @param  tn  The value “type name” identifier, used to construct the reducer type name,
- *              function names, etc.
+ *  @param  tn  The value "type name" identifier, used to construct the reducer
+ *              type name, function names, etc.
  */
 #define CILK_C_REDUCER_OPADD_DECLARATION(t,tn)                             \
     typedef CILK_C_DECLARE_REDUCER(t) CILK_C_REDUCER_OPADD_TYPE(tn);       \
     __CILKRTS_DECLARE_REDUCER_REDUCE(cilk_c_reducer_opadd,tn,l,r);         \
     __CILKRTS_DECLARE_REDUCER_IDENTITY(cilk_c_reducer_opadd,tn);
- 
-/** Define the op_add reducer functions for a numeric type.
+
+/** Defines the op_add reducer functions for a numeric type.
  *
- *  This macro expands into function definitions for functions which implement the
- *  reducer functionality for the op_add reducer type for a specified numeric type.
+ *  This macro expands into function definitions for functions which implement
+ *  the reducer functionality for the op_add reducer type for a specified
+ *  numeric type.
  *
  *  @param  t   The value type of the reducer.
- *  @param  tn  The value “type name” identifier, used to construct the reducer type name,
- *              function names, etc.
+ *  @param  tn  The value "type name" identifier, used to construct the reducer
+ *              type name, function names, etc.
  */
 #define CILK_C_REDUCER_OPADD_DEFINITION(t,tn)                              \
     typedef CILK_C_DECLARE_REDUCER(t) CILK_C_REDUCER_OPADD_TYPE(tn);       \
@@ -516,14 +637,14 @@ __CILKRTS_BEGIN_EXTERN_C
         { *(t*)l += *(t*)r; }                                              \
     __CILKRTS_DECLARE_REDUCER_IDENTITY(cilk_c_reducer_opadd,tn)            \
         { *(t*)v = 0; }
- 
-//@{
-/** @def CILK_C_REDUCER_OPADD_INSTANCE 
- *  @brief Declare or define implementation functions for a reducer type.
+
+///@{
+/** @def CILK_C_REDUCER_OPADD_INSTANCE
+ *  @brief Declares or defines implementation functions for a reducer type.
  *
- *  In the runtime source file c_reducers.c, the macro CILK_C_DEFINE_REDUCERS
- *  will be defined, and this macro will generate reducer implementation 
- *  functions. Everywhere else, CILK_C_DEFINE_REDUCERS will be undefined,
+ *  In the runtime source file c_reducers.c, the macro `CILK_C_DEFINE_REDUCERS`
+ *  will be defined, and this macro will generate reducer implementation
+ *  functions. Everywhere else, `CILK_C_DEFINE_REDUCERS` will be undefined,
  *  and this macro will expand into external declarations for the functions.
  */
 #ifdef CILK_C_DEFINE_REDUCERS
@@ -533,9 +654,9 @@ __CILKRTS_BEGIN_EXTERN_C
 #   define CILK_C_REDUCER_OPADD_INSTANCE(t,tn)  \
         CILK_C_REDUCER_OPADD_DECLARATION(t,tn)
 #endif
-//@}
+///@}
 
-/*  Declare or define an instance of the reducer type and its functions for each 
+/*  Declares or defines an instance of the reducer type and its functions for each
  *  numeric type.
  */
 CILK_C_REDUCER_OPADD_INSTANCE(char,                 char)
@@ -559,6 +680,8 @@ CILK_C_REDUCER_OPADD_INSTANCE(long double,          longdouble)
 
 __CILKRTS_END_EXTERN_C
 
-//@}
+///@}
+
+///@}
 
 #endif /*  REDUCER_OPADD_H_INCLUDED */

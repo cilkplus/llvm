@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -56,12 +53,17 @@
     // Uses sysconf(_SC_NPROCESSORS_ONLN) in verbose output
 #elif defined  __FreeBSD__
 // No additional include files
+#elif defined __OpenBSD__
+// No additional include files
 #elif defined __CYGWIN__
 // Cygwin on Windows - no additional include files
 #elif defined  __VXWORKS__
 #   include <vxWorks.h>   
 #   include <vxCpuLib.h>   
 #   include <taskLib.h>   
+// Solaris
+#elif defined __sun__ && defined __svr4__
+#   include <sched.h>
 #else
 #   error "Unsupported OS"
 #endif
@@ -279,7 +281,7 @@ void __cilkrts_init_tls_variables(void)
 }
 #endif
 
-#if defined (__linux__) && ! defined(ANDROID)
+#if defined (__linux__) && ! defined(__ANDROID__)
 /*
  * Get the thread id, rather than the pid. In the case of MIC offload, it's
  * possible that we have multiple threads entering Cilk, and each has a
@@ -306,36 +308,69 @@ static pid_t linux_gettid(void)
  * mask is set by the offload library to force the offload code away from
  * cores that have offload support threads running on them.
  */
-static int linux_get_affinity_count (int tid) 
+static int linux_get_affinity_count ()
 {
+    long system_cores = sysconf(_SC_NPROCESSORS_ONLN);
+    int affinity_cores = 0;
+
+#if defined HAVE_PTHREAD_AFFINITY_NP
+
+#if defined (CPU_ALLOC_SIZE) && ! defined(DONT_USE_CPU_ALLOC_SIZE)
+    // Statically allocated cpu_set_t's max out at 1024 cores.  If
+    // CPU_ALLOC_SIZE is available, use it to support large numbers of cores
+    size_t cpusetsize = CPU_ALLOC_SIZE(system_cores);
+    cpu_set_t *process_mask = (cpu_set_t *)__cilkrts_malloc(cpusetsize);
+
+    // Get the affinity mask for this thread
+    int err = pthread_getaffinity_np(pthread_self(),
+                                     cpusetsize,
+                                     process_mask);
+
+    // Count the available cores.
+    if (0 == err)
+        affinity_cores = CPU_COUNT_S(cpusetsize, process_mask);
+
+    __cilkrts_free(process_mask);
+
+#else
+    // CPU_ALLOC_SIZE isn't available, or this is the Intel compiler build
+    // and we have to support RHEL5.  Use a statically allocated cpu_set_t
+
     cpu_set_t process_mask;
 
     // Extract the thread affinity mask
-    int err = sched_getaffinity (tid, sizeof(process_mask),&process_mask);
+    int err = pthread_getaffinity_np(pthread_self(),
+                                     sizeof(process_mask),
+                                     &process_mask);
 
-    if (0 != err)
+    if (0 == err)
     {
-        return 0;
-    }
-
-    // We have extracted the mask OK, so now we can count the number of threads
-    // in it.  This is linear in the maximum number of CPUs available, We
-    // could do a logarithmic version, if we assume the format of the mask,
-    // but it's not really worth it. We only call this at thread startup
-    // anyway.
-    int available_procs = 0;
-    int i;
-    for (i = 0; i < CPU_SETSIZE; i++)
-    {
-        if (CPU_ISSET(i, &process_mask))
+        // We have extracted the mask OK, so now we can count the number of
+        // threads in it.  This is linear in the maximum number of CPUs
+        // available, We could do a logarithmic version, if we assume the
+        // format of the mask, but it's not really worth it. We only call
+        // this at thread startup anyway.
+        int i;
+        for (i = 0; i < CPU_SETSIZE; i++)
         {
-            available_procs++;
+            if (CPU_ISSET(i, &process_mask))
+            {
+                affinity_cores++;
+            }
         }
     }
+#endif  // CPU_ALLOC_SIZE
+#endif  //  ! defined HAVE_PTHREAD_AFFINITY_NP
 
-    return available_procs;
+    // If we've got a count of cores this thread is supposed to use, that's
+    // the number or cores we'll use.  Otherwise, default to the number of
+    // cores on the system.
+    if (0 == affinity_cores)
+        return system_cores;
+    else
+        return affinity_cores;
 }
-#endif
+#endif  //  defined (__linux__) && ! defined(__ANDROID__)
 
 /*
  * __cilkrts_hardware_cpu_count
@@ -346,7 +381,7 @@ static int linux_get_affinity_count (int tid)
 
 COMMON_SYSDEP int __cilkrts_hardware_cpu_count(void)
 {
-#if defined ANDROID
+#if defined __ANDROID__ || (defined(__sun__) && defined(__svr4__))
     return sysconf (_SC_NPROCESSORS_ONLN);
 #elif defined __MIC__
     /// HACK: Usually, the 3rd and 4th hyperthreads are not beneficial
@@ -354,9 +389,7 @@ COMMON_SYSDEP int __cilkrts_hardware_cpu_count(void)
     int P = sysconf (_SC_NPROCESSORS_ONLN);
     return P/2 - 2;
 #elif defined __linux__
-    int affinity_count = linux_get_affinity_count(linux_gettid());
-
-    return (0 != affinity_count) ? affinity_count : sysconf (_SC_NPROCESSORS_ONLN);
+    return linux_get_affinity_count();
 #elif defined __APPLE__
     int count = 0;
     int cmd[2] = { CTL_HW, HW_NCPU };
@@ -366,7 +399,7 @@ COMMON_SYSDEP int __cilkrts_hardware_cpu_count(void)
     assert((unsigned)count == count);
 
     return count;
-#elif defined  __FreeBSD__ || defined __CYGWIN__
+#elif defined  __FreeBSD__ || defined __OpenBSD__ || defined __CYGWIN__
     int ncores = sysconf(_SC_NPROCESSORS_ONLN);
 
     return ncores;
@@ -379,49 +412,10 @@ COMMON_SYSDEP int __cilkrts_hardware_cpu_count(void)
 #endif
 }
 
-/* timer support */
-COMMON_SYSDEP unsigned long long __cilkrts_getticks(void)
-{
-#if defined __i386__ || defined __x86_64
-    unsigned a, d; 
-    __asm__ volatile("rdtsc" : "=a" (a), "=d" (d)); 
-    return ((unsigned long long)a) | (((unsigned long long)d) << 32); 
-#else
-#   warning "unimplemented cycle counter"
-    return 0;
-#endif
-}
-
-COMMON_SYSDEP void __cilkrts_short_pause(void)
-{
-#if __ICC >= 1110
-#   if __MIC__ || __MIC2__
-    _mm_delay_32(16); // stall for 16 cycles
-#   else
-    _mm_pause();
-#   endif
-#elif defined __i386__ || defined __x86_64
-    __asm__("pause");
-#else
-#   warning __cilkrts_short_pause empty
-#endif
-}
-
-COMMON_SYSDEP int __cilkrts_xchg(volatile int *ptr, int x)
-{
-#if defined __i386__ || defined __x86_64
-    /* asm statement here works around icc bugs */
-    __asm__("xchgl %0,%a1" :"=r" (x) : "r" (ptr), "0" (x) :"memory");
-#else
-    x = __sync_lock_test_and_set(ptr, x);
-#endif
-    return x;
-}
-
 COMMON_SYSDEP void __cilkrts_sleep(void)
 {
 #ifdef __VXWORKS__
-	taskDelay(1);
+    taskDelay(1);
 #else			
     usleep(1);
 #endif	
@@ -440,9 +434,9 @@ COMMON_SYSDEP void __cilkrts_yield(void)
     // giving up the processor and latency starting up when work becomes
     // available
     _mm_delay_32(1024);
-#elif defined(ANDROID)
-    // On Android, call sched_yield to yield quantum.  I'm not sure why we
-    // don't do this on Linux also.
+#elif defined(__ANDROID__) || (defined(__sun__) && defined(__svr4__))
+    // On Android and Solaris, call sched_yield to yield quantum.  I'm not
+    // sure why we don't do this on Linux also.
     sched_yield();
 #else
     // On Linux, call pthread_yield (which in turn will call sched_yield)

@@ -2,11 +2,9 @@
  *
  *************************************************************************
  *
- *  @copyright
- *  Copyright (C) 2012, Intel Corporation
+ *  Copyright (C) 2012-2014, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +19,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -44,20 +41,31 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include <alloca.h>
 #include <errno.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include "declare-alloca.h"
 
 // MAP_ANON is deprecated on Linux, but seems to be required on Mac...
 #ifndef MAP_ANONYMOUS
-#define MAP_ANONYMOUS MAP_ANON
+#   define MAP_ANONYMOUS MAP_ANON
+#endif
+
+// MAP_STACK and MAP_GROWSDOWN have no affect in Linux as of 2014-04-04, but
+// could be very useful in future versions.  If they are not defined, then set
+// them to zero (no bits set).
+#ifndef MAP_STACK
+#   define MAP_STACK 0
+#endif
+#ifndef MAP_GROWSDOWN
+#   define MAP_GROWSDOWN 0
 #endif
 
 // Magic number for sanity checking fiber structure
 const unsigned magic_number = 0x5afef00d;
 
-int cilk_fiber_sysdep::s_page_size = getpagesize();
+// Page size for stacks
+long cilk_fiber_sysdep::s_page_size = sysconf(_SC_PAGESIZE);
 
 cilk_fiber_sysdep::cilk_fiber_sysdep(std::size_t stack_size)
     : cilk_fiber(stack_size)
@@ -150,6 +158,14 @@ NORETURN cilk_fiber_sysdep::jump_to_resume_other_sysdep(cilk_fiber_sysdep* other
     __cilkrts_bug("Should not get here");
 }
 
+// GCC doesn't allow us to call __builtin_longjmp in the same function that
+// calls __builtin_setjmp, so create a new function to house the call to
+// __builtin_longjmp
+static void __attribute__((noinline))
+do_cilk_longjmp(__CILK_JUMP_BUFFER jmpbuf)
+{
+    CILK_LONGJMP(jmpbuf);
+}
 
 NORETURN cilk_fiber_sysdep::run()
 {
@@ -162,11 +178,43 @@ NORETURN cilk_fiber_sysdep::run()
     // We could probably replace this code with some assembly.
     if (! CILK_SETJMP(m_resume_jmpbuf))
     {
-        // Change stack pointer to fiber stack
-        JMPBUF_SP(m_resume_jmpbuf) = m_stack_base;
-        CILK_LONGJMP(m_resume_jmpbuf);
+        // Calculate the size of the current stack frame (i.e., this
+        // run() function.  
+        size_t frame_size = (size_t)JMPBUF_FP(m_resume_jmpbuf) - (size_t)JMPBUF_SP(m_resume_jmpbuf);
+
+        // Macs require 16-byte alignment.  Do it always because it just
+        // doesn't matter
+        if (frame_size & (16-1))
+            frame_size += 16 - (frame_size  & (16-1));
+
+        // Assert that we are getting a reasonable frame size out of
+        // it.  If this run() function is using more than 4096 bytes
+        // of space for its local variables / any state that spills to
+        // registers, something is probably *very* wrong here...
+        //
+        // 4096 bytes just happens to be a number that seems "large
+        // enough" --- for an example GCC 32-bit compilation, the
+        // frame size was 48 bytes.
+        CILK_ASSERT(frame_size < 4096);
+
+        // Change stack pointer to fiber stack.  Offset the
+        // calculation by the frame size, so that we've allocated
+        // enough extra space from the top of the stack we are
+        // switching to for any temporaries required for this run()
+        // function.
+        JMPBUF_SP(m_resume_jmpbuf) = m_stack_base - frame_size;
+
+        // GCC doesn't allow us to call __builtin_longjmp in the same function
+        // that calls __builtin_setjmp, so it's been moved into it's own
+        // function that cannot be inlined.
+        do_cilk_longjmp(m_resume_jmpbuf);
     }
 
+    // Note: our resetting of the stack pointer is valid only if the
+    // compiler has not saved any temporaries onto the stack for this
+    // function before the longjmp that we still care about at this
+    // point.
+    
     // Verify that 1) 'this' is still valid and 2) '*this' has not been
     // corrupted.
     CILK_ASSERT(magic_number == m_magic);
@@ -180,7 +228,7 @@ NORETURN cilk_fiber_sysdep::run()
     // alloca() to force generation of frame pointer.  The argument to alloca
     // is contrived to prevent the compiler from optimizing it away.  This
     // code should never actually be executed.
-    int* dummy = (int*) alloca(sizeof(int) + (std::size_t) m_start_proc & 0x1);
+    int* dummy = (int*) alloca((sizeof(int) + (std::size_t) m_start_proc) & 0x1);
     *dummy = 0xface;
 
     // User proc should never return.
@@ -197,10 +245,10 @@ void cilk_fiber_sysdep::make_stack(size_t stack_size)
     // Normally, we have already validated that the stack size is
     // aligned to 4K.  In the rare case that pages are huge though, we
     // need to do some extra checks.
-    if (rounded_stack_size < 3 * s_page_size) {
+    if (rounded_stack_size < 3 * (size_t)s_page_size) {
         // If the specified stack size is too small, round up to 3
         // pages.  We need at least 2 extra for the guard pages.
-        rounded_stack_size = 3 * s_page_size;
+        rounded_stack_size = 3 * (size_t)s_page_size;
     }
     else {
         // Otherwise, the stack size is large enough, but might not be
@@ -214,7 +262,7 @@ void cilk_fiber_sysdep::make_stack(size_t stack_size)
 
     p = (char*)mmap(0, rounded_stack_size,
                     PROT_READ|PROT_WRITE,
-                    MAP_PRIVATE|MAP_ANONYMOUS,
+                    MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK|MAP_GROWSDOWN,
                     -1, 0);
     if (MAP_FAILED == p) {
         // For whatever reason (probably ran out of memory), mmap() failed.
