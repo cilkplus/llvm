@@ -168,10 +168,10 @@ These are overloaded intrinsics.  You can use these on any pointer types.
 
 .. code-block:: llvm
 
-    declare i8* @llvm.nvvm.ptr.gen.to.global.p1i8.p0i8(i8 addrspace(1)*)
-    declare i8* @llvm.nvvm.ptr.gen.to.shared.p3i8.p0i8(i8 addrspace(3)*)
-    declare i8* @llvm.nvvm.ptr.gen.to.constant.p4i8.p0i8(i8 addrspace(4)*)
-    declare i8* @llvm.nvvm.ptr.gen.to.local.p5i8.p0i8(i8 addrspace(5)*)
+    declare i8 addrspace(1)* @llvm.nvvm.ptr.gen.to.global.p1i8.p0i8(i8*)
+    declare i8 addrspace(3)* @llvm.nvvm.ptr.gen.to.shared.p3i8.p0i8(i8*)
+    declare i8 addrspace(4)* @llvm.nvvm.ptr.gen.to.constant.p4i8.p0i8(i8*)
+    declare i8 addrspace(5)* @llvm.nvvm.ptr.gen.to.local.p5i8.p0i8(i8*)
 
 Overview:
 """""""""
@@ -273,7 +273,7 @@ there is a separate version for each compute architecture.
 For a list of all math functions implemented in libdevice, see
 `libdevice Users Guide <http://docs.nvidia.com/cuda/libdevice-users-guide/index.html>`_.
 
-To accomodate various math-related compiler flags that can affect code
+To accommodate various math-related compiler flags that can affect code
 generation of libdevice code, the library code depends on a special LLVM IR
 pass (``NVVMReflect``) to handle conditional compilation within LLVM IR. This
 pass looks for calls to the ``@__nvvm_reflect`` function and replaces them
@@ -839,7 +839,7 @@ Libdevice provides an ``__nv_powf`` function that we will use.
     %valB = load float addrspace(1)* %ptrB, align 4
 
     ; Compute C = pow(A, B)
-    %valC = call float @__nv_exp2f(float %valA, float %valB)
+    %valC = call float @__nv_powf(float %valA, float %valB)
 
     ; Store back to C
     store float %valC, float addrspace(1)* %ptrC, align 4
@@ -850,7 +850,7 @@ Libdevice provides an ``__nv_powf`` function that we will use.
   !nvvm.annotations = !{!0}
   !0 = metadata !{void (float addrspace(1)*,
                         float addrspace(1)*,
-                        float addrspace(1)*)* @kernel, metadata !"kernel", i32 1}%
+                        float addrspace(1)*)* @kernel, metadata !"kernel", i32 1}
 
 
 To compile this kernel, we perform the following steps:

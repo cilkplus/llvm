@@ -24,35 +24,25 @@ MCELFObjectTargetWriter::MCELFObjectTargetWriter(bool Is64Bit_,
     IsN64(IsN64_){
 }
 
-const MCSymbol *MCELFObjectTargetWriter::ExplicitRelSym(const MCAssembler &Asm,
-                                                        const MCValue &Target,
-                                                        const MCFragment &F,
-                                                        const MCFixup &Fixup,
-                                                        bool IsPCRel) const {
-  return NULL;
+bool MCELFObjectTargetWriter::needsRelocateWithSymbol(const MCSymbol &Sym,
+                                                      unsigned Type) const {
+  return false;
 }
 
-const MCSymbol *MCELFObjectTargetWriter::undefinedExplicitRelSym(const MCValue &Target,
-                                                                 const MCFixup &Fixup,
-                                                                 bool IsPCRel) const {
-  const MCSymbol &Symbol = Target.getSymA()->getSymbol();
-  return &Symbol.AliasedSymbol();
-}
-
-// ELF doesn't require relocations to be in any order. We sort by the r_offset,
-// just to match gnu as for easier comparison. The use type and index is an
-// arbitrary way of making the sort deterministic.
+// ELF doesn't require relocations to be in any order. We sort by the Offset,
+// just to match gnu as for easier comparison. The use type is an arbitrary way
+// of making the sort deterministic.
 static int cmpRel(const ELFRelocationEntry *AP, const ELFRelocationEntry *BP) {
   const ELFRelocationEntry &A = *AP;
   const ELFRelocationEntry &B = *BP;
-  if (A.r_offset != B.r_offset)
-    return B.r_offset - A.r_offset;
+  if (A.Offset != B.Offset)
+    return B.Offset - A.Offset;
   if (B.Type != A.Type)
     return A.Type - B.Type;
-  if (B.Index != A.Index)
-    return B.Index - A.Index;
-  llvm_unreachable("ELFRelocs might be unstable!");
+  //llvm_unreachable("ELFRelocs might be unstable!");
+  return 0;
 }
+
 
 void
 MCELFObjectTargetWriter::sortRelocs(const MCAssembler &Asm,

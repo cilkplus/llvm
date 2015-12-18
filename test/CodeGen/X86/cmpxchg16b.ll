@@ -4,9 +4,8 @@
 define void @t1(i128* nocapture %p) nounwind ssp {
 entry:
 ; CHECK: movl	$1, %ebx
-; CHECK: lock
-; CHECK-NEXT: cmpxchg16b
-  %r = cmpxchg i128* %p, i128 0, i128 1 seq_cst
+; CHECK: lock cmpxchg16b
+  %r = cmpxchg i128* %p, i128 0, i128 1 seq_cst seq_cst
   ret void
 }
 

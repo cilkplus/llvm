@@ -15,6 +15,7 @@
 #define LLVM_ANALYSIS_SCALAREVOLUTIONEXPRESSIONS_H
 
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -151,8 +152,12 @@ namespace llvm {
     }
 
     typedef const SCEV *const *op_iterator;
+    typedef iterator_range<op_iterator> op_range;
     op_iterator op_begin() const { return Operands; }
     op_iterator op_end() const { return Operands + NumOperands; }
+    op_range operands() const {
+      return make_range(op_begin(), op_end());
+    }
 
     Type *getType() const { return getOperand(0)->getType(); }
 
@@ -304,17 +309,17 @@ namespace llvm {
                               getLoop(), FlagAnyWrap);
     }
 
-    /// isAffine - Return true if this is an affine AddRec (i.e., it represents
-    /// an expressions A+B*x where A and B are loop invariant values.
+    /// isAffine - Return true if this represents an expression
+    /// A + B*x where A and B are loop invariant values.
     bool isAffine() const {
       // We know that the start value is invariant.  This expression is thus
       // affine iff the step is also invariant.
       return getNumOperands() == 2;
     }
 
-    /// isQuadratic - Return true if this is an quadratic AddRec (i.e., it
-    /// represents an expressions A+B*x+C*x^2 where A, B and C are loop
-    /// invariant values.  This corresponds to an addrec of the form {L,+,M,+,N}
+    /// isQuadratic - Return true if this represents an expression
+    /// A + B*x + C*x^2 where A, B and C are loop invariant values.
+    /// This corresponds to an addrec of the form {L,+,M,+,N}
     bool isQuadratic() const {
       return getNumOperands() == 3;
     }
@@ -351,13 +356,6 @@ namespace llvm {
     static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddRecExpr;
     }
-
-    /// Splits the SCEV into two vectors of SCEVs representing the subscripts
-    /// and sizes of an array access. Returns the remainder of the
-    /// delinearization that is the offset start of the array.
-    const SCEV *delinearize(ScalarEvolution &SE,
-                            SmallVectorImpl<const SCEV *> &Subscripts,
-                            SmallVectorImpl<const SCEV *> &Sizes) const;
   };
 
   //===--------------------------------------------------------------------===//
@@ -410,8 +408,8 @@ namespace llvm {
     friend class ScalarEvolution;
 
     // Implement CallbackVH.
-    virtual void deleted();
-    virtual void allUsesReplacedWith(Value *New);
+    void deleted() override;
+    void allUsesReplacedWith(Value *New) override;
 
     /// SE - The parent ScalarEvolution value. This is used to update
     /// the parent's maps when the value associated with a SCEVUnknown
@@ -501,7 +499,7 @@ namespace llvm {
     SmallPtrSet<const SCEV *, 8> Visited;
 
     void push(const SCEV *S) {
-      if (Visited.insert(S) && Visitor.follow(S))
+      if (Visited.insert(S).second && Visitor.follow(S))
         Worklist.push_back(S);
     }
   public:
@@ -548,7 +546,7 @@ namespace llvm {
     }
   };
 
-  /// Use SCEVTraversal to visit all nodes in the givien expression tree.
+  /// Use SCEVTraversal to visit all nodes in the given expression tree.
   template<typename SV>
   void visitAll(const SCEV *Root, SV& Visitor) {
     SCEVTraversal<SV> T(Visitor);
@@ -563,13 +561,14 @@ namespace llvm {
     : public SCEVVisitor<SCEVParameterRewriter, const SCEV*> {
   public:
     static const SCEV *rewrite(const SCEV *Scev, ScalarEvolution &SE,
-                               ValueToValueMap &Map) {
-      SCEVParameterRewriter Rewriter(SE, Map);
+                               ValueToValueMap &Map,
+                               bool InterpretConsts = false) {
+      SCEVParameterRewriter Rewriter(SE, Map, InterpretConsts);
       return Rewriter.visit(Scev);
     }
 
-    SCEVParameterRewriter(ScalarEvolution &S, ValueToValueMap &M)
-      : SE(S), Map(M) {}
+    SCEVParameterRewriter(ScalarEvolution &S, ValueToValueMap &M, bool C)
+      : SE(S), Map(M), InterpretConsts(C) {}
 
     const SCEV *visitConstant(const SCEVConstant *Constant) {
       return Constant;
@@ -632,8 +631,12 @@ namespace llvm {
 
     const SCEV *visitUnknown(const SCEVUnknown *Expr) {
       Value *V = Expr->getValue();
-      if (Map.count(V))
-        return SE.getUnknown(Map[V]);
+      if (Map.count(V)) {
+        Value *NV = Map[V];
+        if (InterpretConsts && isa<ConstantInt>(NV))
+          return SE.getConstant(cast<ConstantInt>(NV));
+        return SE.getUnknown(NV);
+      }
       return Expr;
     }
 
@@ -644,6 +647,7 @@ namespace llvm {
   private:
     ScalarEvolution &SE;
     ValueToValueMap &Map;
+    bool InterpretConsts;
   };
 
   typedef DenseMap<const Loop*, const SCEV*> LoopToScevMapT;

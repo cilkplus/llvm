@@ -46,32 +46,69 @@ public:
   enum ArchType {
     UnknownArch,
 
-    arm,     // ARM: arm, armv.*, xscale
-    aarch64, // AArch64: aarch64
-    hexagon, // Hexagon: hexagon
-    mips,    // MIPS: mips, mipsallegrex
-    mipsel,  // MIPSEL: mipsel, mipsallegrexel
-    mips64,  // MIPS64: mips64
-    mips64el,// MIPS64EL: mips64el
-    msp430,  // MSP430: msp430
-    ppc,     // PPC: powerpc
-    ppc64,   // PPC64: powerpc64, ppu
-    ppc64le, // PPC64LE: powerpc64le
-    r600,    // R600: AMD GPUs HD2XXX - HD6XXX
-    sparc,   // Sparc: sparc
-    sparcv9, // Sparcv9: Sparcv9
-    systemz, // SystemZ: s390x
-    tce,     // TCE (http://tce.cs.tut.fi/): tce
-    thumb,   // Thumb: thumb, thumbv.*
-    x86,     // X86: i[3-9]86
-    x86_64,  // X86-64: amd64, x86_64
-    xcore,   // XCore: xcore
-    nvptx,   // NVPTX: 32-bit
-    nvptx64, // NVPTX: 64-bit
-    le32,    // le32: generic little-endian 32-bit CPU (PNaCl / Emscripten)
-    amdil,   // amdil: amd IL
-    spir,    // SPIR: standard portable IR for OpenCL 32-bit version
-    spir64   // SPIR: standard portable IR for OpenCL 64-bit version
+    arm,        // ARM (little endian): arm, armv.*, xscale
+    armeb,      // ARM (big endian): armeb
+    aarch64,    // AArch64 (little endian): aarch64
+    aarch64_be, // AArch64 (big endian): aarch64_be
+    bpfel,      // eBPF or extended BPF or 64-bit BPF (little endian)
+    bpfeb,      // eBPF or extended BPF or 64-bit BPF (big endian)
+    hexagon,    // Hexagon: hexagon
+    mips,       // MIPS: mips, mipsallegrex
+    mipsel,     // MIPSEL: mipsel, mipsallegrexel
+    mips64,     // MIPS64: mips64
+    mips64el,   // MIPS64EL: mips64el
+    msp430,     // MSP430: msp430
+    ppc,        // PPC: powerpc
+    ppc64,      // PPC64: powerpc64, ppu
+    ppc64le,    // PPC64LE: powerpc64le
+    r600,       // R600: AMD GPUs HD2XXX - HD6XXX
+    amdgcn,     // AMDGCN: AMD GCN GPUs
+    sparc,      // Sparc: sparc
+    sparcv9,    // Sparcv9: Sparcv9
+    sparcel,    // Sparc: (endianness = little). NB: 'Sparcle' is a CPU variant
+    systemz,    // SystemZ: s390x
+    tce,        // TCE (http://tce.cs.tut.fi/): tce
+    thumb,      // Thumb (little endian): thumb, thumbv.*
+    thumbeb,    // Thumb (big endian): thumbeb
+    x86,        // X86: i[3-9]86
+    x86_64,     // X86-64: amd64, x86_64
+    xcore,      // XCore: xcore
+    nvptx,      // NVPTX: 32-bit
+    nvptx64,    // NVPTX: 64-bit
+    le32,       // le32: generic little-endian 32-bit CPU (PNaCl / Emscripten)
+    le64,       // le64: generic little-endian 64-bit CPU (PNaCl / Emscripten)
+    amdil,      // AMDIL
+    amdil64,    // AMDIL with 64-bit pointers
+    hsail,      // AMD HSAIL
+    hsail64,    // AMD HSAIL with 64-bit pointers
+    spir,       // SPIR: standard portable IR for OpenCL 32-bit version
+    spir64,     // SPIR: standard portable IR for OpenCL 64-bit version
+    kalimba,    // Kalimba: generic kalimba
+    shave,      // SHAVE: Movidius vector VLIW processors
+    wasm32,     // WebAssembly with 32-bit pointers
+    wasm64,     // WebAssembly with 64-bit pointers
+    LastArchType = wasm64
+  };
+  enum SubArchType {
+    NoSubArch,
+
+    ARMSubArch_v8_1a,
+    ARMSubArch_v8,
+    ARMSubArch_v7,
+    ARMSubArch_v7em,
+    ARMSubArch_v7m,
+    ARMSubArch_v7s,
+    ARMSubArch_v6,
+    ARMSubArch_v6m,
+    ARMSubArch_v6k,
+    ARMSubArch_v6t2,
+    ARMSubArch_v5,
+    ARMSubArch_v5te,
+    ARMSubArch_v4t,
+
+    KalimbaSubArch_v3,
+    KalimbaSubArch_v4,
+    KalimbaSubArch_v5
   };
   enum VendorType {
     UnknownVendor,
@@ -83,13 +120,16 @@ public:
     BGQ,
     Freescale,
     IBM,
-    NVIDIA
+    ImaginationTechnologies,
+    MipsTechnologies,
+    NVIDIA,
+    CSR,
+    LastVendorType = CSR
   };
   enum OSType {
     UnknownOS,
 
-    AuroraUX,
-    Cygwin,
+    CloudABI,
     Darwin,
     DragonFly,
     FreeBSD,
@@ -98,7 +138,6 @@ public:
     Linux,
     Lv2,        // PS3
     MacOSX,
-    MinGW32,    // i*86-pc-mingw32, *-w64-mingw32
     NetBSD,
     OpenBSD,
     Solaris,
@@ -111,7 +150,10 @@ public:
     Bitrig,
     AIX,
     CUDA,       // NVIDIA CUDA
-    NVCL        // NVIDIA OpenCL
+    NVCL,       // NVIDIA OpenCL
+    AMDHSA,     // AMD HSA Runtime
+    PS4,
+    LastOSType = PS4
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -120,10 +162,22 @@ public:
     GNUEABI,
     GNUEABIHF,
     GNUX32,
+    CODE16,
     EABI,
-    MachO,
+    EABIHF,
     Android,
-    ELF
+
+    MSVC,
+    Itanium,
+    Cygnus,
+    LastEnvironmentType = Cygnus
+  };
+  enum ObjectFormatType {
+    UnknownObjectFormat,
+
+    COFF,
+    ELF,
+    MachO,
   };
 
 private:
@@ -131,6 +185,9 @@ private:
 
   /// The parsed arch type.
   ArchType Arch;
+
+  /// The parsed subarchitecture type.
+  SubArchType SubArch;
 
   /// The parsed vendor type.
   VendorType Vendor;
@@ -141,18 +198,28 @@ private:
   /// The parsed Environment type.
   EnvironmentType Environment;
 
+  /// The object format type.
+  ObjectFormatType ObjectFormat;
+
 public:
   /// @name Constructors
   /// @{
 
   /// \brief Default constructor is the same as an empty string and leaves all
   /// triple fields unknown.
-  Triple() : Data(), Arch(), Vendor(), OS(), Environment() {}
+  Triple() : Data(), Arch(), Vendor(), OS(), Environment(), ObjectFormat() {}
 
   explicit Triple(const Twine &Str);
   Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr);
   Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr,
          const Twine &EnvironmentStr);
+
+  bool operator==(const Triple &Other) const {
+    return Arch == Other.Arch && SubArch == Other.SubArch &&
+           Vendor == Other.Vendor && OS == Other.OS &&
+           Environment == Other.Environment &&
+           ObjectFormat == Other.ObjectFormat;
+  }
 
   /// @}
   /// @name Normalization
@@ -164,12 +231,18 @@ public:
   /// common case in which otherwise valid components are in the wrong order.
   static std::string normalize(StringRef Str);
 
+  /// \brief Return the normalized form of this triple's string.
+  std::string normalize() const { return normalize(Data); }
+
   /// @}
   /// @name Typed Component Access
   /// @{
 
   /// getArch - Get the parsed architecture type of this triple.
   ArchType getArch() const { return Arch; }
+
+  /// getSubArch - get the parsed subarchitecture type for this triple.
+  SubArchType getSubArch() const { return SubArch; }
 
   /// getVendor - Get the parsed vendor type of this triple.
   VendorType getVendor() const { return Vendor; }
@@ -185,6 +258,18 @@ public:
 
   /// getEnvironment - Get the parsed environment type of this triple.
   EnvironmentType getEnvironment() const { return Environment; }
+
+  /// \brief Parse the version number from the OS name component of the
+  /// triple, if present.
+  ///
+  /// For example, "fooos1.2.3" would return (1, 2, 3).
+  ///
+  /// If an entry is not defined, it will be returned as 0.
+  void getEnvironmentVersion(unsigned &Major, unsigned &Minor,
+                             unsigned &Micro) const;
+
+  /// getFormat - Get the object format for this triple.
+  ObjectFormatType getObjectFormat() const { return ObjectFormat; }
 
   /// getOSVersion - Parse the version number from the OS name component of the
   /// triple, if present.
@@ -282,6 +367,12 @@ public:
     return false;
   }
 
+  bool isOSVersionLT(const Triple &Other) const {
+    unsigned RHS[3];
+    Other.getOSVersion(RHS[0], RHS[1], RHS[2]);
+    return isOSVersionLT(RHS[0], RHS[1], RHS[2]);
+  }
+
   /// isMacOSXVersionLT - Comparison function for checking OS X version
   /// compatibility, which handles supporting skewed version numbering schemes
   /// used by the "darwin" triples.
@@ -314,19 +405,64 @@ public:
     return isMacOSX() || isiOS();
   }
 
+  bool isOSNetBSD() const {
+    return getOS() == Triple::NetBSD;
+  }
+
+  bool isOSOpenBSD() const {
+    return getOS() == Triple::OpenBSD;
+  }
+
+  bool isOSFreeBSD() const {
+    return getOS() == Triple::FreeBSD;
+  }
+
+  bool isOSDragonFly() const { return getOS() == Triple::DragonFly; }
+
+  bool isOSSolaris() const {
+    return getOS() == Triple::Solaris;
+  }
+
+  bool isOSBitrig() const {
+    return getOS() == Triple::Bitrig;
+  }
+
+  bool isWindowsMSVCEnvironment() const {
+    return getOS() == Triple::Win32 &&
+           (getEnvironment() == Triple::UnknownEnvironment ||
+            getEnvironment() == Triple::MSVC);
+  }
+
+  bool isKnownWindowsMSVCEnvironment() const {
+    return getOS() == Triple::Win32 && getEnvironment() == Triple::MSVC;
+  }
+
+  bool isWindowsItaniumEnvironment() const {
+    return getOS() == Triple::Win32 && getEnvironment() == Triple::Itanium;
+  }
+
+  bool isWindowsCygwinEnvironment() const {
+    return getOS() == Triple::Win32 && getEnvironment() == Triple::Cygnus;
+  }
+
+  bool isWindowsGNUEnvironment() const {
+    return getOS() == Triple::Win32 && getEnvironment() == Triple::GNU;
+  }
+
   /// \brief Tests for either Cygwin or MinGW OS
   bool isOSCygMing() const {
-    return getOS() == Triple::Cygwin || getOS() == Triple::MinGW32;
+    return isWindowsCygwinEnvironment() || isWindowsGNUEnvironment();
   }
 
   /// \brief Is this a "Windows" OS targeting a "MSVCRT.dll" environment.
   bool isOSMSVCRT() const {
-    return getOS() == Triple::Win32 || getOS() == Triple::MinGW32;
+    return isWindowsMSVCEnvironment() || isWindowsGNUEnvironment() ||
+           isWindowsItaniumEnvironment();
   }
 
   /// \brief Tests whether the OS is Windows.
   bool isOSWindows() const {
-    return getOS() == Triple::Win32 || isOSCygMing();
+    return getOS() == Triple::Win32;
   }
 
   /// \brief Tests whether the OS is NaCl (Native Client)
@@ -341,18 +477,30 @@ public:
 
   /// \brief Tests whether the OS uses the ELF binary format.
   bool isOSBinFormatELF() const {
-    return !isOSDarwin() && !isOSWindows();
+    return getObjectFormat() == Triple::ELF;
   }
 
   /// \brief Tests whether the OS uses the COFF binary format.
   bool isOSBinFormatCOFF() const {
-    return isOSWindows();
+    return getObjectFormat() == Triple::COFF;
   }
 
   /// \brief Tests whether the environment is MachO.
-  // FIXME: Should this be an OSBinFormat predicate?
-  bool isEnvironmentMachO() const {
-    return getEnvironment() == Triple::MachO || isOSDarwin();
+  bool isOSBinFormatMachO() const {
+    return getObjectFormat() == Triple::MachO;
+  }
+
+  /// \brief Tests whether the target is the PS4 CPU
+  bool isPS4CPU() const {
+    return getArch() == Triple::x86_64 &&
+           getVendor() == Triple::SCEI &&
+           getOS() == Triple::PS4;
+  }
+
+  /// \brief Tests whether the target is the PS4 platform
+  bool isPS4() const {
+    return getVendor() == Triple::SCEI &&
+           getOS() == Triple::PS4;
   }
 
   /// @}
@@ -374,6 +522,9 @@ public:
   /// setEnvironment - Set the environment (fourth) component of the triple
   /// to a known type.
   void setEnvironment(EnvironmentType Kind);
+
+  /// setObjectFormat - Set the object file format
+  void setObjectFormat(ObjectFormatType Kind);
 
   /// setTriple - Set all components to the new triple \p Str.
   void setTriple(const Twine &Str);
@@ -398,10 +549,6 @@ public:
   /// environment components with a single string.
   void setOSAndEnvironmentName(StringRef Str);
 
-  /// getArchNameForAssembler - Get an architecture name that is understood by
-  /// the target assembler.
-  const char *getArchNameForAssembler();
-
   /// @}
   /// @name Helpers to build variants of a particular triple.
   /// @{
@@ -421,6 +568,28 @@ public:
   /// \returns A new triple with a 64-bit architecture or an unknown
   ///          architecture if no such variant can be found.
   llvm::Triple get64BitArchVariant() const;
+
+  /// Form a triple with a big endian variant of the current architecture.
+  ///
+  /// This can be used to move across "families" of architectures where useful.
+  ///
+  /// \returns A new triple with a big endian architecture or an unknown
+  ///          architecture if no such variant can be found.
+  llvm::Triple getBigEndianArchVariant() const;
+
+  /// Form a triple with a little endian variant of the current architecture.
+  ///
+  /// This can be used to move across "families" of architectures where useful.
+  ///
+  /// \returns A new triple with a little endian architecture or an unknown
+  ///          architecture if no such variant can be found.
+  llvm::Triple getLittleEndianArchVariant() const;
+
+  /// Get the (LLVM) name of the minimum ARM CPU for the arch we are targeting.
+  ///
+  /// \param Arch the architecture name (e.g., "armv7s"). If it is an empty
+  /// string then the triple's arch name is used.
+  const char* getARMCPUForArch(StringRef Arch = StringRef()) const;
 
   /// @}
   /// @name Static helpers for IDs.

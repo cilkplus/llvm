@@ -10,8 +10,11 @@
 #ifndef LLVM_MC_MCPARSER_MCPARSEDASMOPERAND_H
 #define LLVM_MC_MCPARSER_MCPARSEDASMOPERAND_H
 
+#include <string>
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/SMLoc.h"
+
 namespace llvm {
-class SMLoc;
 class raw_ostream;
 
 /// MCParsedAsmOperand - This abstract class represents a source-level assembly
@@ -38,7 +41,7 @@ public:
   unsigned getMCOperandNum() { return MCOperandNum; }
 
   virtual StringRef getSymName() { return StringRef(); }
-  virtual void *getOpDecl() { return 0; }
+  virtual void *getOpDecl() { return nullptr; }
 
   /// isToken - Is this a token operand?
   virtual bool isToken() const = 0;

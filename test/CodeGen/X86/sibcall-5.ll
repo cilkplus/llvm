@@ -8,7 +8,7 @@
 define double @foo(double %a) nounwind readonly ssp {
 entry:
 ; X32-LABEL: foo:
-; X32: jmp _sin$stub
+; X32: jmp L_sin$stub
 
 ; X64-LABEL: foo:
 ; X64: jmp _sin
@@ -18,7 +18,7 @@ entry:
 
 define float @bar(float %a) nounwind readonly ssp {
 ; X32-LABEL: bar:
-; X32: jmp _sinf$stub
+; X32: jmp L_sinf$stub
 
 ; X64-LABEL: bar:
 ; X64: jmp _sinf
@@ -26,6 +26,11 @@ entry:
   %0 = tail call float @sinf(float %a) nounwind readonly
   ret float %0
 }
+
+; X32-LABEL: L_sin$stub:
+; X32-NEXT:   .indirect_symbol        _sin
+; X32-LABEL: L_sinf$stub:
+; X32-NEXT:   .indirect_symbol        _sinf
 
 declare float @sinf(float) nounwind readonly
 
@@ -41,7 +46,7 @@ define hidden { double, double } @foo2(%0* %self, i8* nocapture %_cmd) uwtable o
 ; X64_BAD: call
 ; X64_BAD: call
 ; X64_BAD: call
-  %1 = load i8** @"\01L_OBJC_SELECTOR_REFERENCES_2", align 8, !invariant.load !0
+  %1 = load i8*, i8** @"\01L_OBJC_SELECTOR_REFERENCES_2", align 8, !invariant.load !0
   %2 = bitcast %0* %self to i8*
   %3 = tail call { double, double } bitcast (i8* (i8*, i8*, ...)* @objc_msgSend to { double, double } (i8*, i8*)*)(i8* %2, i8* %1) optsize
   %4 = extractvalue { double, double } %3, 0
@@ -57,4 +62,4 @@ declare i8* @objc_msgSend(i8*, i8*, ...)
 
 declare double @floor(double) optsize
 
-!0 = metadata !{}
+!0 = !{}

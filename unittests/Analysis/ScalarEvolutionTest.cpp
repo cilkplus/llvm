@@ -14,7 +14,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "gtest/gtest.h"
 
 namespace llvm {
@@ -25,14 +25,14 @@ namespace {
 class ScalarEvolutionsTest : public testing::Test {
 protected:
   ScalarEvolutionsTest() : M("", Context), SE(*new ScalarEvolution) {}
-  ~ScalarEvolutionsTest() {
+  ~ScalarEvolutionsTest() override {
     // Manually clean up, since we allocated new SCEV objects after the
     // pass was finished.
     SE.releaseMemory();
   }
   LLVMContext Context;
   Module M;
-  PassManager PM;
+  legacy::PassManager PM;
   ScalarEvolution &SE;
 };
 
@@ -41,7 +41,7 @@ TEST_F(ScalarEvolutionsTest, SCEVUnknownRAUW) {
                                               std::vector<Type *>(), false);
   Function *F = cast<Function>(M.getOrInsertFunction("f", FTy));
   BasicBlock *BB = BasicBlock::Create(Context, "entry", F);
-  ReturnInst::Create(Context, 0, BB);
+  ReturnInst::Create(Context, nullptr, BB);
 
   Type *Ty = Type::getInt1Ty(Context);
   Constant *Init = Constant::getNullValue(Ty);
@@ -94,7 +94,7 @@ TEST_F(ScalarEvolutionsTest, SCEVMultiplyAddRecs) {
   FunctionType *FTy = FunctionType::get(Type::getVoidTy(Context), Types, false);
   Function *F = cast<Function>(M.getOrInsertFunction("f", FTy));
   BasicBlock *BB = BasicBlock::Create(Context, "entry", F);
-  ReturnInst::Create(Context, 0, BB);
+  ReturnInst::Create(Context, nullptr, BB);
 
   // Create a ScalarEvolution and "run" it so that it gets initialized.
   PM.add(&SE);

@@ -14,19 +14,22 @@
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
+#define DEBUG_TYPE "branch-prob"
+
 INITIALIZE_PASS_BEGIN(BranchProbabilityInfo, "branch-prob",
                       "Branch Probability Analysis", false, true)
-INITIALIZE_PASS_DEPENDENCY(LoopInfo)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_END(BranchProbabilityInfo, "branch-prob",
                     "Branch Probability Analysis", false, true)
 
@@ -112,11 +115,6 @@ static const uint32_t NORMAL_WEIGHT = 16;
 // Minimum weight of an edge. Please note, that weight is NEVER 0.
 static const uint32_t MIN_WEIGHT = 1;
 
-static uint32_t getMaxWeightFor(BasicBlock *BB) {
-  return UINT32_MAX / BB->getTerminator()->getNumSuccessors();
-}
-
-
 /// \brief Calculate edge weights for successors lead to unreachable.
 ///
 /// Predict that a successor which leads necessarily to an
@@ -182,27 +180,45 @@ bool BranchProbabilityInfo::calcMetadataWeights(BasicBlock *BB) {
   if (!WeightsNode)
     return false;
 
+  // Check that the number of successors is manageable.
+  assert(TI->getNumSuccessors() < UINT32_MAX && "Too many successors");
+
   // Ensure there are weights for all of the successors. Note that the first
   // operand to the metadata node is a name, not a weight.
   if (WeightsNode->getNumOperands() != TI->getNumSuccessors() + 1)
     return false;
 
-  // Build up the final weights that will be used in a temporary buffer, but
-  // don't add them until all weihts are present. Each weight value is clamped
-  // to [1, getMaxWeightFor(BB)].
-  uint32_t WeightLimit = getMaxWeightFor(BB);
+  // Build up the final weights that will be used in a temporary buffer.
+  // Compute the sum of all weights to later decide whether they need to
+  // be scaled to fit in 32 bits.
+  uint64_t WeightSum = 0;
   SmallVector<uint32_t, 2> Weights;
   Weights.reserve(TI->getNumSuccessors());
   for (unsigned i = 1, e = WeightsNode->getNumOperands(); i != e; ++i) {
-    ConstantInt *Weight = dyn_cast<ConstantInt>(WeightsNode->getOperand(i));
+    ConstantInt *Weight =
+        mdconst::dyn_extract<ConstantInt>(WeightsNode->getOperand(i));
     if (!Weight)
       return false;
-    Weights.push_back(
-      std::max<uint32_t>(1, Weight->getLimitedValue(WeightLimit)));
+    assert(Weight->getValue().getActiveBits() <= 32 &&
+           "Too many bits for uint32_t");
+    Weights.push_back(Weight->getZExtValue());
+    WeightSum += Weights.back();
   }
   assert(Weights.size() == TI->getNumSuccessors() && "Checked above");
-  for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
-    setEdgeWeight(BB, i, Weights[i]);
+
+  // If the sum of weights does not fit in 32 bits, scale every weight down
+  // accordingly.
+  uint64_t ScalingFactor =
+      (WeightSum > UINT32_MAX) ? WeightSum / UINT32_MAX + 1 : 1;
+
+  WeightSum = 0;
+  for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i) {
+    uint32_t W = Weights[i] / ScalingFactor;
+    WeightSum += W;
+    setEdgeWeight(BB, i, W);
+  }
+  assert(WeightSum <= UINT32_MAX &&
+         "Expected weights to scale down to 32 bits");
 
   return true;
 }
@@ -321,6 +337,9 @@ bool BranchProbabilityInfo::calcLoopBranchHeuristics(BasicBlock *BB) {
       InEdges.push_back(I.getSuccessorIndex());
   }
 
+  if (BackEdges.empty() && ExitingEdges.empty())
+    return false;
+
   if (uint32_t numBackEdges = BackEdges.size()) {
     uint32_t backWeight = LBH_TAKEN_WEIGHT / numBackEdges;
     if (backWeight < NORMAL_WEIGHT)
@@ -371,6 +390,14 @@ bool BranchProbabilityInfo::calcZeroHeuristics(BasicBlock *BB) {
   ConstantInt *CV = dyn_cast<ConstantInt>(RHS);
   if (!CV)
     return false;
+
+  // If the LHS is the result of AND'ing a value with a single bit bitmask,
+  // we don't have information about probabilities.
+  if (Instruction *LHS = dyn_cast<Instruction>(CI->getOperand(0)))
+    if (LHS->getOpcode() == Instruction::And)
+      if (ConstantInt *AndRHS = dyn_cast<ConstantInt>(LHS->getOperand(1)))
+        if (AndRHS->getUniqueInteger().isPowerOf2())
+          return false;
 
   bool isProb;
   if (CV->isZero()) {
@@ -478,42 +505,46 @@ bool BranchProbabilityInfo::calcInvokeHeuristics(BasicBlock *BB) {
 }
 
 void BranchProbabilityInfo::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<LoopInfo>();
+  AU.addRequired<LoopInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
 bool BranchProbabilityInfo::runOnFunction(Function &F) {
+  DEBUG(dbgs() << "---- Branch Probability Info : " << F.getName()
+               << " ----\n\n");
   LastF = &F; // Store the last function we ran on for printing.
-  LI = &getAnalysis<LoopInfo>();
+  LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   assert(PostDominatedByUnreachable.empty());
   assert(PostDominatedByColdCall.empty());
 
   // Walk the basic blocks in post-order so that we can build up state about
   // the successors of a block iteratively.
-  for (po_iterator<BasicBlock *> I = po_begin(&F.getEntryBlock()),
-                                 E = po_end(&F.getEntryBlock());
-       I != E; ++I) {
-    DEBUG(dbgs() << "Computing probabilities for " << I->getName() << "\n");
-    if (calcUnreachableHeuristics(*I))
+  for (auto BB : post_order(&F.getEntryBlock())) {
+    DEBUG(dbgs() << "Computing probabilities for " << BB->getName() << "\n");
+    if (calcUnreachableHeuristics(BB))
       continue;
-    if (calcMetadataWeights(*I))
+    if (calcMetadataWeights(BB))
       continue;
-    if (calcColdCallHeuristics(*I))
+    if (calcColdCallHeuristics(BB))
       continue;
-    if (calcLoopBranchHeuristics(*I))
+    if (calcLoopBranchHeuristics(BB))
       continue;
-    if (calcPointerHeuristics(*I))
+    if (calcPointerHeuristics(BB))
       continue;
-    if (calcZeroHeuristics(*I))
+    if (calcZeroHeuristics(BB))
       continue;
-    if (calcFloatingPointHeuristics(*I))
+    if (calcFloatingPointHeuristics(BB))
       continue;
-    calcInvokeHeuristics(*I);
+    calcInvokeHeuristics(BB);
   }
 
   PostDominatedByUnreachable.clear();
   PostDominatedByColdCall.clear();
   return false;
+}
+
+void BranchProbabilityInfo::releaseMemory() {
+  Weights.clear();
 }
 
 void BranchProbabilityInfo::print(raw_ostream &OS, const Module *) const {
@@ -538,7 +569,7 @@ uint32_t BranchProbabilityInfo::getSumForBlock(const BasicBlock *BB) const {
     uint32_t PrevSum = Sum;
 
     Sum += Weight;
-    assert(Sum > PrevSum); (void) PrevSum;
+    assert(Sum >= PrevSum); (void) PrevSum;
   }
 
   return Sum;
@@ -554,7 +585,7 @@ isEdgeHot(const BasicBlock *Src, const BasicBlock *Dst) const {
 BasicBlock *BranchProbabilityInfo::getHotSucc(BasicBlock *BB) const {
   uint32_t Sum = 0;
   uint32_t MaxWeight = 0;
-  BasicBlock *MaxSucc = 0;
+  BasicBlock *MaxSucc = nullptr;
 
   for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; ++I) {
     BasicBlock *Succ = *I;
@@ -574,7 +605,7 @@ BasicBlock *BranchProbabilityInfo::getHotSucc(BasicBlock *BB) const {
   if (BranchProbability(MaxWeight, Sum) > BranchProbability(4, 5))
     return MaxSucc;
 
-  return 0;
+  return nullptr;
 }
 
 /// Get the raw edge weight for the edge. If can't find it, return
@@ -591,19 +622,27 @@ getEdgeWeight(const BasicBlock *Src, unsigned IndexInSuccessors) const {
   return DEFAULT_WEIGHT;
 }
 
+uint32_t BranchProbabilityInfo::getEdgeWeight(const BasicBlock *Src,
+                                              succ_const_iterator Dst) const {
+  return getEdgeWeight(Src, Dst.getSuccessorIndex());
+}
+
 /// Get the raw edge weight calculated for the block pair. This returns the sum
 /// of all raw edge weights from Src to Dst.
 uint32_t BranchProbabilityInfo::
 getEdgeWeight(const BasicBlock *Src, const BasicBlock *Dst) const {
   uint32_t Weight = 0;
+  bool FoundWeight = false;
   DenseMap<Edge, uint32_t>::const_iterator MapI;
   for (succ_const_iterator I = succ_begin(Src), E = succ_end(Src); I != E; ++I)
     if (*I == Dst) {
       MapI = Weights.find(std::make_pair(Src, I.getSuccessorIndex()));
-      if (MapI != Weights.end())
+      if (MapI != Weights.end()) {
+        FoundWeight = true;
         Weight += MapI->second;
+      }
     }
-  return (Weight == 0) ? DEFAULT_WEIGHT : Weight;
+  return (!FoundWeight) ? DEFAULT_WEIGHT : Weight;
 }
 
 /// Set the edge weight for a given edge specified by PredBlock and an index

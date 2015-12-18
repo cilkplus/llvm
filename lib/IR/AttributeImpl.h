@@ -13,8 +13,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_ATTRIBUTESIMPL_H
-#define LLVM_ATTRIBUTESIMPL_H
+#ifndef LLVM_LIB_IR_ATTRIBUTEIMPL_H
+#define LLVM_LIB_IR_ATTRIBUTEIMPL_H
 
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/IR/Attributes.h"
@@ -33,13 +33,13 @@ class AttributeImpl : public FoldingSetNode {
   unsigned char KindID; ///< Holds the AttrEntryKind of the attribute
 
   // AttributesImpl is uniqued, these should not be publicly available.
-  void operator=(const AttributeImpl &) LLVM_DELETED_FUNCTION;
-  AttributeImpl(const AttributeImpl &) LLVM_DELETED_FUNCTION;
+  void operator=(const AttributeImpl &) = delete;
+  AttributeImpl(const AttributeImpl &) = delete;
 
 protected:
   enum AttrEntryKind {
     EnumAttrEntry,
-    AlignAttrEntry,
+    IntAttrEntry,
     StringAttrEntry
   };
 
@@ -49,7 +49,7 @@ public:
   virtual ~AttributeImpl();
 
   bool isEnumAttribute() const { return KindID == EnumAttrEntry; }
-  bool isAlignAttribute() const { return KindID == AlignAttrEntry; }
+  bool isIntAttribute() const { return KindID == IntAttrEntry; }
   bool isStringAttribute() const { return KindID == StringAttrEntry; }
 
   bool hasAttribute(Attribute::AttrKind A) const;
@@ -67,7 +67,7 @@ public:
   void Profile(FoldingSetNodeID &ID) const {
     if (isEnumAttribute())
       Profile(ID, getKindAsEnum(), 0);
-    else if (isAlignAttribute())
+    else if (isIntAttribute())
       Profile(ID, getKindAsEnum(), getValueAsInt());
     else
       Profile(ID, getKindAsString(), getValueAsString());
@@ -108,19 +108,20 @@ public:
   Attribute::AttrKind getEnumKind() const { return Kind; }
 };
 
-class AlignAttributeImpl : public EnumAttributeImpl {
-  virtual void anchor();
-  unsigned Align;
+class IntAttributeImpl : public EnumAttributeImpl {
+  void anchor() override;
+  uint64_t Val;
 
 public:
-  AlignAttributeImpl(Attribute::AttrKind Kind, unsigned Align)
-      : EnumAttributeImpl(AlignAttrEntry, Kind), Align(Align) {
-    assert(
-        (Kind == Attribute::Alignment || Kind == Attribute::StackAlignment) &&
-        "Wrong kind for alignment attribute!");
+  IntAttributeImpl(Attribute::AttrKind Kind, uint64_t Val)
+      : EnumAttributeImpl(IntAttrEntry, Kind), Val(Val) {
+    assert((Kind == Attribute::Alignment || Kind == Attribute::StackAlignment ||
+            Kind == Attribute::Dereferenceable ||
+            Kind == Attribute::DereferenceableOrNull) &&
+           "Wrong kind for int attribute!");
   }
 
-  unsigned getAlignment() const { return Align; }
+  uint64_t getValue() const { return Val; }
 };
 
 class StringAttributeImpl : public AttributeImpl {
@@ -150,8 +151,8 @@ class AttributeSetNode : public FoldingSetNode {
   }
 
   // AttributesSetNode is uniqued, these should not be publicly available.
-  void operator=(const AttributeSetNode &) LLVM_DELETED_FUNCTION;
-  AttributeSetNode(const AttributeSetNode &) LLVM_DELETED_FUNCTION;
+  void operator=(const AttributeSetNode &) = delete;
+  AttributeSetNode(const AttributeSetNode &) = delete;
 public:
   static AttributeSetNode *get(LLVMContext &C, ArrayRef<Attribute> Attrs);
 
@@ -164,6 +165,8 @@ public:
 
   unsigned getAlignment() const;
   unsigned getStackAlignment() const;
+  uint64_t getDereferenceableBytes() const;
+  uint64_t getDereferenceableOrNullBytes() const;
   std::string getAsString(bool InAttrGrp) const;
 
   typedef const Attribute *iterator;
@@ -178,6 +181,9 @@ public:
       AttrList[I].Profile(ID);
   }
 };
+static_assert(
+    AlignOf<AttributeSetNode>::Alignment >= AlignOf<Attribute>::Alignment,
+    "Alignment is insufficient for objects appended to AttributeSetNode");
 
 //===----------------------------------------------------------------------===//
 /// \class
@@ -186,9 +192,11 @@ public:
 class AttributeSetImpl : public FoldingSetNode {
   friend class AttributeSet;
 
-  LLVMContext &Context;
-
+public:
   typedef std::pair<unsigned, AttributeSetNode*> IndexAttrPair;
+
+private:
+  LLVMContext &Context;
   unsigned NumAttrs; ///< Number of entries in this set.
 
   /// \brief Return a pointer to the IndexAttrPair for the specified slot.
@@ -197,12 +205,13 @@ class AttributeSetImpl : public FoldingSetNode {
   }
 
   // AttributesSet is uniqued, these should not be publicly available.
-  void operator=(const AttributeSetImpl &) LLVM_DELETED_FUNCTION;
-  AttributeSetImpl(const AttributeSetImpl &) LLVM_DELETED_FUNCTION;
+  void operator=(const AttributeSetImpl &) = delete;
+  AttributeSetImpl(const AttributeSetImpl &) = delete;
 public:
   AttributeSetImpl(LLVMContext &C,
                    ArrayRef<std::pair<unsigned, AttributeSetNode *> > Attrs)
       : Context(C), NumAttrs(Attrs.size()) {
+
 #ifndef NDEBUG
     if (Attrs.size() >= 2) {
       for (const std::pair<unsigned, AttributeSetNode *> *i = Attrs.begin() + 1,
@@ -264,6 +273,10 @@ public:
 
   void dump() const;
 };
+static_assert(
+    AlignOf<AttributeSetImpl>::Alignment >=
+        AlignOf<AttributeSetImpl::IndexAttrPair>::Alignment,
+    "Alignment is insufficient for objects appended to AttributeSetImpl");
 
 } // end llvm namespace
 

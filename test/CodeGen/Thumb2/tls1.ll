@@ -1,5 +1,5 @@
 ; RUN: llc < %s -mtriple=thumbv7-linux-gnueabi | \
-; RUN:     grep "i(tpoff)"
+; RUN:     grep "i(TPOFF)"
 ; RUN: llc < %s -mtriple=thumbv7-linux-gnueabi | \
 ; RUN:     grep "__aeabi_read_tp"
 ; RUN: llc < %s -mtriple=thumbv7-linux-gnueabi \
@@ -10,7 +10,7 @@
 
 define i32 @f() {
 entry:
-	%tmp1 = load i32* @i		; <i32> [#uses=1]
+	%tmp1 = load i32, i32* @i		; <i32> [#uses=1]
 	ret i32 %tmp1
 }
 

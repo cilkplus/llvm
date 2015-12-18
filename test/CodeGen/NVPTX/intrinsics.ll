@@ -9,13 +9,15 @@ define ptx_device float @test_fabsf(float %f) {
 }
 
 define ptx_device double @test_fabs(double %d) {
-; CHECK: abs.f64 %fl{{[0-9]+}}, %fl{{[0-9]+}};
+; CHECK: abs.f64 %fd{{[0-9]+}}, %fd{{[0-9]+}};
 ; CHECK: ret;
 	%x = call double @llvm.fabs.f64(double %d)
 	ret double %x
 }
 
 define float @test_nvvm_sqrt(float %a) {
+; CHECK: sqrt.rn.f32 %f{{[0-9]+}}, %f{{[0-9]+}};
+; CHECK: ret;
   %val = call float @llvm.nvvm.sqrt.f(float %a)
   ret float %val
 }

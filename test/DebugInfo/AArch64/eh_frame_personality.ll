@@ -5,13 +5,13 @@ declare i32 @__gxx_personality_v0(...)
 
 declare void @bar()
 
-define i64 @foo(i64 %lhs, i64 %rhs) {
+define i64 @foo(i64 %lhs, i64 %rhs) personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*) {
   invoke void @bar() to label %end unwind label %clean
 end:
  ret i64 0
 
 clean:
-  %tst = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*) cleanup
+  %tst = landingpad { i8*, i32 } cleanup
   ret i64 42
 }
 
@@ -33,7 +33,7 @@ clean:
 ; ----------
 ; 1c000000: Length = 0x1c
 ; 00000000: This is a CIE
-; 01: Version 1
+; 03: Version 3
 ; 7a 50 4c 52 00: Augmentation string "zPLR" (personality routine, language-specific data, pointer format)
 ; 01: Code alignment factor 1
 ; 78: Data alignment factor: -8

@@ -11,7 +11,12 @@ define internal i32 @foo(i32 %i) nounwind {
 ; THUMB-LABEL: foo:
 ; THUMB2-LABEL: foo:
 entry:
-  %0 = load i8** @nextaddr, align 4               ; <i8*> [#uses=2]
+  ; _nextaddr gets CSEed for use later on.
+; THUMB: ldr r[[NEXTADDR_REG:[0-9]+]], [[NEXTADDR_CPI:LCPI0_[0-9]+]]
+; THUMB: [[NEXTADDR_PCBASE:LPC0_[0-9]]]:
+; THUMB: add r[[NEXTADDR_REG]], pc
+
+  %0 = load i8*, i8** @nextaddr, align 4               ; <i8*> [#uses=2]
   %1 = icmp eq i8* %0, null                       ; <i1> [#uses=1]
 ; indirect branch gets duplicated here
 ; ARM: bx
@@ -26,8 +31,8 @@ bb2:                                              ; preds = %entry, %bb3
   indirectbr i8* %gotovar.4.0, [label %L5, label %L4, label %L3, label %L2, label %L1]
 
 bb3:                                              ; preds = %entry
-  %2 = getelementptr inbounds [5 x i8*]* @C.0.2070, i32 0, i32 %i ; <i8**> [#uses=1]
-  %gotovar.4.0.pre = load i8** %2, align 4        ; <i8*> [#uses=1]
+  %2 = getelementptr inbounds [5 x i8*], [5 x i8*]* @C.0.2070, i32 0, i32 %i ; <i8**> [#uses=1]
+  %gotovar.4.0.pre = load i8*, i8** %2, align 4        ; <i8*> [#uses=1]
   br label %bb2
 
 L5:                                               ; preds = %bb2
@@ -53,12 +58,11 @@ L1:                                               ; preds = %L2, %bb2
 ; ARM: ldr [[R1:r[0-9]+]], LCPI
 ; ARM: add [[R1b:r[0-9]+]], pc, [[R1]]
 ; ARM: str [[R1b]]
+
 ; THUMB-LABEL: %L1
-; THUMB: ldr
-; THUMB: add
 ; THUMB: ldr [[R2:r[0-9]+]], LCPI
 ; THUMB: add [[R2]], pc
-; THUMB: str [[R2]]
+; THUMB: str [[R2]], [r[[NEXTADDR_REG]]]
 ; THUMB2-LABEL: %L1
 ; THUMB2: ldr [[R2:r[0-9]+]], LCPI
 ; THUMB2-NEXT: str{{(.w)?}} [[R2]]
@@ -67,4 +71,5 @@ L1:                                               ; preds = %L2, %bb2
 }
 ; ARM: .long Ltmp0-(LPC{{.*}}+8)
 ; THUMB: .long Ltmp0-(LPC{{.*}}+4)
+; THUMB: .long _nextaddr-([[NEXTADDR_PCBASE]]+4)
 ; THUMB2: .long Ltmp0

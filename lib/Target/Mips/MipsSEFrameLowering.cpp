@@ -16,6 +16,7 @@
 #include "MipsAnalyzeImmediate.h"
 #include "MipsMachineFunction.h"
 #include "MipsSEInstrInfo.h"
+#include "MipsSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -63,14 +64,24 @@ private:
   bool expandCopy(MachineBasicBlock &MBB, Iter I);
   bool expandCopyACC(MachineBasicBlock &MBB, Iter I, unsigned MFHiOpc,
                      unsigned MFLoOpc);
+  bool expandBuildPairF64(MachineBasicBlock &MBB,
+                          MachineBasicBlock::iterator I, bool FP64) const;
+  bool expandExtractElementF64(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator I, bool FP64) const;
 
   MachineFunction &MF;
   MachineRegisterInfo &MRI;
+  const MipsSubtarget &Subtarget;
+  const MipsSEInstrInfo &TII;
+  const MipsRegisterInfo &RegInfo;
 };
 }
 
 ExpandPseudo::ExpandPseudo(MachineFunction &MF_)
-  : MF(MF_), MRI(MF.getRegInfo()) {}
+    : MF(MF_), MRI(MF.getRegInfo()),
+      Subtarget(static_cast<const MipsSubtarget &>(MF.getSubtarget())),
+      TII(*static_cast<const MipsSEInstrInfo *>(Subtarget.getInstrInfo())),
+      RegInfo(*Subtarget.getRegisterInfo()) {}
 
 bool ExpandPseudo::expand() {
   bool Expanded = false;
@@ -107,6 +118,22 @@ bool ExpandPseudo::expandInstr(MachineBasicBlock &MBB, Iter I) {
   case Mips::STORE_ACC128:
     expandStoreACC(MBB, I, Mips::PseudoMFHI64, Mips::PseudoMFLO64, 8);
     break;
+  case Mips::BuildPairF64:
+    if (expandBuildPairF64(MBB, I, false))
+      MBB.erase(I);
+    return false;
+  case Mips::BuildPairF64_64:
+    if (expandBuildPairF64(MBB, I, true))
+      MBB.erase(I);
+    return false;
+  case Mips::ExtractElementF64:
+    if (expandExtractElementF64(MBB, I, false))
+      MBB.erase(I);
+    return false;
+  case Mips::ExtractElementF64_64:
+    if (expandExtractElementF64(MBB, I, true))
+      MBB.erase(I);
+    return false;
   case TargetOpcode::COPY:
     if (!expandCopy(MBB, I))
       return false;
@@ -125,11 +152,6 @@ void ExpandPseudo::expandLoadCCond(MachineBasicBlock &MBB, Iter I) {
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
 
-  const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
-  const MipsRegisterInfo &RegInfo =
-    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
-
   const TargetRegisterClass *RC = RegInfo.intRegClass(4);
   unsigned VR = MRI.createVirtualRegister(RC);
   unsigned Dst = I->getOperand(0).getReg(), FI = I->getOperand(1).getIndex();
@@ -144,11 +166,6 @@ void ExpandPseudo::expandStoreCCond(MachineBasicBlock &MBB, Iter I) {
   //  store $vr, FI
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
-
-  const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
-  const MipsRegisterInfo &RegInfo =
-    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
   const TargetRegisterClass *RC = RegInfo.intRegClass(4);
   unsigned VR = MRI.createVirtualRegister(RC);
@@ -167,11 +184,6 @@ void ExpandPseudo::expandLoadACC(MachineBasicBlock &MBB, Iter I,
   //  copy hi, $vr1
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
-
-  const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
-  const MipsRegisterInfo &RegInfo =
-    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
   const TargetRegisterClass *RC = RegInfo.intRegClass(RegSize);
   unsigned VR0 = MRI.createVirtualRegister(RC);
@@ -197,11 +209,6 @@ void ExpandPseudo::expandStoreACC(MachineBasicBlock &MBB, Iter I,
   //  store $vr1, FI + 4
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
-
-  const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
-  const MipsRegisterInfo &RegInfo =
-    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
   const TargetRegisterClass *RC = RegInfo.intRegClass(RegSize);
   unsigned VR0 = MRI.createVirtualRegister(RC);
@@ -233,11 +240,6 @@ bool ExpandPseudo::expandCopyACC(MachineBasicBlock &MBB, Iter I,
   //  mfhi $vr1, src
   //  copy dst_hi, $vr1
 
-  const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
-  const MipsRegisterInfo &RegInfo =
-    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
-
   unsigned Dst = I->getOperand(0).getReg(), Src = I->getOperand(1).getReg();
   unsigned VRegSize = RegInfo.getMinimalPhysRegClass(Dst)->getSize() / 2;
   const TargetRegisterClass *RC = RegInfo.intRegClass(VRegSize);
@@ -257,33 +259,134 @@ bool ExpandPseudo::expandCopyACC(MachineBasicBlock &MBB, Iter I,
   return true;
 }
 
-unsigned MipsSEFrameLowering::ehDataReg(unsigned I) const {
-  static const unsigned EhDataReg[] = {
-    Mips::A0, Mips::A1, Mips::A2, Mips::A3
-  };
-  static const unsigned EhDataReg64[] = {
-    Mips::A0_64, Mips::A1_64, Mips::A2_64, Mips::A3_64
-  };
+/// This method expands the same instruction that MipsSEInstrInfo::
+/// expandBuildPairF64 does, for the case when ABI is fpxx and mthc1 is not
+/// available and the case where the ABI is FP64A. It is implemented here
+/// because frame indexes are eliminated before MipsSEInstrInfo::
+/// expandBuildPairF64 is called.
+bool ExpandPseudo::expandBuildPairF64(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator I,
+                                      bool FP64) const {
+  // For fpxx and when mthc1 is not available, use:
+  //   spill + reload via ldc1
+  //
+  // The case where dmtc1 is available doesn't need to be handled here
+  // because it never creates a BuildPairF64 node.
+  //
+  // The FP64A ABI (fp64 with nooddspreg) must also use a spill/reload sequence
+  // for odd-numbered double precision values (because the lower 32-bits is
+  // transferred with mtc1 which is redirected to the upper half of the even
+  // register). Unfortunately, we have to make this decision before register
+  // allocation so for now we use a spill/reload sequence for all
+  // double-precision values in regardless of being an odd/even register.
+  if ((Subtarget.isABI_FPXX() && !Subtarget.hasMTHC1()) ||
+      (FP64 && !Subtarget.useOddSPReg())) {
+    unsigned DstReg = I->getOperand(0).getReg();
+    unsigned LoReg = I->getOperand(1).getReg();
+    unsigned HiReg = I->getOperand(2).getReg();
 
-  return STI.isABI_N64() ? EhDataReg64[I] : EhDataReg[I];
+    // It should be impossible to have FGR64 on MIPS-II or MIPS32r1 (which are
+    // the cases where mthc1 is not available). 64-bit architectures and
+    // MIPS32r2 or later can use FGR64 though.
+    assert(Subtarget.isGP64bit() || Subtarget.hasMTHC1() ||
+           !Subtarget.isFP64bit());
+
+    const TargetRegisterClass *RC = &Mips::GPR32RegClass;
+    const TargetRegisterClass *RC2 =
+        FP64 ? &Mips::FGR64RegClass : &Mips::AFGR64RegClass;
+
+    // We re-use the same spill slot each time so that the stack frame doesn't
+    // grow too much in functions with a large number of moves.
+    int FI = MF.getInfo<MipsFunctionInfo>()->getMoveF64ViaSpillFI(RC2);
+    if (!Subtarget.isLittle())
+      std::swap(LoReg, HiReg);
+    TII.storeRegToStack(MBB, I, LoReg, I->getOperand(1).isKill(), FI, RC,
+                        &RegInfo, 0);
+    TII.storeRegToStack(MBB, I, HiReg, I->getOperand(2).isKill(), FI, RC,
+                        &RegInfo, 4);
+    TII.loadRegFromStack(MBB, I, DstReg, FI, RC2, &RegInfo, 0);
+    return true;
+  }
+
+  return false;
 }
 
-void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
-  MachineBasicBlock &MBB   = MF.front();
+/// This method expands the same instruction that MipsSEInstrInfo::
+/// expandExtractElementF64 does, for the case when ABI is fpxx and mfhc1 is not
+/// available and the case where the ABI is FP64A. It is implemented here
+/// because frame indexes are eliminated before MipsSEInstrInfo::
+/// expandExtractElementF64 is called.
+bool ExpandPseudo::expandExtractElementF64(MachineBasicBlock &MBB,
+                                           MachineBasicBlock::iterator I,
+                                           bool FP64) const {
+  // For fpxx and when mfhc1 is not available, use:
+  //   spill + reload via ldc1
+  //
+  // The case where dmfc1 is available doesn't need to be handled here
+  // because it never creates a ExtractElementF64 node.
+  //
+  // The FP64A ABI (fp64 with nooddspreg) must also use a spill/reload sequence
+  // for odd-numbered double precision values (because the lower 32-bits is
+  // transferred with mfc1 which is redirected to the upper half of the even
+  // register). Unfortunately, we have to make this decision before register
+  // allocation so for now we use a spill/reload sequence for all
+  // double-precision values in regardless of being an odd/even register.
+
+  if ((Subtarget.isABI_FPXX() && !Subtarget.hasMTHC1()) ||
+      (FP64 && !Subtarget.useOddSPReg())) {
+    unsigned DstReg = I->getOperand(0).getReg();
+    unsigned SrcReg = I->getOperand(1).getReg();
+    unsigned N = I->getOperand(2).getImm();
+    int64_t Offset = 4 * (Subtarget.isLittle() ? N : (1 - N));
+
+    // It should be impossible to have FGR64 on MIPS-II or MIPS32r1 (which are
+    // the cases where mfhc1 is not available). 64-bit architectures and
+    // MIPS32r2 or later can use FGR64 though.
+    assert(Subtarget.isGP64bit() || Subtarget.hasMTHC1() ||
+           !Subtarget.isFP64bit());
+
+    const TargetRegisterClass *RC =
+        FP64 ? &Mips::FGR64RegClass : &Mips::AFGR64RegClass;
+    const TargetRegisterClass *RC2 = &Mips::GPR32RegClass;
+
+    // We re-use the same spill slot each time so that the stack frame doesn't
+    // grow too much in functions with a large number of moves.
+    int FI = MF.getInfo<MipsFunctionInfo>()->getMoveF64ViaSpillFI(RC);
+    TII.storeRegToStack(MBB, I, SrcReg, I->getOperand(1).isKill(), FI, RC,
+                        &RegInfo, 0);
+    TII.loadRegFromStack(MBB, I, DstReg, FI, RC2, &RegInfo, Offset);
+    return true;
+  }
+
+  return false;
+}
+
+MipsSEFrameLowering::MipsSEFrameLowering(const MipsSubtarget &STI)
+    : MipsFrameLowering(STI, STI.stackAlignment()) {}
+
+void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
+                                       MachineBasicBlock &MBB) const {
+  assert(&MF.front() == &MBB && "Shrink-wrapping not yet supported");
   MachineFrameInfo *MFI    = MF.getFrameInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
 
   const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+      *static_cast<const MipsSEInstrInfo *>(STI.getInstrInfo());
   const MipsRegisterInfo &RegInfo =
-    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+      *static_cast<const MipsRegisterInfo *>(STI.getRegisterInfo());
 
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc dl = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
-  unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
-  unsigned FP = STI.isABI_N64() ? Mips::FP_64 : Mips::FP;
-  unsigned ZERO = STI.isABI_N64() ? Mips::ZERO_64 : Mips::ZERO;
-  unsigned ADDu = STI.isABI_N64() ? Mips::DADDu : Mips::ADDu;
+  MipsABIInfo ABI = STI.getABI();
+  unsigned SP = ABI.GetStackPtr();
+  unsigned FP = ABI.GetFramePtr();
+  unsigned ZERO = ABI.GetNullPtr();
+  unsigned ADDu = ABI.GetPtrAdduOp();
+  unsigned ADDiu = ABI.GetPtrAddiuOp();
+  unsigned AND = ABI.IsN64() ? Mips::AND64 : Mips::AND;
+
+  const TargetRegisterClass *RC = ABI.ArePtrs64bit() ?
+        &Mips::GPR64RegClass : &Mips::GPR32RegClass;
 
   // First, compute final stack size.
   uint64_t StackSize = MFI->getStackSize();
@@ -299,11 +402,10 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
   TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
 
   // emit ".cfi_def_cfa_offset StackSize"
-  MCSymbol *AdjustSPLabel = MMI.getContext().CreateTempSymbol();
-  BuildMI(MBB, MBBI, dl,
-          TII.get(TargetOpcode::PROLOG_LABEL)).addSym(AdjustSPLabel);
-  MMI.addFrameInst(
-      MCCFIInstruction::createDefCfaOffset(AdjustSPLabel, -StackSize));
+  unsigned CFIIndex = MMI.addFrameInst(
+      MCCFIInstruction::createDefCfaOffset(nullptr, -StackSize));
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
 
@@ -315,10 +417,6 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
 
     // Iterate over list of callee-saved registers and emit .cfi_offset
     // directives.
-    MCSymbol *CSLabel = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl,
-            TII.get(TargetOpcode::PROLOG_LABEL)).addSym(CSLabel);
-
     for (std::vector<CalleeSavedInfo>::const_iterator I = CSI.begin(),
            E = CSI.end(); I != E; ++I) {
       int64_t Offset = MFI->getObjectOffset(I->getFrameIdx());
@@ -335,52 +433,92 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
         if (!STI.isLittle())
           std::swap(Reg0, Reg1);
 
-        MMI.addFrameInst(
-            MCCFIInstruction::createOffset(CSLabel, Reg0, Offset));
-        MMI.addFrameInst(
-            MCCFIInstruction::createOffset(CSLabel, Reg1, Offset + 4));
+        unsigned CFIIndex = MMI.addFrameInst(
+            MCCFIInstruction::createOffset(nullptr, Reg0, Offset));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
+
+        CFIIndex = MMI.addFrameInst(
+            MCCFIInstruction::createOffset(nullptr, Reg1, Offset + 4));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
+      } else if (Mips::FGR64RegClass.contains(Reg)) {
+        unsigned Reg0 = MRI->getDwarfRegNum(Reg, true);
+        unsigned Reg1 = MRI->getDwarfRegNum(Reg, true) + 1;
+
+        if (!STI.isLittle())
+          std::swap(Reg0, Reg1);
+
+        unsigned CFIIndex = MMI.addFrameInst(
+          MCCFIInstruction::createOffset(nullptr, Reg0, Offset));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
+
+        CFIIndex = MMI.addFrameInst(
+          MCCFIInstruction::createOffset(nullptr, Reg1, Offset + 4));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
       } else {
         // Reg is either in GPR32 or FGR32.
-        MMI.addFrameInst(MCCFIInstruction::createOffset(
-            CSLabel, MRI->getDwarfRegNum(Reg, 1), Offset));
+        unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createOffset(
+            nullptr, MRI->getDwarfRegNum(Reg, 1), Offset));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
       }
     }
   }
 
   if (MipsFI->callsEhReturn()) {
-    const TargetRegisterClass *RC = STI.isABI_N64() ?
-        &Mips::GPR64RegClass : &Mips::GPR32RegClass;
-
     // Insert instructions that spill eh data registers.
     for (int I = 0; I < 4; ++I) {
-      if (!MBB.isLiveIn(ehDataReg(I)))
-        MBB.addLiveIn(ehDataReg(I));
-      TII.storeRegToStackSlot(MBB, MBBI, ehDataReg(I), false,
+      if (!MBB.isLiveIn(ABI.GetEhDataReg(I)))
+        MBB.addLiveIn(ABI.GetEhDataReg(I));
+      TII.storeRegToStackSlot(MBB, MBBI, ABI.GetEhDataReg(I), false,
                               MipsFI->getEhDataRegFI(I), RC, &RegInfo);
     }
 
     // Emit .cfi_offset directives for eh data registers.
-    MCSymbol *CSLabel2 = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl,
-            TII.get(TargetOpcode::PROLOG_LABEL)).addSym(CSLabel2);
     for (int I = 0; I < 4; ++I) {
       int64_t Offset = MFI->getObjectOffset(MipsFI->getEhDataRegFI(I));
-      unsigned Reg = MRI->getDwarfRegNum(ehDataReg(I), true);
-      MMI.addFrameInst(MCCFIInstruction::createOffset(CSLabel2, Reg, Offset));
+      unsigned Reg = MRI->getDwarfRegNum(ABI.GetEhDataReg(I), true);
+      unsigned CFIIndex = MMI.addFrameInst(
+          MCCFIInstruction::createOffset(nullptr, Reg, Offset));
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+          .addCFIIndex(CFIIndex);
     }
   }
 
   // if framepointer enabled, set it to point to the stack pointer.
   if (hasFP(MF)) {
     // Insert instruction "move $fp, $sp" at this location.
-    BuildMI(MBB, MBBI, dl, TII.get(ADDu), FP).addReg(SP).addReg(ZERO);
+    BuildMI(MBB, MBBI, dl, TII.get(ADDu), FP).addReg(SP).addReg(ZERO)
+      .setMIFlag(MachineInstr::FrameSetup);
 
     // emit ".cfi_def_cfa_register $fp"
-    MCSymbol *SetFPLabel = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl,
-            TII.get(TargetOpcode::PROLOG_LABEL)).addSym(SetFPLabel);
-    MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
-        SetFPLabel, MRI->getDwarfRegNum(FP, true)));
+    unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
+        nullptr, MRI->getDwarfRegNum(FP, true)));
+    BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIndex);
+
+    if (RegInfo.needsStackRealignment(MF)) {
+      // addiu $Reg, $zero, -MaxAlignment
+      // andi $sp, $sp, $Reg
+      unsigned VR = MF.getRegInfo().createVirtualRegister(RC);
+      assert(isInt<16>(MFI->getMaxAlignment()) &&
+             "Function's alignment size requirement is not supported.");
+      int MaxAlign = - (signed) MFI->getMaxAlignment();
+
+      BuildMI(MBB, MBBI, dl, TII.get(ADDiu), VR).addReg(ZERO) .addImm(MaxAlign);
+      BuildMI(MBB, MBBI, dl, TII.get(AND), SP).addReg(SP).addReg(VR);
+
+      if (hasBP(MF)) {
+        // move $s7, $sp
+        unsigned BP = STI.isABI_N64() ? Mips::S7_64 : Mips::S7;
+        BuildMI(MBB, MBBI, dl, TII.get(ADDu), BP)
+          .addReg(SP)
+          .addReg(ZERO);
+      }
+    }
   }
 }
 
@@ -391,15 +529,16 @@ void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
 
   const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+      *static_cast<const MipsSEInstrInfo *>(STI.getInstrInfo());
   const MipsRegisterInfo &RegInfo =
-    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+      *static_cast<const MipsRegisterInfo *>(STI.getRegisterInfo());
 
   DebugLoc dl = MBBI->getDebugLoc();
-  unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
-  unsigned FP = STI.isABI_N64() ? Mips::FP_64 : Mips::FP;
-  unsigned ZERO = STI.isABI_N64() ? Mips::ZERO_64 : Mips::ZERO;
-  unsigned ADDu = STI.isABI_N64() ? Mips::DADDu : Mips::ADDu;
+  MipsABIInfo ABI = STI.getABI();
+  unsigned SP = ABI.GetStackPtr();
+  unsigned FP = ABI.GetFramePtr();
+  unsigned ZERO = ABI.GetNullPtr();
+  unsigned ADDu = ABI.GetPtrAdduOp();
 
   // if framepointer enabled, restore the stack pointer.
   if (hasFP(MF)) {
@@ -414,8 +553,8 @@ void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
   }
 
   if (MipsFI->callsEhReturn()) {
-    const TargetRegisterClass *RC = STI.isABI_N64() ?
-        &Mips::GPR64RegClass : &Mips::GPR32RegClass;
+    const TargetRegisterClass *RC =
+        ABI.ArePtrs64bit() ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
 
     // Find first instruction that restores a callee-saved register.
     MachineBasicBlock::iterator I = MBBI;
@@ -424,8 +563,8 @@ void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
 
     // Insert instructions that restore eh data registers.
     for (int J = 0; J < 4; ++J) {
-      TII.loadRegFromStackSlot(MBB, I, ehDataReg(J), MipsFI->getEhDataRegFI(J),
-                               RC, &RegInfo);
+      TII.loadRegFromStackSlot(MBB, I, ABI.GetEhDataReg(J),
+                               MipsFI->getEhDataRegFI(J), RC, &RegInfo);
     }
   }
 
@@ -446,7 +585,7 @@ spillCalleeSavedRegisters(MachineBasicBlock &MBB,
                           const TargetRegisterInfo *TRI) const {
   MachineFunction *MF = MBB.getParent();
   MachineBasicBlock *EntryBlock = MF->begin();
-  const TargetInstrInfo &TII = *MF->getTarget().getInstrInfo();
+  const TargetInstrInfo &TII = *STI.getInstrInfo();
 
   for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
     // Add the callee-saved register as live-in. Do not add if the register is
@@ -482,36 +621,28 @@ MipsSEFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
     !MFI->hasVarSizedObjects();
 }
 
-// Eliminate ADJCALLSTACKDOWN, ADJCALLSTACKUP pseudo instructions
-void MipsSEFrameLowering::
-eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator I) const {
-  const MipsSEInstrInfo &TII =
-    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
-
-  if (!hasReservedCallFrame(MF)) {
-    int64_t Amount = I->getOperand(0).getImm();
-
-    if (I->getOpcode() == Mips::ADJCALLSTACKDOWN)
-      Amount = -Amount;
-
-    unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
-    TII.adjustStackPtr(SP, Amount, MBB, I);
-  }
-
-  MBB.erase(I);
+/// Mark \p Reg and all registers aliasing it in the bitset.
+void setAliasRegs(MachineFunction &MF, BitVector &SavedRegs, unsigned Reg) {
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI)
+    SavedRegs.set(*AI);
 }
 
-void MipsSEFrameLowering::
-processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
-                                     RegScavenger *RS) const {
-  MachineRegisterInfo &MRI = MF.getRegInfo();
+void MipsSEFrameLowering::determineCalleeSaves(MachineFunction &MF,
+                                               BitVector &SavedRegs,
+                                               RegScavenger *RS) const {
+  TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
-  unsigned FP = STI.isABI_N64() ? Mips::FP_64 : Mips::FP;
+  MipsABIInfo ABI = STI.getABI();
+  unsigned FP = ABI.GetFramePtr();
+  unsigned BP = ABI.IsN64() ? Mips::S7_64 : Mips::S7;
 
   // Mark $fp as used if function has dedicated frame pointer.
   if (hasFP(MF))
-    MRI.setPhysRegUsed(FP);
+    setAliasRegs(MF, SavedRegs, FP);
+  // Mark $s7 as used if function has dedicated base pointer.
+  if (hasBP(MF))
+    setAliasRegs(MF, SavedRegs, BP);
 
   // Create spill slots for eh data registers if function calls eh_return.
   if (MipsFI->callsEhReturn())
@@ -536,8 +667,8 @@ processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
   if (isInt<16>(MaxSPOffset))
     return;
 
-  const TargetRegisterClass *RC = STI.isABI_N64() ?
-    &Mips::GPR64RegClass : &Mips::GPR32RegClass;
+  const TargetRegisterClass *RC =
+      ABI.ArePtrs64bit() ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
   int FI = MF.getFrameInfo()->CreateStackObject(RC->getSize(),
                                                 RC->getAlignment(), false);
   RS->addScavengingFrameIndex(FI);

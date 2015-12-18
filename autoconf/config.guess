@@ -810,6 +810,9 @@ EOF
     *:MINGW*:*)
 	echo ${UNAME_MACHINE}-pc-mingw32
 	exit ;;
+    *:MSYS*:*)
+	echo ${UNAME_MACHINE}-pc-msys
+	exit ;;
     i*:windows32*:*)
 	# uname -m includes "-pc" on this system.
 	echo ${UNAME_MACHINE}-mingw32
@@ -863,6 +866,9 @@ EOF
 	exit ;;
     i*86:Minix:*:*)
 	echo ${UNAME_MACHINE}-pc-minix
+	exit ;;
+    aarch64*:Linux:*)
+	    echo ${UNAME_MACHINE}-unknown-linux-gnu
 	exit ;;
     alpha:Linux:*:*)
 	case `sed -n '/^cpu model/s/^.*: \(.*\)/\1/p' < /proc/cpuinfo` in

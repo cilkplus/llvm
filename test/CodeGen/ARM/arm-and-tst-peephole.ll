@@ -1,18 +1,19 @@
-; RUN: llc < %s -march=arm | FileCheck -check-prefix=ARM %s
-; RUN: llc < %s -march=thumb | FileCheck -check-prefix=THUMB %s
-; RUN: llc < %s -march=thumb -mattr=+thumb2 | FileCheck -check-prefix=T2 %s
-; RUN: llc < %s -mtriple=thumbv8 | FileCheck -check-prefix=V8 %s
+; RUN: llc -mtriple=arm-eabi -arm-atomic-cfg-tidy=0 %s -o - | FileCheck -check-prefix=ARM %s
+; RUN: llc -mtriple=thumb-eabi -arm-atomic-cfg-tidy=0 %s -o - | FileCheck -check-prefix=THUMB %s
+; RUN: llc -mtriple=thumb-eabi -arm-atomic-cfg-tidy=0 -mcpu=arm1156t2-s -mattr=+thumb2 %s -o - \
+; RUN:   | FileCheck -check-prefix=T2 %s
+; RUN: llc -mtriple=thumbv8-eabi -arm-atomic-cfg-tidy=0 %s -o - | FileCheck -check-prefix=V8 %s
 
 ; FIXME: The -march=thumb test doesn't change if -disable-peephole is specified.
 
 %struct.Foo = type { i8* }
 
-; ARM:   foo
-; THUMB: foo
-; T2:    foo
+; ARM-LABEL:   foo:
+; THUMB-LABEL: foo:
+; T2-LABEL:    foo:
 define %struct.Foo* @foo(%struct.Foo* %this, i32 %acc) nounwind readonly align 2 {
 entry:
-  %scevgep = getelementptr %struct.Foo* %this, i32 1
+  %scevgep = getelementptr %struct.Foo, %struct.Foo* %this, i32 1
   br label %tailrecurse
 
 tailrecurse:                                      ; preds = %sw.bb, %entry
@@ -20,8 +21,8 @@ tailrecurse:                                      ; preds = %sw.bb, %entry
   %lsr.iv = phi i32 [ %lsr.iv.next, %sw.bb ], [ 1, %entry ]
   %acc.tr = phi i32 [ %or, %sw.bb ], [ %acc, %entry ]
   %lsr.iv24 = bitcast %struct.Foo* %lsr.iv2 to i8**
-  %scevgep5 = getelementptr i8** %lsr.iv24, i32 -1
-  %tmp2 = load i8** %scevgep5
+  %scevgep5 = getelementptr i8*, i8** %lsr.iv24, i32 -1
+  %tmp2 = load i8*, i8** %scevgep5
   %0 = ptrtoint i8* %tmp2 to i32
 
 ; ARM:      ands {{r[0-9]+}}, {{r[0-9]+}}, #3
@@ -48,20 +49,20 @@ tailrecurse.switch:                               ; preds = %tailrecurse
 ; V8-NEXT: beq
 ; V8-NEXT: %tailrecurse.switch
 ; V8: cmp
-; V8-NEXT: beq
+; V8-NEXT: bne
 ; V8-NEXT: b	
 ; The trailing space in the last line checks that the branch is unconditional
   switch i32 %and, label %sw.epilog [
     i32 1, label %sw.bb
     i32 3, label %sw.bb6
     i32 2, label %sw.bb8
-  ]
+  ], !prof !1
 
 sw.bb:                                            ; preds = %tailrecurse.switch, %tailrecurse
   %shl = shl i32 %acc.tr, 1
   %or = or i32 %and, %shl
   %lsr.iv.next = add i32 %lsr.iv, 1
-  %scevgep3 = getelementptr %struct.Foo* %lsr.iv2, i32 1
+  %scevgep3 = getelementptr %struct.Foo, %struct.Foo* %lsr.iv2, i32 1
   br label %tailrecurse
 
 sw.bb6:                                           ; preds = %tailrecurse.switch
@@ -69,7 +70,7 @@ sw.bb6:                                           ; preds = %tailrecurse.switch
 
 sw.bb8:                                           ; preds = %tailrecurse.switch
   %tmp1 = add i32 %acc.tr, %lsr.iv
-  %add.ptr11 = getelementptr inbounds %struct.Foo* %this, i32 %tmp1
+  %add.ptr11 = getelementptr inbounds %struct.Foo, %struct.Foo* %this, i32 %tmp1
   ret %struct.Foo* %add.ptr11
 
 sw.epilog:                                        ; preds = %tailrecurse.switch
@@ -82,14 +83,14 @@ sw.epilog:                                        ; preds = %tailrecurse.switch
 
 %struct.S = type { i8* (i8*)*, [1 x i8] }
 
-; ARM: bar
-; THUMB: bar
-; T2: bar
+; ARM-LABEL: bar:
+; THUMB-LABEL: bar:
+; T2-LABEL: bar:
 ; V8-LABEL: bar:
 define internal zeroext i8 @bar(%struct.S* %x, %struct.S* nocapture %y) nounwind readonly {
 entry:
-  %0 = getelementptr inbounds %struct.S* %x, i32 0, i32 1, i32 0
-  %1 = load i8* %0, align 1
+  %0 = getelementptr inbounds %struct.S, %struct.S* %x, i32 0, i32 1, i32 0
+  %1 = load i8, i8* %0, align 1
   %2 = zext i8 %1 to i32
 ; ARM: ands
 ; THUMB: ands
@@ -102,8 +103,8 @@ entry:
 
 bb:                                               ; preds = %entry
 ; V8-NEXT: %bb
-  %5 = getelementptr inbounds %struct.S* %y, i32 0, i32 1, i32 0
-  %6 = load i8* %5, align 1
+  %5 = getelementptr inbounds %struct.S, %struct.S* %y, i32 0, i32 1, i32 0
+  %6 = load i8, i8* %5, align 1
   %7 = zext i8 %6 to i32
 ; ARM: andsne
 ; THUMB: ands
@@ -133,3 +134,27 @@ bb4:                                              ; preds = %bb2
 return:                                           ; preds = %bb2, %bb, %entry
   ret i8 1
 }
+
+
+; We were looking through multiple COPY instructions to find an AND we might
+; fold into a TST, but in doing so we changed the register being tested allowing
+; folding of unrelated tests (in this case, a TST against r1 was eliminated in
+; favour of an AND of r0).
+
+; ARM-LABEL: test_tst_assessment:
+; THUMB-LABEL: test_tst_assessment:
+; T2-LABEL: test_tst_assessment:
+; V8-LABEL: test_tst_assessment:
+define i32 @test_tst_assessment(i1 %lhs, i1 %rhs) {
+  %lhs32 = zext i1 %lhs to i32
+  %rhs32 = zext i1 %rhs to i32
+  %diff = sub nsw i32 %lhs32, %rhs32
+; ARM: tst r1, #1
+; THUMB: movs [[RTMP:r[0-9]+]], #1
+; THUMB: tst r1, [[RTMP]]
+; T2: tst.w r1, #1
+; V8: tst.w r1, #1
+  ret i32 %diff
+}
+
+!1 = !{!"branch_weights", i32 1, i32 1, i32 3, i32 2 }

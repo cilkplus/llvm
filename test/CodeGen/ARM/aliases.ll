@@ -25,20 +25,20 @@
 define i32 @foo_f() {
   ret i32 0
 }
-@bar_f = alias weak %FunTy* @foo_f
+@bar_f = weak alias %FunTy* @foo_f
 
-@bar_i = alias internal i32* @bar
+@bar_i = internal alias i32* @bar
 
 @A = alias bitcast (i32* @bar to i64*)
 
 define i32 @test() {
 entry:
-   %tmp = load i32* @foo1
-   %tmp1 = load i32* @foo2
-   %tmp0 = load i32* @bar_i
+   %tmp = load i32, i32* @foo1
+   %tmp1 = load i32, i32* @foo2
+   %tmp0 = load i32, i32* @bar_i
    %tmp2 = call i32 @foo_f()
    %tmp3 = add i32 %tmp, %tmp2
-   %tmp4 = call %FunTy* @bar_f()
+   %tmp4 = call i32 @bar_f()
    %tmp5 = add i32 %tmp3, %tmp4
    %tmp6 = add i32 %tmp1, %tmp5
    %tmp7 = add i32 %tmp6, %tmp0

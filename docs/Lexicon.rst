@@ -46,11 +46,20 @@ B
 C
 -
 
+**CFI**
+    Call Frame Information. Used in DWARF debug info and in C++ unwind info
+    to show how the function prolog lays out the stack frame.
+
+**CIE**
+    Common Information Entry.  A kind of CFI used to reduce the size of FDEs.
+    The compiler creates a CIE which contains the information common across all
+    the FDEs.  Each FDE then points to its CIE.
+
 **CSE**
     Common Subexpression Elimination. An optimization that removes common
     subexpression compuation. For example ``(a+b)*(a+b)`` has two subexpressions
     that are the same: ``(a+b)``. This optimization would perform the addition
-    only once and then perform the multiply (but only if it's compulationally
+    only once and then perform the multiply (but only if it's computationally
     correct/safe).
 
 D
@@ -81,6 +90,10 @@ F
 
 **FCA**
     First Class Aggregate
+
+**FDE**
+    Frame Description Entry. A kind of CFI used to describe the stack frame of
+    one function.
 
 G
 -
@@ -118,8 +131,20 @@ L
 **LCSSA**
     Loop-Closed Static Single Assignment Form
 
+**LGTM**
+    "Looks Good To Me". In a review thread, this indicates that the
+    reviewer thinks that the patch is okay to commit.
+
 **LICM**
     Loop Invariant Code Motion
+
+**LSDA**
+    Language Specific Data Area.  C++ "zero cost" unwinding is built on top a
+    generic unwinding mechanism.  As the unwinder walks each frame, it calls
+    a "personality" function to do language specific analysis.  Each function's
+    FDE points to an optional LSDA which is passed to the personality function.
+    For C++, the LSDA contain info about the type and location of catch
+    statements in that function.
 
 **Load-VN**
     Load Value Numbering
@@ -132,6 +157,15 @@ M
 
 **MC**
     Machine Code
+
+N
+-
+
+**NFC**
+  "No functional change". Used in a commit message to indicate that a patch
+  is a pure refactoring/cleanup.
+  Usually used in the first line, so it is visible without opening the
+  actual commit email.
 
 O
 -
@@ -159,7 +193,7 @@ R
     ``Constant::replaceUsesOfWithOnConstant()`` implement the replacement of one
     Value with another by iterating over its def/use chain and fixing up all of
     the pointers to point to the new value.  See
-    also `def/use chains <ProgrammersManual.html#iterate_chains>`_.
+    also `def/use chains <ProgrammersManual.html#iterating-over-def-use-use-def-chains>`_.
 
 **Reassociation**
     Rearranging associative expressions to promote better redundancy elimination

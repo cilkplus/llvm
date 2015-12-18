@@ -1,10 +1,11 @@
 set(LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
-  DebugInfo
+  CodeGen
+  DebugInfoDWARF
   MC
-  MCParser
   MCDisassembler
   Object
+  Support
   )
 
 add_llvm_tool(llvm-objdump
