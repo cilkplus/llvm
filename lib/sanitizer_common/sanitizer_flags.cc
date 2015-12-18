@@ -15,131 +15,73 @@
 
 #include "sanitizer_common.h"
 #include "sanitizer_libc.h"
+#include "sanitizer_list.h"
+#include "sanitizer_flag_parser.h"
 
 namespace __sanitizer {
 
-void SetCommonFlagDefaults() {
-  CommonFlags *f = common_flags();
-  f->symbolize = true;
-  f->external_symbolizer_path = "";
-  f->strip_path_prefix = "";
-  f->fast_unwind_on_fatal = false;
-  f->fast_unwind_on_malloc = true;
-  f->handle_ioctl = false;
-  f->malloc_context_size = 1;
-  f->log_path = "stderr";
-  f->verbosity = 0;
-  f->detect_leaks = false;
-  f->leak_check_at_exit = true;
-  f->allocator_may_return_null = false;
-  f->print_summary = true;
+CommonFlags common_flags_dont_use;
+
+struct FlagDescription {
+  const char *name;
+  const char *description;
+  FlagDescription *next;
+};
+
+IntrusiveList<FlagDescription> flag_descriptions;
+
+// If set, the tool will install its own SEGV signal handler by default.
+#ifndef SANITIZER_NEEDS_SEGV
+# define SANITIZER_NEEDS_SEGV 1
+#endif
+
+void CommonFlags::SetDefaults() {
+#define COMMON_FLAG(Type, Name, DefaultValue, Description) Name = DefaultValue;
+#include "sanitizer_flags.inc"
+#undef COMMON_FLAG
 }
 
-void ParseCommonFlagsFromString(const char *str) {
-  CommonFlags *f = common_flags();
-  ParseFlag(str, &f->symbolize, "symbolize");
-  ParseFlag(str, &f->external_symbolizer_path, "external_symbolizer_path");
-  ParseFlag(str, &f->strip_path_prefix, "strip_path_prefix");
-  ParseFlag(str, &f->fast_unwind_on_fatal, "fast_unwind_on_fatal");
-  ParseFlag(str, &f->fast_unwind_on_malloc, "fast_unwind_on_malloc");
-  ParseFlag(str, &f->handle_ioctl, "handle_ioctl");
-  ParseFlag(str, &f->malloc_context_size, "malloc_context_size");
-  ParseFlag(str, &f->log_path, "log_path");
-  ParseFlag(str, &f->verbosity, "verbosity");
-  ParseFlag(str, &f->detect_leaks, "detect_leaks");
-  ParseFlag(str, &f->leak_check_at_exit, "leak_check_at_exit");
-  ParseFlag(str, &f->allocator_may_return_null, "allocator_may_return_null");
-  ParseFlag(str, &f->print_summary, "print_summary");
-
-  // Do a sanity check for certain flags.
-  if (f->malloc_context_size < 1)
-    f->malloc_context_size = 1;
+void CommonFlags::CopyFrom(const CommonFlags &other) {
+  internal_memcpy(this, &other, sizeof(*this));
 }
 
-static bool GetFlagValue(const char *env, const char *name,
-                         const char **value, int *value_length) {
-  if (env == 0)
-    return false;
-  const char *pos = 0;
-  for (;;) {
-    pos = internal_strstr(env, name);
-    if (pos == 0)
+class FlagHandlerInclude : public FlagHandlerBase {
+  static const uptr kMaxIncludeSize = 1 << 15;
+  FlagParser *parser_;
+
+ public:
+  explicit FlagHandlerInclude(FlagParser *parser) : parser_(parser) {}
+  bool Parse(const char *value) final {
+    char *data;
+    uptr data_mapped_size;
+    error_t err;
+    uptr len =
+      ReadFileToBuffer(value, &data, &data_mapped_size,
+                       Max(kMaxIncludeSize, GetPageSizeCached()), &err);
+    if (!len) {
+      Printf("Failed to read options from '%s': error %d\n", value, err);
       return false;
-    if (pos != env && ((pos[-1] >= 'a' && pos[-1] <= 'z') || pos[-1] == '_')) {
-      // Seems to be middle of another flag name or value.
-      env = pos + 1;
-      continue;
     }
-    break;
+    parser_->ParseString(data);
+    UnmapOrDie(data, data_mapped_size);
+    return true;
   }
-  pos += internal_strlen(name);
-  const char *end;
-  if (pos[0] != '=') {
-    end = pos;
-  } else {
-    pos += 1;
-    if (pos[0] == '"') {
-      pos += 1;
-      end = internal_strchr(pos, '"');
-    } else if (pos[0] == '\'') {
-      pos += 1;
-      end = internal_strchr(pos, '\'');
-    } else {
-      // Read until the next space or colon.
-      end = pos + internal_strcspn(pos, " :");
-    }
-    if (end == 0)
-      end = pos + internal_strlen(pos);
-  }
-  *value = pos;
-  *value_length = end - pos;
-  return true;
+};
+
+void RegisterIncludeFlag(FlagParser *parser, CommonFlags *cf) {
+  FlagHandlerInclude *fh_include =
+      new (FlagParser::Alloc) FlagHandlerInclude(parser);  // NOLINT
+  parser->RegisterHandler("include", fh_include,
+                          "read more options from the given file");
 }
 
-static bool StartsWith(const char *flag, int flag_length, const char *value) {
-  if (!flag || !value)
-    return false;
-  int value_length = internal_strlen(value);
-  return (flag_length >= value_length) &&
-         (0 == internal_strncmp(flag, value, value_length));
-}
+void RegisterCommonFlags(FlagParser *parser, CommonFlags *cf) {
+#define COMMON_FLAG(Type, Name, DefaultValue, Description) \
+  RegisterFlag(parser, #Name, Description, &cf->Name);
+#include "sanitizer_flags.inc"
+#undef COMMON_FLAG
 
-void ParseFlag(const char *env, bool *flag, const char *name) {
-  const char *value;
-  int value_length;
-  if (!GetFlagValue(env, name, &value, &value_length))
-    return;
-  if (StartsWith(value, value_length, "0") ||
-      StartsWith(value, value_length, "no") ||
-      StartsWith(value, value_length, "false"))
-    *flag = false;
-  if (StartsWith(value, value_length, "1") ||
-      StartsWith(value, value_length, "yes") ||
-      StartsWith(value, value_length, "true"))
-    *flag = true;
-}
-
-void ParseFlag(const char *env, int *flag, const char *name) {
-  const char *value;
-  int value_length;
-  if (!GetFlagValue(env, name, &value, &value_length))
-    return;
-  *flag = static_cast<int>(internal_atoll(value));
-}
-
-static LowLevelAllocator allocator_for_flags;
-
-void ParseFlag(const char *env, const char **flag, const char *name) {
-  const char *value;
-  int value_length;
-  if (!GetFlagValue(env, name, &value, &value_length))
-    return;
-  // Copy the flag value. Don't use locks here, as flags are parsed at
-  // tool startup.
-  char *value_copy = (char*)(allocator_for_flags.Allocate(value_length + 1));
-  internal_memcpy(value_copy, value, value_length);
-  value_copy[value_length] = '\0';
-  *flag = value_copy;
+  RegisterIncludeFlag(parser, cf);
 }
 
 }  // namespace __sanitizer

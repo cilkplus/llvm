@@ -20,23 +20,32 @@
 |*
 \*===----------------------------------------------------------------------===*/
 
+#include "InstrProfilingUtil.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <sys/mman.h>
-#include <sys/types.h>
-#ifdef _WIN32
-#include <direct.h>
+#include <sys/file.h>
+
+#define I386_FREEBSD (defined(__FreeBSD__) && defined(__i386__))
+
+#if !defined(_MSC_VER) && !I386_FREEBSD
+#include <stdint.h>
 #endif
 
-#ifndef _MSC_VER
-#include <stdint.h>
-#else
+#if defined(_MSC_VER)
 typedef unsigned int uint32_t;
-typedef unsigned int uint64_t;
+typedef unsigned long long uint64_t;
+#elif I386_FREEBSD
+/* System headers define 'size_t' incorrectly on x64 FreeBSD (prior to
+ * FreeBSD 10, r232261) when compiled in 32-bit mode.
+ */
+typedef unsigned char uint8_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
 #endif
 
 /* #define DEBUG_GCDAPROFILING */
@@ -150,15 +159,15 @@ static uint64_t read_64bit_value() {
 }
 
 static char *mangle_filename(const char *orig_filename) {
-  char *filename = 0;
-  int prefix_len = 0;
-  int prefix_strip = 0;
+  char *new_filename;
+  size_t filename_len, prefix_len;
+  int prefix_strip;
   int level = 0;
-  const char *fname = orig_filename, *ptr = NULL;
+  const char *fname, *ptr;
   const char *prefix = getenv("GCOV_PREFIX");
   const char *prefix_strip_str = getenv("GCOV_PREFIX_STRIP");
 
-  if (!prefix)
+  if (prefix == NULL || prefix[0] == '\0')
     return strdup(orig_filename);
 
   if (prefix_strip_str) {
@@ -167,39 +176,30 @@ static char *mangle_filename(const char *orig_filename) {
     /* Negative GCOV_PREFIX_STRIP values are ignored */
     if (prefix_strip < 0)
       prefix_strip = 0;
+  } else {
+    prefix_strip = 0;
   }
 
-  prefix_len = strlen(prefix);
-  filename = malloc(prefix_len + 1 + strlen(orig_filename) + 1);
-  strcpy(filename, prefix);
-
-  if (prefix[prefix_len - 1] != '/')
-    strcat(filename, "/");
-
-  for (ptr = fname + 1; *ptr != '\0' && level < prefix_strip; ++ptr) {
-    if (*ptr != '/') continue;
+  fname = orig_filename;
+  for (level = 0, ptr = fname + 1; level < prefix_strip; ++ptr) {
+    if (*ptr == '\0')
+      break;
+    if (*ptr != '/')
+      continue;
     fname = ptr;
     ++level;
   }
 
-  strcat(filename, fname);
+  filename_len = strlen(fname);
+  prefix_len = strlen(prefix);
+  new_filename = malloc(prefix_len + 1 + filename_len + 1);
+  memcpy(new_filename, prefix, prefix_len);
 
-  return filename;
-}
+  if (prefix[prefix_len - 1] != '/')
+    new_filename[prefix_len++] = '/';
+  memcpy(new_filename + prefix_len, fname, filename_len + 1);
 
-static void recursive_mkdir(char *filename) {
-  int i;
-
-  for (i = 1; filename[i] != '\0'; ++i) {
-    if (filename[i] != '/') continue;
-    filename[i] = '\0';
-#ifdef _WIN32
-    _mkdir(filename);
-#else
-    mkdir(filename, 0755);  /* Some of these will fail, ignore it. */
-#endif
-    filename[i] = '/';
-  }
+  return new_filename;
 }
 
 static int map_file() {
@@ -245,7 +245,8 @@ static void unmap_file() {
  * profiling enabled will emit to a different file. Only one file may be
  * started at a time.
  */
-void llvm_gcda_start_file(const char *orig_filename, const char version[4]) {
+void llvm_gcda_start_file(const char *orig_filename, const char version[4],
+                          uint32_t checksum) {
   const char *mode = "r+b";
   filename = mangle_filename(orig_filename);
 
@@ -260,7 +261,7 @@ void llvm_gcda_start_file(const char *orig_filename, const char version[4]) {
     fd = open(filename, O_RDWR | O_CREAT, 0644);
     if (fd == -1) {
       /* Try creating the directories first then opening the file. */
-      recursive_mkdir(filename);
+      __llvm_profile_recursive_mkdir(filename);
       fd = open(filename, O_RDWR | O_CREAT, 0644);
       if (fd == -1) {
         /* Bah! It's hopeless. */
@@ -272,6 +273,11 @@ void llvm_gcda_start_file(const char *orig_filename, const char version[4]) {
     }
   }
 
+  /* Try to flock the file to serialize concurrent processes writing out to the
+   * same GCDA. This can fail if the filesystem doesn't support it, but in that
+   * case we'll just carry on with the old racy behaviour and hope for the best.
+   */
+  flock(fd, LOCK_EX);
   output_file = fdopen(fd, mode);
 
   /* Initialize the write buffer. */
@@ -293,10 +299,10 @@ void llvm_gcda_start_file(const char *orig_filename, const char version[4]) {
     }
   }
 
-  /* gcda file, version, stamp LLVM. */
+  /* gcda file, version, stamp checksum. */
   write_bytes("adcg", 4);
   write_bytes(version, 4);
-  write_bytes("MVLL", 4);
+  write_32bit_value(checksum);
 
 #ifdef DEBUG_GCDAPROFILING
   fprintf(stderr, "llvmgcda: [%s]\n", orig_filename);
@@ -329,7 +335,8 @@ void llvm_gcda_increment_indirect_counter(uint32_t *predecessor,
 }
 
 void llvm_gcda_emit_function(uint32_t ident, const char *function_name,
-                             uint8_t use_extra_checksum) {
+                             uint32_t func_checksum, uint8_t use_extra_checksum,
+                             uint32_t cfg_checksum) {
   uint32_t len = 2;
 
   if (use_extra_checksum)
@@ -346,9 +353,9 @@ void llvm_gcda_emit_function(uint32_t ident, const char *function_name,
     len += 1 + length_of_string(function_name);
   write_32bit_value(len);
   write_32bit_value(ident);
-  write_32bit_value(0);
+  write_32bit_value(func_checksum);
   if (use_extra_checksum)
-    write_32bit_value(0);
+    write_32bit_value(cfg_checksum);
   if (function_name)
     write_string(function_name);
 }
@@ -366,13 +373,17 @@ void llvm_gcda_emit_arcs(uint32_t num_counters, uint64_t *counters) {
   if (val != (uint32_t)-1) {
     /* There are counters present in the file. Merge them. */
     if (val != 0x01a10000) {
-      fprintf(stderr, "profiling:invalid arc tag (0x%08x)\n", val);
+      fprintf(stderr, "profiling: %s: cannot merge previous GCDA file: "
+                      "corrupt arc tag (0x%08x)\n",
+              filename, val);
       return;
     }
 
     val = read_32bit_value();
     if (val == (uint32_t)-1 || val / 2 != num_counters) {
-      fprintf(stderr, "profiling:invalid number of counters (%d)\n", val);
+      fprintf(stderr, "profiling: %s: cannot merge previous GCDA file: "
+                      "mismatched number of counters (%d)\n",
+              filename, val);
       return;
     }
 
@@ -401,7 +412,7 @@ void llvm_gcda_emit_arcs(uint32_t num_counters, uint64_t *counters) {
 }
 
 void llvm_gcda_summary_info() {
-  const int obj_summary_len = 9; // length for gcov compatibility
+  const uint32_t obj_summary_len = 9; /* Length for gcov compatibility. */
   uint32_t i;
   uint32_t runs = 1;
   uint32_t val = 0;
@@ -414,19 +425,23 @@ void llvm_gcda_summary_info() {
   if (val != (uint32_t)-1) {
     /* There are counters present in the file. Merge them. */
     if (val != 0xa1000000) {
-      fprintf(stderr, "profiling:invalid object tag (0x%08x)\n", val);
+      fprintf(stderr, "profiling: %s: cannot merge previous run count: "
+                      "corrupt object tag (0x%08x)\n",
+              filename, val);
       return;
     }
 
-    val = read_32bit_value(); // length
+    val = read_32bit_value(); /* length */
     if (val != obj_summary_len) {
-      fprintf(stderr, "profiling:invalid object length (%d)\n", val); // length
+      fprintf(stderr, "profiling: %s: cannot merge previous run count: "
+                      "mismatched object length (%d)\n",
+              filename, val);
       return;
     }
 
-    read_32bit_value(); // checksum, unused
-    read_32bit_value(); // num, unused
-    runs += read_32bit_value(); // add previous run count to new counter
+    read_32bit_value(); /* checksum, unused */
+    read_32bit_value(); /* num, unused */
+    runs += read_32bit_value(); /* Add previous run count to new counter. */
   }
 
   cur_pos = save_cur_pos;
@@ -434,15 +449,15 @@ void llvm_gcda_summary_info() {
   /* Object summary tag */
   write_bytes("\0\0\0\xa1", 4);
   write_32bit_value(obj_summary_len);
-  write_32bit_value(0); // checksum, unused
-  write_32bit_value(0); // num, unused
+  write_32bit_value(0); /* checksum, unused */
+  write_32bit_value(0); /* num, unused */
   write_32bit_value(runs);
-  for (i = 3; i < obj_summary_len; ++i) 
+  for (i = 3; i < obj_summary_len; ++i)
     write_32bit_value(0);
 
   /* Program summary tag */
-  write_bytes("\0\0\0\xa3", 4); // tag indicates 1 program
-  write_32bit_value(0); // 0 length
+  write_bytes("\0\0\0\xa3", 4); /* tag indicates 1 program */
+  write_32bit_value(0); /* 0 length */
 
 #ifdef DEBUG_GCDAPROFILING
   fprintf(stderr, "llvmgcda:   %u runs\n", runs);
@@ -462,6 +477,7 @@ void llvm_gcda_end_file() {
     }
 
     fclose(output_file);
+    flock(fd, LOCK_UN);
     output_file = NULL;
     write_buffer = NULL;
   }

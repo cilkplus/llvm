@@ -24,41 +24,40 @@ namespace __sanitizer {
 typedef CompactSizeClassMap InternalSizeClassMap;
 
 static const uptr kInternalAllocatorSpace = 0;
-#if SANITIZER_WORDSIZE == 32
-static const u64 kInternalAllocatorSize = (1ULL << 32);
+static const u64 kInternalAllocatorSize = SANITIZER_MMAP_RANGE_SIZE;
 static const uptr kInternalAllocatorRegionSizeLog = 20;
-#else
-static const u64 kInternalAllocatorSize = (1ULL << 47);
-static const uptr kInternalAllocatorRegionSizeLog = 24;
-#endif
-static const uptr kInternalAllocatorFlatByteMapSize =
+#if SANITIZER_WORDSIZE == 32
+static const uptr kInternalAllocatorNumRegions =
     kInternalAllocatorSize >> kInternalAllocatorRegionSizeLog;
+typedef FlatByteMap<kInternalAllocatorNumRegions> ByteMap;
+#else
+static const uptr kInternalAllocatorNumRegions =
+    kInternalAllocatorSize >> kInternalAllocatorRegionSizeLog;
+typedef TwoLevelByteMap<(kInternalAllocatorNumRegions >> 12), 1 << 12> ByteMap;
+#endif
 typedef SizeClassAllocator32<
-    kInternalAllocatorSpace, kInternalAllocatorSize, 16, InternalSizeClassMap,
-    kInternalAllocatorRegionSizeLog,
-    FlatByteMap<kInternalAllocatorFlatByteMapSize> > PrimaryInternalAllocator;
+    kInternalAllocatorSpace, kInternalAllocatorSize, 0, InternalSizeClassMap,
+    kInternalAllocatorRegionSizeLog, ByteMap> PrimaryInternalAllocator;
 
 typedef SizeClassAllocatorLocalCache<PrimaryInternalAllocator>
     InternalAllocatorCache;
 
-// We don't want our internal allocator to do any map/unmap operations.
-struct CrashOnMapUnmap {
-  void OnMap(uptr p, uptr size) const {
-    RAW_CHECK_MSG(0, "Unexpected mmap in InternalAllocator!");
-  }
-  void OnUnmap(uptr p, uptr size) const {
-    RAW_CHECK_MSG(0, "Unexpected munmap in InternalAllocator!");
-  }
-};
-
 typedef CombinedAllocator<PrimaryInternalAllocator, InternalAllocatorCache,
-                          LargeMmapAllocator<CrashOnMapUnmap> >
-    InternalAllocator;
+                          LargeMmapAllocator<> > InternalAllocator;
 
 void *InternalAlloc(uptr size, InternalAllocatorCache *cache = 0);
 void InternalFree(void *p, InternalAllocatorCache *cache = 0);
 InternalAllocator *internal_allocator();
 
+enum InternalAllocEnum {
+  INTERNAL_ALLOC
+};
+
 }  // namespace __sanitizer
+
+inline void *operator new(__sanitizer::operator_new_size_type size,
+                          InternalAllocEnum) {
+  return InternalAlloc(size);
+}
 
 #endif  // SANITIZER_ALLOCATOR_INTERNAL_H

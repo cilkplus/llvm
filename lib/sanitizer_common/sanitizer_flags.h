@@ -18,51 +18,38 @@
 
 namespace __sanitizer {
 
-void ParseFlag(const char *env, bool *flag, const char *name);
-void ParseFlag(const char *env, int *flag, const char *name);
-void ParseFlag(const char *env, const char **flag, const char *name);
-
 struct CommonFlags {
-  // If set, use the online symbolizer from common sanitizer runtime.
-  bool symbolize;
-  // Path to external symbolizer.
-  const char *external_symbolizer_path;
-  // Strips this prefix from file paths in error reports.
-  const char *strip_path_prefix;
-  // Use fast (frame-pointer-based) unwinder on fatal errors (if available).
-  bool fast_unwind_on_fatal;
-  // Use fast (frame-pointer-based) unwinder on malloc/free (if available).
-  bool fast_unwind_on_malloc;
-  // Intercept and handle ioctl requests.
-  bool handle_ioctl;
-  // Max number of stack frames kept for each allocation/deallocation.
-  int malloc_context_size;
-  // Write logs to "log_path.pid".
-  // The special values are "stdout" and "stderr".
-  // The default is "stderr".
-  const char *log_path;
-  // Verbosity level (0 - silent, 1 - a bit of output, 2+ - more output).
-  int  verbosity;
-  // Enable memory leak detection.
-  bool detect_leaks;
-  // Invoke leak checking in an atexit handler. Has no effect if
-  // detect_leaks=false, or if __lsan_do_leak_check() is called before the
-  // handler has a chance to run.
-  bool leak_check_at_exit;
-  // If false, the allocator will crash instead of returning 0 on out-of-memory.
-  bool allocator_may_return_null;
-  // If false, disable printing error summaries in addition to error reports.
-  bool print_summary;
+#define COMMON_FLAG(Type, Name, DefaultValue, Description) Type Name;
+#include "sanitizer_flags.inc"
+#undef COMMON_FLAG
+
+  void SetDefaults();
+  void CopyFrom(const CommonFlags &other);
 };
 
-inline CommonFlags *common_flags() {
-  static CommonFlags f;
-  return &f;
+// Functions to get/set global CommonFlags shared by all sanitizer runtimes:
+extern CommonFlags common_flags_dont_use;
+inline const CommonFlags *common_flags() {
+  return &common_flags_dont_use;
 }
 
-void SetCommonFlagDefaults();
-void ParseCommonFlagsFromString(const char *str);
+inline void SetCommonFlagsDefaults() {
+  common_flags_dont_use.SetDefaults();
+}
 
+// This function can only be used to setup tool-specific overrides for
+// CommonFlags defaults. Generally, it should only be used right after
+// SetCommonFlagsDefaults(), but before ParseCommonFlagsFromString(), and
+// only during the flags initialization (i.e. before they are used for
+// the first time).
+inline void OverrideCommonFlags(const CommonFlags &cf) {
+  common_flags_dont_use.CopyFrom(cf);
+}
+
+class FlagParser;
+void RegisterCommonFlags(FlagParser *parser,
+                         CommonFlags *cf = &common_flags_dont_use);
+void RegisterIncludeFlag(FlagParser *parser, CommonFlags *cf);
 }  // namespace __sanitizer
 
 #endif  // SANITIZER_FLAGS_H

@@ -8,10 +8,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "sanitizer_platform.h"
-#if SANITIZER_LINUX
+#if SANITIZER_FREEBSD || SANITIZER_LINUX
 
 #include "sanitizer_libignore.h"
 #include "sanitizer_flags.h"
+#include "sanitizer_posix.h"
 #include "sanitizer_procmaps.h"
 
 namespace __sanitizer {
@@ -19,32 +20,26 @@ namespace __sanitizer {
 LibIgnore::LibIgnore(LinkerInitialized) {
 }
 
-void LibIgnore::Init(const SuppressionContext &supp) {
+void LibIgnore::AddIgnoredLibrary(const char *name_templ) {
   BlockingMutexLock lock(&mutex_);
-  CHECK_EQ(count_, 0);
-  const uptr n = supp.SuppressionCount();
-  for (uptr i = 0; i < n; i++) {
-    const Suppression *s = supp.SuppressionAt(i);
-    if (s->type != SuppressionLib)
-      continue;
-    if (count_ >= kMaxLibs) {
-      Report("%s: too many called_from_lib suppressions (max: %d)\n",
-             SanitizerToolName, kMaxLibs);
-      Die();
-    }
-    Lib *lib = &libs_[count_++];
-    lib->templ = internal_strdup(s->templ);
-    lib->name = 0;
-    lib->loaded = false;
+  if (count_ >= kMaxLibs) {
+    Report("%s: too many ignored libraries (max: %d)\n", SanitizerToolName,
+           kMaxLibs);
+    Die();
   }
+  Lib *lib = &libs_[count_++];
+  lib->templ = internal_strdup(name_templ);
+  lib->name = nullptr;
+  lib->real_name = nullptr;
+  lib->loaded = false;
 }
 
 void LibIgnore::OnLibraryLoaded(const char *name) {
   BlockingMutexLock lock(&mutex_);
   // Try to match suppressions with symlink target.
-  InternalScopedBuffer<char> buf(4096);
+  InternalScopedString buf(kMaxPathLength);
   if (name != 0 && internal_readlink(name, buf.data(), buf.size() - 1) > 0 &&
-      buf.data()[0]) {
+      buf[0]) {
     for (uptr i = 0; i < count_; i++) {
       Lib *lib = &libs_[i];
       if (!lib->loaded && lib->real_name == 0 &&
@@ -55,7 +50,7 @@ void LibIgnore::OnLibraryLoaded(const char *name) {
 
   // Scan suppressions list and find newly loaded and unloaded libraries.
   MemoryMappingLayout proc_maps(/*cache_enabled*/false);
-  InternalScopedBuffer<char> module(4096);
+  InternalScopedString module(kMaxPathLength);
   for (uptr i = 0; i < count_; i++) {
     Lib *lib = &libs_[i];
     bool loaded = false;
@@ -76,9 +71,10 @@ void LibIgnore::OnLibraryLoaded(const char *name) {
         loaded = true;
         if (lib->loaded)
           continue;
-        if (common_flags()->verbosity)
-          Report("Matched called_from_lib suppression '%s' against library"
-              " '%s'\n", lib->templ, module.data());
+        VReport(1,
+                "Matched called_from_lib suppression '%s' against library"
+                " '%s'\n",
+                lib->templ, module.data());
         lib->loaded = true;
         lib->name = internal_strdup(module.data());
         const uptr idx = atomic_load(&loaded_count_, memory_order_relaxed);
@@ -102,4 +98,4 @@ void LibIgnore::OnLibraryUnloaded() {
 
 }  // namespace __sanitizer
 
-#endif  // #if SANITIZER_LINUX
+#endif  // #if SANITIZER_FREEBSD || SANITIZER_LINUX
