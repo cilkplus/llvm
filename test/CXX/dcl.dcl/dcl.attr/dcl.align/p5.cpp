@@ -9,11 +9,18 @@ alignas(1) alignas(4) int n6 alignas(2); // ok
 alignas(1) int n7 alignas(2), // expected-error {{less than minimum alignment}}
                n8 alignas(4); // ok
 alignas(8) int n9 alignas(2); // ok, overaligned
+alignas(1) extern int n10; // expected-error {{less than minimum alignment}}
 
 enum alignas(1) E1 {}; // expected-error {{requested alignment is less than minimum alignment of 4 for type 'E1'}}
 enum alignas(1) E2 : char {}; // ok
 enum alignas(4) E3 { e3 = 0 }; // ok
 enum alignas(4) E4 { e4 = 1ull << 33 }; // expected-error {{requested alignment is less than minimum alignment of 8 for type 'E4'}}
+enum alignas(8) E5 {};
+static_assert(alignof(E5) == 8, "");
+
+typedef __attribute__((aligned(16))) int IntAlign16;
+enum E6 : IntAlign16 {};
+static_assert(alignof(E6) == 4, "");
 
 struct S1 {
   alignas(8) int n;

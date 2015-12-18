@@ -70,6 +70,9 @@ typedef char BOOL;
 
 - (id) dataSource;
 
+// rdar://15509831
+- (id)delegate;
+
 - (id)xxxdelegateYYY;
 - (void)setXxxdelegateYYY:(id)delegate;
 
@@ -234,4 +237,12 @@ DEPRECATED
 @property (nonatomic, readonly) float Fdelegate;
 @property (nonatomic, readonly) int Idelegate;
 @property (nonatomic, readonly) BOOL Bdelegate;
+@end
+
+// rdar://19372798
+@protocol NSObject @end
+@protocol MyProtocol <NSObject>
+- (id)readonlyProperty;
+- (id)readWriteProperty;
+- (void)setReadWriteProperty:(id)readWriteProperty;
 @end

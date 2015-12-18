@@ -20,7 +20,7 @@ where Clang is used are:
 
 If you know of (or wrote!) a tool or project using Clang, please send an
 email to Clang's `development discussion mailing list
-<http://lists.cs.uiuc.edu/mailman/listinfo/cfe-dev>`_ to have it added.
+<http://lists.llvm.org/mailman/listinfo/cfe-dev>`_ to have it added.
 (or if you are already a Clang contributor, feel free to directly commit
 additions). Since the primary purpose of this page is to provide examples
 that can help developers, generally they must have code available.
@@ -78,3 +78,10 @@ List of projects and tools
     "cldoc is a Clang based documentation generator for C and C++.
     cldoc tries to solve the issue of writing C/C++ software documentation
     with a modern, non-intrusive and robust approach."
+
+`<https://github.com/AlexDenisov/ToyClangPlugin>`_
+    "The simplest Clang plugin implementing a semantic check for Objective-C.
+    This example shows how to use the ``DiagnosticsEngine`` (emit warnings,
+    errors, fixit hints).  See also `<http://l.rw.rw/clang_plugin>`_ for
+    step-by-step instructions."
+

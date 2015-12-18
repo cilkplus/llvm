@@ -87,7 +87,7 @@ namespace test5 {
   }
 
   void test2(A &x) {
-    x->A::foo<int>(); // expected-error {{'test5::A' is not a pointer; maybe you meant to use '.'?}}
+    x->A::foo<int>(); // expected-error {{'test5::A' is not a pointer; did you mean to use '.'?}}
   }
 }
 
@@ -181,7 +181,7 @@ namespace PR15045 {
 
   int f() {
     Cl0 c;
-    return c->a;  // expected-error {{member reference type 'PR15045::Cl0' is not a pointer; maybe you meant to use '.'?}}
+    return c->a;  // expected-error {{member reference type 'PR15045::Cl0' is not a pointer; did you mean to use '.'?}}
   }
 
   struct bar {
@@ -193,7 +193,7 @@ namespace PR15045 {
   };
 
   template <class T> void call_func(T t) {
-    t->func();  // expected-error-re 2 {{member reference type 'PR15045::bar' is not a pointer$}} \
+    t->func();  // expected-error-re 2 {{member reference type 'PR15045::bar' is not a pointer{{$}}}} \
                 // expected-note {{did you mean to use '.' instead?}}
   }
 
@@ -202,12 +202,12 @@ namespace PR15045 {
     foo f;
 
     // Show that recovery has happened by also triggering typo correction
-    e->Func();  // expected-error {{member reference type 'PR15045::bar' is not a pointer; maybe you meant to use '.'?}} \
+    e->Func();  // expected-error {{member reference type 'PR15045::bar' is not a pointer; did you mean to use '.'?}} \
                 // expected-error {{no member named 'Func' in 'PR15045::bar'; did you mean 'func'?}}
 
     // Make sure a fixit isn't given in the case that the '->' isn't actually
     // the problem (the problem is with the return value of an operator->).
-    f->func();  // expected-error-re {{member reference type 'PR15045::bar' is not a pointer$}}
+    f->func();  // expected-error-re {{member reference type 'PR15045::bar' is not a pointer{{$}}}}
 
     call_func(e);  // expected-note {{in instantiation of function template specialization 'PR15045::call_func<PR15045::bar>' requested here}}
 
@@ -221,6 +221,6 @@ namespace pr16676 {
   int f(S* s) {
     T t;
     return t.get_s  // expected-error {{reference to non-static member function must be called; did you mean to call it with no arguments?}}
-        .i;  // expected-error {{member reference type 'pr16676::S *' is a pointer; maybe you meant to use '->'}}
+        .i;  // expected-error {{member reference type 'pr16676::S *' is a pointer; did you mean to use '->'}}
   }
 }

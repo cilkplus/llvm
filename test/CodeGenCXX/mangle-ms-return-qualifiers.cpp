@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
+// RUN: %clang_cc1 -emit-llvm %s -o - -triple=i386-pc-win32 | FileCheck %s
 
 void a1() {}
 // CHECK: "\01?a1@@YAXXZ"
@@ -164,6 +164,12 @@ int S::* f8() { return 0; }
 int S::* const f9() { return 0; }
 // CHECK: "\01?f9@@YAQQS@@HXZ"
 
+int S::* __restrict f10() { return 0; }
+// CHECK: "\01?f10@@YAPIQS@@HXZ"
+
+int S::* const __restrict f11() { return 0; }
+// CHECK: "\01?f11@@YAQIQS@@HXZ"
+
 typedef int (*function_pointer)(int);
 
 function_pointer g1() { return 0; }
@@ -177,3 +183,7 @@ function_pointer* g3() { return 0; }
 
 const function_pointer* g4() { return 0; }
 // CHECK: "\01?g4@@YAPBQ6AHH@ZXZ"
+
+extern int &z;
+int & __restrict h1() { return z; }
+// CHECK: "\01?h1@@YAAIAHXZ"

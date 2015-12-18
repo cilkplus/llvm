@@ -8,7 +8,7 @@ compiler infrastructure project.
 
 Unlike many other compiler frontends, Clang is useful for a number of things
 beyond just compiling code: we intend for Clang to be host to a number of
-different source level tools.  One example of this is the Clang Static Analyzer.
+different source-level tools.  One example of this is the Clang Static Analyzer.
 
 If you're interested in more (including how to build Clang) it is best to read
 the relevant web sites.  Here are some pointers:
@@ -20,7 +20,7 @@ Information on the LLVM project:   http://llvm.org/
 
 If you have questions or comments about Clang, a great place to discuss them is
 on the Clang development mailing list:
-  http://lists.cs.uiuc.edu/mailman/listinfo/cfe-dev
+  http://lists.llvm.org/mailman/listinfo/cfe-dev
 
 If you find a bug in Clang, please file it in the LLVM bug tracker:
   http://llvm.org/bugs/

@@ -86,7 +86,7 @@ public:
 };
 
 /// ObjCBoxedExpr - used for generalized expression boxing.
-/// as in: @(strdup("hello world")) or @(random())
+/// as in: @(strdup("hello world")), @(random()) or @(view.frame)
 /// Also used for boxing non-parenthesized numeric literals;
 /// as in: @42 or \@true (c++/objc++) or \@__yes (c/objc).
 class ObjCBoxedExpr : public Expr {
@@ -124,6 +124,15 @@ public:
   
   // Iterators
   child_range children() { return child_range(&SubExpr, &SubExpr+1); }
+
+  typedef ConstExprIterator const_arg_iterator;
+
+  const_arg_iterator arg_begin() const {
+    return reinterpret_cast<Stmt const * const*>(&SubExpr);
+  }
+  const_arg_iterator arg_end() const {
+    return reinterpret_cast<Stmt const * const*>(&SubExpr + 1);
+  }
   
   friend class ASTStmtReader;
 };
@@ -215,7 +224,7 @@ struct ObjCDictionaryElement {
 } // end namespace clang
 
 namespace llvm {
-template <> struct isPodLike<clang::ObjCDictionaryElement> : llvm::true_type {};
+template <> struct isPodLike<clang::ObjCDictionaryElement> : std::true_type {};
 }
 
 namespace clang {
@@ -277,14 +286,14 @@ class ObjCDictionaryLiteral : public Expr {
 
   ExpansionData *getExpansionData() {
     if (!HasPackExpansions)
-      return 0;
+      return nullptr;
     
     return reinterpret_cast<ExpansionData *>(getKeyValues() + NumElements);
   }
 
   const ExpansionData *getExpansionData() const {
     if (!HasPackExpansions)
-      return 0;
+      return nullptr;
     
     return reinterpret_cast<const ExpansionData *>(getKeyValues()+NumElements);
   }
@@ -678,46 +687,16 @@ public:
   QualType getSuperReceiverType() const { 
     return QualType(Receiver.get<const Type*>(), 0); 
   }
-  QualType getGetterResultType() const {
-    QualType ResultType;
-    if (isExplicitProperty()) {
-      const ObjCPropertyDecl *PDecl = getExplicitProperty();
-      if (const ObjCMethodDecl *Getter = PDecl->getGetterMethodDecl())
-        ResultType = Getter->getResultType();
-      else
-        ResultType = PDecl->getType();
-    } else {
-      const ObjCMethodDecl *Getter = getImplicitPropertyGetter();
-      if (Getter)
-        ResultType = Getter->getResultType(); // with reference!
-    }
-    return ResultType;
-  }
 
-  QualType getSetterArgType() const {
-    QualType ArgType;
-    if (isImplicitProperty()) {
-      const ObjCMethodDecl *Setter = getImplicitPropertySetter();
-      ObjCMethodDecl::param_const_iterator P = Setter->param_begin(); 
-      ArgType = (*P)->getType();
-    } else {
-      if (ObjCPropertyDecl *PDecl = getExplicitProperty())
-        if (const ObjCMethodDecl *Setter = PDecl->getSetterMethodDecl()) {
-          ObjCMethodDecl::param_const_iterator P = Setter->param_begin(); 
-          ArgType = (*P)->getType();
-        }
-      if (ArgType.isNull())
-        ArgType = getType();
-    }
-    return ArgType;
-  }
-  
   ObjCInterfaceDecl *getClassReceiver() const {
     return Receiver.get<ObjCInterfaceDecl*>();
   }
   bool isObjectReceiver() const { return Receiver.is<Stmt*>(); }
   bool isSuperReceiver() const { return Receiver.is<const Type*>(); }
   bool isClassReceiver() const { return Receiver.is<ObjCInterfaceDecl*>(); }
+
+  /// Determine the type of the base, regardless of the kind of receiver.
+  QualType getReceiverType(const ASTContext &ctx) const;
 
   SourceLocation getLocStart() const LLVM_READONLY {
     return isObjectReceiver() ? getBase()->getLocStart() :getReceiverLocation();
@@ -743,7 +722,7 @@ private:
   void setExplicitProperty(ObjCPropertyDecl *D, unsigned methRefFlags) {
     PropertyOrGetter.setPointer(D);
     PropertyOrGetter.setInt(false);
-    SetterAndMethodRefFlags.setPointer(0);
+    SetterAndMethodRefFlags.setPointer(nullptr);
     SetterAndMethodRefFlags.setInt(methRefFlags);
   }
   void setImplicitProperty(ObjCMethodDecl *Getter, ObjCMethodDecl *Setter,
@@ -1174,7 +1153,7 @@ public:
     if (getReceiverKind() == Instance)
       return static_cast<Expr *>(getReceiverPointer());
 
-    return 0;
+    return nullptr;
   }
   const Expr *getInstanceReceiver() const {
     return const_cast<ObjCMessageExpr*>(this)->getInstanceReceiver();
@@ -1201,7 +1180,7 @@ public:
   TypeSourceInfo *getClassReceiverTypeInfo() const {
     if (getReceiverKind() == Class)
       return reinterpret_cast<TypeSourceInfo *>(getReceiverPointer());
-    return 0;
+    return nullptr;
   }
 
   void setClassReceiver(TypeSourceInfo *TSInfo) {
@@ -1270,14 +1249,14 @@ public:
     if (HasMethod)
       return reinterpret_cast<const ObjCMethodDecl *>(SelectorOrMethod);
 
-    return 0;
+    return nullptr;
   }
 
   ObjCMethodDecl *getMethodDecl() { 
     if (HasMethod)
       return reinterpret_cast<ObjCMethodDecl *>(SelectorOrMethod);
 
-    return 0;
+    return nullptr;
   }
 
   void setMethodDecl(ObjCMethodDecl *MD) { 

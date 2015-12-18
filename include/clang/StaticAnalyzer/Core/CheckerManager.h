@@ -11,13 +11,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_SA_CORE_CHECKERMANAGER_H
-#define LLVM_CLANG_SA_CORE_CHECKERMANAGER_H
+#ifndef LLVM_CLANG_STATICANALYZER_CORE_CHECKERMANAGER_H
+#define LLVM_CLANG_STATICANALYZER_CORE_CHECKERMANAGER_H
 
 #include "clang/Analysis/ProgramPoint.h"
 #include "clang/Basic/LangOptions.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/Store.h"
 #include "clang/StaticAnalyzer/Core/AnalyzerOptions.h"
+#include "clang/StaticAnalyzer/Core/PathSensitive/Store.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include <vector>
@@ -29,11 +29,11 @@ namespace clang {
 
 namespace ento {
   class CheckerBase;
+  class CheckerRegistry;
   class ExprEngine;
   class AnalysisManager;
   class BugReporter;
   class CheckerContext;
-  class SimpleCall;
   class ObjCMethodCall;
   class SVal;
   class ExplodedNode;
@@ -47,69 +47,16 @@ namespace ento {
 
 template <typename T> class CheckerFn;
 
-template <typename RET, typename P1, typename P2, typename P3, typename P4,
-          typename P5>
-class CheckerFn<RET(P1, P2, P3, P4, P5)> {
-  typedef RET (*Func)(void *, P1, P2, P3, P4, P5);
+template <typename RET, typename... Ps>
+class CheckerFn<RET(Ps...)> {
+  typedef RET (*Func)(void *, Ps...);
   Func Fn;
 public:
   CheckerBase *Checker;
   CheckerFn(CheckerBase *checker, Func fn) : Fn(fn), Checker(checker) { }
-  RET operator()(P1 p1, P2 p2, P3 p3, P4 p4, P5 p5) const {
-    return Fn(Checker, p1, p2, p3, p4, p5);
+  RET operator()(Ps... ps) const {
+    return Fn(Checker, ps...);
   }
-};
-
-template <typename RET, typename P1, typename P2, typename P3, typename P4>
-class CheckerFn<RET(P1, P2, P3, P4)> {
-  typedef RET (*Func)(void *, P1, P2, P3, P4);
-  Func Fn;
-public:
-  CheckerBase *Checker;
-  CheckerFn(CheckerBase *checker, Func fn) : Fn(fn), Checker(checker) { }
-  RET operator()(P1 p1, P2 p2, P3 p3, P4 p4) const { 
-    return Fn(Checker, p1, p2, p3, p4);
-  } 
-};
-
-template <typename RET, typename P1, typename P2, typename P3>
-class CheckerFn<RET(P1, P2, P3)> {
-  typedef RET (*Func)(void *, P1, P2, P3);
-  Func Fn;
-public:
-  CheckerBase *Checker;
-  CheckerFn(CheckerBase *checker, Func fn) : Fn(fn), Checker(checker) { }
-  RET operator()(P1 p1, P2 p2, P3 p3) const { return Fn(Checker, p1, p2, p3); } 
-};
-
-template <typename RET, typename P1, typename P2>
-class CheckerFn<RET(P1, P2)> {
-  typedef RET (*Func)(void *, P1, P2);
-  Func Fn;
-public:
-  CheckerBase *Checker;
-  CheckerFn(CheckerBase *checker, Func fn) : Fn(fn), Checker(checker) { }
-  RET operator()(P1 p1, P2 p2) const { return Fn(Checker, p1, p2); } 
-};
-
-template <typename RET, typename P1>
-class CheckerFn<RET(P1)> {
-  typedef RET (*Func)(void *, P1);
-  Func Fn;
-public:
-  CheckerBase *Checker;
-  CheckerFn(CheckerBase *checker, Func fn) : Fn(fn), Checker(checker) { }
-  RET operator()(P1 p1) const { return Fn(Checker, p1); } 
-};
-
-template <typename RET>
-class CheckerFn<RET()> {
-  typedef RET (*Func)(void *);
-  Func Fn;
-public:
-  CheckerBase *Checker;
-  CheckerFn(CheckerBase *checker, Func fn) : Fn(fn), Checker(checker) { }
-  RET operator()() const { return Fn(Checker); } 
 };
 
 /// \brief Describes the different reasons a pointer escapes
@@ -132,9 +79,26 @@ enum PointerEscapeKind {
   PSK_EscapeOther
 };
 
+// This wrapper is used to ensure that only StringRefs originating from the
+// CheckerRegistry are used as check names. We want to make sure all check
+// name strings have a lifetime that keeps them alive at least until the path
+// diagnostics have been processed.
+class CheckName {
+  StringRef Name;
+  friend class ::clang::ento::CheckerRegistry;
+  explicit CheckName(StringRef Name) : Name(Name) {}
+
+public:
+  CheckName() {}
+  CheckName(const CheckName &Other) : Name(Other.Name) {}
+  StringRef getName() const { return Name; }
+};
+
 class CheckerManager {
   const LangOptions LangOpts;
   AnalyzerOptionsRef AOptions;
+  CheckName CurrentCheckName;
+
 public:
   CheckerManager(const LangOptions &langOpts,
                  AnalyzerOptionsRef AOptions)
@@ -142,6 +106,9 @@ public:
       AOptions(AOptions) {}
 
   ~CheckerManager();
+
+  void setCurrentCheckName(CheckName name) { CurrentCheckName = name; }
+  CheckName getCurrentCheckName() const { return CurrentCheckName; }
 
   bool hasPathSensitiveCheckers() const;
 
@@ -169,6 +136,7 @@ public:
       return static_cast<CHECKER *>(ref); // already registered.
 
     CHECKER *checker = new CHECKER();
+    checker->Name = CurrentCheckName;
     CheckerDtors.push_back(CheckerDtor(checker, destruct<CHECKER>));
     CHECKER::_register(checker, *this);
     ref = checker;
@@ -183,6 +151,7 @@ public:
       return static_cast<CHECKER *>(ref); // already registered.
 
     CHECKER *checker = new CHECKER(AOpts);
+    checker->Name = CurrentCheckName;
     CheckerDtors.push_back(CheckerDtor(checker, destruct<CHECKER>));
     CHECKER::_register(checker, *this);
     ref = checker;

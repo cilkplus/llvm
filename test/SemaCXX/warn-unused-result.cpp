@@ -44,6 +44,12 @@ void bah() {
 }
 
 namespace warn_unused_CXX11 {
+class Status;
+class Foo {
+ public:
+  Status doStuff();
+};
+
 struct [[clang::warn_unused_result]] Status {
   bool ok() const;
   Status& operator=(const Status& x);
@@ -73,9 +79,22 @@ void lazy() {
   (void)DoYetAnotherThing();
 
   DoSomething(); // expected-warning {{ignoring return value}}
-  DoSomethingElse(); // expected-warning {{ignoring return value}}
-  DoAnotherThing(); // expected-warning {{ignoring return value}}
+  DoSomethingElse();
+  DoAnotherThing();
   DoYetAnotherThing();
+}
+
+template <typename T>
+class [[clang::warn_unused_result]] StatusOr {
+};
+StatusOr<int> doit();
+void test() {
+  Foo f;
+  f.doStuff(); // expected-warning {{ignoring return value}}
+  doit(); // expected-warning {{ignoring return value}}
+
+  auto func = []() { return Status(); };
+  func(); // expected-warning {{ignoring return value}}
 }
 }
 
@@ -93,4 +112,51 @@ void Bar() {
   f.Bar(); // expected-warning {{ignoring return value}}
 };
 
+}
+
+namespace PR18571 {
+// Unevaluated contexts should not trigger unused result warnings.
+template <typename T>
+auto foo(T) -> decltype(f(), bool()) { // Should not warn.
+  return true;
+}
+
+void g() {
+  foo(1);
+}
+}
+
+namespace std {
+class type_info { };
+}
+
+namespace {
+// The typeid expression operand is evaluated only when the expression type is
+// a glvalue of polymorphic class type.
+
+struct B {
+  virtual void f() {}
+};
+
+struct D : B {
+  void f() override {}
+};
+
+struct C {};
+
+void g() {
+  // The typeid expression operand is evaluated only when the expression type is
+  // a glvalue of polymorphic class type; otherwise the expression operand is not
+  // evaluated and should not trigger a diagnostic.
+  D d;
+  C c;
+  (void)typeid(f(), c); // Should not warn.
+  (void)typeid(f(), d); // expected-warning {{ignoring return value}} expected-warning {{expression with side effects will be evaluated despite being used as an operand to 'typeid'}}
+
+  // The sizeof expression operand is never evaluated.
+  (void)sizeof(f(), c); // Should not warn.
+
+   // The noexcept expression operand is never evaluated.
+  (void)noexcept(f(), false); // Should not warn.
+}
 }

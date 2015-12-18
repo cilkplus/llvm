@@ -7,19 +7,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef CLANG_DRIVER_DRIVER_H_
-#define CLANG_DRIVER_DRIVER_H_
+#ifndef LLVM_CLANG_DRIVER_DRIVER_H
+#define LLVM_CLANG_DRIVER_DRIVER_H
 
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Driver/Phases.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/Path.h" // FIXME: Kill when CompilationInfo
+#include <memory>
                               // lands.
 #include <list>
 #include <set>
@@ -42,6 +42,7 @@ namespace driver {
   class Command;
   class Compilation;
   class InputInfo;
+  class JobList;
   class JobAction;
   class SanitizerArgs;
   class ToolChain;
@@ -59,6 +60,12 @@ class Driver {
     CPPMode,
     CLMode
   } Mode;
+
+  enum SaveTempsMode {
+    SaveTempsNone,
+    SaveTempsCwd,
+    SaveTempsObj
+  } SaveTemps;
 
 public:
   // Diag - Forwarding function for diagnostics.
@@ -84,7 +91,7 @@ public:
   /// The path to the compiler resource directory.
   std::string ResourceDir;
 
-  /// A prefix directory used to emulated a limited subset of GCC's '-Bprefix'
+  /// A prefix directory used to emulate a limited subset of GCC's '-Bprefix'
   /// functionality.
   /// FIXME: This type of customization should be removed in favor of the
   /// universal driver when it is ready.
@@ -102,9 +109,6 @@ public:
 
   /// Default target triple.
   std::string DefaultTargetTriple;
-
-  /// Default name for linked images (e.g., "a.out").
-  std::string DefaultImageName;
 
   /// Driver title to use with help.
   std::string DriverTitle;
@@ -188,12 +192,17 @@ private:
   // getFinalPhase - Determine which compilation mode we are in and record 
   // which option we used to determine the final phase.
   phases::ID getFinalPhase(const llvm::opt::DerivedArgList &DAL,
-                           llvm::opt::Arg **FinalPhaseArg = 0) const;
+                           llvm::opt::Arg **FinalPhaseArg = nullptr) const;
+
+  // Before executing jobs, sets up response files for commands that need them.
+  void setUpResponseFiles(Compilation &C, Command &Cmd);
+
+  void generatePrefixedToolNames(const char *Tool, const ToolChain &TC,
+                                 SmallVectorImpl<std::string> &Names) const;
 
 public:
   Driver(StringRef _ClangExecutable,
          StringRef _DefaultTargetTriple,
-         StringRef _DefaultImageName,
          DiagnosticsEngine &_Diags);
   ~Driver();
 
@@ -229,6 +238,9 @@ public:
     InstalledDir = Value;
   }
 
+  bool isSaveTempsEnabled() const { return SaveTemps != SaveTempsNone; }
+  bool isSaveTempsObj() const { return SaveTemps == SaveTempsObj; }
+
   /// @}
   /// @name Primary Functionality
   /// @{
@@ -250,7 +262,7 @@ public:
 
   /// ParseArgStrings - Parse the given list of strings into an
   /// ArgList.
-  llvm::opt::InputArgList *ParseArgStrings(ArrayRef<const char *> Args);
+  llvm::opt::InputArgList ParseArgStrings(ArrayRef<const char *> Args);
 
   /// BuildInputs - Construct the list of inputs and their types from 
   /// the given arguments.
@@ -259,7 +271,7 @@ public:
   /// \param Args - The input arguments.
   /// \param Inputs - The list to store the resulting compilation 
   /// inputs onto.
-  void BuildInputs(const ToolChain &TC, const llvm::opt::DerivedArgList &Args,
+  void BuildInputs(const ToolChain &TC, llvm::opt::DerivedArgList &Args,
                    InputList &Inputs) const;
 
   /// BuildActions - Construct the list of actions to perform for the
@@ -292,16 +304,16 @@ public:
   /// arguments and return an appropriate exit code.
   ///
   /// This routine handles additional processing that must be done in addition
-  /// to just running the subprocesses, for example reporting errors, removing
-  /// temporary files, etc.
-  int ExecuteCompilation(const Compilation &C,
-     SmallVectorImpl< std::pair<int, const Command *> > &FailingCommands) const;
+  /// to just running the subprocesses, for example reporting errors, setting
+  /// up response files, removing temporary files, etc.
+  int ExecuteCompilation(Compilation &C,
+     SmallVectorImpl< std::pair<int, const Command *> > &FailingCommands);
   
   /// generateCompilationDiagnostics - Generate diagnostics information 
   /// including preprocessed source file(s).
   /// 
   void generateCompilationDiagnostics(Compilation &C,
-                                      const Command *FailingCommand);
+                                      const Command &FailingCommand);
 
   /// @}
   /// @name Helper Methods
@@ -344,8 +356,9 @@ public:
   /// ConstructAction - Construct the appropriate action to do for
   /// \p Phase on the \p Input, taking in to account arguments
   /// like -fsyntax-only or --analyze.
-  Action *ConstructPhaseAction(const llvm::opt::ArgList &Args, phases::ID Phase,
-                               Action *Input) const;
+  std::unique_ptr<Action>
+  ConstructPhaseAction(const ToolChain &TC, const llvm::opt::ArgList &Args,
+                       phases::ID Phase, std::unique_ptr<Action> Input) const;
 
   /// BuildJobsForAction - Construct the jobs to perform for the
   /// action \p A.
@@ -357,6 +370,9 @@ public:
                           bool MultipleArchs,
                           const char *LinkingOutput,
                           InputInfo &Result) const;
+
+  /// Returns the default name for linked images (e.g., "a.out").
+  const char *getDefaultImageName() const;
 
   /// GetNamedOutputPath - Return the name to use for the output of
   /// the action \p JA. The result is appended to the compilation's
@@ -389,12 +405,12 @@ public:
   bool IsUsingLTO(const llvm::opt::ArgList &Args) const;
 
 private:
-  /// \brief Retrieves a ToolChain for a particular target triple.
+  /// \brief Retrieves a ToolChain for a particular \p Target triple.
   ///
   /// Will cache ToolChains for the life of the driver object, and create them
   /// on-demand.
   const ToolChain &getToolChain(const llvm::opt::ArgList &Args,
-                                StringRef DarwinArchName = "") const;
+                                const llvm::Triple &Target) const;
 
   /// @}
 
@@ -414,6 +430,10 @@ public:
                                 unsigned &Minor, unsigned &Micro,
                                 bool &HadExtra);
 };
+
+/// \return True if the last defined optimization level is -Ofast.
+/// And False otherwise.
+bool isOptimizationLevelFast(const llvm::opt::ArgList &Args);
 
 } // end namespace driver
 } // end namespace clang

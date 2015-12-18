@@ -10,7 +10,7 @@ void __attribute__((stdcall)) bar(float *a) {
 void __attribute__((fastcall(1))) baz(float *a) { // expected-error {{'fastcall' attribute takes no arguments}}
 }
 
-void __attribute__((fastcall)) test0() { // expected-error {{function with no prototype cannot use fastcall calling convention}}
+void __attribute__((fastcall)) test0() {
 }
 
 void __attribute__((fastcall)) test1(void) {
@@ -59,10 +59,10 @@ void __attribute__((cdecl)) ctest3() {}
 typedef __attribute__((stdcall)) void (*PROC)();
 PROC __attribute__((cdecl)) ctest4(const char *x) {}
 
-void __attribute__((pnaclcall)) pnaclfunc(float *a) {} // expected-warning {{calling convention 'pnaclcall' ignored for this target}}
-
 void __attribute__((intel_ocl_bicc)) inteloclbifunc(float *a) {}
 
 typedef void typedef_fun_t(int);
 typedef_fun_t typedef_fun; // expected-note {{previous declaration is here}}
 void __attribute__((stdcall)) typedef_fun(int x) { } // expected-error {{function declared 'stdcall' here was previously declared without calling convention}}
+
+struct type_test {} __attribute__((stdcall));  // expected-warning {{'stdcall' attribute only applies to functions and methods}}

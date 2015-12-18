@@ -3,8 +3,8 @@
 namespace PR16263 {
   const unsigned int n = 1234;
   extern const int &r = (const int&)n;
-  // CHECK: @_ZGRN7PR162631rE = private constant i32 1234,
-  // CHECK: @_ZN7PR162631rE = constant i32* @_ZGRN7PR162631rE,
+  // CHECK: @_ZGRN7PR162631rE_ = internal constant i32 1234,
+  // CHECK: @_ZN7PR162631rE = constant i32* @_ZGRN7PR162631rE_,
 
   extern const int &s = reinterpret_cast<const int&>(n);
   // CHECK: @_ZN7PR16263L1nE = internal constant i32 1234, align 4
@@ -14,17 +14,39 @@ namespace PR16263 {
   struct B { int n; };
   struct C : A, B {};
   extern const A &&a = (A&&)(A&&)(C&&)(C{});
-  // CHECK: @_ZGRN7PR162631aE = private global {{.*}} zeroinitializer,
-  // CHECK: @_ZN7PR162631aE = constant {{.*}} bitcast ({{.*}}* @_ZGRN7PR162631aE to
+  // CHECK: @_ZGRN7PR162631aE_ = internal global {{.*}} zeroinitializer,
+  // CHECK: @_ZN7PR162631aE = constant {{.*}} bitcast ({{.*}}* @_ZGRN7PR162631aE_ to
 
   extern const int &&t = ((B&&)C{}).n;
-  // CHECK: @_ZGRN7PR162631tE = private global {{.*}} zeroinitializer,
-  // CHECK: @_ZN7PR162631tE = constant i32* {{.*}}* @_ZGRN7PR162631tE {{.*}} 4
+  // CHECK: @_ZGRN7PR162631tE_ = internal global {{.*}} zeroinitializer,
+  // CHECK: @_ZN7PR162631tE = constant i32* {{.*}}* @_ZGRN7PR162631tE_ {{.*}} 4
 
   struct D { double d; C c; };
   extern const int &&u = (123, static_cast<B&&>(0, ((D&&)D{}).*&D::c).n);
-  // CHECK: @_ZGRN7PR162631uE = private global {{.*}} zeroinitializer
-  // CHECK: @_ZN7PR162631uE = constant i32* {{.*}} @_ZGRN7PR162631uE {{.*}} 12
+  // CHECK: @_ZGRN7PR162631uE_ = internal global {{.*}} zeroinitializer
+  // CHECK: @_ZN7PR162631uE = constant i32* {{.*}} @_ZGRN7PR162631uE_ {{.*}} 12
+}
+
+namespace PR20227 {
+  struct A { ~A(); };
+  struct B { virtual ~B(); };
+  struct C : B {};
+
+  A &&a = dynamic_cast<A&&>(A{});
+  // CHECK: @_ZGRN7PR202271aE_ = internal global
+
+  B &&b = dynamic_cast<C&&>(dynamic_cast<B&&>(C{}));
+  // CHECK: @_ZGRN7PR202271bE_ = internal global
+
+  B &&c = static_cast<C&&>(static_cast<B&&>(C{}));
+  // CHECK: @_ZGRN7PR202271cE_ = internal global
+}
+
+namespace BraceInit {
+  typedef const int &CIR;
+  CIR x = CIR{3};
+  // CHECK: @_ZGRN9BraceInit1xE_ = internal constant i32 3
+  // CHECK: @_ZN9BraceInit1xE = constant i32* @_ZGRN9BraceInit1xE_
 }
 
 struct A {
@@ -310,7 +332,7 @@ int& f(int);
 void g() {
   // CHECK: call void @_ZN3T121AC1Ev
   // CHECK-NEXT: call i32 @_ZN3T121A1fEv(
-  // CHECK-NEXT: call i32* @_ZN3T121fEi(
+  // CHECK-NEXT: call dereferenceable({{[0-9]+}}) i32* @_ZN3T121fEi(
   // CHECK-NEXT: call void @_ZN3T121AD1Ev(
   int& i = f(A().f());
 }
@@ -325,7 +347,7 @@ namespace PR6648 {
   struct D;
   D& zed(B);
   void foobar() {
-    // CHECK: call %"struct.PR6648::D"* @_ZN6PR66483zedENS_1BE
+    // CHECK: call nonnull %"struct.PR6648::D"* @_ZN6PR66483zedENS_1BE
     zed(foo);
   }
 }
@@ -412,10 +434,10 @@ namespace Elision {
     // CHECK-NEXT: [[J:%.*]] = alloca [[A]], align 8
 
     // CHECK:      call void @_ZN7Elision1AC1Ev([[A]]* [[I]])
-    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[I]], [[A]]* [[X:%.*]])
+    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[I]], [[A]]* dereferenceable({{[0-9]+}}) [[X:%.*]])
     A i = (c ? A() : x);
 
-    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[J]], [[A]]* [[X]])
+    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[J]], [[A]]* dereferenceable({{[0-9]+}}) [[X]])
     // CHECK:      call void @_ZN7Elision1AC1Ev([[A]]* [[J]])
     A j = (c ? x : A());
 
@@ -435,10 +457,10 @@ namespace Elision {
   A test3(int v, A x) {
     if (v < 5)
     // CHECK:      call void @_ZN7Elision1AC1Ev([[A]]* [[RET:%.*]])
-    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[RET]], [[A]]* [[X:%.*]])
+    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[RET]], [[A]]* dereferenceable({{[0-9]+}}) [[X:%.*]])
       return (v < 0 ? A() : x);
     else
-    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[RET]], [[A]]* [[X]])
+    // CHECK:      call void @_ZN7Elision1AC1ERKS0_([[A]]* [[RET]], [[A]]* dereferenceable({{[0-9]+}}) [[X]])
     // CHECK:      call void @_ZN7Elision1AC1Ev([[A]]* [[RET]])
       return (v > 10 ? x : A());
 
@@ -453,17 +475,17 @@ namespace Elision {
     // CHECK-NEXT: call void @_ZN7Elision1AC1Ev([[A]]* [[X]])
     A x;
 
-    // CHECK-NEXT: [[XS0:%.*]] = getelementptr inbounds [2 x [[A]]]* [[XS]], i64 0, i64 0
+    // CHECK-NEXT: [[XS0:%.*]] = getelementptr inbounds [2 x [[A]]], [2 x [[A]]]* [[XS]], i64 0, i64 0
     // CHECK-NEXT: call void @_ZN7Elision1AC1Ev([[A]]* [[XS0]])
-    // CHECK-NEXT: [[XS1:%.*]] = getelementptr inbounds [[A]]* [[XS0]], i64 1
-    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[XS1]], [[A]]* [[X]])
+    // CHECK-NEXT: [[XS1:%.*]] = getelementptr inbounds [[A]], [[A]]* [[XS0]], i64 1
+    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[XS1]], [[A]]* dereferenceable({{[0-9]+}}) [[X]])
     A xs[] = { A(), x };
 
-    // CHECK-NEXT: [[BEGIN:%.*]] = getelementptr inbounds [2 x [[A]]]* [[XS]], i32 0, i32 0
-    // CHECK-NEXT: [[END:%.*]] = getelementptr inbounds [[A]]* [[BEGIN]], i64 2
+    // CHECK-NEXT: [[BEGIN:%.*]] = getelementptr inbounds [2 x [[A]]], [2 x [[A]]]* [[XS]], i32 0, i32 0
+    // CHECK-NEXT: [[END:%.*]] = getelementptr inbounds [[A]], [[A]]* [[BEGIN]], i64 2
     // CHECK-NEXT: br label
     // CHECK:      [[AFTER:%.*]] = phi [[A]]*
-    // CHECK-NEXT: [[CUR:%.*]] = getelementptr inbounds [[A]]* [[AFTER]], i64 -1
+    // CHECK-NEXT: [[CUR:%.*]] = getelementptr inbounds [[A]], [[A]]* [[AFTER]], i64 -1
     // CHECK-NEXT: call void @_ZN7Elision1AD1Ev([[A]]* [[CUR]])
     // CHECK-NEXT: [[T0:%.*]] = icmp eq [[A]]* [[CUR]], [[BEGIN]]
     // CHECK-NEXT: br i1 [[T0]],
@@ -482,22 +504,22 @@ namespace Elision {
     // CHECK-NEXT: [[BT2:%.*]] = alloca [[B]], align 8
 
     // CHECK:      call void @_ZN7Elision1BC1Ev([[B]]* [[BT0]])
-    // CHECK-NEXT: [[AM:%.*]] = getelementptr inbounds [[B]]* [[BT0]], i32 0, i32 0
-    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[AT0]], [[A]]* [[AM]])
+    // CHECK-NEXT: [[AM:%.*]] = getelementptr inbounds [[B]], [[B]]* [[BT0]], i32 0, i32 0
+    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[AT0]], [[A]]* dereferenceable({{[0-9]+}}) [[AM]])
     // CHECK-NEXT: call void @_ZN7Elision5takeAENS_1AE([[A]]* [[AT0]])
     // CHECK-NEXT: call void @_ZN7Elision1AD1Ev([[A]]* [[AT0]])
     // CHECK-NEXT: call void @_ZN7Elision1BD1Ev([[B]]* [[BT0]])
     takeA(B().a);
 
     // CHECK-NEXT: call void @_ZN7Elision1BC1Ev([[B]]* [[BT1]])
-    // CHECK-NEXT: [[AM:%.*]] = getelementptr inbounds [[B]]* [[BT1]], i32 0, i32 0
-    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[X]], [[A]]* [[AM]])
+    // CHECK-NEXT: [[AM:%.*]] = getelementptr inbounds [[B]], [[B]]* [[BT1]], i32 0, i32 0
+    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[X]], [[A]]* dereferenceable({{[0-9]+}}) [[AM]])
     // CHECK-NEXT: call void @_ZN7Elision1BD1Ev([[B]]* [[BT1]])
     A x = B().a;
 
     // CHECK-NEXT: call void @_ZN7Elision1BC1Ev([[B]]* [[BT2]])
-    // CHECK-NEXT: [[AM:%.*]] = getelementptr inbounds [[B]]* [[BT2]], i32 0, i32 0
-    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[RET:%.*]], [[A]]* [[AM]])
+    // CHECK-NEXT: [[AM:%.*]] = getelementptr inbounds [[B]], [[B]]* [[BT2]], i32 0, i32 0
+    // CHECK-NEXT: call void @_ZN7Elision1AC1ERKS0_([[A]]* [[RET:%.*]], [[A]]* dereferenceable({{[0-9]+}}) [[AM]])
     // CHECK-NEXT: call void @_ZN7Elision1BD1Ev([[B]]* [[BT2]])
     return B().a;
 
@@ -509,7 +531,7 @@ namespace Elision {
   struct C { operator A() const; };
   void test6(const C *x) {
     // CHECK:      [[T0:%.*]] = alloca [[A]], align 8
-    // CHECK:      [[X:%.*]] = load [[C]]** {{%.*}}, align 8
+    // CHECK:      [[X:%.*]] = load [[C]]*, [[C]]** {{%.*}}, align 8
     // CHECK-NEXT: call void @_ZNK7Elision1CcvNS_1AEEv([[A]]* sret [[T0]], [[C]]* [[X]])
     // CHECK-NEXT: call void @_ZNK7Elision1A3fooEv([[A]]* [[T0]])
     // CHECK-NEXT: call void @_ZN7Elision1AD1Ev([[A]]* [[T0]])
@@ -535,11 +557,11 @@ namespace PR8623 {
     // CHECK:      call void @_ZN6PR86231AC1Ei([[A]]* [[TMP]], i32 3)
     // CHECK-NEXT: store i1 true, i1* [[RCONS]]
     // CHECK-NEXT: br label
-    // CHECK:      load i1* [[RCONS]]
+    // CHECK:      load i1, i1* [[RCONS]]
     // CHECK-NEXT: br i1
     // CHECK:      call void @_ZN6PR86231AD1Ev([[A]]* [[TMP]])
     // CHECK-NEXT: br label
-    // CHECK:      load i1* [[LCONS]]
+    // CHECK:      load i1, i1* [[LCONS]]
     // CHECK-NEXT: br i1
     // CHECK:      call void @_ZN6PR86231AD1Ev([[A]]* [[TMP]])
     // CHECK-NEXT: br label
@@ -553,12 +575,12 @@ namespace PR11365 {
 
   // CHECK-LABEL: define void @_ZN7PR113653fooEv(
   void foo() {
-    // CHECK: [[BEGIN:%.*]] = getelementptr inbounds [3 x [[A:%.*]]]* {{.*}}, i32 0, i32 0
-    // CHECK-NEXT: [[END:%.*]] = getelementptr inbounds [[A]]* [[BEGIN]], i64 3
+    // CHECK: [[BEGIN:%.*]] = getelementptr inbounds [3 x [[A:%.*]]], [3 x [[A:%.*]]]* {{.*}}, i32 0, i32 0
+    // CHECK-NEXT: [[END:%.*]] = getelementptr inbounds [[A]], [[A]]* [[BEGIN]], i64 3
     // CHECK-NEXT: br label
 
     // CHECK: [[PHI:%.*]] = phi
-    // CHECK-NEXT: [[ELEM:%.*]] = getelementptr inbounds [[A]]* [[PHI]], i64 -1
+    // CHECK-NEXT: [[ELEM:%.*]] = getelementptr inbounds [[A]], [[A]]* [[PHI]], i64 -1
     // CHECK-NEXT: call void @_ZN7PR113651AD1Ev([[A]]* [[ELEM]])
     // CHECK-NEXT: icmp eq [[A]]* [[ELEM]], [[BEGIN]]
     // CHECK-NEXT: br i1
@@ -596,23 +618,23 @@ namespace BindToSubobject {
 
   void f(), g();
 
-  // CHECK: call void @_ZN15BindToSubobject1AC1Ev({{.*}} @_ZGRN15BindToSubobject1aE)
-  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1AD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1aE to i8*), i8* @__dso_handle)
-  // CHECK: store i32* getelementptr inbounds ({{.*}} @_ZGRN15BindToSubobject1aE, i32 0, i32 0), i32** @_ZN15BindToSubobject1aE, align 8
+  // CHECK: call void @_ZN15BindToSubobject1AC1Ev({{.*}} @_ZGRN15BindToSubobject1aE_)
+  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1AD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1aE_ to i8*), i8* @__dso_handle)
+  // CHECK: store i32* getelementptr inbounds ({{.*}} @_ZGRN15BindToSubobject1aE_, i32 0, i32 0), i32** @_ZN15BindToSubobject1aE, align 8
   int &&a = A().a;
 
   // CHECK: call void @_ZN15BindToSubobject1fEv()
-  // CHECK: call void @_ZN15BindToSubobject1AC1Ev({{.*}} @_ZGRN15BindToSubobject1bE)
-  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1AD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1bE to i8*), i8* @__dso_handle)
-  // CHECK: store i32* getelementptr inbounds ({{.*}} @_ZGRN15BindToSubobject1bE, i32 0, i32 0), i32** @_ZN15BindToSubobject1bE, align 8
+  // CHECK: call void @_ZN15BindToSubobject1AC1Ev({{.*}} @_ZGRN15BindToSubobject1bE_)
+  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1AD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1bE_ to i8*), i8* @__dso_handle)
+  // CHECK: store i32* getelementptr inbounds ({{.*}} @_ZGRN15BindToSubobject1bE_, i32 0, i32 0), i32** @_ZN15BindToSubobject1bE, align 8
   int &&b = (f(), A().a);
 
   int A::*h();
 
   // CHECK: call void @_ZN15BindToSubobject1fEv()
   // CHECK: call void @_ZN15BindToSubobject1gEv()
-  // CHECK: call void @_ZN15BindToSubobject1AC1Ev({{.*}} @_ZGRN15BindToSubobject1cE)
-  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1AD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1cE to i8*), i8* @__dso_handle)
+  // CHECK: call void @_ZN15BindToSubobject1AC1Ev({{.*}} @_ZGRN15BindToSubobject1cE_)
+  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1AD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1cE_ to i8*), i8* @__dso_handle)
   // CHECK: call {{.*}} @_ZN15BindToSubobject1hE
   // CHECK: getelementptr
   // CHECK: store i32* {{.*}}, i32** @_ZN15BindToSubobject1cE, align 8
@@ -623,8 +645,8 @@ namespace BindToSubobject {
     A a;
   };
 
-  // CHECK: call void @_ZN15BindToSubobject1BC1Ev({{.*}} @_ZGRN15BindToSubobject1dE)
-  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1BD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1dE to i8*), i8* @__dso_handle)
+  // CHECK: call void @_ZN15BindToSubobject1BC1Ev({{.*}} @_ZGRN15BindToSubobject1dE_)
+  // CHECK: call i32 @__cxa_atexit({{.*}} bitcast ({{.*}} @_ZN15BindToSubobject1BD1Ev to void (i8*)*), i8* bitcast ({{.*}} @_ZGRN15BindToSubobject1dE_ to i8*), i8* @__dso_handle)
   // CHECK: call {{.*}} @_ZN15BindToSubobject1hE
   // CHECK: getelementptr {{.*}} getelementptr
   // CHECK: store i32* {{.*}}, i32** @_ZN15BindToSubobject1dE, align 8
@@ -637,9 +659,9 @@ namespace Bitfield {
   // Do not lifetime extend the S() temporary here.
   // CHECK: alloca
   // CHECK: call {{.*}}memset
-  // CHECK: store i32 {{.*}}, i32* @_ZGRN8Bitfield1rE
+  // CHECK: store i32 {{.*}}, i32* @_ZGRN8Bitfield1rE_
   // CHECK: call void @_ZN8Bitfield1SD1
-  // CHECK: store i32* @_ZGRN8Bitfield1rE, i32** @_ZN8Bitfield1rE, align 8
+  // CHECK: store i32* @_ZGRN8Bitfield1rE_, i32** @_ZN8Bitfield1rE, align 8
   int &&r = S().a;
 }
 
@@ -652,14 +674,14 @@ namespace Vector {
   };
   // CHECK: alloca
   // CHECK: extractelement
-  // CHECK: store i32 {{.*}}, i32* @_ZGRN6Vector1rE
-  // CHECK: store i32* @_ZGRN6Vector1rE, i32** @_ZN6Vector1rE,
+  // CHECK: store i32 {{.*}}, i32* @_ZGRN6Vector1rE_
+  // CHECK: store i32* @_ZGRN6Vector1rE_, i32** @_ZN6Vector1rE,
   int &&r = S().v[1];
 
   // CHECK: alloca
   // CHECK: extractelement
-  // CHECK: store i32 {{.*}}, i32* @_ZGRN6Vector1sE
-  // CHECK: store i32* @_ZGRN6Vector1sE, i32** @_ZN6Vector1sE,
+  // CHECK: store i32 {{.*}}, i32* @_ZGRN6Vector1sE_
+  // CHECK: store i32* @_ZGRN6Vector1sE_, i32** @_ZN6Vector1sE,
   int &&s = S().w[1];
   // FIXME PR16204: The following code leads to an assertion in Sema.
   //int &&s = S().w.y;
@@ -761,8 +783,8 @@ namespace PR14130 {
   struct S { S(int); };
   struct U { S &&s; };
   U v { { 0 } };
-  // CHECK: call void @_ZN7PR141301SC1Ei({{.*}} @_ZGRN7PR141301vE, i32 0)
-  // CHECK: store {{.*}} @_ZGRN7PR141301vE, {{.*}} @_ZN7PR141301vE
+  // CHECK: call void @_ZN7PR141301SC1Ei({{.*}} @_ZGRN7PR141301vE_, i32 0)
+  // CHECK: store {{.*}} @_ZGRN7PR141301vE_, {{.*}} @_ZN7PR141301vE
 }
 
 namespace Ctor {

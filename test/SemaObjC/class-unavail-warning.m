@@ -1,8 +1,8 @@
-// RUN: %clang_cc1  -fsyntax-only -verify %s
+// RUN: %clang_cc1  -fsyntax-only  -triple x86_64-apple-darwin10 -verify %s
 // rdar://9092208
 
 __attribute__((unavailable("not available")))
-@interface MyClass { // expected-note 8 {{declaration has been explicitly marked unavailable here}}
+@interface MyClass { // expected-note 8 {{'MyClass' has been explicitly marked unavailable here}}
 @public
     void *_test;
     MyClass *ivar; // no error.
@@ -15,7 +15,7 @@ __attribute__((unavailable("not available")))
 
 @end
 
-@interface Foo {
+@interface Gorf {
   MyClass *ivar; // expected-error {{unavailable}}
 }
 - (MyClass *)meth; // expected-error {{unavailable}}
@@ -40,3 +40,61 @@ int main() {
 
  return 0;
 }
+
+// rdar://16681279
+@interface NSObject @end
+
+__attribute__((visibility("default"))) __attribute__((availability(macosx,unavailable)))
+@interface Foo : NSObject @end // expected-note 3 {{'Foo' has been explicitly marked unavailable here}}
+@interface AppDelegate  : NSObject
+@end
+
+@class Foo;
+
+@implementation AppDelegate
+- (void) applicationDidFinishLaunching
+{
+  Foo *foo = 0; // expected-error {{'Foo' is unavailable}}
+}
+@end
+
+@class Foo;
+Foo *g_foo = 0; // expected-error {{'Foo' is unavailable}}
+
+@class Foo;
+@class Foo;
+@class Foo;
+Foo * f_func() { // expected-error {{'Foo' is unavailable}}
+  return 0; 
+}
+
+#define UNAVAILABLE __attribute__((unavailable("not available")))
+
+UNAVAILABLE
+@interface Base // expected-note {{unavailable here}}
+@end
+
+UNAVAILABLE
+@protocol SomeProto // expected-note 4 {{unavailable here}}
+@end
+
+@interface Sub : Base<SomeProto> // expected-error 2 {{unavailable}}
+@end
+@interface IP<SomeProto> // expected-error {{unavailable}}
+@end
+@protocol SubProt<SomeProto> // expected-error {{unavailable}}
+@end
+@interface Sub(cat)<SomeProto> // expected-error {{unavailable}}
+@end
+
+UNAVAILABLE
+@interface UnavailSub : Base<SomeProto> // no error
+@end
+UNAVAILABLE
+@interface UnavailIP<SomeProto> // no error
+@end
+UNAVAILABLE
+@protocol UnavailProt<SomeProto> // no error
+@end
+@interface UnavailSub(cat)<SomeProto> // no error
+@end

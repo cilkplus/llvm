@@ -7,16 +7,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef CLANG_DRIVER_TOOLCHAIN_H_
-#define CLANG_DRIVER_TOOLCHAIN_H_
+#ifndef LLVM_CLANG_DRIVER_TOOLCHAIN_H
+#define LLVM_CLANG_DRIVER_TOOLCHAIN_H
 
+#include "clang/Basic/Sanitizers.h"
 #include "clang/Driver/Action.h"
+#include "clang/Driver/Multilib.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/Path.h"
+#include <memory>
 #include <string>
 
 namespace llvm {
@@ -40,7 +42,7 @@ namespace driver {
 /// ToolChain - Access to tools for a single platform.
 class ToolChain {
 public:
-  typedef SmallVector<std::string, 4> path_list;
+  typedef SmallVector<std::string, 16> path_list;
 
   enum CXXStdlibType {
     CST_Libcxx,
@@ -52,10 +54,20 @@ public:
     RLT_Libgcc
   };
 
+  enum RTTIMode {
+    RM_EnabledExplicitly,
+    RM_EnabledImplicitly,
+    RM_DisabledExplicitly,
+    RM_DisabledImplicitly
+  };
+
 private:
   const Driver &D;
   const llvm::Triple Triple;
   const llvm::opt::ArgList &Args;
+  // We need to initialize CachedRTTIArg before CachedRTTIMode
+  const llvm::opt::Arg *const CachedRTTIArg;
+  const RTTIMode CachedRTTIMode;
 
   /// The list of toolchain specific path prefixes to search for
   /// files.
@@ -65,17 +77,19 @@ private:
   /// programs.
   path_list ProgramPaths;
 
-  mutable OwningPtr<Tool> Clang;
-  mutable OwningPtr<Tool> Assemble;
-  mutable OwningPtr<Tool> Link;
+  mutable std::unique_ptr<Tool> Clang;
+  mutable std::unique_ptr<Tool> Assemble;
+  mutable std::unique_ptr<Tool> Link;
   Tool *getClang() const;
   Tool *getAssemble() const;
   Tool *getLink() const;
   Tool *getClangAs() const;
 
-  mutable OwningPtr<SanitizerArgs> SanitizerArguments;
+  mutable std::unique_ptr<SanitizerArgs> SanitizerArguments;
 
 protected:
+  MultilibSet Multilibs;
+
   ToolChain(const Driver &D, const llvm::Triple &T,
             const llvm::opt::ArgList &Args);
 
@@ -115,7 +129,7 @@ public:
 
   /// \brief Provide the default architecture name (as expected by -arch) for
   /// this toolchain. Note t
-  std::string getDefaultUniversalArchName() const;
+  StringRef getDefaultUniversalArchName() const;
 
   std::string getTripleString() const {
     return Triple.getTriple();
@@ -127,7 +141,15 @@ public:
   path_list &getProgramPaths() { return ProgramPaths; }
   const path_list &getProgramPaths() const { return ProgramPaths; }
 
+  const MultilibSet &getMultilibs() const { return Multilibs; }
+
   const SanitizerArgs& getSanitizerArgs() const;
+
+  // Returns the Arg * that explicitly turned on/off rtti, or nullptr.
+  const llvm::opt::Arg *getRTTIArg() const { return CachedRTTIArg; }
+
+  // Returns the RTTIMode for the toolchain with the current arguments.
+  RTTIMode getRTTIMode() const { return CachedRTTIMode; }
 
   // Tool access.
 
@@ -139,16 +161,23 @@ public:
   virtual llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args,
                 const char *BoundArch) const {
-    return 0;
+    return nullptr;
   }
 
   /// Choose a tool to use to handle the action \p JA.
-  Tool *SelectTool(const JobAction &JA) const;
+  ///
+  /// This can be overridden when a particular ToolChain needs to use
+  /// a C compiler other than Clang.
+  virtual Tool *SelectTool(const JobAction &JA) const;
 
   // Helper methods
 
   std::string GetFilePath(const char *Name) const;
   std::string GetProgramPath(const char *Name) const;
+
+  /// Returns the linker path, respecting the -fuse-ld= argument to determine
+  /// the linker suffix or name.
+  std::string GetLinkerPath() const;
 
   /// \brief Dispatch to the specific toolchain for verbose printing.
   ///
@@ -158,6 +187,10 @@ public:
   virtual void printVerboseInfo(raw_ostream &OS) const {};
 
   // Platform defaults information
+
+  /// \brief Returns true if the toolchain is targeting a non-native
+  /// architecture.
+  virtual bool isCrossCompiling() const;
 
   /// HasNativeLTOLinker - Check whether the linker and related tools have
   /// native LLVM support.
@@ -193,7 +226,7 @@ public:
   virtual bool UseObjCMixedDispatch() const { return false; }
 
   /// GetDefaultStackProtectorLevel - Get the default stack protector level for
-  /// this tool chain (0=off, 1=on, 2=all).
+  /// this tool chain (0=off, 1=on, 2=strong, 3=all).
   virtual unsigned GetDefaultStackProtectorLevel(bool KernelOrKext) const {
     return 0;
   }
@@ -235,6 +268,12 @@ public:
   /// UseSjLjExceptions - Does this tool chain use SjLj exceptions.
   virtual bool UseSjLjExceptions() const { return false; }
 
+  /// getThreadModel() - Which thread model does this target use?
+  virtual std::string getThreadModel() const { return "posix"; }
+
+  /// isThreadModelSupported() - Does this target support a thread model?
+  virtual bool isThreadModelSupported(const StringRef Model) const;
+
   /// ComputeLLVMTriple - Return the LLVM target triple to use, after taking
   /// command line arguments into account.
   virtual std::string
@@ -275,6 +314,9 @@ public:
   virtual void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                                      llvm::opt::ArgStringList &CC1Args) const;
 
+  /// \brief Add warning options that need to be passed to cc1 for this target.
+  virtual void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const;
+
   // GetRuntimeLibType - Determine the runtime library type to use with the
   // given compilation arguments.
   virtual RuntimeLibType
@@ -303,10 +345,13 @@ public:
   /// AddFastMathRuntimeIfAvailable - If a runtime library exists that sets
   /// global flags for unsafe floating point math, add it and return true.
   ///
-  /// This checks for presence of the -ffast-math or -funsafe-math flags.
+  /// This checks for presence of the -Ofast, -ffast-math or -funsafe-math flags.
   virtual bool
   AddFastMathRuntimeIfAvailable(const llvm::opt::ArgList &Args,
                                 llvm::opt::ArgStringList &CmdArgs) const;
+
+  /// \brief Return sanitizers which are available in this toolchain.
+  virtual SanitizerMask getSupportedSanitizers() const;
 };
 
 } // end namespace driver

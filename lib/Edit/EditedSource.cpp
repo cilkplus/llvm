@@ -72,13 +72,11 @@ bool EditedSource::commitInsert(SourceLocation OrigLoc,
     return true;
   }
 
-  Twine concat;
   if (beforePreviousInsertions)
-    concat = Twine(text) + FA.Text;
+    FA.Text = copyString(Twine(text) + FA.Text);
   else
-    concat = Twine(FA.Text) +  text;
+    FA.Text = copyString(Twine(FA.Text) + text);
 
-  FA.Text = copyString(concat);
   return true;
 }
 
@@ -137,7 +135,7 @@ bool EditedSource::commitInsertFromRange(SourceLocation OrigLoc,
     StrVec += text;
   }
 
-  return commitInsert(OrigLoc, Offs, StrVec.str(), beforePreviousInsertions);
+  return commitInsert(OrigLoc, Offs, StrVec, beforePreviousInsertions);
 }
 
 void EditedSource::commitRemove(SourceLocation OrigLoc,
@@ -160,7 +158,7 @@ void EditedSource::commitRemove(SourceLocation OrigLoc,
   }
 
   FileOffset TopBegin, TopEnd;
-  FileEdit *TopFA = 0;
+  FileEdit *TopFA = nullptr;
 
   if (I == FileEdits.end()) {
     FileEditsTy::iterator
@@ -282,6 +280,12 @@ static void adjustRemoval(const SourceManager &SM, const LangOptions &LangOpts,
   unsigned begin = offs.getOffset();
   unsigned end = begin + len;
 
+  // Do not try to extend the removal if we're at the end of the buffer already.
+  if (end == buffer.size())
+    return;
+
+  assert(begin < buffer.size() && end < buffer.size() && "Invalid range!");
+
   // FIXME: Remove newline.
 
   if (begin == 0) {
@@ -291,9 +295,11 @@ static void adjustRemoval(const SourceManager &SM, const LangOptions &LangOpts,
   }
 
   if (buffer[end] == ' ') {
+    assert((end + 1 != buffer.size() || buffer.data()[end + 1] == 0) &&
+           "buffer not zero-terminated!");
     if (canRemoveWhitespace(/*left=*/buffer[begin-1],
                             /*beforeWSpace=*/buffer[end-1],
-                            /*right=*/buffer[end+1],
+                            /*right=*/buffer.data()[end + 1], // zero-terminated
                             LangOpts))
       ++len;
     return;
@@ -356,14 +362,14 @@ void EditedSource::applyRewrites(EditsReceiver &receiver) {
       continue;
     }
 
-    applyRewrite(receiver, StrVec.str(), CurOffs, CurLen, SourceMgr, LangOpts);
+    applyRewrite(receiver, StrVec, CurOffs, CurLen, SourceMgr, LangOpts);
     CurOffs = offs;
     StrVec = act.Text;
     CurLen = act.RemoveLen;
     CurEnd = CurOffs.getWithOffset(CurLen);
   }
 
-  applyRewrite(receiver, StrVec.str(), CurOffs, CurLen, SourceMgr, LangOpts);
+  applyRewrite(receiver, StrVec, CurOffs, CurLen, SourceMgr, LangOpts);
 }
 
 void EditedSource::clearRewrites() {

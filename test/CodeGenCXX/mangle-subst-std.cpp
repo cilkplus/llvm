@@ -3,20 +3,21 @@
 // Check mangling of Vtables, VTTs, and construction vtables that
 // involve standard substitutions.
 
+
 // CHECK: @_ZTVSd = linkonce_odr unnamed_addr constant 
 // CHECK: @_ZTTSd = linkonce_odr unnamed_addr constant
 // CHECK: @_ZTCSd0_Si = linkonce_odr unnamed_addr constant 
 // CHECK: @_ZTCSd16_So = linkonce_odr unnamed_addr constant
-// CHECK: @_ZTVSo = linkonce_odr unnamed_addr constant
-// CHECK: @_ZTTSo = linkonce_odr unnamed_addr constant
 // CHECK: @_ZTVSi = linkonce_odr unnamed_addr constant
 // CHECK: @_ZTTSi = linkonce_odr unnamed_addr constant
+// CHECK: @_ZTVSo = linkonce_odr unnamed_addr constant
+// CHECK: @_ZTTSo = linkonce_odr unnamed_addr constant
 
 namespace std {
   struct A { A(); };
   
-  // CHECK-LABEL: define void @_ZNSt1AC1Ev(%"struct.std::A"* %this) unnamed_addr
   // CHECK-LABEL: define void @_ZNSt1AC2Ev(%"struct.std::A"* %this) unnamed_addr
+  // CHECK-LABEL: define void @_ZNSt1AC1Ev(%"struct.std::A"* %this) unnamed_addr
   A::A() { }
 };
 

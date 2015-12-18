@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_GR_RVALUE_H
-#define LLVM_CLANG_GR_RVALUE_H
+#ifndef LLVM_CLANG_STATICANALYZER_CORE_PATHSENSITIVE_SVALS_H
+#define LLVM_CLANG_STATICANALYZER_CORE_PATHSENSITIVE_SVALS_H
 
 #include "clang/Basic/LLVM.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramState_Fwd.h"
@@ -63,11 +63,11 @@ protected:
   explicit SVal(const void *d, bool isLoc, unsigned ValKind)
   : Data(d), Kind((isLoc ? LocKind : NonLocKind) | (ValKind << BaseBits)) {}
 
-  explicit SVal(BaseKind k, const void *D = NULL)
+  explicit SVal(BaseKind k, const void *D = nullptr)
     : Data(D), Kind(k) {}
 
 public:
-  explicit SVal() : Data(0), Kind(0) {}
+  explicit SVal() : Data(nullptr), Kind(0) {}
 
   /// \brief Convert to the specified SVal type, asserting that this SVal is of
   /// the desired type.
@@ -203,15 +203,15 @@ class DefinedOrUnknownSVal : public SVal {
 private:
   // We want calling these methods to be a compiler error since they are
   // tautologically false.
-  bool isUndef() const LLVM_DELETED_FUNCTION;
-  bool isValid() const LLVM_DELETED_FUNCTION;
+  bool isUndef() const = delete;
+  bool isValid() const = delete;
   
 protected:
   DefinedOrUnknownSVal() {}
   explicit DefinedOrUnknownSVal(const void *d, bool isLoc, unsigned ValKind)
     : SVal(d, isLoc, ValKind) {}
   
-  explicit DefinedOrUnknownSVal(BaseKind k, void *D = NULL)
+  explicit DefinedOrUnknownSVal(BaseKind k, void *D = nullptr)
     : SVal(k, D) {}
   
 private:
@@ -236,9 +236,9 @@ class DefinedSVal : public DefinedOrUnknownSVal {
 private:
   // We want calling these methods to be a compiler error since they are
   // tautologically true/false.
-  bool isUnknown() const LLVM_DELETED_FUNCTION;
-  bool isUnknownOrUndef() const LLVM_DELETED_FUNCTION;
-  bool isValid() const LLVM_DELETED_FUNCTION;
+  bool isUnknown() const = delete;
+  bool isUnknownOrUndef() const = delete;
+  bool isValid() const = delete;
 protected:
   DefinedSVal() {}
   explicit DefinedSVal(const void *d, bool isLoc, unsigned ValKind)

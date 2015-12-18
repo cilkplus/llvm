@@ -10,8 +10,8 @@
 // routines.
 //
 //===----------------------------------------------------------------------===/
-#ifndef LLVM_CLANG_SEMA_TEMPLATE_DEDUCTION_H
-#define LLVM_CLANG_SEMA_TEMPLATE_DEDUCTION_H
+#ifndef LLVM_CLANG_SEMA_TEMPLATEDEDUCTION_H
+#define LLVM_CLANG_SEMA_TEMPLATEDEDUCTION_H
 
 #include "clang/AST/DeclTemplate.h"
 #include "clang/Basic/PartialDiagnostic.h"
@@ -19,6 +19,7 @@
 
 namespace clang {
 
+struct DeducedPack;
 class TemplateArgumentList;
 class Sema;
 
@@ -43,12 +44,13 @@ class TemplateDeductionInfo {
   /// SFINAE while performing template argument deduction.
   SmallVector<PartialDiagnosticAt, 4> SuppressedDiagnostics;
 
-  TemplateDeductionInfo(const TemplateDeductionInfo &) LLVM_DELETED_FUNCTION;
-  void operator=(const TemplateDeductionInfo &) LLVM_DELETED_FUNCTION;
+  TemplateDeductionInfo(const TemplateDeductionInfo &) = delete;
+  void operator=(const TemplateDeductionInfo &) = delete;
 
 public:
   TemplateDeductionInfo(SourceLocation Loc)
-    : Deduced(0), Loc(Loc), HasSFINAEDiagnostic(false), Expression(0) { }
+    : Deduced(nullptr), Loc(Loc), HasSFINAEDiagnostic(false),
+      Expression(nullptr) {}
 
   /// \brief Returns the location at which template argument is
   /// occurring.
@@ -59,7 +61,7 @@ public:
   /// \brief Take ownership of the deduced template argument list.
   TemplateArgumentList *take() {
     TemplateArgumentList *Result = Deduced;
-    Deduced = 0;
+    Deduced = nullptr;
     return Result;
   }
 
@@ -89,9 +91,7 @@ public:
     if (HasSFINAEDiagnostic)
       return;
     SuppressedDiagnostics.clear();
-    SuppressedDiagnostics.push_back(
-        std::make_pair(Loc, PartialDiagnostic::NullDiagnostic()));
-    SuppressedDiagnostics.back().second.swap(PD);
+    SuppressedDiagnostics.emplace_back(Loc, std::move(PD));
     HasSFINAEDiagnostic = true;
   }
 
@@ -100,9 +100,7 @@ public:
                                PartialDiagnostic PD) {
     if (HasSFINAEDiagnostic)
       return;
-    SuppressedDiagnostics.push_back(
-        std::make_pair(Loc, PartialDiagnostic::NullDiagnostic()));
-    SuppressedDiagnostics.back().second.swap(PD);
+    SuppressedDiagnostics.emplace_back(Loc, std::move(PD));
   }
 
   /// \brief Iterator over the set of suppressed diagnostics.
@@ -161,6 +159,11 @@ public:
   ///   an overloaded function which could not be resolved to a specific
   ///   function.
   Expr *Expression;
+
+  /// \brief Information on packs that we're currently expanding.
+  ///
+  /// FIXME: This should be kept internal to SemaTemplateDeduction.
+  SmallVector<DeducedPack *, 8> PendingDeducedPacks;
 };
 
 } // end namespace sema
@@ -245,8 +248,8 @@ class TemplateSpecCandidateSet {
   SourceLocation Loc;
 
   TemplateSpecCandidateSet(
-      const TemplateSpecCandidateSet &) LLVM_DELETED_FUNCTION;
-  void operator=(const TemplateSpecCandidateSet &) LLVM_DELETED_FUNCTION;
+      const TemplateSpecCandidateSet &) = delete;
+  void operator=(const TemplateSpecCandidateSet &) = delete;
 
   void destroyCandidates();
 
@@ -270,7 +273,7 @@ public:
   /// \brief Add a new candidate with NumConversions conversion sequence slots
   /// to the overload set.
   TemplateSpecCandidate &addCandidate() {
-    Candidates.push_back(TemplateSpecCandidate());
+    Candidates.emplace_back();
     return Candidates.back();
   }
 

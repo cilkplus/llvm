@@ -1,4 +1,6 @@
 // RUN: %clang_cc1 -triple x86_64-none-linux-gnu -emit-llvm -g %s -o - | FileCheck %s
+// RUN: %clang_cc1 -triple i686-pc-windows-msvc -emit-llvm -g %s -o - | FileCheck %s --check-prefix=MSVC
+
 template<typename T> struct Identity {
   typedef T Type;
 };
@@ -43,19 +45,40 @@ namespace VirtualDtor {
 }
 
 namespace VirtualBase {
-  struct A { };
-  struct B : virtual A { };
+  struct A { int a; };
+  struct B : virtual A { int b; };
 
   void f() {
     B b;
   }
 }
 
-void foo() {
-  const wchar_t c = L'x';
-  wchar_t d = c;
-}
+// CHECK: define void @_ZN7pr147634funcENS_3fooE
+// CHECK: call void @llvm.dbg.declare({{.*}}, metadata ![[F:.*]], metadata ![[EXPR:.*]])
 
+// MSVC: [[VBASE_B:![0-9]+]] = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "B",{{.*}} line: 49
+// MSVC-SAME:                                            size: 96, align: 32
+// MSVC-NOT:                                             offset:
+// MSVC-NOT:                                             DIFlagFwdDecl
+// MSVC-SAME:                                            elements: [[VBASE_B_DEF:![0-9]+]]
+// MSVC: [[VBASE_B_DEF]] = !{[[VBASE_A_IN_B:![0-9]+]],
+//
+// Look for the vbtable offset of A, which should be 4.
+// MSVC: [[VBASE_A_IN_B]] = !DIDerivedType(tag: DW_TAG_inheritance, scope: [[VBASE_B]],
+// MSVC-SAME:                              baseType: !{{[0-9]*}}
+
+// CHECK: !DICompositeType(tag: DW_TAG_structure_type, name: "B",{{.*}} line: 49,
+// CHECK-SAME:             size: 128, align: 64,
+// CHECK-NOT:              offset:
+// CHECK-NOT:              DIFlagFwdDecl
+// CHECK-SAME:             elements: [[VBASE_B_DEF:![^,)]+]]
+// CHECK: [[VBASE_B_DEF]] = !{[[VBASE_A_IN_B:![0-9]+]],
+//
+// Look for the vtable offset offset, which should be -24.
+// CHECK: [[VBASE_A_IN_B]] = !DIDerivedType(tag: DW_TAG_inheritance
+// CHECK-SAME:                              scope: !"_ZTSN11VirtualBase1BE"
+// CHECK-SAME:                              baseType: !"_ZTSN11VirtualBase1AE"
+// CHECK-SAME:                              offset: 24,
 namespace b5249287 {
 template <typename T> class A {
   struct B;
@@ -77,27 +100,53 @@ foo func(foo f) {
   return f; // reference 'f' for now because otherwise we hit another bug
 }
 
-// CHECK: [[FOO:![0-9]*]] = metadata !{i32 {{[0-9]*}}, metadata !{{[0-9]*}}, metadata [[PR14763:![0-9]*]], {{.*}} ; [ DW_TAG_structure_type ] [foo]
-// CHECK: [[PR14763]] = {{.*}} ; [ DW_TAG_namespace ] [pr14763]
-// CHECK: [[INCTYPE:![0-9]*]] = {{.*}} ; [ DW_TAG_structure_type ] [incomplete]{{.*}} [decl]
-// CHECK: metadata [[A_MEM:![0-9]*]], i32 0, null, null, metadata !"_ZTSN7pr162141aE"} ; [ DW_TAG_structure_type ] [a]
-// CHECK: [[A_MEM]] = metadata !{metadata [[A_I:![0-9]*]]}
-// CHECK: [[A_I]] = {{.*}} ; [ DW_TAG_member ] [i] {{.*}} [from int]
-// CHECK: ; [ DW_TAG_structure_type ] [b] {{.*}}[decl]
+// CHECK: !DICompositeType(tag: DW_TAG_structure_type, name: "foo"
+// CHECK-SAME:             scope: [[PR14763:![0-9]+]]
+// CHECK-SAME:             identifier: "[[FOO:.*]]"
+// CHECK: [[PR14763]] = !DINamespace(name: "pr14763"
+// CHECK: [[INCTYPE:![0-9]*]] = !DICompositeType(tag: DW_TAG_structure_type, name: "incomplete"
+// CHECK-SAME:                                   DIFlagFwdDecl
+// CHECK: !DICompositeType(tag: DW_TAG_structure_type, name: "a"
+// CHECK-SAME:             elements: [[A_MEM:![0-9]+]]
+// CHECK-SAME:             identifier: "_ZTSN7pr162141aE"
+// CHECK: [[A_MEM]] = !{[[A_I:![0-9]*]]}
+// CHECK: [[A_I]] = !DIDerivedType(tag: DW_TAG_member, name: "i"
+// CHECK: !DICompositeType(tag: DW_TAG_structure_type, name: "b"
+// CHECK-SAME:             DIFlagFwdDecl
 
-// CHECK: [[FUNC:![0-9]*]] = {{.*}} metadata !"_ZN7pr147634funcENS_3fooE", i32 {{[0-9]*}}, metadata [[FUNC_TYPE:![0-9]*]], {{.*}} ; [ DW_TAG_subprogram ] {{.*}} [def] [func]
+// CHECK: [[FUNC:![0-9]+]] = !DISubprogram(name: "func", linkageName: "_ZN7pr147634funcENS_3fooE"
+// CHECK-SAME:                             type: [[FUNC_TYPE:![0-9]*]]
+// CHECK-SAME:                             isDefinition: true
 }
+
+void foo() {
+  const wchar_t c = L'x';
+  wchar_t d = c;
+}
+
+// CHECK-NOT: !DIGlobalVariable(name: "c"
 
 namespace pr9608 { // also pr9600
 struct incomplete;
 incomplete (*x)[3];
-// CHECK: metadata [[INCARRAYPTR:![0-9]*]], i32 0, i32 1, [3 x i8]** @_ZN6pr96081xE, null} ; [ DW_TAG_variable ] [x]
-// CHECK: [[INCARRAYPTR]] = {{.*}}metadata [[INCARRAY:![0-9]*]]} ; [ DW_TAG_pointer_type ]
-// CHECK: [[INCARRAY]] = {{.*}}metadata !"_ZTSN6pr960810incompleteE", metadata {{![0-9]*}}, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 0, align 0, offset 0] [from _ZTSN6pr960810incompleteE]
+// CHECK: !DIGlobalVariable(name: "x", linkageName: "_ZN6pr96081xE"
+// CHECK-SAME:              type: [[INCARRAYPTR:![0-9]*]]
+// CHECK-SAME:              variable: [3 x i8]** @_ZN6pr96081xE
+// CHECK: [[INCARRAYPTR]] = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: [[INCARRAY:![0-9]+]]
+// CHECK: [[INCARRAY]] = !DICompositeType(tag: DW_TAG_array_type
+// CHECK-NOT:                             line:
+// CHECK-NOT:                             size:
+// CHECK-NOT:                             align:
+// CHECK-NOT:                             offset:
+// CHECK-SAME:                            baseType: !"_ZTSN6pr960810incompleteE"
 }
 
-// For some reason the argument for PR14763 ended up all the way down here
-// CHECK: = metadata !{i32 {{[0-9]*}}, metadata [[FUNC]], {{.*}}, metadata [[FOO]], i32 8192, i32 0} ; [ DW_TAG_arg_variable ] [f]
+// For some reason function arguments ended up down here
+// CHECK: ![[F]] = !DILocalVariable(tag: DW_TAG_arg_variable, name: "f", arg: 1, scope: [[FUNC]]
+// CHECK-SAME:                      type: !"[[FOO]]"
+// CHECK: ![[EXPR]] = !DIExpression(DW_OP_deref)
+
+// CHECK: !DILocalVariable(tag: DW_TAG_auto_variable, name: "c"
 
 namespace pr16214 {
 struct a {

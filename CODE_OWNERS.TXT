@@ -8,6 +8,14 @@ beautification by scripts.  The fields are: name (N), email (E), web-address
 (W), PGP key ID and fingerprint (P), description (D), and snail-mail address
 (S).
 
+N: Aaron Ballman
+E: aaron@aaronballman.com
+D: Clang attributes
+
+N: Alexey Bataev
+E: a.bataev@hotmail.com
+D: OpenMP support
+
 N: Chandler Carruth
 E: chandlerc@gmail.com
 E: chandlerc@google.com
@@ -18,13 +26,19 @@ E: echristo@gmail.com
 D: Debug Information, autotools/configure/make build, inline assembly
 
 N: Doug Gregor
-D: All parts of Clang not covered by someone else
+E: dgregor@apple.com
+D: Emeritus owner
+
+N: Reid Kleckner
+E: rnk@google.com
+D: Microsoft C++ ABI compatibility and general Windows support
 
 N: Anton Korobeynikov
 E: anton@korobeynikov.info
 D: Exception handling, Windows codegen, ARM EABI
 
 N: Ted Kremenek
+E: kremenek@apple.com
 D: Clang Static Analyzer
 
 N: John McCall
@@ -33,8 +47,8 @@ D: Clang LLVM IR generation
 
 N: Chad Rosier
 E: mcrosier@codeaurora.org
-D: MS-inline asm, and the compiler driver
+D: Compiler driver
 
 N: Richard Smith
 E: richard@metafoo.co.uk
-D: Clang Semantic Analysis (tools/clang/lib/Sema/* tools/clang/include/clang/Sema/*)
+D: All parts of Clang not covered by someone else

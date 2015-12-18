@@ -1,13 +1,13 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -fsyntax-only -fobjc-arc -x objective-c %s.result
 // RUN: arcmt-test --args -triple x86_64-apple-darwin10 -fsyntax-only -x objective-c %s > %t
 // RUN: diff %t %s.result
-// DISABLE: mingw32
 
 #include "Common.h"
 
 typedef const struct __CFString * CFStringRef;
 extern const CFStringRef kUTTypePlainText;
 extern const CFStringRef kUTTypeRTF;
+extern CFStringRef kNonConst;
 
 typedef const struct __CFAllocator * CFAllocatorRef;
 typedef const struct __CFUUID * CFUUIDRef;
@@ -29,10 +29,14 @@ struct StrS {
 @end
 
 void f(BOOL b, id p) {
-  NSString *str = (NSString *)kUTTypePlainText;
-  str = b ? kUTTypeRTF : kUTTypePlainText;
-  str = (NSString *)(b ? kUTTypeRTF : kUTTypePlainText);
+  NSString *str = (NSString *)kUTTypePlainText; // no change
+  str = b ? kUTTypeRTF : kUTTypePlainText; // no change
+  str = (NSString *)(b ? kUTTypeRTF : kUTTypePlainText); // no change
   str = (NSString *)p; // no change.
+
+  str = (NSString *)kNonConst;
+  str = b ? kUTTypeRTF : kNonConst;
+  str = (NSString *)(b ? kUTTypeRTF : kNonConst);
 
   CFUUIDRef   _uuid;
   NSString *_uuidString = (NSString *)CFUUIDCreateString(kCFAllocatorDefault, _uuid);

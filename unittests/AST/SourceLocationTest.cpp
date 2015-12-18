@@ -17,11 +17,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTContext.h"
+#include "MatchVerifier.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Tooling/Tooling.h"
 #include "gtest/gtest.h"
-#include "MatchVerifier.h"
 
 namespace clang {
 namespace ast_matchers {
@@ -60,7 +60,7 @@ TEST(RangeVerifier, WrongRange) {
 
 class LabelDeclRangeVerifier : public RangeVerifier<LabelStmt> {
 protected:
-  virtual SourceRange getRange(const LabelStmt &Node) {
+  SourceRange getRange(const LabelStmt &Node) override {
     return Node.getDecl()->getSourceRange();
   }
 };
@@ -109,6 +109,38 @@ TEST(MemberExpr, ImplicitMemberRange) {
                              memberExpr()));
 }
 
+class MemberExprArrowLocVerifier : public RangeVerifier<MemberExpr> {
+protected:
+  SourceRange getRange(const MemberExpr &Node) override {
+     return Node.getOperatorLoc();
+  }
+};
+
+TEST(MemberExpr, ArrowRange) {
+  MemberExprArrowLocVerifier Verifier;
+  Verifier.expectRange(2, 19, 2, 19);
+  EXPECT_TRUE(Verifier.match("struct S { int x; };\n"
+                             "void foo(S *s) { s->x = 0; }",
+                             memberExpr()));
+}
+
+TEST(MemberExpr, MacroArrowRange) {
+  MemberExprArrowLocVerifier Verifier;
+  Verifier.expectRange(1, 24, 1, 24);
+  EXPECT_TRUE(Verifier.match("#define MEMBER(a, b) (a->b)\n"
+                             "struct S { int x; };\n"
+                             "void foo(S *s) { MEMBER(s, x) = 0; }",
+                             memberExpr()));
+}
+
+TEST(MemberExpr, ImplicitArrowRange) {
+  MemberExprArrowLocVerifier Verifier;
+  Verifier.expectRange(0, 0, 0, 0);
+  EXPECT_TRUE(Verifier.match("struct S { int x; void Test(); };\n"
+                             "void S::Test() { x = 1; }",
+                             memberExpr()));
+}
+
 TEST(VarDecl, VMTypeFixedVarDeclRange) {
   RangeVerifier<VarDecl> Verifier;
   Verifier.expectRange(1, 1, 1, 23);
@@ -120,6 +152,18 @@ TEST(CXXConstructorDecl, NoRetFunTypeLocRange) {
   RangeVerifier<CXXConstructorDecl> Verifier;
   Verifier.expectRange(1, 11, 1, 13);
   EXPECT_TRUE(Verifier.match("class C { C(); };", functionDecl()));
+}
+
+TEST(CXXConstructorDecl, DefaultedCtorLocRange) {
+  RangeVerifier<CXXConstructorDecl> Verifier;
+  Verifier.expectRange(1, 11, 1, 23);
+  EXPECT_TRUE(Verifier.match("class C { C() = default; };", functionDecl()));
+}
+
+TEST(CXXConstructorDecl, DeletedCtorLocRange) {
+  RangeVerifier<CXXConstructorDecl> Verifier;
+  Verifier.expectRange(1, 11, 1, 22);
+  EXPECT_TRUE(Verifier.match("class C { C() = delete; };", functionDecl()));
 }
 
 TEST(CompoundLiteralExpr, CompoundVectorLiteralRange) {
@@ -157,7 +201,7 @@ TEST(InitListExpr, VectorLiteralInitListParens) {
 
 class TemplateAngleBracketLocRangeVerifier : public RangeVerifier<TypeLoc> {
 protected:
-  virtual SourceRange getRange(const TypeLoc &Node) {
+  SourceRange getRange(const TypeLoc &Node) override {
     TemplateSpecializationTypeLoc T =
         Node.getUnqualifiedLoc().castAs<TemplateSpecializationTypeLoc>();
     assert(!T.isNull());
@@ -182,7 +226,7 @@ TEST(CXXNewExpr, TypeParenRange) {
 
 class UnaryTransformTypeLocParensRangeVerifier : public RangeVerifier<TypeLoc> {
 protected:
-  virtual SourceRange getRange(const TypeLoc &Node) {
+  SourceRange getRange(const TypeLoc &Node) override {
     UnaryTransformTypeLoc T =
         Node.getUnqualifiedLoc().castAs<UnaryTransformTypeLoc>();
     assert(!T.isNull());
@@ -209,6 +253,16 @@ TEST(CXXFunctionalCastExpr, SourceRange) {
       "  return int{};\n"
       "}",
       functionalCastExpr(), Lang_CXX11));
+}
+
+TEST(CXXConstructExpr, SourceRange) {
+  RangeVerifier<CXXConstructExpr> Verifier;
+  Verifier.expectRange(3, 14, 3, 19);
+  EXPECT_TRUE(Verifier.match(
+      "struct A { A(int, int); };\n"
+      "void f(A a);\n"
+      "void g() { f({0, 0}); }",
+      constructExpr(), Lang_CXX11));
 }
 
 TEST(CXXTemporaryObjectExpr, SourceRange) {
@@ -253,6 +307,216 @@ TEST(UnresolvedUsingValueDecl, SourceRange) {
       unresolvedUsingValueDecl()));
 }
 
+TEST(FriendDecl, FriendNonMemberFunctionLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(2, 13);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend void f();\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendNonMemberFunctionRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 2, 15);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend void f();\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendNonMemberFunctionDefinitionLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(2, 12);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend int f() { return 0; }\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendNonMemberFunctionDefinitionRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 2, 28);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend int f() { return 0; }\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendElaboratedTypeLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(2, 8);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend class B;\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendElaboratedTypeRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 2, 14);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend class B;\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendSimpleTypeLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(3, 8);
+  EXPECT_TRUE(Verifier.match("class B;\n"
+                             "struct A {\n"
+                             "friend B;\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendSimpleTypeRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(3, 1, 3, 8);
+  EXPECT_TRUE(Verifier.match("class B;\n"
+                             "struct A {\n"
+                             "friend B;\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendTemplateParameterLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(3, 8);
+  EXPECT_TRUE(Verifier.match("template <typename T>\n"
+                             "struct A {\n"
+                             "friend T;\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendTemplateParameterRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(3, 1, 3, 8);
+  EXPECT_TRUE(Verifier.match("template <typename T>\n"
+                             "struct A {\n"
+                             "friend T;\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendDecltypeLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(4, 8);
+  EXPECT_TRUE(Verifier.match("struct A;\n"
+                             "A foo();\n"
+                             "struct A {\n"
+                             "friend decltype(foo());\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendDecltypeRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(4, 1, 4, 8);
+  EXPECT_TRUE(Verifier.match("struct A;\n"
+                             "A foo();\n"
+                             "struct A {\n"
+                             "friend decltype(foo());\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendConstructorDestructorLocation) {
+  const std::string Code = "struct B {\n"
+                           "B();\n"
+                           "~B();\n"
+                           "};\n"
+                           "struct A {\n"
+                           "friend B::B(), B::~B();\n"
+                           "};\n";
+  LocationVerifier<FriendDecl> ConstructorVerifier;
+  ConstructorVerifier.expectLocation(6, 11);
+  EXPECT_TRUE(ConstructorVerifier.match(
+      Code, friendDecl(has(constructorDecl(ofClass(hasName("B")))))));
+  LocationVerifier<FriendDecl> DestructorVerifier;
+  DestructorVerifier.expectLocation(6, 19);
+  EXPECT_TRUE(DestructorVerifier.match(
+      Code, friendDecl(has(destructorDecl(ofClass(hasName("B")))))));
+}
+
+TEST(FriendDecl, FriendConstructorDestructorRange) {
+  const std::string Code = "struct B {\n"
+                           "B();\n"
+                           "~B();\n"
+                           "};\n"
+                           "struct A {\n"
+                           "friend B::B(), B::~B();\n"
+                           "};\n";
+  RangeVerifier<FriendDecl> ConstructorVerifier;
+  ConstructorVerifier.expectRange(6, 1, 6, 13);
+  EXPECT_TRUE(ConstructorVerifier.match(
+      Code, friendDecl(has(constructorDecl(ofClass(hasName("B")))))));
+  RangeVerifier<FriendDecl> DestructorVerifier;
+  DestructorVerifier.expectRange(6, 1, 6, 22);
+  EXPECT_TRUE(DestructorVerifier.match(
+      Code, friendDecl(has(destructorDecl(ofClass(hasName("B")))))));
+}
+
+TEST(FriendDecl, FriendTemplateFunctionLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(3, 13);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "template <typename T>\n"
+                             "friend void f();\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendTemplateFunctionRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 3, 15);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "template <typename T>\n"
+                             "friend void f();\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendTemplateClassLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(3, 14);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "template <typename T>\n"
+                             "friend class B;\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendTemplateClassRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 3, 14);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "template <typename T>\n"
+                             "friend class B;\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendInlineFunctionLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(2, 19);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "int inline friend f() { return 0; }"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendInlineFunctionRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 2, 35);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "int inline friend f() { return 0; }"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
 TEST(FriendDecl, InstantiationSourceRange) {
   RangeVerifier<FriendDecl> Verifier;
   Verifier.expectRange(4, 3, 4, 35);
@@ -264,6 +528,18 @@ TEST(FriendDecl, InstantiationSourceRange) {
       "};\n"
       "void test(S<double> s) { +s; }",
       friendDecl(hasParent(recordDecl(isTemplateInstantiation())))));
+}
+
+TEST(ObjCMessageExpr, CXXConstructExprRange) {
+  RangeVerifier<CXXConstructExpr> Verifier;
+  Verifier.expectRange(5, 25, 5, 27);
+  EXPECT_TRUE(Verifier.match(
+      "struct A { int a; };\n"
+      "@interface B {}\n"
+      "+ (void) f1: (A)arg;\n"
+      "@end\n"
+      "void f2() { A a; [B f1: (a)]; }\n",
+      constructExpr(), Lang_OBJCXX));
 }
 
 } // end namespace ast_matchers

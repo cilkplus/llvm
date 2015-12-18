@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_GR_SIMPLE_CONSTRAINT_MANAGER_H
-#define LLVM_CLANG_GR_SIMPLE_CONSTRAINT_MANAGER_H
+#ifndef LLVM_CLANG_LIB_STATICANALYZER_CORE_SIMPLECONSTRAINTMANAGER_H
+#define LLVM_CLANG_LIB_STATICANALYZER_CORE_SIMPLECONSTRAINTMANAGER_H
 
 #include "clang/StaticAnalyzer/Core/PathSensitive/ConstraintManager.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramState.h"
@@ -27,14 +27,14 @@ class SimpleConstraintManager : public ConstraintManager {
 public:
   SimpleConstraintManager(SubEngine *subengine, SValBuilder &SB)
     : SU(subengine), SVB(SB) {}
-  virtual ~SimpleConstraintManager();
+  ~SimpleConstraintManager() override;
 
   //===------------------------------------------------------------------===//
   // Common implementation for the interface provided by ConstraintManager.
   //===------------------------------------------------------------------===//
 
   ProgramStateRef assume(ProgramStateRef state, DefinedSVal Cond,
-                        bool Assumption);
+                        bool Assumption) override;
 
   ProgramStateRef assume(ProgramStateRef state, NonLoc Cond, bool Assumption);
 
@@ -82,7 +82,7 @@ protected:
   BasicValueFactory &getBasicVals() const { return SVB.getBasicValueFactory(); }
   SymbolManager &getSymbolManager() const { return SVB.getSymbolManager(); }
 
-  bool canReasonAbout(SVal X) const;
+  bool canReasonAbout(SVal X) const override;
 
   ProgramStateRef assumeAux(ProgramStateRef state,
                                 NonLoc Cond,

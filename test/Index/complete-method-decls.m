@@ -72,6 +72,38 @@
 - (oneway void)method:(in id x) {}
 @end
 
+typedef A MyObject;
+typedef A *MyObjectRef;
+
+@interface I1
+-(Class<P1>)meth;
+-(MyObject <P1> *)meth2;
+-(MyObjectRef)meth3;
+@end
+
+@implementation I1
+-(void)foo {}
+@end
+
+@interface I2
+-(nonnull I2 *)produceI2:(nullable I2 *)i2;
+@end
+
+@implementation I2
+-(void)foo {}
+@end
+
+#pragma clang assume_nonnull begin
+@interface I3
+-(I3 *)produceI3:(I3 *)i3;
+-(instancetype)getI3;
+@end
+#pragma clang assume_nonnull end
+
+@implementation I3
+-(void)foo {}
+@end
+
 // RUN: c-index-test -code-completion-at=%s:17:3 %s | FileCheck -check-prefix=CHECK-CC1 %s
 // CHECK-CC1: ObjCInstanceMethodDecl:{LeftParen (}{Text id}{RightParen )}{TypedText abc} (40)
 // CHECK-CC1: ObjCInstanceMethodDecl:{LeftParen (}{Text int}{RightParen )}{TypedText getInt} (40)
@@ -140,6 +172,8 @@
 // CHECK-CCF: NotImplemented:{TypedText byref} (40)
 // CHECK-CCF: NotImplemented:{TypedText in} (40)
 // CHECK-CCF: NotImplemented:{TypedText inout} (40)
+// CHECK-CCF: NotImplemented:{TypedText nonnull} (40)
+// CHECK-CCF: NotImplemented:{TypedText nullable} (40)
 // CHECK-CCF: NotImplemented:{TypedText oneway} (40)
 // CHECK-CCF: NotImplemented:{TypedText out} (40)
 // CHECK-CCF: NotImplemented:{TypedText unsigned} (50)
@@ -182,3 +216,15 @@
 
 // RUN: c-index-test -code-completion-at=%s:72:2 %s | FileCheck -check-prefix=CHECK-ONEWAY %s
 // CHECK-ONEWAY: ObjCInstanceMethodDecl:{LeftParen (}{Text oneway }{Text void}{RightParen )}{TypedText method}{TypedText :}{LeftParen (}{Text in }{Text id}{RightParen )}{Text x} (40)
+
+// RUN: c-index-test -code-completion-at=%s:85:2 %s | FileCheck -check-prefix=CHECK-CLASSTY %s
+// CHECK-CLASSTY: ObjCInstanceMethodDecl:{LeftParen (}{Text Class<P1>}{RightParen )}{TypedText meth}
+// CHECK-CLASSTY: ObjCInstanceMethodDecl:{LeftParen (}{Text MyObject<P1> *}{RightParen )}{TypedText meth2}
+// CHECK-CLASSTY: ObjCInstanceMethodDecl:{LeftParen (}{Text MyObjectRef}{RightParen )}{TypedText meth3}
+
+// RUN: c-index-test -code-completion-at=%s:93:2 %s | FileCheck -check-prefix=CHECK-NULLABILITY %s
+// CHECK-NULLABILITY: ObjCInstanceMethodDecl:{LeftParen (}{Text nonnull }{Text I2 *}{RightParen )}{TypedText produceI2}{TypedText :}{LeftParen (}{Text nullable }{Text I2 *}{RightParen )}{Text i2} (40)
+
+// RUN: c-index-test -code-completion-at=%s:104:2 %s | FileCheck -check-prefix=CHECK-NULLABILITY2 %s
+// CHECK-NULLABILITY2: ObjCInstanceMethodDecl:{LeftParen (}{Text nonnull }{Text instancetype}{RightParen )}{TypedText getI3} (40)
+// CHECK-NULLABILITY2: ObjCInstanceMethodDecl:{LeftParen (}{Text nonnull }{Text I3 *}{RightParen )}{TypedText produceI3}{TypedText :}{LeftParen (}{Text nonnull }{Text I3 *}{RightParen )}{Text i3} (40)

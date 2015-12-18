@@ -55,13 +55,16 @@ struct __attribute__((aligned(8))) as1 {
 extern int e1[sizeof(struct as1) == 8 ? 1 : -1];
 extern int e2[__alignof(struct as1) == 8 ? 1 : -1];
 
-// FIXME: Will need to force arch once max usable alignment isn't hard
-// coded.
 struct __attribute__((aligned)) as1_2 {
     char c;
 };
+#ifdef __s390x__
+extern int e1_2[sizeof(struct as1_2) == 8 ? 1 : -1];
+extern int e2_2[__alignof(struct as1_2) == 8 ? 1 : -1];
+#else
 extern int e1_2[sizeof(struct as1_2) == 16 ? 1 : -1];
 extern int e2_2[__alignof(struct as1_2) == 16 ? 1 : -1];
+#endif
 
 struct as2 {
     char c;
@@ -127,9 +130,11 @@ struct nS {
   nt start_lba;
 };
 
+#if defined(_WIN32) && !defined(__declspec) // _MSC_VER is unavailable in cc1.
+// Alignment doesn't affect packing in MS mode.
+extern int n1[sizeof(struct nS) == 16 ? 1 : -1];
+extern int n2[__alignof(struct nS) == 8 ? 1 : -1];
+#else
 extern int n1[sizeof(struct nS) == 9 ? 1 : -1];
 extern int n2[__alignof(struct nS) == 1 ? 1 : -1];
-
-
-
-
+#endif

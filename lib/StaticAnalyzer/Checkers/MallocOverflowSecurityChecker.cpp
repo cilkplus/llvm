@@ -65,7 +65,7 @@ void MallocOverflowSecurityChecker::CheckMallocArgument(
    conditional expression, an operation that could reduce the range
    of the result, or anything too complicated :-).  */
   const Expr * e = TheArgument;
-  const BinaryOperator * mulop = NULL;
+  const BinaryOperator * mulop = nullptr;
 
   for (;;) {
     e = e->IgnoreParenImpCasts();
@@ -73,7 +73,7 @@ void MallocOverflowSecurityChecker::CheckMallocArgument(
       const BinaryOperator * binop = dyn_cast<BinaryOperator>(e);
       BinaryOperatorKind opc = binop->getOpcode();
       // TODO: ignore multiplications by 1, reject if multiplied by 0.
-      if (mulop == NULL && opc == BO_Mul)
+      if (mulop == nullptr && opc == BO_Mul)
         mulop = binop;
       if (opc != BO_Mul && opc != BO_Add && opc != BO_Sub && opc != BO_Shl)
         return;
@@ -94,7 +94,7 @@ void MallocOverflowSecurityChecker::CheckMallocArgument(
       return;
   }
 
-  if (mulop == NULL)
+  if (mulop == nullptr)
     return;
 
   //  We've found the right structure of malloc argument, now save
@@ -142,13 +142,13 @@ private:
           }
         }
       }
-      else if (isa<MemberExpr>(E)) {
+      else if (const auto *ME = dyn_cast<MemberExpr>(E)) {
         // No points-to analysis, just look at the member
-        const Decl * EmeMD = dyn_cast<MemberExpr>(E)->getMemberDecl();
+        const Decl *EmeMD = ME->getMemberDecl();
         while (i != e) {
           --i;
-          if (isa<MemberExpr>(i->variable)) {
-            if (dyn_cast<MemberExpr>(i->variable)->getMemberDecl() == EmeMD)
+          if (const auto *ME_i = dyn_cast<MemberExpr>(i->variable)) {
+            if (ME_i->getMemberDecl() == EmeMD)
               i = toScanFor.erase (i);
           }
         }
@@ -213,11 +213,12 @@ void MallocOverflowSecurityChecker::OutputPossibleOverflows(
        e = PossibleMallocOverflows.end();
        i != e;
        ++i) {
-    BR.EmitBasicReport(D, "malloc() size overflow", categories::UnixAPI,
-      "the computation of the size of the memory allocation may overflow",
-      PathDiagnosticLocation::createOperatorLoc(i->mulop,
-                                                BR.getSourceManager()),
-      i->mulop->getSourceRange());
+    BR.EmitBasicReport(
+        D, this, "malloc() size overflow", categories::UnixAPI,
+        "the computation of the size of the memory allocation may overflow",
+        PathDiagnosticLocation::createOperatorLoc(i->mulop,
+                                                  BR.getSourceManager()),
+        i->mulop->getSourceRange());
   }
 }
 
@@ -262,6 +263,7 @@ void MallocOverflowSecurityChecker::checkASTCodeBody(const Decl *D,
   OutputPossibleOverflows(PossibleMallocOverflows, D, BR, mgr);
 }
 
-void ento::registerMallocOverflowSecurityChecker(CheckerManager &mgr) {
+void
+ento::registerMallocOverflowSecurityChecker(CheckerManager &mgr) {
   mgr.registerChecker<MallocOverflowSecurityChecker>();
 }
