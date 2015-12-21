@@ -16,6 +16,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef LLVM_CLANG_UNITTESTS_AST_MATCHVERIFIER_H
+#define LLVM_CLANG_UNITTESTS_AST_MATCHVERIFIER_H
+
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
@@ -25,7 +28,14 @@
 namespace clang {
 namespace ast_matchers {
 
-enum Language { Lang_C, Lang_C89, Lang_CXX, Lang_CXX11, Lang_OpenCL };
+enum Language { 
+    Lang_C,
+    Lang_C89,
+    Lang_CXX,
+    Lang_CXX11,
+    Lang_OpenCL,
+    Lang_OBJCXX
+};
 
 /// \brief Base class for verifying some property of nodes found by a matcher.
 template <typename NodeType>
@@ -53,7 +63,7 @@ public:
                                  Language L);
 
 protected:
-  virtual void run(const MatchFinder::MatchResult &Result);
+  void run(const MatchFinder::MatchResult &Result) override;
   virtual void verify(const MatchFinder::MatchResult &Result,
                       const NodeType &Node) {}
 
@@ -79,7 +89,7 @@ testing::AssertionResult MatchVerifier<NodeType>::match(
     std::vector<std::string>& Args, Language L) {
   MatchFinder Finder;
   Finder.addMatcher(AMatcher.bind(""), this);
-  OwningPtr<tooling::FrontendActionFactory> Factory(
+  std::unique_ptr<tooling::FrontendActionFactory> Factory(
       tooling::newFrontendActionFactory(&Finder));
 
   StringRef FileName;
@@ -102,6 +112,10 @@ testing::AssertionResult MatchVerifier<NodeType>::match(
     break;
   case Lang_OpenCL:
     FileName = "input.cl";
+    break;
+  case Lang_OBJCXX:
+    FileName = "input.mm";
+    break;
   }
 
   // Default to failure in case callback is never called
@@ -152,7 +166,8 @@ public:
   }
 
 protected:
-  void verify(const MatchFinder::MatchResult &Result, const NodeType &Node) {
+  void verify(const MatchFinder::MatchResult &Result,
+              const NodeType &Node) override {
     SourceLocation Loc = getLocation(Node);
     unsigned Line = Result.SourceManager->getSpellingLineNumber(Loc);
     unsigned Column = Result.SourceManager->getSpellingColumnNumber(Loc);
@@ -191,7 +206,8 @@ public:
   }
 
 protected:
-  void verify(const MatchFinder::MatchResult &Result, const NodeType &Node) {
+  void verify(const MatchFinder::MatchResult &Result,
+              const NodeType &Node) override {
     SourceRange R = getRange(Node);
     SourceLocation Begin = R.getBegin();
     SourceLocation End = R.getEnd();
@@ -230,7 +246,7 @@ public:
 
 protected:
   void verify(const MatchFinder::MatchResult &Result,
-              const ast_type_traits::DynTypedNode &Node) {
+              const ast_type_traits::DynTypedNode &Node) override {
     std::string DumpStr;
     llvm::raw_string_ostream Dump(DumpStr);
     Node.dump(Dump, *Result.SourceManager);
@@ -257,7 +273,7 @@ public:
 
 protected:
   void verify(const MatchFinder::MatchResult &Result,
-              const ast_type_traits::DynTypedNode &Node) {
+              const ast_type_traits::DynTypedNode &Node) override {
     std::string PrintStr;
     llvm::raw_string_ostream Print(PrintStr);
     Node.print(Print, Result.Context->getPrintingPolicy());
@@ -277,3 +293,5 @@ private:
 
 } // end namespace ast_matchers
 } // end namespace clang
+
+#endif

@@ -46,11 +46,9 @@ class EditedSource {
 
 public:
   EditedSource(const SourceManager &SM, const LangOptions &LangOpts,
-               const PPConditionalDirectiveRecord *PPRec = 0,
-               const bool FCommitInSystemHeader = true)
+               const PPConditionalDirectiveRecord *PPRec = nullptr)
     : SourceMgr(SM), LangOpts(LangOpts), PPRec(PPRec),
-      ForceCommitInSystemHeader(FCommitInSystemHeader),
-      StrAlloc(/*size=*/512) { }
+      StrAlloc() { }
 
   const SourceManager &getSourceManager() const { return SourceMgr; }
   const LangOptions &getLangOpts() const { return LangOpts; }

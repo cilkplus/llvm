@@ -1,9 +1,11 @@
-// RUN: %clang_cc1 -verify -fopenmp -ast-print %s | FileCheck %s
-// RUN: %clang_cc1 -fopenmp -x c++ -std=c++11 -emit-pch -o %t %s
-// RUN: %clang_cc1 -fopenmp -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print
+// RUN: %clang_cc1 -verify -fopenmp -triple x86_64-apple-darwin10.6.0 -ast-print %s | FileCheck %s
+// RUN: %clang_cc1 -fopenmp -triple x86_64-apple-darwin10.6.0 -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -fopenmp -triple x86_64-apple-darwin10.6.0 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print
+// RUN: %clang_cc1 -verify -fopenmp -triple x86_64-unknown-linux-gnu -ast-print %s | FileCheck %s
+// RUN: %clang_cc1 -fopenmp -fnoopenmp-use-tls -triple x86_64-unknown-linux-gnu -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -fopenmp -fnoopenmp-use-tls -triple x86_64-unknown-linux-gnu -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print
 // expected-no-diagnostics
-// FIXME: This test has been crashing since r186647.
-// REQUIRES: disabled
+// REQUIRES: x86-registered-target
 
 #ifndef HEADER
 #define HEADER
@@ -24,13 +26,22 @@ int a, b;
 // CHECK: int a;
 // CHECK: int b;
 #pragma omp threadprivate(a)
+#pragma omp threadprivate(a)
+// CHECK-NEXT: #pragma omp threadprivate(a)
 // CHECK-NEXT: #pragma omp threadprivate(a)
 #pragma omp threadprivate(d, b)
 // CHECK-NEXT: #pragma omp threadprivate(d,b)
 
+template <class T>
+struct ST {
+  static T m;
+  #pragma omp threadprivate(m)
+};
+
 template <class T> T foo() {
   static T v;
   #pragma omp threadprivate(v)
+  v = ST<T>::m;
   return v;
 }
 //CHECK: template <class T = int> int foo() {

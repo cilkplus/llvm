@@ -1,5 +1,5 @@
 // RUN: %clang_cc1 %s -emit-llvm -o - -triple=x86_64-apple-macosx10.9.0 | FileCheck %s
-
+// REQUIRES: x86-registered-target
 // Also test serialization of atomic operations here, to avoid duplicating the
 // test.
 // RUN: %clang_cc1 %s -emit-pch -o %t -triple=x86_64-apple-macosx10.9.0
@@ -16,13 +16,13 @@ typedef enum memory_order {
 
 int fi1(_Atomic(int) *i) {
   // CHECK: @fi1
-  // CHECK: load atomic i32* {{.*}} seq_cst
+  // CHECK: load atomic i32, i32* {{.*}} seq_cst
   return __c11_atomic_load(i, memory_order_seq_cst);
 }
 
 int fi1a(int *i) {
   // CHECK: @fi1a
-  // CHECK: load atomic i32* {{.*}} seq_cst
+  // CHECK: load atomic i32, i32* {{.*}} seq_cst
   int v;
   __atomic_load(i, &v, memory_order_seq_cst);
   return v;
@@ -30,7 +30,7 @@ int fi1a(int *i) {
 
 int fi1b(int *i) {
   // CHECK: @fi1b
-  // CHECK: load atomic i32* {{.*}} seq_cst
+  // CHECK: load atomic i32, i32* {{.*}} seq_cst
   return __atomic_load_n(i, memory_order_seq_cst);
 }
 
@@ -106,14 +106,14 @@ _Bool fi4a(int *i) {
 
 _Bool fi4b(int *i) {
   // CHECK: @fi4
-  // CHECK: cmpxchg i32*
+  // CHECK: cmpxchg weak i32*
   int cmp = 0;
   return __atomic_compare_exchange_n(i, &cmp, 1, 1, memory_order_acquire, memory_order_acquire);
 }
 
 float ff1(_Atomic(float) *d) {
   // CHECK: @ff1
-  // CHECK: load atomic i32* {{.*}} monotonic
+  // CHECK: load atomic i32, i32* {{.*}} monotonic
   return __c11_atomic_load(d, memory_order_relaxed);
 }
 
@@ -129,7 +129,7 @@ float ff3(_Atomic(float) *d) {
 
 int* fp1(_Atomic(int*) *p) {
   // CHECK: @fp1
-  // CHECK: load atomic i64* {{.*}} seq_cst
+  // CHECK: load atomic i64, i64* {{.*}} seq_cst
   return __c11_atomic_load(p, memory_order_seq_cst);
 }
 
@@ -309,15 +309,6 @@ void atomic_init_foo()
 
   // CHECK-NOT: atomic
   // CHECK: }
-}
-
-// CHECK: @invalid_atomic
-void invalid_atomic(_Atomic(int) *i) {
-  __c11_atomic_store(i, 1, memory_order_consume);
-  __c11_atomic_store(i, 1, memory_order_acquire);
-  __c11_atomic_store(i, 1, memory_order_acq_rel);
-  __c11_atomic_load(i, memory_order_release);
-  __c11_atomic_load(i, memory_order_acq_rel);
 }
 
 #endif

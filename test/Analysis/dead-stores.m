@@ -28,7 +28,7 @@ extern NSString *NSAlignmentBinding;
 // This test case was reported as a false positive due to a bug in the
 // LiveVariables <-> deadcode.DeadStores interplay.  We should not flag a warning
 // here.  The test case was reported in:
-//  http://lists.cs.uiuc.edu/pipermail/cfe-dev/2008-July/002157.html
+//  http://lists.llvm.org/pipermail/cfe-dev/2008-July/002157.html
 void DeadStoreTest(NSObject *anObject) {
   NSArray *keys;
   if ((keys = [anObject exposedBindings]) &&   // no-warning
@@ -109,3 +109,11 @@ Radar11059352_1 *_Path;
     return wp;
 }
 @end
+
+id test_objc_precise_lifetime_foo();
+void test_objc_precise_lifetime() {
+  __attribute__((objc_precise_lifetime)) id dead = test_objc_precise_lifetime_foo(); // no-warning
+  dead = 0;
+  dead = test_objc_precise_lifetime_foo(); // no-warning
+  dead = 0;
+}

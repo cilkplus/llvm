@@ -35,16 +35,12 @@ void CXXBasePaths::ComputeDeclsFound() {
   std::copy(Decls.begin(), Decls.end(), DeclsFound);
 }
 
-CXXBasePaths::decl_iterator CXXBasePaths::found_decls_begin() {
+CXXBasePaths::decl_range CXXBasePaths::found_decls() {
   if (NumDeclsFound == 0)
     ComputeDeclsFound();
-  return DeclsFound;
-}
 
-CXXBasePaths::decl_iterator CXXBasePaths::found_decls_end() {
-  if (NumDeclsFound == 0)
-    ComputeDeclsFound();
-  return DeclsFound + NumDeclsFound;
+  return decl_range(decl_iterator(DeclsFound),
+                    decl_iterator(DeclsFound + NumDeclsFound));
 }
 
 /// isAmbiguous - Determines whether the set of paths provided is
@@ -62,7 +58,7 @@ void CXXBasePaths::clear() {
   Paths.clear();
   ClassSubobjects.clear();
   ScratchPath.clear();
-  DetectedVirtual = 0;
+  DetectedVirtual = nullptr;
 }
 
 /// @brief Swaps the contents of this CXXBasePaths structure with the
@@ -141,9 +137,8 @@ bool CXXRecordDecl::forallBases(ForallBasesCallback *BaseMatches,
   const CXXRecordDecl *Record = this;
   bool AllMatches = true;
   while (true) {
-    for (CXXRecordDecl::base_class_const_iterator
-           I = Record->bases_begin(), E = Record->bases_end(); I != E; ++I) {
-      const RecordType *Ty = I->getType()->getAs<RecordType>();
+    for (const auto &I : Record->bases()) {
+      const RecordType *Ty = I.getType()->getAs<RecordType>();
       if (!Ty) {
         if (AllowShortCircuit) return false;
         AllMatches = false;
@@ -186,14 +181,11 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
   AccessSpecifier AccessToHere = ScratchPath.Access;
   bool IsFirstStep = ScratchPath.empty();
 
-  for (CXXRecordDecl::base_class_const_iterator BaseSpec = Record->bases_begin(),
-         BaseSpecEnd = Record->bases_end(); 
-       BaseSpec != BaseSpecEnd; 
-       ++BaseSpec) {
+  for (const auto &BaseSpec : Record->bases()) {
     // Find the record of the base class subobjects for this type.
-    QualType BaseType = Context.getCanonicalType(BaseSpec->getType())
-                                                          .getUnqualifiedType();
-    
+    QualType BaseType =
+        Context.getCanonicalType(BaseSpec.getType()).getUnqualifiedType();
+
     // C++ [temp.dep]p3:
     //   In the definition of a class template or a member of a class template,
     //   if a base class of the class template depends on a template-parameter,
@@ -208,10 +200,10 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
     std::pair<bool, unsigned>& Subobjects = ClassSubobjects[BaseType];
     bool VisitBase = true;
     bool SetVirtual = false;
-    if (BaseSpec->isVirtual()) {
+    if (BaseSpec.isVirtual()) {
       VisitBase = !Subobjects.first;
       Subobjects.first = true;
-      if (isDetectingVirtual() && DetectedVirtual == 0) {
+      if (isDetectingVirtual() && DetectedVirtual == nullptr) {
         // If this is the first virtual we find, remember it. If it turns out
         // there is no base path here, we'll reset it later.
         DetectedVirtual = BaseType->getAs<RecordType>();
@@ -223,9 +215,9 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
     if (isRecordingPaths()) {
       // Add this base specifier to the current path.
       CXXBasePathElement Element;
-      Element.Base = &*BaseSpec;
+      Element.Base = &BaseSpec;
       Element.Class = Record;
-      if (BaseSpec->isVirtual())
+      if (BaseSpec.isVirtual())
         Element.SubobjectNumber = 0;
       else
         Element.SubobjectNumber = Subobjects.second;
@@ -247,16 +239,16 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
       // 3. Otherwise, overall access is determined by the most restrictive
       //    access in the sequence.
       if (IsFirstStep)
-        ScratchPath.Access = BaseSpec->getAccessSpecifier();
+        ScratchPath.Access = BaseSpec.getAccessSpecifier();
       else
         ScratchPath.Access = CXXRecordDecl::MergeAccess(AccessToHere, 
-                                                 BaseSpec->getAccessSpecifier());
+                                                 BaseSpec.getAccessSpecifier());
     }
     
     // Track whether there's a path involving this specific base.
     bool FoundPathThroughBase = false;
     
-    if (BaseMatches(BaseSpec, ScratchPath, UserData)) {
+    if (BaseMatches(&BaseSpec, ScratchPath, UserData)) {
       // We've found a path that terminates at this base.
       FoundPath = FoundPathThroughBase = true;
       if (isRecordingPaths()) {
@@ -269,7 +261,7 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
       }
     } else if (VisitBase) {
       CXXRecordDecl *BaseRecord
-        = cast<CXXRecordDecl>(BaseSpec->getType()->castAs<RecordType>()
+        = cast<CXXRecordDecl>(BaseSpec.getType()->castAs<RecordType>()
                                 ->getDecl());
       if (lookupInBases(Context, BaseRecord, BaseMatches, UserData)) {
         // C++ [class.member.lookup]p2:
@@ -294,7 +286,7 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
 
     // If we set a virtual earlier, and this isn't a path, forget it again.
     if (SetVirtual && !FoundPathThroughBase) {
-      DetectedVirtual = 0;
+      DetectedVirtual = nullptr;
     }
   }
 
@@ -326,48 +318,36 @@ bool CXXRecordDecl::lookupInBases(BaseMatchesCallback *BaseMatches,
   //
   // FIXME: This is an O(N^2) algorithm, but DPG doesn't see an easy
   // way to make it any faster.
-  for (CXXBasePaths::paths_iterator P = Paths.begin(), PEnd = Paths.end();
-       P != PEnd; /* increment in loop */) {
-    bool Hidden = false;
+  Paths.Paths.remove_if([&Paths](const CXXBasePath &Path) {
+    for (const CXXBasePathElement &PE : Path) {
+      if (!PE.Base->isVirtual())
+        continue;
 
-    for (CXXBasePath::iterator PE = P->begin(), PEEnd = P->end();
-         PE != PEEnd && !Hidden; ++PE) {
-      if (PE->Base->isVirtual()) {
-        CXXRecordDecl *VBase = 0;
-        if (const RecordType *Record = PE->Base->getType()->getAs<RecordType>())
-          VBase = cast<CXXRecordDecl>(Record->getDecl());
-        if (!VBase)
+      CXXRecordDecl *VBase = nullptr;
+      if (const RecordType *Record = PE.Base->getType()->getAs<RecordType>())
+        VBase = cast<CXXRecordDecl>(Record->getDecl());
+      if (!VBase)
+        break;
+
+      // The declaration(s) we found along this path were found in a
+      // subobject of a virtual base. Check whether this virtual
+      // base is a subobject of any other path; if so, then the
+      // declaration in this path are hidden by that patch.
+      for (const CXXBasePath &HidingP : Paths) {
+        CXXRecordDecl *HidingClass = nullptr;
+        if (const RecordType *Record =
+                HidingP.back().Base->getType()->getAs<RecordType>())
+          HidingClass = cast<CXXRecordDecl>(Record->getDecl());
+        if (!HidingClass)
           break;
 
-        // The declaration(s) we found along this path were found in a
-        // subobject of a virtual base. Check whether this virtual
-        // base is a subobject of any other path; if so, then the
-        // declaration in this path are hidden by that patch.
-        for (CXXBasePaths::paths_iterator HidingP = Paths.begin(),
-                                       HidingPEnd = Paths.end();
-             HidingP != HidingPEnd;
-             ++HidingP) {
-          CXXRecordDecl *HidingClass = 0;
-          if (const RecordType *Record
-                       = HidingP->back().Base->getType()->getAs<RecordType>())
-            HidingClass = cast<CXXRecordDecl>(Record->getDecl());
-          if (!HidingClass)
-            break;
-
-          if (HidingClass->isVirtuallyDerivedFrom(VBase)) {
-            Hidden = true;
-            break;
-          }
-        }
+        if (HidingClass->isVirtuallyDerivedFrom(VBase))
+          return true;
       }
     }
+    return false;
+  });
 
-    if (Hidden)
-      P = Paths.Paths.erase(P);
-    else
-      ++P;
-  }
-  
   return true;
 }
 
@@ -501,14 +481,13 @@ void FinalOverriderCollector::Collect(const CXXRecordDecl *RD,
     SubobjectNumber
       = ++SubobjectCount[cast<CXXRecordDecl>(RD->getCanonicalDecl())];
 
-  for (CXXRecordDecl::base_class_const_iterator Base = RD->bases_begin(),
-         BaseEnd = RD->bases_end(); Base != BaseEnd; ++Base) {
-    if (const RecordType *RT = Base->getType()->getAs<RecordType>()) {
+  for (const auto &Base : RD->bases()) {
+    if (const RecordType *RT = Base.getType()->getAs<RecordType>()) {
       const CXXRecordDecl *BaseDecl = cast<CXXRecordDecl>(RT->getDecl());
       if (!BaseDecl->isPolymorphic())
         continue;
 
-      if (Overriders.empty() && !Base->isVirtual()) {
+      if (Overriders.empty() && !Base.isVirtual()) {
         // There are no other overriders of virtual member functions,
         // so let the base class fill in our overriders for us.
         Collect(BaseDecl, false, InVirtualSubobject, Overriders);
@@ -522,7 +501,7 @@ void FinalOverriderCollector::Collect(const CXXRecordDecl *RD,
       // its base classes) more than once.
       CXXFinalOverriderMap ComputedBaseOverriders;
       CXXFinalOverriderMap *BaseOverriders = &ComputedBaseOverriders;
-      if (Base->isVirtual()) {
+      if (Base.isVirtual()) {
         CXXFinalOverriderMap *&MyVirtualOverriders = VirtualOverriders[BaseDecl];
         BaseOverriders = MyVirtualOverriders;
         if (!MyVirtualOverriders) {
@@ -551,10 +530,7 @@ void FinalOverriderCollector::Collect(const CXXRecordDecl *RD,
     }
   }
 
-  for (CXXRecordDecl::method_iterator M = RD->method_begin(), 
-                                   MEnd = RD->method_end();
-       M != MEnd;
-       ++M) {
+  for (auto *M : RD->methods()) {
     // We only care about virtual methods.
     if (!M->isVirtual())
       continue;
@@ -581,18 +557,14 @@ void FinalOverriderCollector::Collect(const CXXRecordDecl *RD,
     // overrider. To do so, we dig down to the original virtual
     // functions using data recursion and update all of the methods it
     // overrides.
-    typedef std::pair<CXXMethodDecl::method_iterator, 
-                      CXXMethodDecl::method_iterator> OverriddenMethods;
+    typedef llvm::iterator_range<CXXMethodDecl::method_iterator>
+        OverriddenMethods;
     SmallVector<OverriddenMethods, 4> Stack;
-    Stack.push_back(std::make_pair(CanonM->begin_overridden_methods(),
-                                   CanonM->end_overridden_methods()));
+    Stack.push_back(llvm::make_range(CanonM->begin_overridden_methods(),
+                                     CanonM->end_overridden_methods()));
     while (!Stack.empty()) {
-      OverriddenMethods OverMethods = Stack.back();
-      Stack.pop_back();
-
-      for (; OverMethods.first != OverMethods.second; ++OverMethods.first) {
-        const CXXMethodDecl *CanonOM
-          = cast<CXXMethodDecl>((*OverMethods.first)->getCanonicalDecl());
+      for (const CXXMethodDecl *OM : Stack.pop_back_val()) {
+        const CXXMethodDecl *CanonOM = OM->getCanonicalDecl();
 
         // C++ [class.virtual]p2:
         //   A virtual member function C::vf of a class object S is
@@ -613,8 +585,8 @@ void FinalOverriderCollector::Collect(const CXXRecordDecl *RD,
 
         // Continue recursion to the methods that this virtual method
         // overrides.
-        Stack.push_back(std::make_pair(CanonOM->begin_overridden_methods(),
-                                       CanonOM->end_overridden_methods()));
+        Stack.push_back(llvm::make_range(CanonOM->begin_overridden_methods(),
+                                         CanonOM->end_overridden_methods()));
       }
     }
 
@@ -637,59 +609,37 @@ FinalOverriderCollector::~FinalOverriderCollector() {
 void 
 CXXRecordDecl::getFinalOverriders(CXXFinalOverriderMap &FinalOverriders) const {
   FinalOverriderCollector Collector;
-  Collector.Collect(this, false, 0, FinalOverriders);
+  Collector.Collect(this, false, nullptr, FinalOverriders);
 
   // Weed out any final overriders that come from virtual base class
   // subobjects that were hidden by other subobjects along any path.
   // This is the final-overrider variant of C++ [class.member.lookup]p10.
-  for (CXXFinalOverriderMap::iterator OM = FinalOverriders.begin(), 
-                           OMEnd = FinalOverriders.end();
-       OM != OMEnd;
-       ++OM) {
-    for (OverridingMethods::iterator SO = OM->second.begin(), 
-                                  SOEnd = OM->second.end();
-         SO != SOEnd; 
-         ++SO) {
-      SmallVectorImpl<UniqueVirtualMethod> &Overriding = SO->second;
+  for (auto &OM : FinalOverriders) {
+    for (auto &SO : OM.second) {
+      SmallVectorImpl<UniqueVirtualMethod> &Overriding = SO.second;
       if (Overriding.size() < 2)
         continue;
 
-      for (SmallVectorImpl<UniqueVirtualMethod>::iterator
-             Pos = Overriding.begin(), PosEnd = Overriding.end();
-           Pos != PosEnd;
-           /* increment in loop */) {
-        if (!Pos->InVirtualSubobject) {
-          ++Pos;
-          continue;
-        }
+      auto IsHidden = [&Overriding](const UniqueVirtualMethod &M) {
+        if (!M.InVirtualSubobject)
+          return false;
 
         // We have an overriding method in a virtual base class
         // subobject (or non-virtual base class subobject thereof);
         // determine whether there exists an other overriding method
         // in a base class subobject that hides the virtual base class
         // subobject.
-        bool Hidden = false;
-        for (SmallVectorImpl<UniqueVirtualMethod>::iterator
-               OP = Overriding.begin(), OPEnd = Overriding.end();
-             OP != OPEnd && !Hidden; 
-             ++OP) {
-          if (Pos == OP)
-            continue;
+        for (const UniqueVirtualMethod &OP : Overriding)
+          if (&M != &OP &&
+              OP.Method->getParent()->isVirtuallyDerivedFrom(
+                  M.InVirtualSubobject))
+            return true;
+        return false;
+      };
 
-          if (OP->Method->getParent()->isVirtuallyDerivedFrom(
-                         const_cast<CXXRecordDecl *>(Pos->InVirtualSubobject)))
-            Hidden = true;
-        }
-
-        if (Hidden) {
-          // The current overriding function is hidden by another
-          // overriding function; remove this one.
-          Pos = Overriding.erase(Pos);
-          PosEnd = Overriding.end();
-        } else {
-          ++Pos;
-        }
-      }
+      Overriding.erase(
+          std::remove_if(Overriding.begin(), Overriding.end(), IsHidden),
+          Overriding.end());
     }
   }
 }
@@ -702,13 +652,12 @@ AddIndirectPrimaryBases(const CXXRecordDecl *RD, ASTContext &Context,
   if (Layout.isPrimaryBaseVirtual())
     Bases.insert(Layout.getPrimaryBase());
 
-  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
-       E = RD->bases_end(); I != E; ++I) {
-    assert(!I->getType()->isDependentType() &&
+  for (const auto &I : RD->bases()) {
+    assert(!I.getType()->isDependentType() &&
            "Cannot get indirect primary bases for class with dependent bases.");
 
     const CXXRecordDecl *BaseDecl =
-      cast<CXXRecordDecl>(I->getType()->castAs<RecordType>()->getDecl());
+      cast<CXXRecordDecl>(I.getType()->castAs<RecordType>()->getDecl());
 
     // Only bases with virtual bases participate in computing the
     // indirect primary virtual base classes.
@@ -725,13 +674,12 @@ CXXRecordDecl::getIndirectPrimaryBases(CXXIndirectPrimaryBaseSet& Bases) const {
   if (!getNumVBases())
     return;
 
-  for (CXXRecordDecl::base_class_const_iterator I = bases_begin(),
-       E = bases_end(); I != E; ++I) {
-    assert(!I->getType()->isDependentType() &&
+  for (const auto &I : bases()) {
+    assert(!I.getType()->isDependentType() &&
            "Cannot get indirect primary bases for class with dependent bases.");
 
     const CXXRecordDecl *BaseDecl =
-      cast<CXXRecordDecl>(I->getType()->castAs<RecordType>()->getDecl());
+      cast<CXXRecordDecl>(I.getType()->castAs<RecordType>()->getDecl());
 
     // Only bases with virtual bases participate in computing the
     // indirect primary virtual base classes.

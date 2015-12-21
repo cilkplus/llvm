@@ -11,16 +11,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_CXSTRING_H
-#define LLVM_CLANG_CXSTRING_H
+#ifndef LLVM_CLANG_TOOLS_LIBCLANG_CXSTRING_H
+#define LLVM_CLANG_TOOLS_LIBCLANG_CXSTRING_H
 
 #include "clang-c/Index.h"
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Compiler.h"
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace clang {
 namespace cxstring {
@@ -63,7 +63,7 @@ CXString createDup(StringRef String);
 // In this case, call \c createRef(String.c_str()).
 //
 // If you need to make a copy, call \c createDup(StringRef(String)).
-CXString createRef(std::string String) LLVM_DELETED_FUNCTION;
+CXString createRef(std::string String) = delete;
 
 /// \brief Create a CXString object that is backed by a string buffer.
 CXString createCXString(CXStringBuf *buf);
@@ -96,6 +96,10 @@ CXStringBuf *getCXStringBuf(CXTranslationUnit TU);
 /// \brief Returns true if the CXString data is managed by a pool.
 bool isManagedByPool(CXString str);
 
+}
+
+static inline StringRef getContents(const CXUnsavedFile &UF) {
+  return StringRef(UF.Contents, UF.Length);
 }
 }
 

@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -verify -std=c++11 %s
+// RUN: %clang_cc1 -verify -std=c++11 -fms-extensions %s
 
 8gi///===--- recovery.cpp ---===// // expected-error {{unqualified-id}}
 namespace Std { // expected-note {{here}}
@@ -120,8 +120,95 @@ void MissingSemiInFunction() {
   Inner5;
 }
 
+namespace NS {
+  template<typename T> struct Foo {};
+}
+struct MissingSemiThenTemplate1 {} // expected-error {{expected ';' after struct}}
+NS::Foo<int> missingSemiBeforeFunctionReturningTemplateId1();
+
+using NS::Foo;
+struct MissingSemiThenTemplate2 {} // expected-error {{expected ';' after struct}}
+Foo<int> missingSemiBeforeFunctionReturningTemplateId2();
+
 namespace PR17084 {
 enum class EnumID {};
 template <typename> struct TempID;
 template <> struct TempID<BadType> : BadType, EnumID::Garbage; // expected-error{{use of undeclared identifier 'BadType'}}
+}
+
+namespace pr15133 {
+  namespace ns {
+    const int V1 = 1;   // expected-note {{declared here}}
+  }
+  struct C1 {
+    enum E1 { V2 = 2 }; // expected-note {{declared here}}
+    static const int V3 = 3; // expected-note {{declared here}}
+  };
+  enum E2 {
+    V4 = 4,   // expected-note {{declared here}}
+    V6        // expected-note {{declared here}}
+  };
+  enum class EC3 { V0 = 0, V5 = 5 }; // expected-note {{declared here}}
+  void func_3();
+
+  void func_1(int x) {
+    switch(x) {
+    case 0: break;
+    case ns::V1:: break; // expected-error{{'V1' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+    case C1::V2:: break; // expected-error{{'V2' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+    case C1::V3:: break; // expected-error{{'V3' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+    case V4:: break; // expected-error{{'V4' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+    case V6:: func_3();   // expected-error{{'V6' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+    }
+  }
+  void func_2(EC3 x) {
+    switch(x) {
+    case EC3::V0:  break;
+    case EC3::V5:: break; // expected-error{{'V5' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+    }
+  }
+
+  template<class T> struct TS1 {
+    typedef int A;
+  };
+  template<class T> void func(int x) {
+    switch(x) {
+    case TS1<T>::A:: break;  // expected-error{{expected unqualified-id}}
+    }
+  };
+  void mainf() {
+    func<int>(1);
+  }
+
+  struct S {
+    static int n;  // expected-note{{declared here}}
+    int nn;        // expected-note 2 {{declared here}}
+  };
+
+  int func_3(int x) {
+    return x ? S::n :: 0;  // expected-error{{'n' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+  }
+  int func_4(int x, S &s) {
+    return x ? s.nn :: x;  // expected-error{{'nn' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+  }
+  int func_5(int x, S &s) {
+    return x ? s.nn :: S::n;  // expected-error{{'nn' cannot appear before '::' because it is not a class, namespace, or enumeration; did you mean ':'?}}
+  }
+
+  struct S2 {
+    struct S3;
+  };
+
+  struct S2 :: S3 :: public S2 {  // expected-error{{'public' cannot be a part of nested name specifier; did you mean ':'?}}
+  };
+}
+
+namespace InvalidEmptyNames {
+// These shouldn't crash, the diagnostics aren't important.
+struct ::, struct ::; // expected-error 2 {{expected identifier}} expected-error 2 {{declaration of anonymous struct must be a definition}} expected-warning {{declaration does not declare anything}}
+enum ::, enum ::; // expected-error 2 {{expected identifier}} expected-warning {{declaration does not declare anything}}
+struct ::__super, struct ::__super; // expected-error 2 {{expected identifier}} expected-error 2 {{expected '::' after '__super'}}
+struct ::template foo, struct ::template bar; // expected-error 2 {{expected identifier}} expected-error 2 {{declaration of anonymous struct must be a definition}} expected-warning {{declaration does not declare anything}}
+struct ::foo struct::; // expected-error {{no struct named 'foo' in the global namespace}} expected-error {{expected identifier}} expected-error {{declaration of anonymous struct must be a definition}}
+class :: : {} a;  // expected-error {{expected identifier}} expected-error {{expected class name}}
 }

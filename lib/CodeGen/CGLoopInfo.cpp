@@ -8,149 +8,131 @@
 //===----------------------------------------------------------------------===//
 
 #include "CGLoopInfo.h"
+#include "clang/AST/Attr.h"
+#include "clang/Sema/LoopHint.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
-using namespace clang;
-using namespace CodeGen;
+using namespace clang::CodeGen;
+using namespace llvm;
 
-static llvm::MDNode *CreateMetadata(llvm::LLVMContext &Ctx,
-                                    const LoopAttributes &Attrs) {
-  using namespace llvm;
+static MDNode *createMetadata(LLVMContext &Ctx, const LoopAttributes &Attrs) {
 
-  if (!Attrs.IsParallel &&
-      Attrs.VectorizerWidth == 0 &&
-      Attrs.VectorizerEnable == LoopAttributes::LVEC_UNSPECIFIED)
-    return 0;
+  if (!Attrs.IsParallel && Attrs.VectorizerWidth == 0 &&
+      Attrs.VectorizerUnroll == 0 &&
+      Attrs.VectorizerEnable == LoopAttributes::VecUnspecified)
+    return nullptr;
 
-  SmallVector<Value *, 4> Args;
+  SmallVector<Metadata *, 4> Args;
   // Reserve operand 0 for loop id self reference.
-  MDNode *TempNode = MDNode::getTemporary(Ctx, None);
-  Args.push_back(TempNode);
+  auto TempNode = MDNode::getTemporary(Ctx, None);
+  Args.push_back(TempNode.get());
 
   // Setting vectorizer.width
-  // TODO: For a correct implementation of 'safelen' clause
-  // we need to update the value somewhere (based on target info).
   if (Attrs.VectorizerWidth > 0) {
-    Value *Vals[] = {
-      MDString::get(Ctx, "llvm.vectorizer.width"),
-      ConstantInt::get(Type::getInt32Ty(Ctx), Attrs.VectorizerWidth)
-    };
+    Metadata *Vals[] = {MDString::get(Ctx, "llvm.loop.vectorize.width"),
+                        ConstantAsMetadata::get(ConstantInt::get(
+                            Type::getInt32Ty(Ctx), Attrs.VectorizerWidth))};
+    Args.push_back(MDNode::get(Ctx, Vals));
+  }
+
+  // Setting vectorizer.unroll
+  if (Attrs.VectorizerUnroll > 0) {
+    Metadata *Vals[] = {MDString::get(Ctx, "llvm.loop.interleave.count"),
+                        ConstantAsMetadata::get(ConstantInt::get(
+                            Type::getInt32Ty(Ctx), Attrs.VectorizerUnroll))};
     Args.push_back(MDNode::get(Ctx, Vals));
   }
 
   // Setting vectorizer.enable
-  int EnableLoopVectorizer = 0;
-  switch (Attrs.VectorizerEnable) {
-    case LoopAttributes::LVEC_UNSPECIFIED:
-      break;
-    case LoopAttributes::LVEC_ENABLE:
-      EnableLoopVectorizer = 1;
-      // Fall-through
-    case LoopAttributes::LVEC_DISABLE:
-      Value *Vals[] = {
-        MDString::get(Ctx, "llvm.vectorizer.enable"),
-        ConstantInt::get(Type::getInt1Ty(Ctx), EnableLoopVectorizer)
-      };
-      Args.push_back(MDNode::get(Ctx, Vals));
-      break;
+  if (Attrs.VectorizerEnable != LoopAttributes::VecUnspecified) {
+    Metadata *Vals[] = {
+        MDString::get(Ctx, "llvm.loop.vectorize.enable"),
+        ConstantAsMetadata::get(ConstantInt::get(
+            Type::getInt1Ty(Ctx),
+            (Attrs.VectorizerEnable == LoopAttributes::VecEnable)))};
+    Args.push_back(MDNode::get(Ctx, Vals));
   }
 
-  MDNode *LoopID = MDNode::get(Ctx, Args);
-  assert(LoopID->use_empty() && "LoopID should not be used");
-
   // Set the first operand to itself.
+  MDNode *LoopID = MDNode::get(Ctx, Args);
   LoopID->replaceOperandWith(0, LoopID);
-  MDNode::deleteTemporary(TempNode);
   return LoopID;
 }
 
 LoopAttributes::LoopAttributes(bool IsParallel)
-  : IsParallel(IsParallel),
-    VectorizerEnable(LoopAttributes::LVEC_UNSPECIFIED),
-    VectorizerWidth(0) { }
+    : IsParallel(IsParallel), VectorizerEnable(LoopAttributes::VecUnspecified),
+      VectorizerWidth(0), VectorizerUnroll(0) {}
 
-void LoopAttributes::Clear() {
+void LoopAttributes::clear() {
   IsParallel = false;
   VectorizerWidth = 0;
-  VectorizerEnable = LoopAttributes::LVEC_UNSPECIFIED;
+  VectorizerUnroll = 0;
+  VectorizerEnable = LoopAttributes::VecUnspecified;
 }
 
-LoopInfo::LoopInfo(llvm::BasicBlock *Header, const LoopAttributes &Attrs)
-  : LoopID(0), Header(Header), Attrs(Attrs) {
-  LoopID = CreateMetadata(Header->getContext(), Attrs);
+LoopInfo::LoopInfo(BasicBlock *Header, const LoopAttributes &Attrs)
+    : LoopID(nullptr), Header(Header), Attrs(Attrs) {
+  LoopID = createMetadata(Header->getContext(), Attrs);
 }
 
-LoopInfo::LoopInfo(llvm::MDNode *LoopID, const LoopAttributes &Attrs)
-  : LoopID(LoopID), Header(0), Attrs(Attrs) { }
+void LoopInfoStack::push(BasicBlock *Header,
+                         ArrayRef<const clang::Attr *> Attrs) {
+  for (const auto *Attr : Attrs) {
+    const LoopHintAttr *LH = dyn_cast<LoopHintAttr>(Attr);
 
-void LoopInfoStack::Push(llvm::BasicBlock *Header) {
+    // Skip non loop hint attributes
+    if (!LH)
+      continue;
+
+    LoopHintAttr::OptionType Option = LH->getOption();
+    LoopHintAttr::LoopHintState State = LH->getState();
+    switch (Option) {
+    case LoopHintAttr::Vectorize:
+    case LoopHintAttr::Interleave:
+      if (State == LoopHintAttr::AssumeSafety) {
+        // Apply "llvm.mem.parallel_loop_access" metadata to load/stores.
+        setParallel(true);
+      }
+      break;
+    case LoopHintAttr::VectorizeWidth:
+    case LoopHintAttr::InterleaveCount:
+    case LoopHintAttr::Unroll:
+    case LoopHintAttr::UnrollCount:
+      // Nothing to do here for these loop hints.
+      break;
+    }
+  }
+
   Active.push_back(LoopInfo(Header, StagedAttrs));
   // Clear the attributes so nested loops do not inherit them.
-  StagedAttrs.Clear();
+  StagedAttrs.clear();
 }
 
-void LoopInfoStack::Pop() {
-  assert(!Active.empty());
+void LoopInfoStack::pop() {
+  assert(!Active.empty() && "No active loops to pop");
   Active.pop_back();
 }
 
-void LoopInfoStack::AddAligned(const llvm::Value *Val, int Align) {
-  // The following restriction should be enforced by Sema, so
-  // check it with assertion.
-  assert(Aligneds.find(Val) == Aligneds.end() ||
-         Aligneds.find(Val)->second == Align);
-  Aligneds.insert(std::make_pair(Val, Align));
-}
-
-int LoopInfoStack::GetAligned(const llvm::Value *Val) const {
-  llvm::DenseMap<const llvm::Value *, int>::const_iterator It =
-    Aligneds.find(Val);
-  if (It == Aligneds.end()) return 0;
-  return It->second;
-}
-
-void LoopInfoStack::InsertHelper(llvm::Instruction *I) const {
-  if (!HasInfo())
+void LoopInfoStack::InsertHelper(Instruction *I) const {
+  if (!hasInfo())
     return;
 
-  const LoopInfo &L = GetInfo();
-
-  if (!L.GetLoopID())
+  const LoopInfo &L = getInfo();
+  if (!L.getLoopID())
     return;
 
-  if (llvm::TerminatorInst *TI = llvm::dyn_cast<llvm::TerminatorInst>(I)) {
+  if (TerminatorInst *TI = dyn_cast<TerminatorInst>(I)) {
     for (unsigned i = 0, ie = TI->getNumSuccessors(); i < ie; ++i)
-      if (TI->getSuccessor(i) == L.GetHeader()) {
-        TI->setMetadata("llvm.loop", L.GetLoopID());
+      if (TI->getSuccessor(i) == L.getHeader()) {
+        TI->setMetadata("llvm.loop", L.getLoopID());
         break;
       }
     return;
   }
 
-  if (L.GetAttributes().IsParallel) {
-    if (llvm::StoreInst *SI = llvm::dyn_cast<llvm::StoreInst>(I)) {
-      SI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
-    }
-    else if (llvm::LoadInst *LI = llvm::dyn_cast<llvm::LoadInst>(I)) {
-      LI->setMetadata("llvm.mem.parallel_loop_access", L.GetLoopID());
-      if (int Align = GetAligned(LI->getOperand(0))) {
-        llvm::Value *AlignVal = llvm::ConstantInt::get(
-            llvm::Type::getInt32Ty(LI->getContext()), Align);
-        llvm::SmallVector<llvm::Value *, 4> Args;
-        Args.push_back(AlignVal);
-        llvm::MDNode *Node = llvm::MDNode::get(LI->getContext(), Args);
-        LI->setMetadata("llvm.mem.aligned", Node);
-      }
-    }
-  }
+  if (L.getAttributes().IsParallel && I->mayReadOrWriteMemory())
+    I->setMetadata("llvm.mem.parallel_loop_access", L.getLoopID());
 }
-
-void LoopInfoStack::Push(llvm::MDNode *LoopID, bool IsParallel) {
-  assert(Active.empty() && "cannot have an active loop");
-  Active.push_back(LoopInfo(LoopID, LoopAttributes(IsParallel)));
-  StagedAttrs.Clear();
-}
-

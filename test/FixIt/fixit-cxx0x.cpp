@@ -125,7 +125,8 @@ namespace NonStaticConstexpr {
   struct foo {
     constexpr int i; // expected-error {{non-static data member cannot be constexpr; did you intend to make it const?}}
     constexpr int j = 7; // expected-error {{non-static data member cannot be constexpr; did you intend to make it static?}}
-    foo() : i(3) {
+    constexpr const int k; // expected-error {{non-static data member cannot be constexpr; did you intend to make it const?}}
+    foo() : i(3), k(4) {
     }
     static int get_j() {
       return j;
@@ -136,4 +137,43 @@ namespace NonStaticConstexpr {
 int RegisterVariable() {
   register int n; // expected-warning {{'register' storage class specifier is deprecated}}
   return n;
+}
+
+namespace MisplacedParameterPack {
+  template <typename Args...> // expected-error {{'...' must immediately precede declared identifier}}
+  void misplacedEllipsisInTypeParameter(Args...);
+
+  template <typename... Args...> // expected-error {{'...' must immediately precede declared identifier}}
+  void redundantEllipsisInTypeParameter(Args...);
+
+  template <template <typename> class Args...> // expected-error {{'...' must immediately precede declared identifier}}
+  void misplacedEllipsisInTemplateTypeParameter(Args<int>...);
+
+  template <template <typename> class... Args...> // expected-error {{'...' must immediately precede declared identifier}}
+  void redundantEllipsisInTemplateTypeParameter(Args<int>...);
+
+  template <int N...> // expected-error {{'...' must immediately precede declared identifier}}
+  void misplacedEllipsisInNonTypeTemplateParameter();
+
+  template <int... N...> // expected-error {{'...' must immediately precede declared identifier}}
+  void redundantEllipsisInNonTypeTemplateParameter();
+}
+
+namespace MisplacedDeclAndRefSpecAfterVirtSpec {
+  struct B {
+    virtual void f();
+    virtual void f() volatile const;
+  };
+  struct D : B {
+    virtual void f() override;
+    virtual void f() override final const volatile; // expected-error {{'const' qualifier may not appear after the virtual specifier 'final'}} expected-error {{'volatile' qualifier may not appear after the virtual specifier 'final'}}
+  };
+  struct B2 {
+    virtual void f() &;
+    virtual void f() volatile const &&;
+  };
+  struct D2 : B2 {
+    virtual void f() override &; // expected-error {{'&' qualifier may not appear after the virtual specifier 'override'}}
+    virtual void f() override final const volatile &&; //  expected-error {{'const' qualifier may not appear after the virtual specifier 'final'}} expected-error {{'volatile' qualifier may not appear after the virtual specifier 'final'}} expected-error {{'&&' qualifier may not appear after the virtual specifier 'final'}}
+  };
 }

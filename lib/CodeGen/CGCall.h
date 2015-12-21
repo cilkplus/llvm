@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef CLANG_CODEGEN_CGCALL_H
-#define CLANG_CODEGEN_CGCALL_H
+#ifndef LLVM_CLANG_LIB_CODEGEN_CGCALL_H
+#define LLVM_CLANG_LIB_CODEGEN_CGCALL_H
 
 #include "CGValue.h"
 #include "EHScopeStack.h"
@@ -56,6 +56,8 @@ namespace CodeGen {
   class CallArgList :
     public SmallVector<CallArg, 16> {
   public:
+    CallArgList() : StackBase(nullptr), StackBaseMem(nullptr) {}
+
     struct Writeback {
       /// The original argument.  Note that the argument l-value
       /// is potentially null.
@@ -97,9 +99,12 @@ namespace CodeGen {
 
     bool hasWritebacks() const { return !Writebacks.empty(); }
 
-    typedef SmallVectorImpl<Writeback>::const_iterator writeback_iterator;
-    writeback_iterator writeback_begin() const { return Writebacks.begin(); }
-    writeback_iterator writeback_end() const { return Writebacks.end(); }
+    typedef llvm::iterator_range<SmallVectorImpl<Writeback>::const_iterator>
+      writeback_const_range;
+
+    writeback_const_range writebacks() const {
+      return writeback_const_range(Writebacks.begin(), Writebacks.end());
+    }
 
     void addArgCleanupDeactivation(EHScopeStack::stable_iterator Cleanup,
                                    llvm::Instruction *IsActiveIP) {
@@ -113,6 +118,14 @@ namespace CodeGen {
       return CleanupsToDeactivate;
     }
 
+    void allocateArgumentMemory(CodeGenFunction &CGF);
+    llvm::Instruction *getStackBase() const { return StackBase; }
+    void freeArgumentMemory(CodeGenFunction &CGF) const;
+
+    /// \brief Returns if we're using an inalloca struct to pass arguments in
+    /// memory.
+    bool isUsingInAlloca() const { return StackBase; }
+
   private:
     SmallVector<Writeback, 1> Writebacks;
 
@@ -120,6 +133,17 @@ namespace CodeGen {
     /// is used to cleanup objects that are owned by the callee once the call
     /// occurs.
     SmallVector<CallArgCleanup, 1> CleanupsToDeactivate;
+
+    /// The stacksave call.  It dominates all of the argument evaluation.
+    llvm::CallInst *StackBase;
+
+    /// The alloca holding the stackbase.  We need it to maintain SSA form.
+    llvm::AllocaInst *StackBaseMem;
+
+    /// The iterator pointing to the stack restore cleanup.  We manually run and
+    /// deactivate this cleanup after the call in the unexceptional case because
+    /// it doesn't run in the normal order.
+    EHScopeStack::stable_iterator StackCleanup;
   };
 
   /// FunctionArgList - Type for representing both the decl and type
@@ -131,17 +155,25 @@ namespace CodeGen {
   /// ReturnValueSlot - Contains the address where the return value of a 
   /// function can be stored, and whether the address is volatile or not.
   class ReturnValueSlot {
-    llvm::PointerIntPair<llvm::Value *, 1, bool> Value;
+    llvm::PointerIntPair<llvm::Value *, 2, unsigned int> Value;
+
+    // Return value slot flags
+    enum Flags {
+      IS_VOLATILE = 0x1,
+      IS_UNUSED = 0x2,
+    };
 
   public:
     ReturnValueSlot() {}
-    ReturnValueSlot(llvm::Value *Value, bool IsVolatile)
-      : Value(Value, IsVolatile) {}
+    ReturnValueSlot(llvm::Value *Value, bool IsVolatile, bool IsUnused = false)
+      : Value(Value,
+              (IsVolatile ? IS_VOLATILE : 0) | (IsUnused ? IS_UNUSED : 0)) {}
 
     bool isNull() const { return !getValue(); }
-    
-    bool isVolatile() const { return Value.getInt(); }
+
+    bool isVolatile() const { return Value.getInt() & IS_VOLATILE; }
     llvm::Value *getValue() const { return Value.getPointer(); }
+    bool isUnused() const { return Value.getInt() & IS_UNUSED; }
   };
   
 }  // end namespace CodeGen

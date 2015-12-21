@@ -18,14 +18,21 @@ Using Clang as a Compiler
 
    UsersManual
    LanguageExtensions
+   AttributeReference
    CrossCompilation
+   ThreadSafetyAnalysis
    AddressSanitizer
    ThreadSanitizer
    MemorySanitizer
    DataFlowSanitizer
    LeakSanitizer
+   SanitizerCoverage
    SanitizerSpecialCaseList
+   ControlFlowIntegrity
+   SafeStack
    Modules
+   MSVCCompatibility
+   CommandGuide/index
    FAQ
 
 Using Clang as a Library

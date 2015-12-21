@@ -1,6 +1,6 @@
 // RUN: rm -rf %t
-// RUN: %clang_cc1 -Wauto-import -fmodules-cache-path=%t -fmodules -F %S/Inputs %s -verify -DERRORS
-// RUN: %clang_cc1 -Wauto-import -fmodules-cache-path=%t -fmodules -F %S/Inputs %s -verify
+// RUN: %clang_cc1 -Wauto-import -fmodules-cache-path=%t -fmodules -fimplicit-module-maps -F %S/Inputs %s -verify -DERRORS
+// RUN: %clang_cc1 -Wauto-import -fmodules-cache-path=%t -fmodules -fimplicit-module-maps -F %S/Inputs %s -verify
 // 
 // Test both with and without the declarations that refer to unimported
 // entities. For error recovery, those cases implicitly trigger an import.
@@ -83,6 +83,6 @@ int getNotInModule() {
   return not_in_module;
 }
 
-void includeNotAtTopLevel() {
-  #include <NoUmbrella/A.h> // expected-warning {{treating #include as an import}} expected-error {{expected expression}}
-}
+void includeNotAtTopLevel() { // expected-note {{to match this '{'}}
+  #include <NoUmbrella/A.h> // expected-warning {{treating #include as an import}} expected-error {{expected '}'}}
+} // expected-error {{extraneous closing brace}}

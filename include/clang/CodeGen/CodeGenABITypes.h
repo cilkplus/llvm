@@ -21,8 +21,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_CODEGEN_ABITYPES_H
-#define LLVM_CLANG_CODEGEN_ABITYPES_H
+#ifndef LLVM_CLANG_CODEGEN_CODEGENABITYPES_H
+#define LLVM_CLANG_CODEGEN_CODEGENABITYPES_H
 
 #include "clang/AST/CanonicalType.h"
 #include "clang/AST/Type.h"
@@ -37,8 +37,11 @@ namespace clang {
 class ASTContext;
 class CXXRecordDecl;
 class CodeGenOptions;
+class CoverageSourceInfo;
 class DiagnosticsEngine;
+class HeaderSearchOptions;
 class ObjCMethodDecl;
+class PreprocessorOptions;
 
 namespace CodeGen {
 class CGFunctionInfo;
@@ -47,10 +50,8 @@ class CodeGenModule;
 class CodeGenABITypes
 {
 public:
-  CodeGenABITypes(ASTContext &C, const CodeGenOptions &CodeGenOpts,
-                  llvm::Module &M, const llvm::DataLayout &TD,
-                  DiagnosticsEngine &Diags);
-
+  CodeGenABITypes(ASTContext &C, llvm::Module &M, const llvm::DataLayout &TD,
+                  CoverageSourceInfo *CoverageInfo = nullptr);
   ~CodeGenABITypes();
 
   /// These methods all forward to methods in the private implementation class
@@ -65,12 +66,20 @@ public:
                                              CanQual<FunctionNoProtoType> Ty);
   const CGFunctionInfo &arrangeCXXMethodType(const CXXRecordDecl *RD,
                                              const FunctionProtoType *FTP);
-  const CGFunctionInfo &arrangeLLVMFunctionInfo(CanQualType returnType,
-                                         llvm::ArrayRef<CanQualType> argTypes,
-                                         FunctionType::ExtInfo info,
-                                         RequiredArgs args);
+  const CGFunctionInfo &arrangeFreeFunctionCall(CanQualType returnType,
+                                                ArrayRef<CanQualType> argTypes,
+                                                FunctionType::ExtInfo info,
+                                                RequiredArgs args);
 
 private:
+  /// Default CodeGenOptions object used to initialize the
+  /// CodeGenModule and otherwise not used. More specifically, it is
+  /// not used in ABI type generation, so none of the options matter.
+  CodeGenOptions *CGO;
+  HeaderSearchOptions *HSO;
+  PreprocessorOptions *PPO;
+
+  /// The CodeGenModule we use get to the CodeGenTypes object.
   CodeGen::CodeGenModule *CGM;
 };
 

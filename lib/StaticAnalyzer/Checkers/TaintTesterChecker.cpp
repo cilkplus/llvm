@@ -22,7 +22,7 @@ using namespace ento;
 namespace {
 class TaintTesterChecker : public Checker< check::PostStmt<Expr> > {
 
-  mutable OwningPtr<BugType> BT;
+  mutable std::unique_ptr<BugType> BT;
   void initBugType() const;
 
   /// Given a pointer argument, get the symbol of the value it contains
@@ -38,7 +38,7 @@ public:
 
 inline void TaintTesterChecker::initBugType() const {
   if (!BT)
-    BT.reset(new BugType("Tainted data", "General"));
+    BT.reset(new BugType(this, "Tainted data", "General"));
 }
 
 void TaintTesterChecker::checkPostStmt(const Expr *E,
@@ -50,9 +50,9 @@ void TaintTesterChecker::checkPostStmt(const Expr *E,
   if (State->isTainted(E, C.getLocationContext())) {
     if (ExplodedNode *N = C.addTransition()) {
       initBugType();
-      BugReport *report = new BugReport(*BT, "tainted",N);
+      auto report = llvm::make_unique<BugReport>(*BT, "tainted",N);
       report->addRange(E->getSourceRange());
-      C.emitReport(report);
+      C.emitReport(std::move(report));
     }
   }
 }

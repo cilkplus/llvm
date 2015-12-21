@@ -33,9 +33,9 @@ void test0(X x) {
   test0_helper(x);
   // CHECK-LABEL:    define void @_Z5test01X(
   // CHECK:      [[TMP:%.*]] = alloca [[A:%.*]], align
-  // CHECK-NEXT: [[T0:%.*]] = call [[B:%.*]]* @_ZN1XcvR1BEv(
+  // CHECK-NEXT: [[T0:%.*]] = call dereferenceable({{[0-9]+}}) [[B:%.*]]* @_ZN1XcvR1BEv(
   // CHECK-NEXT: [[T1:%.*]] = bitcast [[B]]* [[T0]] to [[A]]*
-  // CHECK-NEXT: call void @_ZN1AC1ERKS_([[A]]* [[TMP]], [[A]]* [[T1]])
+  // CHECK-NEXT: call void @_ZN1AC1ERKS_([[A]]* [[TMP]], [[A]]* dereferenceable({{[0-9]+}}) [[T1]])
   // CHECK-NEXT: call void @_Z12test0_helper1A([[A]]* [[TMP]])
   // CHECK-NEXT: call void @_ZN1AD1Ev([[A]]* [[TMP]])
   // CHECK-NEXT: ret void
@@ -79,7 +79,7 @@ void test2(Test2b &x) {
   // CHECK:      [[X:%.*]] = alloca [[B:%.*]]*, align 8
   // CHECK-NEXT: [[Y:%.*]] = alloca [[A:%.*]]*, align 8
   // CHECK-NEXT: store [[B]]* {{%.*}}, [[B]]** [[X]], align 8
-  // CHECK-NEXT: [[T0:%.*]] = load [[B]]** [[X]], align 8
+  // CHECK-NEXT: [[T0:%.*]] = load [[B]]*, [[B]]** [[X]], align 8
   // CHECK-NEXT: [[T1:%.*]] = bitcast [[B]]* [[T0]] to [[A]]*
   // CHECK-NEXT: store [[A]]* [[T1]], [[A]]** [[Y]], align 8
   // CHECK-NEXT: ret void

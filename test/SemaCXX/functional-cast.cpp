@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify %s
+// RUN: %clang_cc1 -std=c++11 -fsyntax-only -verify %s
 // REQUIRES: LP64
 
 // ------------ not interpreted as C-style cast ------------
@@ -11,7 +11,7 @@ struct InitViaConstructor {
   InitViaConstructor(int i = 7);
 };
 
-struct NoValueInit { // expected-note 2 {{candidate constructor (the implicit copy constructor)}} 
+struct NoValueInit { // expected-note 2 {{candidate constructor (the implicit copy constructor)}} expected-note 2 {{candidate constructor (the implicit move constructor)}}
   NoValueInit(int i, int j); // expected-note 2 {{candidate constructor}}
 };
 
@@ -25,6 +25,7 @@ void test_cxx_function_cast_multi() {
   (void)NoValueInit(0, 0);
   (void)NoValueInit(0, 0, 0); // expected-error{{no matching constructor for initialization}}
   (void)int(1, 2); // expected-error{{excess elements in scalar initializer}}
+  (void)int({}, 2);           // expected-error{{excess elements in scalar initializer}}
 }
 
 
@@ -305,8 +306,8 @@ void memptrs()
   (void)structureimfp(psf);
 
   typedef void (structure::*structurevmfp)();
-  (void)structurevmfp(psi); // expected-error {{functional-style cast from 'const int structure::*' to 'structurevmfp' (aka 'void (structure::*)()') is not allowed}}
-  (void)structureimp(psf); // expected-error {{functional-style cast from 'void (structure::*)()' to 'structureimp' (aka 'int structure::*') is not allowed}}
+  (void)structurevmfp(psi); // expected-error-re {{functional-style cast from 'const int structure::*' to 'structurevmfp' (aka 'void (structure::*)(){{( __attribute__\(\(thiscall\)\))?}}') is not allowed}}
+  (void)structureimp(psf); // expected-error-re {{functional-style cast from 'void (structure::*)(){{( __attribute__\(\(thiscall\)\))?}}' to 'structureimp' (aka 'int structure::*') is not allowed}}
 }
 
 // ---------------- misc ------------------

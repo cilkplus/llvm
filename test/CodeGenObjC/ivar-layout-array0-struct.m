@@ -1,4 +1,4 @@
-// REQUIRES: x86-64-registered-target
+// REQUIRES: x86-registered-target
 // RUN: %clang_cc1 -fobjc-gc -triple x86_64-apple-darwin -fobjc-runtime=macosx-fragile-10.5 -S %s -o %t-64.s
 // RUN: FileCheck -check-prefix CHECK-LP64 --input-file=%t-64.s %s
 
@@ -19,5 +19,5 @@ typedef struct {
 @end
 
 @implementation Test @end
-// CHECK-LP64: L_OBJC_CLASS_NAME_4:
+// CHECK-LP64: L_OBJC_CLASS_NAME_.4:
 // CHECK-LP64-NEXT: .asciz      "\001\020"

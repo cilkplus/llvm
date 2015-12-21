@@ -25,12 +25,12 @@ int global_namespace_variable = 1;
 // functions that belong to the namespace have it as a context, and the global
 // function has the file as a context.
 
-// CHECK: metadata !"_ZTS1C", metadata !"member_function"{{.*}} [ DW_TAG_subprogram ] [line 11] [def] [member_function]
+// CHECK: ![[FILE:[0-9]+]] = !DIFile(filename: "{{.*}}context.cpp",
+// CHECK: !DISubprogram(name: "member_function",{{.*}} scope: !"_ZTS1C",{{.*}} isDefinition: true
 
-// CHECK: metadata !"_ZTS1C", metadata !"static_member_function"{{.*}}  [ DW_TAG_subprogram ] [line 13] [def] [static_member_function]
+// CHECK: !DISubprogram(name: "static_member_function",{{.*}} scope: !"_ZTS1C",{{.*}} isDefinition: true
 
-// CHECK: metadata !22, metadata !"global_function"{{.*}}  [ DW_TAG_subprogram ] [line 17] [def] [global_function]
-// CHECK: !22 = {{.*}} [ DW_TAG_file_type ]
+// CHECK: !DISubprogram(name: "global_function",{{.*}} scope: ![[FILE]],{{.*}} isDefinition: true
 
-// CHECK: metadata !24, metadata !"global_namespace_function"{{.*}} [ DW_TAG_subprogram ] [line 20] [def] [global_namespace_function]
-// CHECK: !24 = {{.*}} [ DW_TAG_namespace ] [ns] [line 19]
+// CHECK: !DISubprogram(name: "global_namespace_function",{{.*}} scope: ![[NS:[0-9]+]],{{.*}} isDefinition: true
+// CHECK: ![[NS]] = !DINamespace(name: "ns"

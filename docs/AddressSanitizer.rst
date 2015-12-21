@@ -23,8 +23,7 @@ Typical slowdown introduced by AddressSanitizer is **2x**.
 How to build
 ============
 
-Follow the `clang build instructions <../get_started.html>`_. CMake build is
-supported.
+Build LLVM/Clang with `CMake <http://llvm.org/docs/CMake.html>`_.
 
 Usage
 =====
@@ -61,14 +60,35 @@ or:
     % clang -g -fsanitize=address example_UseAfterFree.o
 
 If a bug is detected, the program will print an error message to stderr and
-exit with a non-zero exit code. Currently, AddressSanitizer does not symbolize
-its output, so you may need to use a separate script to symbolize the result
-offline (this will be fixed in future).
+exit with a non-zero exit code. AddressSanitizer exits on the first detected error.
+This is by design:
+
+* This approach allows AddressSanitizer to produce faster and smaller generated code
+  (both by ~5%).
+* Fixing bugs becomes unavoidable. AddressSanitizer does not produce
+  false alarms. Once a memory corruption occurs, the program is in an inconsistent
+  state, which could lead to confusing results and potentially misleading
+  subsequent reports.
+
+If your process is sandboxed and you are running on OS X 10.10 or earlier, you
+will need to set ``DYLD_INSERT_LIBRARIES`` environment variable and point it to
+the ASan library that is packaged with the compiler used to build the
+executable. (You can find the library by searching for dynamic libraries with
+``asan`` in their name.) If the environment variable is not set, the process will
+try to re-exec. Also keep in mind that when moving the executable to another machine,
+the ASan library will also need to be copied over.
+
+Symbolizing the Reports
+=========================
+
+To make AddressSanitizer symbolize its output
+you need to set the ``ASAN_SYMBOLIZER_PATH`` environment variable to point to
+the ``llvm-symbolizer`` binary (or make sure ``llvm-symbolizer`` is in your
+``$PATH``):
 
 .. code-block:: console
 
-    % ./a.out 2> log
-    % projects/compiler-rt/lib/asan/scripts/asan_symbolize.py / < log | c++filt
+    % ASAN_SYMBOLIZER_PATH=/usr/local/bin/llvm-symbolizer ./a.out
     ==9442== ERROR: AddressSanitizer heap-use-after-free on address 0x7f7ddab8c084 at pc 0x403c8c bp 0x7fff87fb82d0 sp 0x7fff87fb82c8
     READ of size 4 at 0x7f7ddab8c084 thread T0
         #0 0x403c8c in main example_UseAfterFree.cc:4
@@ -84,14 +104,80 @@ offline (this will be fixed in future).
         #2 0x7f7ddabcac4d in __libc_start_main ??:0
     ==9442== ABORTING
 
-AddressSanitizer exits on the first detected error. This is by design.
-One reason: it makes the generated code smaller and faster (both by
-~5%). Another reason: this makes fixing bugs unavoidable. With Valgrind,
-it is often the case that users treat Valgrind warnings as false
-positives (which they are not) and don't fix them.
+If that does not work for you (e.g. your process is sandboxed), you can use a
+separate script to symbolize the result offline (online symbolization can be
+force disabled by setting ``ASAN_OPTIONS=symbolize=0``):
 
-``__has_feature(address_sanitizer)``
-------------------------------------
+.. code-block:: console
+
+    % ASAN_OPTIONS=symbolize=0 ./a.out 2> log
+    % projects/compiler-rt/lib/asan/scripts/asan_symbolize.py / < log | c++filt
+    ==9442== ERROR: AddressSanitizer heap-use-after-free on address 0x7f7ddab8c084 at pc 0x403c8c bp 0x7fff87fb82d0 sp 0x7fff87fb82c8
+    READ of size 4 at 0x7f7ddab8c084 thread T0
+        #0 0x403c8c in main example_UseAfterFree.cc:4
+        #1 0x7f7ddabcac4d in __libc_start_main ??:0
+    ...
+
+Note that on OS X you may need to run ``dsymutil`` on your binary to have the
+file\:line info in the AddressSanitizer reports.
+
+Additional Checks
+=================
+
+Initialization order checking
+-----------------------------
+
+AddressSanitizer can optionally detect dynamic initialization order problems,
+when initialization of globals defined in one translation unit uses
+globals defined in another translation unit. To enable this check at runtime,
+you should set environment variable
+``ASAN_OPTIONS=check_initialization_order=1``.
+
+Note that this option is not supported on OS X.
+
+Memory leak detection
+---------------------
+
+For more information on leak detector in AddressSanitizer, see
+:doc:`LeakSanitizer`. The leak detection is turned on by default on Linux;
+however, it is not yet supported on other platforms.
+
+Issue Suppression
+=================
+
+AddressSanitizer is not expected to produce false positives. If you see one,
+look again; most likely it is a true positive!
+
+Suppressing Reports in External Libraries
+-----------------------------------------
+Runtime interposition allows AddressSanitizer to find bugs in code that is
+not being recompiled. If you run into an issue in external libraries, we
+recommend immediately reporting it to the library maintainer so that it
+gets addressed. However, you can use the following suppression mechanism
+to unblock yourself and continue on with the testing. This suppression
+mechanism should only be used for suppressing issues in external code; it
+does not work on code recompiled with AddressSanitizer. To suppress errors
+in external libraries, set the ``ASAN_OPTIONS`` environment variable to point
+to a suppression file. You can either specify the full path to the file or the
+path of the file relative to the location of your executable.
+
+.. code-block:: bash
+
+    ASAN_OPTIONS=suppressions=MyASan.supp
+
+Use the following format to specify the names of the functions or libraries
+you want to suppress. You can see these in the error report. Remember that
+the narrower the scope of the suppression, the more bugs you will be able to
+catch.
+
+.. code-block:: bash
+
+    interceptor_via_fun:NameOfCFunctionToSuppress
+    interceptor_via_fun:-[ClassName objCMethodToSuppress:]
+    interceptor_via_lib:NameOfTheLibraryToSuppress
+
+Conditional Compilation with ``__has_feature(address_sanitizer)``
+-----------------------------------------------------------------
 
 In some cases one may need to execute different code depending on whether
 AddressSanitizer is enabled.
@@ -106,28 +192,19 @@ this purpose.
     #  endif
     #endif
 
-``__attribute__((no_sanitize_address))``
------------------------------------------------
+Disabling Instrumentation with ``__attribute__((no_sanitize("address")))``
+--------------------------------------------------------------------------
 
 Some code should not be instrumented by AddressSanitizer. One may use the
-function attribute
-:ref:`no_sanitize_address <langext-address_sanitizer>`
-(or a deprecated synonym `no_address_safety_analysis`)
-to disable instrumentation of a particular function. This attribute may not be
-supported by other compilers, so we suggest to use it together with
-``__has_feature(address_sanitizer)``.
+function attribute ``__attribute__((no_sanitize("address")))``
+(which has deprecated synonyms
+:ref:`no_sanitize_address <langext-address_sanitizer>` and
+`no_address_safety_analysis`) to disable instrumentation of a particular
+function. This attribute may not be supported by other compilers, so we suggest
+to use it together with ``__has_feature(address_sanitizer)``.
 
-Initialization order checking
------------------------------
-
-AddressSanitizer can optionally detect dynamic initialization order problems,
-when initialization of globals defined in one translation unit uses
-globals defined in another translation unit. To enable this check at runtime,
-you should set environment variable
-``ASAN_OPTIONS=check_initialization_order=1``.
-
-Blacklist
----------
+Suppressing Errors in Recompiled Code (Blacklist)
+-------------------------------------------------
 
 AddressSanitizer supports ``src`` and ``fun`` entity types in
 :doc:`SanitizerSpecialCaseList`, that can be used to suppress error reports
@@ -148,30 +225,13 @@ problems happening in certain source files or with certain global variables.
     # Disable out-of-bound checks for global:
     global:bad_array
     # Disable out-of-bound checks for global instances of a given class ...
-    type:class.Namespace::BadClassName
+    type:Namespace::BadClassName
     # ... or a given struct. Use wildcard to deal with anonymous namespace.
-    type:struct.Namespace2::*::BadStructName
+    type:Namespace2::*::BadStructName
     # Disable initialization-order checks for globals:
     global:bad_init_global=init
     type:*BadInitClassSubstring*=init
     src:bad/init/files/*=init
-
-Memory leak detection
----------------------
-
-For the experimental memory leak detector in AddressSanitizer, see
-:doc:`LeakSanitizer`.
-
-Supported Platforms
-===================
-
-AddressSanitizer is supported on
-
-* Linux i386/x86\_64 (tested on Ubuntu 10.04 and 12.04);
-* MacOS 10.6, 10.7 and 10.8 (i386/x86\_64).
-
-Support for Linux ARM (and Android ARM) is in progress (it may work, but
-is not guaranteed too).
 
 Limitations
 ===========
@@ -184,6 +244,19 @@ Limitations
   virtual address space. This means that tools like ``ulimit`` may not work as
   usually expected.
 * Static linking is not supported.
+
+Supported Platforms
+===================
+
+AddressSanitizer is supported on:
+
+* Linux i386/x86\_64 (tested on Ubuntu 12.04)
+* OS X 10.7 - 10.11 (i386/x86\_64)
+* iOS Simulator
+* Android ARM
+* FreeBSD i386/x86\_64 (tested on FreeBSD 11-current)
+
+Ports to various other platforms are in progress.
 
 Current Status
 ==============

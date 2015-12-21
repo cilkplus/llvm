@@ -44,7 +44,7 @@ namespace VariableLengthArrays {
 
   void f() {
     int n = 42;
-    goto foo; // expected-error {{goto into protected scope}}
+    goto foo; // expected-error {{cannot jump}}
     using T = int[n]; // expected-note {{bypasses initialization of VLA type alias}}
   foo: ;
   }
@@ -83,12 +83,10 @@ namespace InFunctions {
 
 namespace ClassNameRedecl {
   class C0 {
-    // FIXME: this diagnostic is pretty poor
-    using C0 = int; // expected-error {{name defined in alias declaration must be an identifier}}
+    using C0 = int; // expected-error {{member 'C0' has the same name as its class}}
   };
   class C1 {
-    // FIXME: this diagnostic is pretty poor
-    using C1 = C1; // expected-error {{name defined in alias declaration must be an identifier}}
+    using C1 = C1; // expected-error {{member 'C1' has the same name as its class}}
   };
   class C2 {
     using C0 = C1; // ok
@@ -154,5 +152,5 @@ namespace Access {
 namespace VoidArg {
   using V = void;
   V f(int); // ok
-  V g(V); // expected-error {{empty parameter list defined with a type alias of 'void' not allowed}}
+  V g(V); // ok (DR577)
 }
