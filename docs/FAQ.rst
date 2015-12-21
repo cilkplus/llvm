@@ -102,7 +102,7 @@ grabbing the wrong linker/assembler/etc, there are two ways to fix it:
 
 .. code-block:: console
 
-   % PATH=[the path without the bad program] ./configure ...
+   % PATH=[the path without the bad program] $LLVM_SRC_DIR/configure ...
 
 This is still somewhat inconvenient, but it allows ``configure`` to do its
 work without having to adjust your ``PATH`` permanently.
@@ -182,14 +182,6 @@ Compiling LLVM with GCC 3.3.2 fails, what should I do?
 ------------------------------------------------------
 This is `a bug in GCC <http://gcc.gnu.org/bugzilla/show_bug.cgi?id=13392>`_,
 and affects projects other than LLVM.  Try upgrading or downgrading your GCC.
-
-
-Compiling LLVM with GCC succeeds, but the resulting tools do not work, what can be wrong?
------------------------------------------------------------------------------------------
-Several versions of GCC have shown a weakness in miscompiling the LLVM
-codebase.  Please consult your compiler version (``gcc --version``) to find
-out whether it is `broken <GettingStarted.html#brokengcc>`_.  If so, your only
-option is to upgrade GCC to a known good version.
 
 
 After Subversion update, rebuilding gives the error "No rule to make target".

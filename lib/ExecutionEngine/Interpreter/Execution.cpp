@@ -11,22 +11,24 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "interpreter"
 #include "Interpreter.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/IntrinsicLowering.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cmath>
 using namespace llvm;
+
+#define DEBUG_TYPE "interpreter"
 
 STATISTIC(NumDynamicInsts, "Number of dynamic instructions executed");
 
@@ -57,7 +59,7 @@ static void executeFAddInst(GenericValue &Dest, GenericValue Src1,
     IMPLEMENT_BINARY_OPERATOR(+, Double);
   default:
     dbgs() << "Unhandled type for FAdd instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 }
 
@@ -68,7 +70,7 @@ static void executeFSubInst(GenericValue &Dest, GenericValue Src1,
     IMPLEMENT_BINARY_OPERATOR(-, Double);
   default:
     dbgs() << "Unhandled type for FSub instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 }
 
@@ -79,7 +81,7 @@ static void executeFMulInst(GenericValue &Dest, GenericValue Src1,
     IMPLEMENT_BINARY_OPERATOR(*, Double);
   default:
     dbgs() << "Unhandled type for FMul instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 }
 
@@ -90,7 +92,7 @@ static void executeFDivInst(GenericValue &Dest, GenericValue Src1,
     IMPLEMENT_BINARY_OPERATOR(/, Double);
   default:
     dbgs() << "Unhandled type for FDiv instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 }
 
@@ -105,7 +107,7 @@ static void executeFRemInst(GenericValue &Dest, GenericValue Src1,
     break;
   default:
     dbgs() << "Unhandled type for Rem instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 }
 
@@ -142,7 +144,7 @@ static GenericValue executeICMP_EQ(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(==);
   default:
     dbgs() << "Unhandled type for ICMP_EQ predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -156,7 +158,7 @@ static GenericValue executeICMP_NE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(!=);
   default:
     dbgs() << "Unhandled type for ICMP_NE predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -170,7 +172,7 @@ static GenericValue executeICMP_ULT(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(<);
   default:
     dbgs() << "Unhandled type for ICMP_ULT predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -184,7 +186,7 @@ static GenericValue executeICMP_SLT(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(<);
   default:
     dbgs() << "Unhandled type for ICMP_SLT predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -198,7 +200,7 @@ static GenericValue executeICMP_UGT(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(>);
   default:
     dbgs() << "Unhandled type for ICMP_UGT predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -212,7 +214,7 @@ static GenericValue executeICMP_SGT(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(>);
   default:
     dbgs() << "Unhandled type for ICMP_SGT predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -226,7 +228,7 @@ static GenericValue executeICMP_ULE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(<=);
   default:
     dbgs() << "Unhandled type for ICMP_ULE predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -240,7 +242,7 @@ static GenericValue executeICMP_SLE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(<=);
   default:
     dbgs() << "Unhandled type for ICMP_SLE predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -254,7 +256,7 @@ static GenericValue executeICMP_UGE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(>=);
   default:
     dbgs() << "Unhandled type for ICMP_UGE predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -268,7 +270,7 @@ static GenericValue executeICMP_SGE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_POINTER_ICMP(>=);
   default:
     dbgs() << "Unhandled type for ICMP_SGE predicate: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -293,7 +295,7 @@ void Interpreter::visitICmpInst(ICmpInst &I) {
   case ICmpInst::ICMP_SGE: R = executeICMP_SGE(Src1, Src2, Ty); break;
   default:
     dbgs() << "Don't know how to handle this ICmp predicate!\n-->" << I;
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
  
   SetValue(&I, R, SF);
@@ -314,7 +316,7 @@ void Interpreter::visitICmpInst(ICmpInst &I) {
 
 #define IMPLEMENT_VECTOR_FCMP(OP)                                   \
   case Type::VectorTyID:                                            \
-    if(dyn_cast<VectorType>(Ty)->getElementType()->isFloatTy()) {   \
+    if (cast<VectorType>(Ty)->getElementType()->isFloatTy()) {      \
       IMPLEMENT_VECTOR_FCMP_T(OP, Float);                           \
     } else {                                                        \
         IMPLEMENT_VECTOR_FCMP_T(OP, Double);                        \
@@ -329,7 +331,7 @@ static GenericValue executeFCMP_OEQ(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_VECTOR_FCMP(==);
   default:
     dbgs() << "Unhandled type for FCmp EQ instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -361,7 +363,7 @@ static GenericValue executeFCMP_OEQ(GenericValue Src1, GenericValue Src2,
 
 #define MASK_VECTOR_NANS(TY, X,Y, FLAG)                                     \
   if (TY->isVectorTy()) {                                                   \
-    if (dyn_cast<VectorType>(TY)->getElementType()->isFloatTy()) {          \
+    if (cast<VectorType>(TY)->getElementType()->isFloatTy()) {              \
       MASK_VECTOR_NANS_T(X, Y, Float, FLAG)                                 \
     } else {                                                                \
       MASK_VECTOR_NANS_T(X, Y, Double, FLAG)                                \
@@ -385,7 +387,7 @@ static GenericValue executeFCMP_ONE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_VECTOR_FCMP(!=);
     default:
       dbgs() << "Unhandled type for FCmp NE instruction: " << *Ty << "\n";
-      llvm_unreachable(0);
+      llvm_unreachable(nullptr);
   }
   // in vector case mask out NaN elements
   if (Ty->isVectorTy())
@@ -405,7 +407,7 @@ static GenericValue executeFCMP_OLE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_VECTOR_FCMP(<=);
   default:
     dbgs() << "Unhandled type for FCmp LE instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -419,7 +421,7 @@ static GenericValue executeFCMP_OGE(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_VECTOR_FCMP(>=);
   default:
     dbgs() << "Unhandled type for FCmp GE instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -433,7 +435,7 @@ static GenericValue executeFCMP_OLT(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_VECTOR_FCMP(<);
   default:
     dbgs() << "Unhandled type for FCmp LT instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -447,7 +449,7 @@ static GenericValue executeFCMP_OGT(GenericValue Src1, GenericValue Src2,
     IMPLEMENT_VECTOR_FCMP(>);
   default:
     dbgs() << "Unhandled type for FCmp GT instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
   return Dest;
 }
@@ -463,14 +465,14 @@ static GenericValue executeFCMP_OGT(GenericValue Src1, GenericValue Src2,
     return Dest;                                                         \
   }
 
-#define IMPLEMENT_VECTOR_UNORDERED(TY, X,Y, _FUNC)                       \
-  if (TY->isVectorTy()) {                                                \
-    GenericValue DestMask = Dest;                                        \
-    Dest = _FUNC(Src1, Src2, Ty);                                        \
-      for( size_t _i=0; _i<Src1.AggregateVal.size(); _i++)               \
-        if (DestMask.AggregateVal[_i].IntVal == true)                    \
-          Dest.AggregateVal[_i].IntVal = APInt(1,true);                  \
-      return Dest;                                                       \
+#define IMPLEMENT_VECTOR_UNORDERED(TY, X, Y, FUNC)                             \
+  if (TY->isVectorTy()) {                                                      \
+    GenericValue DestMask = Dest;                                              \
+    Dest = FUNC(Src1, Src2, Ty);                                               \
+    for (size_t _i = 0; _i < Src1.AggregateVal.size(); _i++)                   \
+      if (DestMask.AggregateVal[_i].IntVal == true)                            \
+        Dest.AggregateVal[_i].IntVal = APInt(1, true);                         \
+    return Dest;                                                               \
   }
 
 static GenericValue executeFCMP_UEQ(GenericValue Src1, GenericValue Src2,
@@ -534,7 +536,7 @@ static GenericValue executeFCMP_ORD(GenericValue Src1, GenericValue Src2,
   if(Ty->isVectorTy()) {
     assert(Src1.AggregateVal.size() == Src2.AggregateVal.size());
     Dest.AggregateVal.resize( Src1.AggregateVal.size() );
-    if(dyn_cast<VectorType>(Ty)->getElementType()->isFloatTy()) {
+    if (cast<VectorType>(Ty)->getElementType()->isFloatTy()) {
       for( size_t _i=0;_i<Src1.AggregateVal.size();_i++)
         Dest.AggregateVal[_i].IntVal = APInt(1,
         ( (Src1.AggregateVal[_i].FloatVal ==
@@ -565,7 +567,7 @@ static GenericValue executeFCMP_UNO(GenericValue Src1, GenericValue Src2,
   if(Ty->isVectorTy()) {
     assert(Src1.AggregateVal.size() == Src2.AggregateVal.size());
     Dest.AggregateVal.resize( Src1.AggregateVal.size() );
-    if(dyn_cast<VectorType>(Ty)->getElementType()->isFloatTy()) {
+    if (cast<VectorType>(Ty)->getElementType()->isFloatTy()) {
       for( size_t _i=0;_i<Src1.AggregateVal.size();_i++)
         Dest.AggregateVal[_i].IntVal = APInt(1,
         ( (Src1.AggregateVal[_i].FloatVal !=
@@ -615,7 +617,7 @@ void Interpreter::visitFCmpInst(FCmpInst &I) {
   switch (I.getPredicate()) {
   default:
     dbgs() << "Don't know how to handle this FCmp predicate!\n-->" << I;
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   break;
   case FCmpInst::FCMP_FALSE: R = executeFCMP_BOOL(Src1, Src2, Ty, false); 
   break;
@@ -672,7 +674,7 @@ static GenericValue executeCmpInst(unsigned predicate, GenericValue Src1,
   case FCmpInst::FCMP_TRUE:  return executeFCMP_BOOL(Src1, Src2, Ty, true);
   default:
     dbgs() << "Unhandled Cmp predicate\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 }
 
@@ -711,10 +713,10 @@ void Interpreter::visitBinaryOperator(BinaryOperator &I) {
     // Macros to choose appropriate TY: float or double and run operation
     // execution
 #define FLOAT_VECTOR_OP(OP) {                                         \
-  if (dyn_cast<VectorType>(Ty)->getElementType()->isFloatTy())        \
+  if (cast<VectorType>(Ty)->getElementType()->isFloatTy())            \
     FLOAT_VECTOR_FUNCTION(OP, FloatVal)                               \
   else {                                                              \
-    if (dyn_cast<VectorType>(Ty)->getElementType()->isDoubleTy())     \
+    if (cast<VectorType>(Ty)->getElementType()->isDoubleTy())         \
       FLOAT_VECTOR_FUNCTION(OP, DoubleVal)                            \
     else {                                                            \
       dbgs() << "Unhandled type for OP instruction: " << *Ty << "\n"; \
@@ -726,7 +728,7 @@ void Interpreter::visitBinaryOperator(BinaryOperator &I) {
     switch(I.getOpcode()){
     default:
       dbgs() << "Don't know how to handle this binary operator!\n-->" << I;
-      llvm_unreachable(0);
+      llvm_unreachable(nullptr);
       break;
     case Instruction::Add:   INTEGER_VECTOR_OPERATION(+) break;
     case Instruction::Sub:   INTEGER_VECTOR_OPERATION(-) break;
@@ -743,18 +745,18 @@ void Interpreter::visitBinaryOperator(BinaryOperator &I) {
     case Instruction::FMul:  FLOAT_VECTOR_OP(*) break;
     case Instruction::FDiv:  FLOAT_VECTOR_OP(/) break;
     case Instruction::FRem:
-      if (dyn_cast<VectorType>(Ty)->getElementType()->isFloatTy())
+      if (cast<VectorType>(Ty)->getElementType()->isFloatTy())
         for (unsigned i = 0; i < R.AggregateVal.size(); ++i)
           R.AggregateVal[i].FloatVal = 
           fmod(Src1.AggregateVal[i].FloatVal, Src2.AggregateVal[i].FloatVal);
       else {
-        if (dyn_cast<VectorType>(Ty)->getElementType()->isDoubleTy())
+        if (cast<VectorType>(Ty)->getElementType()->isDoubleTy())
           for (unsigned i = 0; i < R.AggregateVal.size(); ++i)
             R.AggregateVal[i].DoubleVal = 
             fmod(Src1.AggregateVal[i].DoubleVal, Src2.AggregateVal[i].DoubleVal);
         else {
           dbgs() << "Unhandled type for Rem instruction: " << *Ty << "\n";
-          llvm_unreachable(0);
+          llvm_unreachable(nullptr);
         }
       }
       break;
@@ -763,7 +765,7 @@ void Interpreter::visitBinaryOperator(BinaryOperator &I) {
     switch (I.getOpcode()) {
     default:
       dbgs() << "Don't know how to handle this binary operator!\n-->" << I;
-      llvm_unreachable(0);
+      llvm_unreachable(nullptr);
       break;
     case Instruction::Add:   R.IntVal = Src1.IntVal + Src2.IntVal; break;
     case Instruction::Sub:   R.IntVal = Src1.IntVal - Src2.IntVal; break;
@@ -896,7 +898,7 @@ void Interpreter::visitSwitchInst(SwitchInst &I) {
   GenericValue CondVal = getOperandValue(Cond, SF);
 
   // Check to see if any of the cases match...
-  BasicBlock *Dest = 0;
+  BasicBlock *Dest = nullptr;
   for (SwitchInst::CaseIt i = I.case_begin(), e = I.case_end(); i != e; ++i) {
     GenericValue CaseVal = getOperandValue(i.getCaseValue(), SF);
     if (executeICMP_EQ(CondVal, CaseVal, ElTy).IntVal != 0) {
@@ -979,7 +981,7 @@ void Interpreter::visitAllocaInst(AllocaInst &I) {
                << uintptr_t(Memory) << '\n');
 
   GenericValue Result = PTOGV(Memory);
-  assert(Result.PointerVal != 0 && "Null pointer returned by malloc!");
+  assert(Result.PointerVal && "Null pointer returned by malloc!");
   SetValue(&I, Result, SF);
 
   if (I.getOpcode() == Instruction::Alloca)
@@ -1120,7 +1122,7 @@ void Interpreter::visitCallSite(CallSite CS) {
   callFunction((Function*)GVTOP(SRC), ArgVals);
 }
 
-// auxilary function for shift operations
+// auxiliary function for shift operations
 static unsigned getShiftAmount(uint64_t orgShiftAmount,
                                llvm::APInt valueToShift) {
   unsigned valueWidth = valueToShift.getBitWidth();
@@ -1732,7 +1734,7 @@ void Interpreter::visitVAArgInst(VAArgInst &I) {
   IMPLEMENT_VAARG(Double);
   default:
     dbgs() << "Unhandled dest type for vaarg instruction: " << *Ty << "\n";
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 
   // Set the Value of this Instruction.
@@ -1756,7 +1758,7 @@ void Interpreter::visitExtractElementInst(ExtractElementInst &I) {
     default:
       dbgs() << "Unhandled destination type for extractelement instruction: "
       << *Ty << "\n";
-      llvm_unreachable(0);
+      llvm_unreachable(nullptr);
       break;
     case Type::IntegerTyID:
       Dest.IntVal = Src1.AggregateVal[indx].IntVal;
@@ -2071,13 +2073,12 @@ GenericValue Interpreter::getOperandValue(Value *V, ExecutionContext &SF) {
 //===----------------------------------------------------------------------===//
 // callFunction - Execute the specified function...
 //
-void Interpreter::callFunction(Function *F,
-                               const std::vector<GenericValue> &ArgVals) {
-  assert((ECStack.empty() || ECStack.back().Caller.getInstruction() == 0 ||
+void Interpreter::callFunction(Function *F, ArrayRef<GenericValue> ArgVals) {
+  assert((ECStack.empty() || !ECStack.back().Caller.getInstruction() ||
           ECStack.back().Caller.arg_size() == ArgVals.size()) &&
          "Incorrect number of arguments passed into function call!");
   // Make a new stack frame... and fill it in.
-  ECStack.push_back(ExecutionContext());
+  ECStack.emplace_back();
   ExecutionContext &StackFrame = ECStack.back();
   StackFrame.CurFunction = F;
 

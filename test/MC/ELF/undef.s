@@ -2,7 +2,6 @@
 
 // Test which symbols should be in the symbol table
 
-        .long	.Lsym1
 .Lsym2:
 .Lsym3:
 .Lsym4 = .Lsym2 - .Lsym3
@@ -19,21 +18,35 @@
         .text
         movsd   .Lsym8(%rip), %xmm1
 
+test2_a = undef
+test2_b = undef + 1
+
 // CHECK:      Symbols [
-
-// CHECK:        Symbol {
-// CHECK:          Name: .Lsym8
-
-// CHECK:        Symbol {
-// CHECK:          Name: .Lsym1
-
-// CHECK:        Symbol {
-// CHECK:          Name: sym6
+// CHECK-NEXT:   Symbol {
+// CHECK-NEXT:     Name:  (0)
+// CHECK-NEXT:     Value: 0x0
+// CHECK-NEXT:     Size: 0
+// CHECK-NEXT:     Binding: Local
+// CHECK-NEXT:     Type: None
+// CHECK-NEXT:     Other: 0
+// CHECK-NEXT:     Section: Undefined
+// CHECK-NEXT:   }
+// CHECK-NEXT:   Symbol {
+// CHECK-NEXT:     Name: .Lsym8
+// CHECK-NEXT:     Value: 0x0
+// CHECK-NEXT:     Size: 0
+// CHECK-NEXT:     Binding: Local
+// CHECK-NEXT:     Type: None
+// CHECK-NEXT:     Other: 0
+// CHECK-NEXT:     Section: .rodata.str1.1
+// CHECK-NEXT:   }
+// CHECK-NEXT:   Symbol {
+// CHECK-NEXT:     Name: sym6
 // CHECK-NEXT:     Value: 0x0
 // CHECK-NEXT:     Size: 0
 // CHECK-NEXT:     Binding: Global
 // CHECK-NEXT:     Type: Object
 // CHECK-NEXT:     Other: 0
-// CHECK-NEXT:     Section: (0x0)
+// CHECK-NEXT:     Section: Undefined
 // CHECK-NEXT:   }
 // CHECK-NEXT: ]

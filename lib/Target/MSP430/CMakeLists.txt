@@ -18,12 +18,9 @@ add_llvm_target(MSP430CodeGen
   MSP430RegisterInfo.cpp
   MSP430Subtarget.cpp
   MSP430TargetMachine.cpp
-  MSP430SelectionDAGInfo.cpp
   MSP430AsmPrinter.cpp
   MSP430MCInstLower.cpp
   )
-
-add_dependencies(LLVMMSP430CodeGen MSP430CommonTableGen intrinsics_gen)
 
 add_subdirectory(InstPrinter)
 add_subdirectory(TargetInfo)

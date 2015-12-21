@@ -22,6 +22,7 @@
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 using namespace llvm;
 
@@ -34,7 +35,7 @@ namespace {
 
   public:
     static char ID; // Class identification, replacement for typeinfo
-    ScalarEvolutionAliasAnalysis() : FunctionPass(ID), SE(0) {
+    ScalarEvolutionAliasAnalysis() : FunctionPass(ID), SE(nullptr) {
       initializeScalarEvolutionAliasAnalysisPass(
         *PassRegistry::getPassRegistry());
     }
@@ -43,16 +44,17 @@ namespace {
     /// an analysis interface through multiple inheritance.  If needed, it
     /// should override this to adjust the this pointer as needed for the
     /// specified pass info.
-    virtual void *getAdjustedAnalysisPointer(AnalysisID PI) {
+    void *getAdjustedAnalysisPointer(AnalysisID PI) override {
       if (PI == &AliasAnalysis::ID)
         return (AliasAnalysis*)this;
       return this;
     }
 
   private:
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual bool runOnFunction(Function &F);
-    virtual AliasResult alias(const Location &LocA, const Location &LocB);
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    bool runOnFunction(Function &F) override;
+    AliasResult alias(const MemoryLocation &LocA,
+                      const MemoryLocation &LocB) override;
 
     Value *GetBaseValue(const SCEV *S);
   };
@@ -79,7 +81,7 @@ ScalarEvolutionAliasAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
 
 bool
 ScalarEvolutionAliasAnalysis::runOnFunction(Function &F) {
-  InitializeAliasAnalysis(this);
+  InitializeAliasAnalysis(this, &F.getParent()->getDataLayout());
   SE = &getAnalysis<ScalarEvolution>();
   return false;
 }
@@ -102,12 +104,11 @@ ScalarEvolutionAliasAnalysis::GetBaseValue(const SCEV *S) {
     return U->getValue();
   }
   // No Identified object found.
-  return 0;
+  return nullptr;
 }
 
-AliasAnalysis::AliasResult
-ScalarEvolutionAliasAnalysis::alias(const Location &LocA,
-                                    const Location &LocB) {
+AliasResult ScalarEvolutionAliasAnalysis::alias(const MemoryLocation &LocA,
+                                                const MemoryLocation &LocB) {
   // If either of the memory references is empty, it doesn't matter what the
   // pointer values are. This allows the code below to ignore this special
   // case.
@@ -160,12 +161,12 @@ ScalarEvolutionAliasAnalysis::alias(const Location &LocA,
   Value *AO = GetBaseValue(AS);
   Value *BO = GetBaseValue(BS);
   if ((AO && AO != LocA.Ptr) || (BO && BO != LocB.Ptr))
-    if (alias(Location(AO ? AO : LocA.Ptr,
-                       AO ? +UnknownSize : LocA.Size,
-                       AO ? 0 : LocA.TBAATag),
-              Location(BO ? BO : LocB.Ptr,
-                       BO ? +UnknownSize : LocB.Size,
-                       BO ? 0 : LocB.TBAATag)) == NoAlias)
+    if (alias(MemoryLocation(AO ? AO : LocA.Ptr,
+                             AO ? +MemoryLocation::UnknownSize : LocA.Size,
+                             AO ? AAMDNodes() : LocA.AATags),
+              MemoryLocation(BO ? BO : LocB.Ptr,
+                             BO ? +MemoryLocation::UnknownSize : LocB.Size,
+                             BO ? AAMDNodes() : LocB.AATags)) == NoAlias)
       return NoAlias;
 
   // Forward the query to the next analysis.

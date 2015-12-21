@@ -1,4 +1,4 @@
-; RUN: llc < %s -relocation-model=static | FileCheck %s
+; RUN: llc < %s -relocation-model=static -no-integrated-as | FileCheck %s
 ; PR4152
 
 ; CHECK: {{1: ._pv_cpu_ops[+]8}}
@@ -12,7 +12,7 @@ target triple = "i386-apple-darwin9.6"
 
 define void @x() nounwind {
 entry:
-	tail call void asm sideeffect "1: $0", "i,~{dirflag},~{fpsr},~{flags}"(i32* getelementptr (%struct.pv_cpu_ops* @pv_cpu_ops, i32 0, i32 1, i32 1)) nounwind
+	tail call void asm sideeffect "1: $0", "i,~{dirflag},~{fpsr},~{flags}"(i32* getelementptr (%struct.pv_cpu_ops, %struct.pv_cpu_ops* @pv_cpu_ops, i32 0, i32 1, i32 1)) nounwind
 	tail call void asm sideeffect "2: $0", "i,~{dirflag},~{fpsr},~{flags}"(i32* @G) nounwind
 	ret void
 }

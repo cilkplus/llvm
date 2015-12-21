@@ -9,15 +9,15 @@ define internal void @f() {
 @a = alias void ()* @f
 
 define void @g() {
-	call void()* @a()
+	call void() @a()
 	ret void
 }
 
-@b = alias internal void ()* @g
+@b = internal alias  void ()* @g
 ; CHECK-NOT: @b
 
 define void @h() {
-	call void()* @b()
+	call void() @b()
 ; CHECK: call void @g
 	ret void
 }

@@ -85,7 +85,7 @@ define i64 @f7(i64 %a, i32 *%src) {
 ; CHECK-NOT: {{%r[23]}}
 ; CHECK: l %r2, 0(%r3)
 ; CHECK: br %r14
-  %b = load i32 *%src
+  %b = load i32 , i32 *%src
   %low = zext i32 %b to i64
   %high = and i64 %a, -4294967296
   %res = or i64 %high, %low
@@ -98,7 +98,7 @@ define i64 @f8(i64 %a, i8 *%src) {
 ; CHECK-NOT: {{%r[23]}}
 ; CHECK: lb %r2, 0(%r3)
 ; CHECK: br %r14
-  %byte = load i8 *%src
+  %byte = load i8 , i8 *%src
   %b = sext i8 %byte to i32
   %low = zext i32 %b to i64
   %high = and i64 %a, -4294967296
@@ -177,4 +177,18 @@ define i64 @f14(i64 %a, i64 %b) {
   %res = icmp eq i64 %or, 0
   %ext = sext i1 %res to i64
   ret i64 %ext
+}
+
+; Check another representation of f8.
+define i64 @f15(i64 %a, i8 *%src) {
+; CHECK-LABEL: f15:
+; CHECK-NOT: {{%r[23]}}
+; CHECK: lb %r2, 0(%r3)
+; CHECK: br %r14
+  %byte = load i8 , i8 *%src
+  %b = sext i8 %byte to i64
+  %low = and i64 %b, 4294967295
+  %high = and i64 %a, -4294967296
+  %res = or i64 %high, %low
+  ret i64 %res
 }

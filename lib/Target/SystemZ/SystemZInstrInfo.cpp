@@ -12,16 +12,16 @@
 //===----------------------------------------------------------------------===//
 
 #include "SystemZInstrInfo.h"
-#include "SystemZTargetMachine.h"
 #include "SystemZInstrBuilder.h"
+#include "SystemZTargetMachine.h"
 #include "llvm/CodeGen/LiveVariables.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+
+using namespace llvm;
 
 #define GET_INSTRINFO_CTOR_DTOR
 #define GET_INSTRMAP_INFO
 #include "SystemZGenInstrInfo.inc"
-
-using namespace llvm;
 
 // Return a mask with Count low bits set.
 static uint64_t allOnes(unsigned int Count) {
@@ -40,9 +40,9 @@ static bool isHighReg(unsigned int Reg) {
 // Pin the vtable to this file.
 void SystemZInstrInfo::anchor() {}
 
-SystemZInstrInfo::SystemZInstrInfo(SystemZTargetMachine &tm)
+SystemZInstrInfo::SystemZInstrInfo(SystemZSubtarget &sti)
   : SystemZGenInstrInfo(SystemZ::ADJCALLSTACKDOWN, SystemZ::ADJCALLSTACKUP),
-    RI(tm), TM(tm) {
+    RI(), STI(sti) {
 }
 
 // MI is a 128-bit load or store.  Split it into two 64-bit loads or stores,
@@ -53,7 +53,7 @@ void SystemZInstrInfo::splitMove(MachineBasicBlock::iterator MI,
   MachineFunction &MF = *MBB->getParent();
 
   // Get two load or store instructions.  Use the original instruction for one
-  // of them (arbitarily the second here) and create a clone for the other.
+  // of them (arbitrarily the second here) and create a clone for the other.
   MachineInstr *EarlierMI = MF.CloneMachineInstr(MI);
   MBB->insert(MI, EarlierMI);
 
@@ -280,15 +280,15 @@ bool SystemZInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
       }
 
       // If the block has any instructions after a JMP, delete them.
-      while (llvm::next(I) != MBB.end())
-        llvm::next(I)->eraseFromParent();
+      while (std::next(I) != MBB.end())
+        std::next(I)->eraseFromParent();
 
       Cond.clear();
-      FBB = 0;
+      FBB = nullptr;
 
       // Delete the JMP if it's equivalent to a fall-through.
       if (MBB.isLayoutSuccessor(Branch.Target->getMBB())) {
-        TBB = 0;
+        TBB = nullptr;
         I->eraseFromParent();
         I = MBB.end();
         continue;
@@ -362,7 +362,7 @@ ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const {
 unsigned
 SystemZInstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
                                MachineBasicBlock *FBB,
-                               const SmallVectorImpl<MachineOperand> &Cond,
+                               ArrayRef<MachineOperand> Cond,
                                DebugLoc DL) const {
   // In this function we output 32-bit branches, which should always
   // have enough range.  They can be shortened and relaxed by later code
@@ -418,12 +418,12 @@ bool SystemZInstrInfo::analyzeCompare(const MachineInstr *MI,
 static MachineInstr *getDef(unsigned Reg,
                             const MachineRegisterInfo *MRI) {
   if (TargetRegisterInfo::isPhysicalRegister(Reg))
-    return 0;
+    return nullptr;
   return MRI->getUniqueVRegDef(Reg);
 }
 
 // Return true if MI is a shift of type Opcode by Imm bits.
-static bool isShift(MachineInstr *MI, int Opcode, int64_t Imm) {
+static bool isShift(MachineInstr *MI, unsigned Opcode, int64_t Imm) {
   return (MI->getOpcode() == Opcode &&
           !MI->getOperand(2).getReg() &&
           MI->getOperand(3).getImm() == Imm);
@@ -442,7 +442,7 @@ static void eraseIfDead(MachineInstr *MI, const MachineRegisterInfo *MRI) {
 static bool removeIPMBasedCompare(MachineInstr *Compare, unsigned SrcReg,
                                   const MachineRegisterInfo *MRI,
                                   const TargetRegisterInfo *TRI) {
-  MachineInstr *LGFR = 0;
+  MachineInstr *LGFR = nullptr;
   MachineInstr *RLL = getDef(SrcReg, MRI);
   if (RLL && RLL->getOpcode() == SystemZ::LGFR) {
     LGFR = RLL;
@@ -488,7 +488,7 @@ SystemZInstrInfo::optimizeCompareInstr(MachineInstr *Compare,
   bool IsLogical = (Compare->getDesc().TSFlags & SystemZII::IsLogical) != 0;
   if (Value == 0 &&
       !IsLogical &&
-      removeIPMBasedCompare(Compare, SrcReg, MRI, TM.getRegisterInfo()))
+      removeIPMBasedCompare(Compare, SrcReg, MRI, &RI))
     return true;
   return false;
 }
@@ -505,7 +505,7 @@ static unsigned getConditionalMove(unsigned Opcode) {
 
 bool SystemZInstrInfo::isPredicable(MachineInstr *MI) const {
   unsigned Opcode = MI->getOpcode();
-  if (TM.getSubtargetImpl()->hasLoadStoreOnCond() &&
+  if (STI.hasLoadStoreOnCond() &&
       getConditionalMove(Opcode))
     return true;
   return false;
@@ -530,19 +530,18 @@ isProfitableToIfCvt(MachineBasicBlock &TMBB,
 }
 
 bool SystemZInstrInfo::
-PredicateInstruction(MachineInstr *MI,
-                     const SmallVectorImpl<MachineOperand> &Pred) const {
+PredicateInstruction(MachineInstr *MI, ArrayRef<MachineOperand> Pred) const {
   assert(Pred.size() == 2 && "Invalid condition");
   unsigned CCValid = Pred[0].getImm();
   unsigned CCMask = Pred[1].getImm();
   assert(CCMask > 0 && CCMask < 15 && "Invalid predicate");
   unsigned Opcode = MI->getOpcode();
-  if (TM.getSubtargetImpl()->hasLoadStoreOnCond()) {
+  if (STI.hasLoadStoreOnCond()) {
     if (unsigned CondOpcode = getConditionalMove(Opcode)) {
       MI->setDesc(get(CondOpcode));
       MachineInstrBuilder(*MI->getParent()->getParent(), MI)
         .addImm(CCValid).addImm(CCMask)
-        .addReg(SystemZ::CC, RegState::Implicit);;
+        .addReg(SystemZ::CC, RegState::Implicit);
       return true;
     }
   }
@@ -578,6 +577,12 @@ SystemZInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Opcode = SystemZ::LDR;
   else if (SystemZ::FP128BitRegClass.contains(DestReg, SrcReg))
     Opcode = SystemZ::LXR;
+  else if (SystemZ::VR32BitRegClass.contains(DestReg, SrcReg))
+    Opcode = SystemZ::VLR32;
+  else if (SystemZ::VR64BitRegClass.contains(DestReg, SrcReg))
+    Opcode = SystemZ::VLR64;
+  else if (SystemZ::VR128BitRegClass.contains(DestReg, SrcReg))
+    Opcode = SystemZ::VLR;
   else
     llvm_unreachable("Impossible reg-to-reg copy");
 
@@ -628,16 +633,16 @@ static bool isSimpleBD12Move(const MachineInstr *MI, unsigned Flag) {
 }
 
 namespace {
-  struct LogicOp {
-    LogicOp() : RegSize(0), ImmLSB(0), ImmSize(0) {}
-    LogicOp(unsigned regSize, unsigned immLSB, unsigned immSize)
-      : RegSize(regSize), ImmLSB(immLSB), ImmSize(immSize) {}
+struct LogicOp {
+  LogicOp() : RegSize(0), ImmLSB(0), ImmSize(0) {}
+  LogicOp(unsigned regSize, unsigned immLSB, unsigned immSize)
+    : RegSize(regSize), ImmLSB(immLSB), ImmSize(immSize) {}
 
-    operator bool() const { return RegSize; }
+  explicit operator bool() const { return RegSize; }
 
-    unsigned RegSize, ImmLSB, ImmSize;
-  };
-}
+  unsigned RegSize, ImmLSB, ImmSize;
+};
+} // end anonymous namespace
 
 static LogicOp interpretAndImmediate(unsigned Opcode) {
   switch (Opcode) {
@@ -685,7 +690,7 @@ SystemZInstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
   // We prefer to keep the two-operand form where possible both
   // because it tends to be shorter and because some instructions
   // have memory forms that can be used during spilling.
-  if (TM.getSubtargetImpl()->hasDistinctOps()) {
+  if (STI.hasDistinctOps()) {
     MachineOperand &Dest = MI->getOperand(0);
     MachineOperand &Src = MI->getOperand(1);
     unsigned DestReg = Dest.getReg();
@@ -723,9 +728,12 @@ SystemZInstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
     unsigned Start, End;
     if (isRxSBGMask(Imm, And.RegSize, Start, End)) {
       unsigned NewOpcode;
-      if (And.RegSize == 64)
+      if (And.RegSize == 64) {
         NewOpcode = SystemZ::RISBG;
-      else {
+        // Prefer RISBGN if available, since it does not clobber CC.
+        if (STI.hasMiscellaneousExtensions())
+          NewOpcode = SystemZ::RISBGN;
+      } else {
         NewOpcode = SystemZ::RISBMux;
         Start &= 31;
         End &= 31;
@@ -740,14 +748,12 @@ SystemZInstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
       return finishConvertToThreeAddress(MI, MIB, LV);
     }
   }
-  return 0;
+  return nullptr;
 }
 
-MachineInstr *
-SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
-                                        MachineInstr *MI,
-                                        const SmallVectorImpl<unsigned> &Ops,
-                                        int FrameIndex) const {
+MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(
+    MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
+    MachineBasicBlock::iterator InsertPt, int FrameIndex) const {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
   unsigned Size = MFI->getObjectSize(FrameIndex);
   unsigned Opcode = MI->getOpcode();
@@ -757,16 +763,18 @@ SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
         isInt<8>(MI->getOperand(2).getImm()) &&
         !MI->getOperand(3).getReg()) {
       // LA(Y) %reg, CONST(%reg) -> AGSI %mem, CONST
-      return BuildMI(MF, MI->getDebugLoc(), get(SystemZ::AGSI))
-        .addFrameIndex(FrameIndex).addImm(0)
-        .addImm(MI->getOperand(2).getImm());
+      return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+                     get(SystemZ::AGSI))
+          .addFrameIndex(FrameIndex)
+          .addImm(0)
+          .addImm(MI->getOperand(2).getImm());
     }
-    return 0;
+    return nullptr;
   }
 
   // All other cases require a single operand.
   if (Ops.size() != 1)
-    return 0;
+    return nullptr;
 
   unsigned OpNum = Ops[0];
   assert(Size == MF.getRegInfo()
@@ -778,9 +786,11 @@ SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
       isInt<8>(MI->getOperand(2).getImm())) {
     // A(G)HI %reg, CONST -> A(G)SI %mem, CONST
     Opcode = (Opcode == SystemZ::AHI ? SystemZ::ASI : SystemZ::AGSI);
-    return BuildMI(MF, MI->getDebugLoc(), get(Opcode))
-      .addFrameIndex(FrameIndex).addImm(0)
-      .addImm(MI->getOperand(2).getImm());
+    return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+                   get(Opcode))
+        .addFrameIndex(FrameIndex)
+        .addImm(0)
+        .addImm(MI->getOperand(2).getImm());
   }
 
   if (Opcode == SystemZ::LGDR || Opcode == SystemZ::LDGR) {
@@ -790,17 +800,23 @@ SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
     // source register instead.
     if (OpNum == 0) {
       unsigned StoreOpcode = Op1IsGPR ? SystemZ::STG : SystemZ::STD;
-      return BuildMI(MF, MI->getDebugLoc(), get(StoreOpcode))
-        .addOperand(MI->getOperand(1)).addFrameIndex(FrameIndex)
-        .addImm(0).addReg(0);
+      return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+                     get(StoreOpcode))
+          .addOperand(MI->getOperand(1))
+          .addFrameIndex(FrameIndex)
+          .addImm(0)
+          .addReg(0);
     }
     // If we're spilling the source of an LDGR or LGDR, load the
     // destination register instead.
     if (OpNum == 1) {
       unsigned LoadOpcode = Op0IsGPR ? SystemZ::LG : SystemZ::LD;
       unsigned Dest = MI->getOperand(0).getReg();
-      return BuildMI(MF, MI->getDebugLoc(), get(LoadOpcode), Dest)
-        .addFrameIndex(FrameIndex).addImm(0).addReg(0);
+      return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+                     get(LoadOpcode), Dest)
+          .addFrameIndex(FrameIndex)
+          .addImm(0)
+          .addReg(0);
     }
   }
 
@@ -822,17 +838,25 @@ SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
     if (MMO->getSize() == Size && !MMO->isVolatile()) {
       // Handle conversion of loads.
       if (isSimpleBD12Move(MI, SystemZII::SimpleBDXLoad)) {
-        return BuildMI(MF, MI->getDebugLoc(), get(SystemZ::MVC))
-          .addFrameIndex(FrameIndex).addImm(0).addImm(Size)
-          .addOperand(MI->getOperand(1)).addImm(MI->getOperand(2).getImm())
-          .addMemOperand(MMO);
+        return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+                       get(SystemZ::MVC))
+            .addFrameIndex(FrameIndex)
+            .addImm(0)
+            .addImm(Size)
+            .addOperand(MI->getOperand(1))
+            .addImm(MI->getOperand(2).getImm())
+            .addMemOperand(MMO);
       }
       // Handle conversion of stores.
       if (isSimpleBD12Move(MI, SystemZII::SimpleBDXStore)) {
-        return BuildMI(MF, MI->getDebugLoc(), get(SystemZ::MVC))
-          .addOperand(MI->getOperand(1)).addImm(MI->getOperand(2).getImm())
-          .addImm(Size).addFrameIndex(FrameIndex).addImm(0)
-          .addMemOperand(MMO);
+        return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+                       get(SystemZ::MVC))
+            .addOperand(MI->getOperand(1))
+            .addImm(MI->getOperand(2).getImm())
+            .addImm(Size)
+            .addFrameIndex(FrameIndex)
+            .addImm(0)
+            .addMemOperand(MMO);
       }
     }
   }
@@ -848,7 +872,8 @@ SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
       assert(AccessBytes != 0 && "Size of access should be known");
       assert(AccessBytes <= Size && "Access outside the frame index");
       uint64_t Offset = Size - AccessBytes;
-      MachineInstrBuilder MIB = BuildMI(MF, MI->getDebugLoc(), get(MemOpcode));
+      MachineInstrBuilder MIB = BuildMI(*InsertPt->getParent(), InsertPt,
+                                        MI->getDebugLoc(), get(MemOpcode));
       for (unsigned I = 0; I < OpNum; ++I)
         MIB.addOperand(MI->getOperand(I));
       MIB.addFrameIndex(FrameIndex).addImm(Offset);
@@ -858,14 +883,13 @@ SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
     }
   }
 
-  return 0;
+  return nullptr;
 }
 
-MachineInstr *
-SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr* MI,
-                                        const SmallVectorImpl<unsigned> &Ops,
-                                        MachineInstr* LoadMI) const {
-  return 0;
+MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(
+    MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
+    MachineBasicBlock::iterator InsertPt, MachineInstr *LoadMI) const {
+  return nullptr;
 }
 
 bool
@@ -1114,6 +1138,16 @@ void SystemZInstrInfo::getLoadStoreOpcodes(const TargetRegisterClass *RC,
   } else if (RC == &SystemZ::FP128BitRegClass) {
     LoadOpcode = SystemZ::LX;
     StoreOpcode = SystemZ::STX;
+  } else if (RC == &SystemZ::VR32BitRegClass) {
+    LoadOpcode = SystemZ::VL32;
+    StoreOpcode = SystemZ::VST32;
+  } else if (RC == &SystemZ::VR64BitRegClass) {
+    LoadOpcode = SystemZ::VL64;
+    StoreOpcode = SystemZ::VST64;
+  } else if (RC == &SystemZ::VF128BitRegClass ||
+             RC == &SystemZ::VR128BitRegClass) {
+    LoadOpcode = SystemZ::VL;
+    StoreOpcode = SystemZ::VST;
   } else
     llvm_unreachable("Unsupported regclass to load or store");
 }
@@ -1147,17 +1181,22 @@ unsigned SystemZInstrInfo::getOpcodeForOffset(unsigned Opcode,
 
 unsigned SystemZInstrInfo::getLoadAndTest(unsigned Opcode) const {
   switch (Opcode) {
-  case SystemZ::L:    return SystemZ::LT;
-  case SystemZ::LY:   return SystemZ::LT;
-  case SystemZ::LG:   return SystemZ::LTG;
-  case SystemZ::LGF:  return SystemZ::LTGF;
-  case SystemZ::LR:   return SystemZ::LTR;
-  case SystemZ::LGFR: return SystemZ::LTGFR;
-  case SystemZ::LGR:  return SystemZ::LTGR;
-  case SystemZ::LER:  return SystemZ::LTEBR;
-  case SystemZ::LDR:  return SystemZ::LTDBR;
-  case SystemZ::LXR:  return SystemZ::LTXBR;
-  default:            return 0;
+  case SystemZ::L:      return SystemZ::LT;
+  case SystemZ::LY:     return SystemZ::LT;
+  case SystemZ::LG:     return SystemZ::LTG;
+  case SystemZ::LGF:    return SystemZ::LTGF;
+  case SystemZ::LR:     return SystemZ::LTR;
+  case SystemZ::LGFR:   return SystemZ::LTGFR;
+  case SystemZ::LGR:    return SystemZ::LTGR;
+  case SystemZ::LER:    return SystemZ::LTEBR;
+  case SystemZ::LDR:    return SystemZ::LTDBR;
+  case SystemZ::LXR:    return SystemZ::LTXBR;
+  // On zEC12 we prefer to use RISBGN.  But if there is a chance to
+  // actually use the condition code, we may turn it back into RISGB.
+  // Note that RISBG is not really a "load-and-test" instruction,
+  // but sets the same condition code values, so is OK to use here.
+  case SystemZ::RISBGN: return SystemZ::RISBG;
+  default:              return 0;
   }
 }
 
@@ -1178,6 +1217,7 @@ static bool isStringOfOnes(uint64_t Mask, unsigned &LSB, unsigned &Length) {
 bool SystemZInstrInfo::isRxSBGMask(uint64_t Mask, unsigned BitSize,
                                    unsigned &Start, unsigned &End) const {
   // Reject trivial all-zero masks.
+  Mask &= allOnes(BitSize);
   if (Mask == 0)
     return false;
 

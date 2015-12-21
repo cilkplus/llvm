@@ -19,7 +19,6 @@
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 
@@ -41,7 +40,7 @@ static void decreaseSetPressure(std::vector<unsigned> &CurrSetPressure,
   }
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD
 void llvm::dumpRegSetPressure(ArrayRef<unsigned> SetPressure,
                               const TargetRegisterInfo *TRI) {
   bool Empty = true;
@@ -55,19 +54,21 @@ void llvm::dumpRegSetPressure(ArrayRef<unsigned> SetPressure,
     dbgs() << "\n";
 }
 
+LLVM_DUMP_METHOD
 void RegisterPressure::dump(const TargetRegisterInfo *TRI) const {
   dbgs() << "Max Pressure: ";
   dumpRegSetPressure(MaxSetPressure, TRI);
   dbgs() << "Live In: ";
   for (unsigned i = 0, e = LiveInRegs.size(); i < e; ++i)
-    dbgs() << PrintReg(LiveInRegs[i], TRI) << " ";
+    dbgs() << PrintVRegOrUnit(LiveInRegs[i], TRI) << " ";
   dbgs() << '\n';
   dbgs() << "Live Out: ";
   for (unsigned i = 0, e = LiveOutRegs.size(); i < e; ++i)
-    dbgs() << PrintReg(LiveOutRegs[i], TRI) << " ";
+    dbgs() << PrintVRegOrUnit(LiveOutRegs[i], TRI) << " ";
   dbgs() << '\n';
 }
 
+LLVM_DUMP_METHOD
 void RegPressureTracker::dump() const {
   if (!isTopClosed() || !isBottomClosed()) {
     dbgs() << "Curr Pressure: ";
@@ -75,7 +76,16 @@ void RegPressureTracker::dump() const {
   }
   P.dump(TRI);
 }
-#endif
+
+void PressureDiff::dump(const TargetRegisterInfo &TRI) const {
+  for (const PressureChange &Change : *this) {
+    if (!Change.isValid() || Change.getUnitInc() == 0)
+      continue;
+    dbgs() << "    " << TRI.getRegPressureSetName(Change.getPSet())
+           << " " << Change.getUnitInc();
+  }
+  dbgs() << '\n';
+}
 
 /// Increase the current pressure as impacted by these registers and bump
 /// the high water mark if needed.
@@ -154,8 +164,8 @@ const LiveRange *RegPressureTracker::getLiveRange(unsigned Reg) const {
 }
 
 void RegPressureTracker::reset() {
-  MBB = 0;
-  LIS = 0;
+  MBB = nullptr;
+  LIS = nullptr;
 
   CurrSetPressure.clear();
   LiveThruPressure.clear();
@@ -184,7 +194,7 @@ void RegPressureTracker::init(const MachineFunction *mf,
   reset();
 
   MF = mf;
-  TRI = MF->getTarget().getRegisterInfo();
+  TRI = MF->getSubtarget().getRegisterInfo();
   RCI = rci;
   MRI = &MF->getRegInfo();
   MBB = mbb;
@@ -304,6 +314,7 @@ static bool containsReg(ArrayRef<unsigned> RegUnits, unsigned RegUnit) {
   return std::find(RegUnits.begin(), RegUnits.end(), RegUnit) != RegUnits.end();
 }
 
+namespace {
 /// Collect this instruction's unique uses and defs into SmallVectors for
 /// processing defs and uses in order.
 ///
@@ -354,6 +365,7 @@ protected:
     }
   }
 };
+} // namespace
 
 /// Collect physical and virtual register operands.
 static void collectOperands(const MachineInstr *MI,
@@ -506,7 +518,13 @@ bool RegPressureTracker::recede(SmallVectorImpl<unsigned> *LiveUses,
         DeadDef = LRQ.isDeadDef();
       }
     }
-    if (!DeadDef) {
+    if (DeadDef) {
+      // LiveIntervals knows this is a dead even though it's MachineOperand is
+      // not flagged as such. Since this register will not be recorded as
+      // live-out, increase its PDiff value to avoid underflowing pressure.
+      if (PDiff)
+        PDiff->addPressureChange(Reg, false, MRI);
+    } else {
       if (LiveRegs.erase(Reg))
         decreaseRegPressure(Reg);
       else
@@ -742,9 +760,11 @@ void RegPressureTracker::bumpUpwardPressure(const MachineInstr *MI) {
 ///
 /// This assumes that the current LiveOut set is sufficient.
 ///
-/// FIXME: This is expensive for an on-the-fly query. We need to cache the
-/// result per-SUnit with enough information to adjust for the current
-/// scheduling position. But this works as a proof of concept.
+/// This is expensive for an on-the-fly query because it calls
+/// bumpUpwardPressure to recompute the pressure sets based on current
+/// liveness. This mainly exists to verify correctness, e.g. with
+/// -verify-misched. getUpwardPressureDelta is the fast version of this query
+/// that uses the per-SUnit cache of the PressureDiff.
 void RegPressureTracker::
 getMaxUpwardPressureDelta(const MachineInstr *MI, PressureDiff *PDiff,
                           RegPressureDelta &Delta,
@@ -777,6 +797,8 @@ getMaxUpwardPressureDelta(const MachineInstr *MI, PressureDiff *PDiff,
   RegPressureDelta Delta2;
   getUpwardPressureDelta(MI, *PDiff, Delta2, CriticalPSets, MaxPressureLimit);
   if (Delta != Delta2) {
+    dbgs() << "PDiff: ";
+    PDiff->dump(*TRI);
     dbgs() << "DELTA: " << *MI;
     if (Delta.Excess.isValid())
       dbgs() << "Excess1 " << TRI->getRegPressureSetName(Delta.Excess.getPSet())
@@ -801,10 +823,8 @@ getMaxUpwardPressureDelta(const MachineInstr *MI, PressureDiff *PDiff,
 #endif
 }
 
-/// This is a prototype of the fast version of querying register pressure that
-/// does not directly depend on current liveness. It's still slow because we
-/// recompute pressure change on-the-fly. This implementation only exists to
-/// prove correctness.
+/// This is the fast version of querying register pressure that does not
+/// directly depend on current liveness.
 ///
 /// @param Delta captures information needed for heuristics.
 ///
@@ -876,9 +896,9 @@ static bool findUseBetween(unsigned Reg,
                            SlotIndex PriorUseIdx, SlotIndex NextUseIdx,
                            const MachineRegisterInfo *MRI,
                            const LiveIntervals *LIS) {
-  for (MachineRegisterInfo::use_nodbg_iterator
-         UI = MRI->use_nodbg_begin(Reg), UE = MRI->use_nodbg_end();
-         UI != UE; UI.skipInstruction()) {
+  for (MachineRegisterInfo::use_instr_nodbg_iterator
+       UI = MRI->use_instr_nodbg_begin(Reg),
+       UE = MRI->use_instr_nodbg_end(); UI != UE; ++UI) {
       const MachineInstr* MI = &*UI;
       if (MI->isDebugValue())
         continue;
@@ -942,6 +962,11 @@ void RegPressureTracker::bumpDownwardPressure(const MachineInstr *MI) {
 /// register units of that pressure set introduced by this instruction.
 ///
 /// This assumes that the current LiveIn set is sufficient.
+///
+/// This is expensive for an on-the-fly query because it calls
+/// bumpDownwardPressure to recompute the pressure sets based on current
+/// liveness. We don't yet have a fast version of downward pressure tracking
+/// analagous to getUpwardPressureDelta.
 void RegPressureTracker::
 getMaxDownwardPressureDelta(const MachineInstr *MI, RegPressureDelta &Delta,
                             ArrayRef<PressureChange> CriticalPSets,

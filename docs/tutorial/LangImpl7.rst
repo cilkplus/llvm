@@ -237,7 +237,7 @@ strongly recommend that you use this technique for building SSA form,
 unless there is an extremely good reason not to. Using this technique
 is:
 
--  Proven and well tested: llvm-gcc and clang both use this technique
+-  Proven and well tested: clang uses this technique
    for local mutable variables. As such, the most common clients of LLVM
    are using this to handle a bulk of their variables. You can be sure
    that bugs are found fast and fixed early.
@@ -632,7 +632,7 @@ own local variables, lets add this next!
 User-defined Local Variables
 ============================
 
-Adding var/in is just like any other other extensions we made to
+Adding var/in is just like any other extension we made to
 Kaleidoscope: we extend the lexer, the parser, the AST and the code
 generator. The first step for adding our new 'var/in' construct is to
 extend the lexer. As before, this is pretty trivial, the code looks like
@@ -847,7 +847,7 @@ mutable variables and var/in support. To build this example, use:
 .. code-block:: bash
 
     # Compile
-    clang++ -g toy.cpp `llvm-config --cppflags --ldflags --libs core jit native` -O3 -o toy
+    clang++ -g toy.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core mcjit native` -O3 -o toy
     # Run
     ./toy
 
@@ -856,5 +856,5 @@ Here is the code:
 .. literalinclude:: ../../examples/Kaleidoscope/Chapter7/toy.cpp
    :language: c++
 
-`Next: Conclusion and other useful LLVM tidbits <LangImpl8.html>`_
+`Next: Adding Debug Information <LangImpl8.html>`_
 

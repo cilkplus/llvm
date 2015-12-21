@@ -13,47 +13,52 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "systemz-shorten-inst"
-
 #include "SystemZTargetMachine.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 
 using namespace llvm;
 
+#define DEBUG_TYPE "systemz-shorten-inst"
+
 namespace {
-  class SystemZShortenInst : public MachineFunctionPass {
-  public:
-    static char ID;
-    SystemZShortenInst(const SystemZTargetMachine &tm);
+class SystemZShortenInst : public MachineFunctionPass {
+public:
+  static char ID;
+  SystemZShortenInst(const SystemZTargetMachine &tm);
 
-    virtual const char *getPassName() const {
-      return "SystemZ Instruction Shortening";
-    }
+  const char *getPassName() const override {
+    return "SystemZ Instruction Shortening";
+  }
 
-    bool processBlock(MachineBasicBlock *MBB);
-    bool runOnMachineFunction(MachineFunction &F);
+  bool processBlock(MachineBasicBlock &MBB);
+  bool runOnMachineFunction(MachineFunction &F) override;
 
-  private:
-    bool shortenIIF(MachineInstr &MI, unsigned *GPRMap, unsigned LiveOther,
-                    unsigned LLIxL, unsigned LLIxH);
+private:
+  bool shortenIIF(MachineInstr &MI, unsigned *GPRMap, unsigned LiveOther,
+                  unsigned LLIxL, unsigned LLIxH);
+  bool shortenOn0(MachineInstr &MI, unsigned Opcode);
+  bool shortenOn01(MachineInstr &MI, unsigned Opcode);
+  bool shortenOn001(MachineInstr &MI, unsigned Opcode);
+  bool shortenFPConv(MachineInstr &MI, unsigned Opcode);
 
-    const SystemZInstrInfo *TII;
+  const SystemZInstrInfo *TII;
 
-    // LowGPRs[I] has bit N set if LLVM register I includes the low
-    // word of GPR N.  HighGPRs is the same for the high word.
-    unsigned LowGPRs[SystemZ::NUM_TARGET_REGS];
-    unsigned HighGPRs[SystemZ::NUM_TARGET_REGS];
-  };
+  // LowGPRs[I] has bit N set if LLVM register I includes the low
+  // word of GPR N.  HighGPRs is the same for the high word.
+  unsigned LowGPRs[SystemZ::NUM_TARGET_REGS];
+  unsigned HighGPRs[SystemZ::NUM_TARGET_REGS];
+};
 
-  char SystemZShortenInst::ID = 0;
-} // end of anonymous namespace
+char SystemZShortenInst::ID = 0;
+} // end anonymous namespace
 
 FunctionPass *llvm::createSystemZShortenInstPass(SystemZTargetMachine &TM) {
   return new SystemZShortenInst(TM);
 }
 
 SystemZShortenInst::SystemZShortenInst(const SystemZTargetMachine &tm)
-  : MachineFunctionPass(ID), TII(0), LowGPRs(), HighGPRs() {
+  : MachineFunctionPass(ID), TII(nullptr), LowGPRs(), HighGPRs() {
   // Set up LowGPRs and HighGPRs.
   for (unsigned I = 0; I < 16; ++I) {
     LowGPRs[SystemZMC::GR32Regs[I]] |= 1 << I;
@@ -97,17 +102,74 @@ bool SystemZShortenInst::shortenIIF(MachineInstr &MI, unsigned *GPRMap,
   return false;
 }
 
+// Change MI's opcode to Opcode if register operand 0 has a 4-bit encoding.
+bool SystemZShortenInst::shortenOn0(MachineInstr &MI, unsigned Opcode) {
+  if (SystemZMC::getFirstReg(MI.getOperand(0).getReg()) < 16) {
+    MI.setDesc(TII->get(Opcode));
+    return true;
+  }
+  return false;
+}
+
+// Change MI's opcode to Opcode if register operands 0 and 1 have a
+// 4-bit encoding.
+bool SystemZShortenInst::shortenOn01(MachineInstr &MI, unsigned Opcode) {
+  if (SystemZMC::getFirstReg(MI.getOperand(0).getReg()) < 16 &&
+      SystemZMC::getFirstReg(MI.getOperand(1).getReg()) < 16) {
+    MI.setDesc(TII->get(Opcode));
+    return true;
+  }
+  return false;
+}
+
+// Change MI's opcode to Opcode if register operands 0, 1 and 2 have a
+// 4-bit encoding and if operands 0 and 1 are tied.
+bool SystemZShortenInst::shortenOn001(MachineInstr &MI, unsigned Opcode) {
+  if (SystemZMC::getFirstReg(MI.getOperand(0).getReg()) < 16 &&
+      MI.getOperand(1).getReg() == MI.getOperand(0).getReg() &&
+      SystemZMC::getFirstReg(MI.getOperand(2).getReg()) < 16) {
+    MI.setDesc(TII->get(Opcode));
+    return true;
+  }
+  return false;
+}
+
+// MI is a vector-style conversion instruction with the operand order:
+// destination, source, exact-suppress, rounding-mode.  If both registers
+// have a 4-bit encoding then change it to Opcode, which has operand order:
+// destination, rouding-mode, source, exact-suppress.
+bool SystemZShortenInst::shortenFPConv(MachineInstr &MI, unsigned Opcode) {
+  if (SystemZMC::getFirstReg(MI.getOperand(0).getReg()) < 16 &&
+      SystemZMC::getFirstReg(MI.getOperand(1).getReg()) < 16) {
+    MachineOperand Dest(MI.getOperand(0));
+    MachineOperand Src(MI.getOperand(1));
+    MachineOperand Suppress(MI.getOperand(2));
+    MachineOperand Mode(MI.getOperand(3));
+    MI.RemoveOperand(3);
+    MI.RemoveOperand(2);
+    MI.RemoveOperand(1);
+    MI.RemoveOperand(0);
+    MI.setDesc(TII->get(Opcode));
+    MachineInstrBuilder(*MI.getParent()->getParent(), &MI)
+      .addOperand(Dest)
+      .addOperand(Mode)
+      .addOperand(Src)
+      .addOperand(Suppress);
+    return true;
+  }
+  return false;
+}
+
 // Process all instructions in MBB.  Return true if something changed.
-bool SystemZShortenInst::processBlock(MachineBasicBlock *MBB) {
+bool SystemZShortenInst::processBlock(MachineBasicBlock &MBB) {
   bool Changed = false;
 
   // Work out which words are live on exit from the block.
   unsigned LiveLow = 0;
   unsigned LiveHigh = 0;
-  for (MachineBasicBlock::succ_iterator SI = MBB->succ_begin(),
-         SE = MBB->succ_end(); SI != SE; ++SI) {
-    for (MachineBasicBlock::livein_iterator LI = (*SI)->livein_begin(),
-           LE = (*SI)->livein_end(); LI != LE; ++LI) {
+  for (auto SI = MBB.succ_begin(), SE = MBB.succ_end(); SI != SE; ++SI) {
+    for (auto LI = (*SI)->livein_begin(), LE = (*SI)->livein_end();
+         LI != LE; ++LI) {
       unsigned Reg = *LI;
       assert(Reg < SystemZ::NUM_TARGET_REGS && "Invalid register number");
       LiveLow |= LowGPRs[Reg];
@@ -116,20 +178,89 @@ bool SystemZShortenInst::processBlock(MachineBasicBlock *MBB) {
   }
 
   // Iterate backwards through the block looking for instructions to change.
-  for (MachineBasicBlock::reverse_iterator MBBI = MBB->rbegin(),
-         MBBE = MBB->rend(); MBBI != MBBE; ++MBBI) {
+  for (auto MBBI = MBB.rbegin(), MBBE = MBB.rend(); MBBI != MBBE; ++MBBI) {
     MachineInstr &MI = *MBBI;
-    unsigned Opcode = MI.getOpcode();
-    if (Opcode == SystemZ::IILF)
+    switch (MI.getOpcode()) {
+    case SystemZ::IILF:
       Changed |= shortenIIF(MI, LowGPRs, LiveHigh, SystemZ::LLILL,
                             SystemZ::LLILH);
-    else if (Opcode == SystemZ::IIHF)
+      break;
+
+    case SystemZ::IIHF:
       Changed |= shortenIIF(MI, HighGPRs, LiveLow, SystemZ::LLIHL,
                             SystemZ::LLIHH);
+      break;
+
+    case SystemZ::WFADB:
+      Changed |= shortenOn001(MI, SystemZ::ADBR);
+      break;
+
+    case SystemZ::WFDDB:
+      Changed |= shortenOn001(MI, SystemZ::DDBR);
+      break;
+
+    case SystemZ::WFIDB:
+      Changed |= shortenFPConv(MI, SystemZ::FIDBRA);
+      break;
+
+    case SystemZ::WLDEB:
+      Changed |= shortenOn01(MI, SystemZ::LDEBR);
+      break;
+
+    case SystemZ::WLEDB:
+      Changed |= shortenFPConv(MI, SystemZ::LEDBRA);
+      break;
+
+    case SystemZ::WFMDB:
+      Changed |= shortenOn001(MI, SystemZ::MDBR);
+      break;
+
+    case SystemZ::WFLCDB:
+      Changed |= shortenOn01(MI, SystemZ::LCDBR);
+      break;
+
+    case SystemZ::WFLNDB:
+      Changed |= shortenOn01(MI, SystemZ::LNDBR);
+      break;
+
+    case SystemZ::WFLPDB:
+      Changed |= shortenOn01(MI, SystemZ::LPDBR);
+      break;
+
+    case SystemZ::WFSQDB:
+      Changed |= shortenOn01(MI, SystemZ::SQDBR);
+      break;
+
+    case SystemZ::WFSDB:
+      Changed |= shortenOn001(MI, SystemZ::SDBR);
+      break;
+
+    case SystemZ::WFCDB:
+      Changed |= shortenOn01(MI, SystemZ::CDBR);
+      break;
+
+    case SystemZ::VL32:
+      // For z13 we prefer LDE over LE to avoid partial register dependencies.
+      Changed |= shortenOn0(MI, SystemZ::LDE32);
+      break;
+
+    case SystemZ::VST32:
+      Changed |= shortenOn0(MI, SystemZ::STE);
+      break;
+
+    case SystemZ::VL64:
+      Changed |= shortenOn0(MI, SystemZ::LD);
+      break;
+
+    case SystemZ::VST64:
+      Changed |= shortenOn0(MI, SystemZ::STD);
+      break;
+    }
+
     unsigned UsedLow = 0;
     unsigned UsedHigh = 0;
-    for (MachineInstr::mop_iterator MOI = MI.operands_begin(),
-           MOE = MI.operands_end(); MOI != MOE; ++MOI) {
+    for (auto MOI = MI.operands_begin(), MOE = MI.operands_end();
+         MOI != MOE; ++MOI) {
       MachineOperand &MO = *MOI;
       if (MO.isReg()) {
         if (unsigned Reg = MO.getReg()) {
@@ -152,12 +283,11 @@ bool SystemZShortenInst::processBlock(MachineBasicBlock *MBB) {
 }
 
 bool SystemZShortenInst::runOnMachineFunction(MachineFunction &F) {
-  TII = static_cast<const SystemZInstrInfo *>(F.getTarget().getInstrInfo());
+  TII = static_cast<const SystemZInstrInfo *>(F.getSubtarget().getInstrInfo());
 
   bool Changed = false;
-  for (MachineFunction::iterator MFI = F.begin(), MFE = F.end();
-       MFI != MFE; ++MFI)
-    Changed |= processBlock(MFI);
+  for (auto &MBB : F)
+    Changed |= processBlock(MBB);
 
   return Changed;
 }

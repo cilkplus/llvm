@@ -36,7 +36,11 @@ void LibCallAliasAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();                         // Does not transform code
 }
 
-
+bool LibCallAliasAnalysis::runOnFunction(Function &F) {
+  // set up super class
+  InitializeAliasAnalysis(this, &F.getParent()->getDataLayout());
+  return false;
+}
 
 /// AnalyzeLibCallDetails - Given a call to a function with the specified
 /// LibCallFunctionInfo, see if we can improve the mod/ref footprint of the call
@@ -44,7 +48,7 @@ void LibCallAliasAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
 AliasAnalysis::ModRefResult
 LibCallAliasAnalysis::AnalyzeLibCallDetails(const LibCallFunctionInfo *FI,
                                             ImmutableCallSite CS,
-                                            const Location &Loc) {
+                                            const MemoryLocation &Loc) {
   // If we have a function, check to see what kind of mod/ref effects it
   // has.  Start by including any info globally known about the function.
   AliasAnalysis::ModRefResult MRInfo = FI->UniversalBehavior;
@@ -54,7 +58,7 @@ LibCallAliasAnalysis::AnalyzeLibCallDetails(const LibCallFunctionInfo *FI,
   // if we have detailed info and if 'P' is any of the locations we know
   // about.
   const LibCallFunctionInfo::LocationMRInfo *Details = FI->LocationDetails;
-  if (Details == 0)
+  if (Details == nullptr)
     return MRInfo;
   
   // If the details array is of the 'DoesNot' kind, we only know something if
@@ -118,7 +122,7 @@ LibCallAliasAnalysis::AnalyzeLibCallDetails(const LibCallFunctionInfo *FI,
 //
 AliasAnalysis::ModRefResult
 LibCallAliasAnalysis::getModRefInfo(ImmutableCallSite CS,
-                                    const Location &Loc) {
+                                    const MemoryLocation &Loc) {
   ModRefResult MRInfo = ModRef;
   
   // If this is a direct call to a function that LCI knows about, get the

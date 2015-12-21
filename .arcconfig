@@ -1,5 +1,4 @@
 {
-  "project_id" : "llvm-cilkplus",
-  "conduit_uri" : "http://phabricator.kw.intel.com:8443",
-  "history.immutable" : true
+  "project_id" : "llvm",
+  "conduit_uri" : "http://reviews.llvm.org/"
 }

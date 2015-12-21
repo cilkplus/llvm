@@ -1,4 +1,5 @@
 @ RUN: llvm-mc -triple=thumbv7-apple-darwin -mcpu=cortex-a8 -show-encoding < %s | FileCheck %s
+@ RUN: llvm-mc -triple=thumbebv7-unknown-unknown -mcpu=cortex-a8 -show-encoding < %s | FileCheck --check-prefix=CHECK-BE %s
   .syntax unified
   .globl _func
 
@@ -48,7 +49,6 @@ _func:
         adcs	r0, r1, r3, lsl #7
         adc.w	r0, r1, r3, lsr #31
         adcs.w	r0, r1, r3, asr #32
-        add r2, sp, ip
 
 @ CHECK: adc.w	r4, r5, r6              @ encoding: [0x45,0xeb,0x06,0x04]
 @ CHECK: adcs.w	r4, r5, r6              @ encoding: [0x55,0xeb,0x06,0x04]
@@ -58,7 +58,6 @@ _func:
 @ CHECK: adcs.w	r0, r1, r3, lsl #7      @ encoding: [0x51,0xeb,0xc3,0x10]
 @ CHECK: adc.w	r0, r1, r3, lsr #31     @ encoding: [0x41,0xeb,0xd3,0x70]
 @ CHECK: adcs.w	r0, r1, r3, asr #32     @ encoding: [0x51,0xeb,0x23,0x00]
-@ CHECK: add.w	r2, sp, r12             @ encoding: [0x0d,0xeb,0x0c,0x02]
 
 
 @------------------------------------------------------------------------------
@@ -114,23 +113,99 @@ _func:
 
 
 @------------------------------------------------------------------------------
-@ ADD (register)
+@ ADD (register, not SP) A8.8.6
 @------------------------------------------------------------------------------
         add r1, r2, r8
         add r5, r9, r2, asr #32
         adds r7, r3, r1, lsl #31
         adds.w r0, r3, r6, lsr #25
         add.w r4, r8, r1, ror #12
+        adds r1, r1, r7              // T1
+        it eq
+        addeq r1, r3, r5             // T1
+        it eq
+        addeq r1, r1, r5             // T1
+        it eq
+        addseq r1, r3, r5            // T3
+        it eq
+        addseq r1, r1, r5            // T3
         add r10, r8
         add r10, r10, r8
+        it eq
+        addeq r1, r10                // T2
+        it eq
+        addseq r1, r10               // T3
 
 @ CHECK: add.w	r1, r2, r8              @ encoding: [0x02,0xeb,0x08,0x01]
 @ CHECK: add.w	r5, r9, r2, asr #32     @ encoding: [0x09,0xeb,0x22,0x05]
 @ CHECK: adds.w	r7, r3, r1, lsl #31     @ encoding: [0x13,0xeb,0xc1,0x77]
 @ CHECK: adds.w	r0, r3, r6, lsr #25     @ encoding: [0x13,0xeb,0x56,0x60]
 @ CHECK: add.w	r4, r8, r1, ror #12     @ encoding: [0x08,0xeb,0x31,0x34]
+@ CHECK: adds r1, r1, r7                @ encoding: [0xc9,0x19]
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+@ CHECK: addeq r1, r3, r5               @ encoding: [0x59,0x19]
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+@ CHECK: addeq r1, r1, r5               @ encoding: [0x49,0x19]
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+@ CHECK: addseq.w r1, r3, r5            @ encoding: [0x13,0xeb,0x05,0x01]
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+@ CHECK: addseq.w r1, r1, r5            @ encoding: [0x11,0xeb,0x05,0x01]
 @ CHECK: add	r10, r8                 @ encoding: [0xc2,0x44]
 @ CHECK: add	r10, r8                 @ encoding: [0xc2,0x44]
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+@ CHECK: addeq r1, r10                  @ encoding: [0x51,0x44]
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+@ CHECK: addseq.w r1, r1, r10           @ encoding: [0x11,0xeb,0x0a,0x01]
+
+@------------------------------------------------------------------------------
+@ ADD (SP plus immediate) A8.8.9
+@------------------------------------------------------------------------------
+        it eq
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+        addeq r7, sp, #1020          // T1
+@ CHECK: addeq	r7, sp, #1020           @ encoding: [0xff,0xaf]
+
+        it eq
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+        addeq sp, sp, #508           // T2
+@ FIXME: ARMARM says 'addeq sp, sp, #508'
+@ CHECK: addeq	sp, #508                @ encoding: [0x7f,0xb0]
+
+        add r7, sp, #15              // T3
+@ CHECK: add.w	r7, sp, #15             @ encoding: [0x0d,0xf1,0x0f,0x07]
+        adds r7, sp, #16             // T3
+@ CHECK: adds.w	r7, sp, #16             @ encoding: [0x1d,0xf1,0x10,0x07]
+        add r8, sp, #16              // T3
+@ CHECK: add.w	r8, sp, #16             @ encoding: [0x0d,0xf1,0x10,0x08]
+
+        addw r6, sp, #1020           // T4
+@ CHECK: addw	r6, sp, #1020           @ encoding: [0x0d,0xf2,0xfc,0x36]
+        add r6, sp, #1019            // T4
+@ CHECK: addw	r6, sp, #1019           @ encoding: [0x0d,0xf2,0xfb,0x36]
+
+@------------------------------------------------------------------------------
+@ ADD (SP plus register) A8.8.10
+@------------------------------------------------------------------------------
+        it eq
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+        addeq r8, sp, r8             // T1
+@ CHECK: addeq	r8, sp, r8              @ encoding: [0xe8,0x44]
+        it eq
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+        addeq r8, sp                 // T1
+@ CHECK: addeq	r8, sp                  @ encoding: [0xe8,0x44]
+
+        it eq
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+        addeq sp, r9                 // T2
+@ CHECK: addeq	sp, r9                  @ encoding: [0xcd,0x44]
+
+        add r2, sp, ip               // T3
+@ CHECK: add.w r2, sp, r12              @ encoding: [0x0d,0xeb,0x0c,0x02]
+        it eq
+@ CHECK: it eq                          @ encoding: [0x08,0xbf]
+        addeq r2, sp, ip             // T3
+@ CHECK: addeq.w r2, sp, r12            @ encoding: [0x0d,0xeb,0x0c,0x02]
 
 
 @------------------------------------------------------------------------------
@@ -227,12 +302,18 @@ _func:
         bmi.w   #-183396
 
 @ CHECK: b.w	_bar                    @ encoding: [A,0xf0'A',A,0x90'A']
-          @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
+@ CHECK:  @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
+@ CHECK-BE: b.w	_bar                    @ encoding: [0xf0'A',A,0x90'A',A]
+@ CHECK-BE:  @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
 @ CHECK: beq.w	_bar                    @ encoding: [A,0xf0'A',A,0x80'A']
-          @   fixup A - offset: 0, value: _bar, kind: fixup_t2_condbranch
+@ CHECK:  @   fixup A - offset: 0, value: _bar, kind: fixup_t2_condbranch
+@ CHECK-BE: beq.w	_bar                    @ encoding: [0xf0'A',A,0x80'A',A]
+@ CHECK-BE:  @   fixup A - offset: 0, value: _bar, kind: fixup_t2_condbranch
 @ CHECK: it	eq                      @ encoding: [0x08,0xbf]
 @ CHECK: beq.w	_bar                    @ encoding: [A,0xf0'A',A,0x90'A']
-          @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
+@ CHECK:  @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
+@ CHECK-BE: beq.w	_bar                    @ encoding: [0xf0'A',A,0x90'A',A]
+@ CHECK-BE:  @   fixup A - offset: 0, value: _bar, kind: fixup_t2_uncondbranch
 @ CHECK: bmi.w   #-183396                @ encoding: [0x13,0xf5,0xce,0xa9]
 
 
@@ -332,9 +413,13 @@ _func:
 @ CHECK: cbnz    r7, #6                  @ encoding: [0x1f,0xb9]
 @ CHECK: cbnz    r7, #12                 @ encoding: [0x37,0xb9]
 @ CHECK: cbz	r6, _bar                @ encoding: [0x06'A',0xb1'A']
-           @   fixup A - offset: 0, value: _bar, kind: fixup_arm_thumb_cb
+@ CHECK:   @   fixup A - offset: 0, value: _bar, kind: fixup_arm_thumb_cb
+@ CHECK-BE: cbz	r6, _bar                @ encoding: [0xb1'A',0x06'A']
+@ CHECK-BE:   @   fixup A - offset: 0, value: _bar, kind: fixup_arm_thumb_cb
 @ CHECK: cbnz	r6, _bar                @ encoding: [0x06'A',0xb9'A']
-           @   fixup A - offset: 0, value: _bar, kind: fixup_arm_thumb_cb
+@ CHECK:   @   fixup A - offset: 0, value: _bar, kind: fixup_arm_thumb_cb
+@ CHECK-BE: cbnz	r6, _bar                @ encoding: [0xb9'A',0x06'A']
+@ CHECK-BE:   @   fixup A - offset: 0, value: _bar, kind: fixup_arm_thumb_cb
 
 
 @------------------------------------------------------------------------------
@@ -800,11 +885,20 @@ _func:
 @------------------------------------------------------------------------------
         ldr.w r5, _foo
         ldr   lr, (_strcmp-4)
+        ldr sp, _foo
 
 @ CHECK: ldr.w	r5, _foo                @ encoding: [0x5f'A',0xf8'A',A,0x50'A']
 @ CHECK: @   fixup A - offset: 0, value: _foo, kind: fixup_t2_ldst_pcrel_12
+@ CHECK-BE: ldr.w	r5, _foo                @ encoding: [0xf8'A',0x5f'A',0x50'A',A]
+@ CHECK-BE: @   fixup A - offset: 0, value: _foo, kind: fixup_t2_ldst_pcrel_12
 @ CHECK: ldr.w	lr, _strcmp-4           @ encoding: [0x5f'A',0xf8'A',A,0xe0'A']
 @ CHECK: @   fixup A - offset: 0, value: _strcmp-4, kind: fixup_t2_ldst_pcrel_12
+@ CHECK-BE: ldr.w	lr, _strcmp-4           @ encoding: [0xf8'A',0x5f'A',0xe0'A',A]
+@ CHECK-BE: @   fixup A - offset: 0, value: _strcmp-4, kind: fixup_t2_ldst_pcrel_12
+@ CHECK: ldr.w sp, _foo                 @ encoding: [0x5f'A',0xf8'A',A,0xd0'A']
+@ CHECK: @   fixup A - offset: 0, value: _foo, kind: fixup_t2_ldst_pcrel_12
+@ CHECK-BE: ldr.w sp, _foo                 @ encoding: [0xf8'A',0x5f'A',0xd0'A',A]
+@ CHECK-BE: @   fixup A - offset: 0, value: _foo, kind: fixup_t2_ldst_pcrel_12
 
         ldr r7, [pc, #8]
         ldr.n r7, [pc, #8]
@@ -818,19 +912,21 @@ _func:
         ldr r8, [pc, #132]
         ldr pc, [pc, #256]
         ldr pc, [pc, #-400]
+        ldr sp, [pc, #4]
 
 @ CHECK: ldr	r7, [pc, #8]            @ encoding: [0x02,0x4f]
 @ CHECK: ldr	r7, [pc, #8]            @ encoding: [0x02,0x4f]
 @ CHECK: ldr.w	r7, [pc, #8]            @ encoding: [0xdf,0xf8,0x08,0x70]
-@ CHECK: ldr	r4, [pc, #1020]       @ encoding: [0xff,0x4c]
+@ CHECK: ldr	r4, [pc, #1020]         @ encoding: [0xff,0x4c]
 @ CHECK: ldr.w	r3, [pc, #-1020]        @ encoding: [0x5f,0xf8,0xfc,0x33]
-@ CHECK: ldr.w	r6, [pc, #1024]       @ encoding: [0xdf,0xf8,0x00,0x64]
-@ CHECK: ldr.w	r0, [pc, #-1024]      @ encoding: [0x5f,0xf8,0x00,0x04]
-@ CHECK: ldr.w	r2, [pc, #4095]       @ encoding: [0xdf,0xf8,0xff,0x2f]
-@ CHECK: ldr.w	r1, [pc, #-4095]      @ encoding: [0x5f,0xf8,0xff,0x1f]
-@ CHECK: ldr.w	r8, [pc, #132]        @ encoding: [0xdf,0xf8,0x84,0x80]
+@ CHECK: ldr.w	r6, [pc, #1024]         @ encoding: [0xdf,0xf8,0x00,0x64]
+@ CHECK: ldr.w	r0, [pc, #-1024]        @ encoding: [0x5f,0xf8,0x00,0x04]
+@ CHECK: ldr.w	r2, [pc, #4095]         @ encoding: [0xdf,0xf8,0xff,0x2f]
+@ CHECK: ldr.w	r1, [pc, #-4095]        @ encoding: [0x5f,0xf8,0xff,0x1f]
+@ CHECK: ldr.w	r8, [pc, #132]          @ encoding: [0xdf,0xf8,0x84,0x80]
 @ CHECK: ldr.w	pc, [pc, #256]          @ encoding: [0xdf,0xf8,0x00,0xf1]
 @ CHECK: ldr.w	pc, [pc, #-400]         @ encoding: [0x5f,0xf8,0x90,0xf1]
+@ CHECK: ldr.w  sp, [pc, #4]            @ encoding: [0xdf,0xf8,0x04,0xd0]
 
         ldrb  r9, [pc, #-0]
         ldrsb r11, [pc, #-0]
@@ -839,9 +935,9 @@ _func:
         ldr   r5, [pc, #-0]
 
 @ CHECK: ldrb.w	r9, [pc, #-0]           @ encoding: [0x1f,0xf8,0x00,0x90]
-@ CHECK: ldrsb.w	r11, [pc, #-0]        @ encoding: [0x1f,0xf9,0x00,0xb0]
+@ CHECK: ldrsb.w	r11, [pc, #-0]  @ encoding: [0x1f,0xf9,0x00,0xb0]
 @ CHECK: ldrh.w	r10, [pc, #-0]          @ encoding: [0x3f,0xf8,0x00,0xa0]
-@ CHECK: ldrsh.w	r1, [pc, #-0]         @ encoding: [0x3f,0xf9,0x00,0x10]
+@ CHECK: ldrsh.w	r1, [pc, #-0]   @ encoding: [0x3f,0xf9,0x00,0x10]
 @ CHECK: ldr.w	r5, [pc, #-0]           @ encoding: [0x5f,0xf8,0x00,0x50]
 
 @------------------------------------------------------------------------------
@@ -1022,6 +1118,8 @@ _func:
 
 @ CHECK: ldrh.w	r5, _bar                @ encoding: [0x3f'A',0xf8'A',A,0x50'A']
 @ CHECK:     @   fixup A - offset: 0, value: _bar, kind: fixup_t2_ldst_pcrel_12
+@ CHECK-BE: ldrh.w	r5, _bar                @ encoding: [0xf8'A',0x3f'A',0x50'A',A]
+@ CHECK-BE:     @   fixup A - offset: 0, value: _bar, kind: fixup_t2_ldst_pcrel_12
 
 
 @------------------------------------------------------------------------------
@@ -1091,6 +1189,8 @@ _func:
 
 @ CHECK: ldrsb.w r5, _bar               @ encoding: [0x1f'A',0xf9'A',A,0x50'A']
 @ CHECK:      @   fixup A - offset: 0, value: _bar, kind: fixup_t2_ldst_pcrel_12
+@ CHECK-BE: ldrsb.w r5, _bar               @ encoding: [0xf9'A',0x1f'A',0x50'A',A]
+@ CHECK-BE:      @   fixup A - offset: 0, value: _bar, kind: fixup_t2_ldst_pcrel_12
 
 
 @------------------------------------------------------------------------------
@@ -1160,6 +1260,8 @@ _func:
 
 @ CHECK: ldrsh.w r5, _bar               @ encoding: [0x3f'A',0xf9'A',A,0x50'A']
 @ CHECK:      @   fixup A - offset: 0, value: _bar, kind: fixup_t2_ldst_pcrel_12
+@ CHECK-BE: ldrsh.w r5, _bar               @ encoding: [0xf9'A',0x3f'A',0x50'A',A]
+@ CHECK-BE:      @   fixup A - offset: 0, value: _bar, kind: fixup_t2_ldst_pcrel_12
 
 @ TEMPORARILY DISABLED:
 @        ldrsh.w r4, [pc, #1435]
@@ -2777,6 +2879,9 @@ _func:
         strd r0, r1, [r2, #-0]
         strd r0, r1, [r2, #-0]!
         strd r0, r1, [r2], #-0
+        strd r0, r1, [r2, #256]
+        strd r0, r1, [r2, #256]!
+        strd r0, r1, [r2], #256
 
 @ CHECK: strd	r3, r5, [r6, #24]       @ encoding: [0xc6,0xe9,0x06,0x35]
 @ CHECK: strd	r3, r5, [r6, #24]!      @ encoding: [0xe6,0xe9,0x06,0x35]
@@ -2787,6 +2892,9 @@ _func:
 @ CHECK: strd   r0, r1, [r2, #-0]       @ encoding: [0x42,0xe9,0x00,0x01]
 @ CHECK: strd   r0, r1, [r2, #-0]!      @ encoding: [0x62,0xe9,0x00,0x01]
 @ CHECK: strd   r0, r1, [r2], #-0       @ encoding: [0x62,0xe8,0x00,0x01]
+@ CHECK: strd	r0, r1, [r2, #256]      @ encoding: [0xc2,0xe9,0x40,0x01]
+@ CHECK: strd	r0, r1, [r2, #256]!     @ encoding: [0xe2,0xe9,0x40,0x01]
+@ CHECK: strd	r0, r1, [r2], #256      @ encoding: [0xe2,0xe8,0x40,0x01]
 
 
 @------------------------------------------------------------------------------

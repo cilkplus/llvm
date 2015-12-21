@@ -15,17 +15,17 @@ entry:
   %x = alloca i32, align 8
   %zz = alloca i32, align 4
   %z = alloca i32, align 4
-  %0 = load i32* @i, align 4
-  %arrayidx = getelementptr inbounds [512 x i32]* %y, i32 0, i32 10
+  %0 = load i32, i32* @i, align 4
+  %arrayidx = getelementptr inbounds [512 x i32], [512 x i32]* %y, i32 0, i32 10
   store i32 %0, i32* %arrayidx, align 4
-  %1 = load i32* @i, align 4
+  %1 = load i32, i32* @i, align 4
   store i32 %1, i32* %x, align 8
   call void @p(i32* %x)
-  %arrayidx1 = getelementptr inbounds [512 x i32]* %y, i32 0, i32 10
+  %arrayidx1 = getelementptr inbounds [512 x i32], [512 x i32]* %y, i32 0, i32 10
   call void @p(i32* %arrayidx1)
   ret void
 }
-; 16:	save	$ra, $s0, $s1, $s2, 2040
-; 16:	addiu	$sp, -56 # 16 bit inst
-; 16:	addiu	$sp, 56 # 16 bit inst
-; 16:	restore	$ra,  $s0, $s1, $s2, 2040
+; 16:	save	$ra, 2040
+; 16:	addiu	$sp, -40 # 16 bit inst
+; 16:	addiu	$sp, 40 # 16 bit inst
+; 16:	restore	$ra, 2040

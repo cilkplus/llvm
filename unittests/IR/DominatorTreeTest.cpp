@@ -7,12 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/Dominators.h"
-#include "llvm/Assembly/Parser.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/Analysis/PostDominators.h"
+#include "llvm/AsmParser/Parser.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
 
@@ -24,8 +26,10 @@ namespace llvm {
   namespace {
     struct DPass : public FunctionPass {
       static char ID;
-      virtual bool runOnFunction(Function &F) {
-        DominatorTree *DT = &getAnalysis<DominatorTree>();
+      bool runOnFunction(Function &F) override {
+        DominatorTree *DT =
+            &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+        PostDominatorTree *PDT = &getAnalysis<PostDominatorTree>();
         Function::iterator FI = F.begin();
 
         BasicBlock *BB0 = FI++;
@@ -148,10 +152,61 @@ namespace llvm {
 
         EXPECT_TRUE(DT->dominates(Y6, BB3));
 
+        // Post dominance.
+        EXPECT_TRUE(PDT->dominates(BB0, BB0));
+        EXPECT_FALSE(PDT->dominates(BB1, BB0));
+        EXPECT_FALSE(PDT->dominates(BB2, BB0));
+        EXPECT_FALSE(PDT->dominates(BB3, BB0));
+        EXPECT_TRUE(PDT->dominates(BB4, BB1));
+
+        // Dominance descendants.
+        SmallVector<BasicBlock *, 8> DominatedBBs, PostDominatedBBs;
+
+        DT->getDescendants(BB0, DominatedBBs);
+        PDT->getDescendants(BB0, PostDominatedBBs);
+        EXPECT_EQ(DominatedBBs.size(), 4UL);
+        EXPECT_EQ(PostDominatedBBs.size(), 1UL);
+
+        // BB3 is unreachable. It should have no dominators nor postdominators.
+        DominatedBBs.clear();
+        PostDominatedBBs.clear();
+        DT->getDescendants(BB3, DominatedBBs);
+        DT->getDescendants(BB3, PostDominatedBBs);
+        EXPECT_EQ(DominatedBBs.size(), 0UL);
+        EXPECT_EQ(PostDominatedBBs.size(), 0UL);
+
+        // Check DFS Numbers before
+        EXPECT_EQ(DT->getNode(BB0)->getDFSNumIn(), 0UL);
+        EXPECT_EQ(DT->getNode(BB0)->getDFSNumOut(), 7UL);
+        EXPECT_EQ(DT->getNode(BB1)->getDFSNumIn(), 1UL);
+        EXPECT_EQ(DT->getNode(BB1)->getDFSNumOut(), 2UL);
+        EXPECT_EQ(DT->getNode(BB2)->getDFSNumIn(), 5UL);
+        EXPECT_EQ(DT->getNode(BB2)->getDFSNumOut(), 6UL);
+        EXPECT_EQ(DT->getNode(BB4)->getDFSNumIn(), 3UL);
+        EXPECT_EQ(DT->getNode(BB4)->getDFSNumOut(), 4UL);
+
+        // Reattach block 3 to block 1 and recalculate
+        BB1->getTerminator()->eraseFromParent();
+        BranchInst::Create(BB4, BB3, ConstantInt::getTrue(F.getContext()), BB1);
+        DT->recalculate(F);
+
+        // Check DFS Numbers after
+        EXPECT_EQ(DT->getNode(BB0)->getDFSNumIn(), 0UL);
+        EXPECT_EQ(DT->getNode(BB0)->getDFSNumOut(), 9UL);
+        EXPECT_EQ(DT->getNode(BB1)->getDFSNumIn(), 1UL);
+        EXPECT_EQ(DT->getNode(BB1)->getDFSNumOut(), 4UL);
+        EXPECT_EQ(DT->getNode(BB2)->getDFSNumIn(), 7UL);
+        EXPECT_EQ(DT->getNode(BB2)->getDFSNumOut(), 8UL);
+        EXPECT_EQ(DT->getNode(BB3)->getDFSNumIn(), 2UL);
+        EXPECT_EQ(DT->getNode(BB3)->getDFSNumOut(), 3UL);
+        EXPECT_EQ(DT->getNode(BB4)->getDFSNumIn(), 5UL);
+        EXPECT_EQ(DT->getNode(BB4)->getDFSNumOut(), 6UL);
+
         return false;
       }
-      virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-        AU.addRequired<DominatorTree>();
+      void getAnalysisUsage(AnalysisUsage &AU) const override {
+        AU.addRequired<DominatorTreeWrapperPass>();
+        AU.addRequired<PostDominatorTree>();
       }
       DPass() : FunctionPass(ID) {
         initializeDPassPass(*PassRegistry::getPassRegistry());
@@ -159,11 +214,10 @@ namespace llvm {
     };
     char DPass::ID = 0;
 
-
-    Module* makeLLVMModule(DPass *P) {
+    std::unique_ptr<Module> makeLLVMModule(DPass *P) {
       const char *ModuleStrig =
         "declare i32 @g()\n" \
-        "define void @f(i32 %x) {\n" \
+        "define void @f(i32 %x) personality i32 ()* @g {\n" \
         "bb0:\n" \
         "  %y1 = add i32 %x, 1\n" \
         "  %y2 = add i32 %x, 1\n" \
@@ -172,7 +226,7 @@ namespace llvm {
         "  %y4 = add i32 %x, 1\n" \
         "  br label %bb4\n" \
         "bb2:\n" \
-        "  %y5 = landingpad i32 personality i32 ()* @g\n" \
+        "  %y5 = landingpad i32\n" \
         "          cleanup\n" \
         "  br label %bb4\n" \
         "bb3:\n" \
@@ -186,13 +240,13 @@ namespace llvm {
         "}\n";
       LLVMContext &C = getGlobalContext();
       SMDiagnostic Err;
-      return ParseAssemblyString(ModuleStrig, NULL, Err, C);
+      return parseAssemblyString(ModuleStrig, Err, C);
     }
 
     TEST(DominatorTree, Unreachable) {
       DPass *P = new DPass();
-      OwningPtr<Module> M(makeLLVMModule(P));
-      PassManager Passes;
+      std::unique_ptr<Module> M = makeLLVMModule(P);
+      legacy::PassManager Passes;
       Passes.add(P);
       Passes.run(*M);
     }
@@ -200,5 +254,6 @@ namespace llvm {
 }
 
 INITIALIZE_PASS_BEGIN(DPass, "dpass", "dpass", false, false)
-INITIALIZE_PASS_DEPENDENCY(DominatorTree)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(PostDominatorTree)
 INITIALIZE_PASS_END(DPass, "dpass", "dpass", false, false)

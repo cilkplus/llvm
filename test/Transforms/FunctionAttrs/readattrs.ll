@@ -5,7 +5,7 @@ declare void @test1_1(i8* %x1_1, i8* readonly %y1_1, ...)
 
 ; CHECK: define void @test1_2(i8* %x1_2, i8* readonly %y1_2, i8* %z1_2)
 define void @test1_2(i8* %x1_2, i8* %y1_2, i8* %z1_2) {
-  call void (i8*, i8*, ...)* @test1_1(i8* %x1_2, i8* %y1_2, i8* %z1_2)
+  call void (i8*, i8*, ...) @test1_1(i8* %x1_2, i8* %y1_2, i8* %z1_2)
   store i32 0, i32* @x
   ret void
 }
@@ -43,5 +43,25 @@ declare void @test6_1()
 define void @test6_2(i8** %p, i8* %q) {
   store i8* %q, i8** %p
   call void @test6_1()
+  ret void
+}
+
+; CHECK: define void @test7_1(i32* inalloca nocapture %a)
+; inalloca parameters are always considered written
+define void @test7_1(i32* inalloca %a) {
+  ret void
+}
+
+; CHECK: define i32* @test8_1(i32* readnone %p)
+define i32* @test8_1(i32* %p) {
+entry:
+  ret i32* %p
+}
+
+; CHECK: define void @test8_2(i32* %p)
+define void @test8_2(i32* %p) {
+entry:
+  %call = call i32* @test8_1(i32* %p)
+  store i32 10, i32* %call, align 4
   ret void
 }

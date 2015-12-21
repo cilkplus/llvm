@@ -81,12 +81,12 @@ namespace llvm
       Filled = false;
     }
 
-    virtual void write_impl(const char *Ptr, size_t Size) LLVM_OVERRIDE;
+    void write_impl(const char *Ptr, size_t Size) override;
 
     /// current_pos - Return the current position within the stream,
     /// not counting the bytes currently in the buffer.
     ///
-    virtual uint64_t current_pos() const LLVM_OVERRIDE {
+    uint64_t current_pos() const override {
       // This has the same effect as calling TheStream.current_pos(),
       // but that interface is private.
       return TheStream->tell() - TheStream->GetNumBytesInBuffer();
@@ -107,30 +107,17 @@ namespace llvm
     /// management of it, etc.
     ///
     circular_raw_ostream(raw_ostream &Stream, const char *Header,
-                         size_t BuffSize = 0, bool Owns = REFERENCE_ONLY) 
-        : raw_ostream(/*unbuffered*/true),
-            TheStream(0),
-            OwnsStream(Owns),
-            BufferSize(BuffSize),
-            BufferArray(0),
-            Filled(false),
-            Banner(Header) {
+                         size_t BuffSize = 0, bool Owns = REFERENCE_ONLY)
+        : raw_ostream(/*unbuffered*/ true), TheStream(nullptr),
+          OwnsStream(Owns), BufferSize(BuffSize), BufferArray(nullptr),
+          Filled(false), Banner(Header) {
       if (BufferSize != 0)
         BufferArray = new char[BufferSize];
       Cur = BufferArray;
       setStream(Stream, Owns);
     }
-    explicit circular_raw_ostream()
-        : raw_ostream(/*unbuffered*/true),
-            TheStream(0),
-            OwnsStream(REFERENCE_ONLY),
-            BufferArray(0),
-            Filled(false),
-            Banner("") {
-      Cur = BufferArray;
-    }
 
-    ~circular_raw_ostream() {
+    ~circular_raw_ostream() override {
       flush();
       flushBufferWithBanner();
       releaseStream();

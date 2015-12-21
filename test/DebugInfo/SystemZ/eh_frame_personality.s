@@ -37,7 +37,7 @@ DW.ref.__gxx_personality_v0:
 # Contents of the .eh_frame section:
 #
 # 00000000 0000001c 00000000 CIE
-#   Version:               1
+#   Version:               3
 #   Augmentation:          "zPLR"
 #   Code alignment factor: 1
 #   Data alignment factor: -8

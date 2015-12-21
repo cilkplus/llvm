@@ -263,6 +263,74 @@ almost never be stored or mentioned directly.  They are intended solely for use
 when defining a function which should be able to efficiently accept concatenated
 strings.
 
+.. _function_apis:
+
+Passing functions and other callable objects
+--------------------------------------------
+
+Sometimes you may want a function to be passed a callback object. In order to
+support lambda expressions and other function objects, you should not use the
+traditional C approach of taking a function pointer and an opaque cookie:
+
+.. code-block:: c++
+
+    void takeCallback(bool (*Callback)(Function *, void *), void *Cookie);
+
+Instead, use one of the following approaches:
+
+Function template
+^^^^^^^^^^^^^^^^^
+
+If you don't mind putting the definition of your function into a header file,
+make it a function template that is templated on the callable type.
+
+.. code-block:: c++
+
+    template<typename Callable>
+    void takeCallback(Callable Callback) {
+      Callback(1, 2, 3);
+    }
+
+The ``function_ref`` class template
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``function_ref``
+(`doxygen <http://llvm.org/doxygen/classllvm_1_1function_ref.html>`__) class
+template represents a reference to a callable object, templated over the type
+of the callable. This is a good choice for passing a callback to a function,
+if you don't need to hold onto the callback after the function returns. In this
+way, ``function_ref`` is to ``std::function`` as ``StringRef`` is to
+``std::string``.
+
+``function_ref<Ret(Param1, Param2, ...)>`` can be implicitly constructed from
+any callable object that can be called with arguments of type ``Param1``,
+``Param2``, ..., and returns a value that can be converted to type ``Ret``.
+For example:
+
+.. code-block:: c++
+
+    void visitBasicBlocks(Function *F, function_ref<bool (BasicBlock*)> Callback) {
+      for (BasicBlock &BB : *F)
+        if (Callback(&BB))
+          return;
+    }
+
+can be called using:
+
+.. code-block:: c++
+
+    visitBasicBlocks(F, [&](BasicBlock *BB) {
+      if (process(BB))
+        return isEmpty(BB);
+      return false;
+    });
+
+Note that a ``function_ref`` object contains pointers to external memory, so it
+is not generally safe to store an instance of the class (unless you know that
+the external storage will not be freed). If you need this ability, consider
+using ``std::function``. ``function_ref`` is small enough that it should always
+be passed by value.
+
 .. _DEBUG:
 
 The ``DEBUG()`` macro and ``-debug`` option
@@ -315,7 +383,8 @@ Fine grained debug info with ``DEBUG_TYPE`` and the ``-debug-only`` option
 Sometimes you may find yourself in a situation where enabling ``-debug`` just
 turns on **too much** information (such as when working on the code generator).
 If you want to enable debug information with more fine-grained control, you
-define the ``DEBUG_TYPE`` macro and the ``-debug`` only option as follows:
+can define the ``DEBUG_TYPE`` macro and use the ``-debug-only`` option as
+follows:
 
 .. code-block:: c++
 
@@ -353,8 +422,11 @@ to specify the debug type for the entire module (if you do this before you
 because there is no system in place to ensure that names do not conflict.  If
 two different modules use the same string, they will all be turned on when the
 name is specified.  This allows, for example, all debug information for
-instruction scheduling to be enabled with ``-debug-type=InstrSched``, even if
+instruction scheduling to be enabled with ``-debug-only=InstrSched``, even if
 the source lives in multiple files.
+
+For performance reasons, -debug-only is not available in optimized build
+(``--enable-optimized``) of LLVM.
 
 The ``DEBUG_WITH_TYPE`` macro is also available for situations where you would
 like to set ``DEBUG_TYPE``, but only for one specific ``DEBUG`` statement.  It
@@ -416,6 +488,9 @@ gathered, use the '``-stats``' option:
   $ opt -stats -mypassname < program.bc > /dev/null
   ... statistics output ...
 
+Note that in order to use the '``-stats``' option, LLVM must be
+compiled with assertions enabled.
+
 When running ``opt`` on a C file from the SPEC benchmark suite, it gives a
 report that looks like this:
 
@@ -473,14 +548,15 @@ methods.  Within GDB, for example, you can usually use something like ``call
 DAG.viewGraph()`` to pop up a window.  Alternatively, you can sprinkle calls to
 these functions in your code in places you want to debug.
 
-Getting this to work requires a small amount of configuration.  On Unix systems
+Getting this to work requires a small amount of setup.  On Unix systems
 with X11, install the `graphviz <http://www.graphviz.org>`_ toolkit, and make
-sure 'dot' and 'gv' are in your path.  If you are running on Mac OS/X, download
-and install the Mac OS/X `Graphviz program
+sure 'dot' and 'gv' are in your path.  If you are running on Mac OS X, download
+and install the Mac OS X `Graphviz program
 <http://www.pixelglow.com/graphviz/>`_ and add
 ``/Applications/Graphviz.app/Contents/MacOS/`` (or wherever you install it) to
-your path.  Once in your system and path are set up, rerun the LLVM configure
-script and rebuild LLVM to enable this functionality.
+your path. The programs need not be present when configuring, building or
+running LLVM and can simply be installed when needed during an active debug
+session.
 
 ``SelectionDAG`` has been extended to make it easier to locate *interesting*
 nodes in large complex graphs.  From gdb, if you ``call DAG.setGraphColor(node,
@@ -803,7 +879,7 @@ variety of customizations.
 llvm/ADT/ilist_node.h
 ^^^^^^^^^^^^^^^^^^^^^
 
-``ilist_node<T>`` implements a the forward and backward links that are expected
+``ilist_node<T>`` implements the forward and backward links that are expected
 by the ``ilist<T>`` (and analogous containers) in the default manner.
 
 ``ilist_node<T>``\ s are meant to be embedded in the node type ``T``, usually
@@ -864,7 +940,7 @@ There are a variety of ways to pass around and use strings in C and C++, and
 LLVM adds a few new options to choose from.  Pick the first option on this list
 that will do what you need, they are ordered according to their relative cost.
 
-Note that is is generally preferred to *not* pass strings around as ``const
+Note that it is generally preferred to *not* pass strings around as ``const
 char*``'s.  These have a number of problems, including the fact that they
 cannot represent embedded nul ("\0") characters, and do not have a length
 available efficiently.  The general replacement for '``const char*``' is
@@ -1029,10 +1105,10 @@ If you have a set-like data structure that is usually small and whose elements
 are reasonably small, a ``SmallSet<Type, N>`` is a good choice.  This set has
 space for N elements in place (thus, if the set is dynamically smaller than N,
 no malloc traffic is required) and accesses them with a simple linear search.
-When the set grows beyond 'N' elements, it allocates a more expensive
+When the set grows beyond N elements, it allocates a more expensive
 representation that guarantees efficient access (for most types, it falls back
-to std::set, but for pointers it uses something far better, :ref:`SmallPtrSet
-<dss_smallptrset>`.
+to :ref:`std::set <dss_set>`, but for pointers it uses something far better,
+:ref:`SmallPtrSet <dss_smallptrset>`.
 
 The magic of this class is that it handles small sets extremely efficiently, but
 gracefully handles extremely large sets without loss of efficiency.  The
@@ -1044,16 +1120,31 @@ and erasing, but does not support iteration.
 llvm/ADT/SmallPtrSet.h
 ^^^^^^^^^^^^^^^^^^^^^^
 
-SmallPtrSet has all the advantages of ``SmallSet`` (and a ``SmallSet`` of
+``SmallPtrSet`` has all the advantages of ``SmallSet`` (and a ``SmallSet`` of
 pointers is transparently implemented with a ``SmallPtrSet``), but also supports
-iterators.  If more than 'N' insertions are performed, a single quadratically
+iterators.  If more than N insertions are performed, a single quadratically
 probed hash table is allocated and grows as needed, providing extremely
 efficient access (constant time insertion/deleting/queries with low constant
 factors) and is very stingy with malloc traffic.
 
-Note that, unlike ``std::set``, the iterators of ``SmallPtrSet`` are invalidated
-whenever an insertion occurs.  Also, the values visited by the iterators are not
-visited in sorted order.
+Note that, unlike :ref:`std::set <dss_set>`, the iterators of ``SmallPtrSet``
+are invalidated whenever an insertion occurs.  Also, the values visited by the
+iterators are not visited in sorted order.
+
+.. _dss_stringset:
+
+llvm/ADT/StringSet.h
+^^^^^^^^^^^^^^^^^^^^
+
+``StringSet`` is a thin wrapper around :ref:`StringMap\<char\> <dss_stringmap>`,
+and it allows efficient storage and retrieval of unique strings.
+
+Functionally analogous to ``SmallSet<StringRef>``, ``StringSet`` also suports
+iteration. (The iterator dereferences to a ``StringMapEntry<char>``, so you
+need to call ``i->getKey()`` to access the item of the StringSet.)  On the
+other hand, ``StringSet`` doesn't support range-insertion and
+copy-construction, which :ref:`SmallSet <dss_smallset>` and :ref:`SmallPtrSet
+<dss_smallptrset>` do support.
 
 .. _dss_denseset:
 
@@ -1221,8 +1312,9 @@ never use hash_set and unordered_set because they are generally very expensive
 (each insertion requires a malloc) and very non-portable.
 
 std::multiset is useful if you're not interested in elimination of duplicates,
-but has all the drawbacks of std::set.  A sorted vector (where you don't delete
-duplicate entries) or some other approach is almost always better.
+but has all the drawbacks of :ref:`std::set <dss_set>`.  A sorted vector
+(where you don't delete duplicate entries) or some other approach is almost
+always better.
 
 .. _ds_map:
 
@@ -1318,7 +1410,7 @@ type used.
 
 .. _dss_valuemap:
 
-llvm/ADT/ValueMap.h
+llvm/IR/ValueMap.h
 ^^^^^^^^^^^^^^^^^^^
 
 ValueMap is a wrapper around a :ref:`DenseMap <dss_densemap>` mapping
@@ -1335,7 +1427,7 @@ llvm/ADT/IntervalMap.h
 
 IntervalMap is a compact map for small keys and values.  It maps key intervals
 instead of single keys, and it will automatically coalesce adjacent intervals.
-When then map only contains a few intervals, they are stored in the map object
+When the map only contains a few intervals, they are stored in the map object
 itself to avoid allocations.
 
 The IntervalMap iterators are quite big, so they should not be passed around as
@@ -1367,8 +1459,10 @@ order, making it an easy (but somewhat expensive) solution for non-deterministic
 iteration over maps of pointers.
 
 It is implemented by mapping from key to an index in a vector of key,value
-pairs.  This provides fast lookup and iteration, but has two main drawbacks: The
-key is stored twice and it doesn't support removing elements.
+pairs.  This provides fast lookup and iteration, but has two main drawbacks:
+the key is stored twice and removing elements takes linear time.  If it is
+necessary to remove elements, it's best to remove them in bulk using
+``remove_if()``.
 
 .. _dss_inteqclasses:
 
@@ -1559,14 +1653,14 @@ Iterating over the ``Instruction`` in a ``Function``
 If you're finding that you commonly iterate over a ``Function``'s
 ``BasicBlock``\ s and then that ``BasicBlock``'s ``Instruction``\ s,
 ``InstIterator`` should be used instead.  You'll need to include
-``llvm/Support/InstIterator.h`` (`doxygen
-<http://llvm.org/doxygen/InstIterator_8h-source.html>`__) and then instantiate
+``llvm/IR/InstIterator.h`` (`doxygen
+<http://llvm.org/doxygen/InstIterator_8h.html>`__) and then instantiate
 ``InstIterator``\ s explicitly in your code.  Here's a small example that shows
 how to dump all instructions in a function to the standard error stream:
 
 .. code-block:: c++
 
-  #include "llvm/Support/InstIterator.h"
+  #include "llvm/IR/InstIterator.h"
 
   // F is a pointer to a Function instance
   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
@@ -1609,8 +1703,8 @@ they will automatically convert to a ptr-to-instance type whenever they need to.
 Instead of derferencing the iterator and then taking the address of the result,
 you can simply assign the iterator to the proper pointer type and you get the
 dereference and address-of operation as a result of the assignment (behind the
-scenes, this is a result of overloading casting mechanisms).  Thus the last line
-of the last example,
+scenes, this is a result of overloading casting mechanisms).  Thus the second
+line of the last example,
 
 .. code-block:: c++
 
@@ -1738,15 +1832,11 @@ chain of ``F``:
 
   Function *F = ...;
 
-  for (Value::use_iterator i = F->use_begin(), e = F->use_end(); i != e; ++i)
-    if (Instruction *Inst = dyn_cast<Instruction>(*i)) {
+  for (User *U : F->users()) {
+    if (Instruction *Inst = dyn_cast<Instruction>(U)) {
       errs() << "F is used in instruction:\n";
       errs() << *Inst << "\n";
     }
-
-Note that dereferencing a ``Value::use_iterator`` is not a very cheap operation.
-Instead of performing ``*i`` above several times, consider doing it only once in
-the loop body and reusing its result.
 
 Alternatively, it's common to have an instance of the ``User`` Class (`doxygen
 <http://llvm.org/doxygen/classllvm_1_1User.html>`__) and need to know what
@@ -1759,8 +1849,8 @@ instruction uses (that is, the operands of the particular ``Instruction``):
 
   Instruction *pi = ...;
 
-  for (User::op_iterator i = pi->op_begin(), e = pi->op_end(); i != e; ++i) {
-    Value *v = *i;
+  for (Use &U : pi->operands()) {
+    Value *v = U.get();
     // ...
   }
 
@@ -1778,7 +1868,7 @@ Iterating over predecessors & successors of blocks
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Iterating over the predecessors and successors of a block is quite easy with the
-routines defined in ``"llvm/Support/CFG.h"``.  Just use code like this to
+routines defined in ``"llvm/IR/CFG.h"``.  Just use code like this to
 iterate over all predecessors of BB:
 
 .. code-block:: c++
@@ -1848,7 +1938,7 @@ which is a pointer to an integer on the run time stack.
 
 *Inserting instructions*
 
-There are essentially two ways to insert an ``Instruction`` into an existing
+There are essentially three ways to insert an ``Instruction`` into an existing
 sequence of instructions that form a ``BasicBlock``:
 
 * Insertion into an explicit instruction list
@@ -1917,6 +2007,41 @@ sequence of instructions that form a ``BasicBlock``:
 
   which is much cleaner, especially if you're creating a lot of instructions and
   adding them to ``BasicBlock``\ s.
+
+* Insertion using an instance of ``IRBuilder``
+
+  Inserting several ``Instruction``\ s can be quite laborious using the previous
+  methods. The ``IRBuilder`` is a convenience class that can be used to add
+  several instructions to the end of a ``BasicBlock`` or before a particular
+  ``Instruction``. It also supports constant folding and renaming named
+  registers (see ``IRBuilder``'s template arguments).
+
+  The example below demonstrates a very simple use of the ``IRBuilder`` where
+  three instructions are inserted before the instruction ``pi``. The first two
+  instructions are Call instructions and third instruction multiplies the return
+  value of the two calls.
+
+  .. code-block:: c++
+
+    Instruction *pi = ...;
+    IRBuilder<> Builder(pi);
+    CallInst* callOne = Builder.CreateCall(...);
+    CallInst* callTwo = Builder.CreateCall(...);
+    Value* result = Builder.CreateMul(callOne, callTwo);
+
+  The example below is similar to the above example except that the created
+  ``IRBuilder`` inserts instructions at the end of the ``BasicBlock`` ``pb``.
+
+  .. code-block:: c++
+
+    BasicBlock *pb = ...;
+    IRBuilder<> Builder(pb);
+    CallInst* callOne = Builder.CreateCall(...);
+    CallInst* callTwo = Builder.CreateCall(...);
+    Value* result = Builder.CreateMul(callOne, callTwo);
+
+  See :doc:`tutorial/LangImpl3` for a practical use of the ``IRBuilder``.
+
 
 .. _schanges_deleting:
 
@@ -2065,46 +2190,13 @@ compiler, consider compiling LLVM and LLVM-GCC in single-threaded mode, and
 using the resultant compiler to build a copy of LLVM with multithreading
 support.
 
-.. _startmultithreaded:
-
-Entering and Exiting Multithreaded Mode
----------------------------------------
-
-In order to properly protect its internal data structures while avoiding
-excessive locking overhead in the single-threaded case, the LLVM must intialize
-certain data structures necessary to provide guards around its internals.  To do
-so, the client program must invoke ``llvm_start_multithreaded()`` before making
-any concurrent LLVM API calls.  To subsequently tear down these structures, use
-the ``llvm_stop_multithreaded()`` call.  You can also use the
-``llvm_is_multithreaded()`` call to check the status of multithreaded mode.
-
-Note that both of these calls must be made *in isolation*.  That is to say that
-no other LLVM API calls may be executing at any time during the execution of
-``llvm_start_multithreaded()`` or ``llvm_stop_multithreaded``.  It is the
-client's responsibility to enforce this isolation.
-
-The return value of ``llvm_start_multithreaded()`` indicates the success or
-failure of the initialization.  Failure typically indicates that your copy of
-LLVM was built without multithreading support, typically because GCC atomic
-intrinsics were not found in your system compiler.  In this case, the LLVM API
-will not be safe for concurrent calls.  However, it *will* be safe for hosting
-threaded applications in the JIT, though :ref:`care must be taken
-<jitthreading>` to ensure that side exits and the like do not accidentally
-result in concurrent LLVM API calls.
-
 .. _shutdown:
 
 Ending Execution with ``llvm_shutdown()``
 -----------------------------------------
 
 When you are done using the LLVM APIs, you should call ``llvm_shutdown()`` to
-deallocate memory used for internal structures.  This will also invoke
-``llvm_stop_multithreaded()`` if LLVM is operating in multithreaded mode.  As
-such, ``llvm_shutdown()`` requires the same isolation guarantees as
-``llvm_stop_multithreaded()``.
-
-Note that, if you use scope-based shutdown, you can use the
-``llvm_shutdown_obj`` class, which calls ``llvm_shutdown()`` in its destructor.
+deallocate memory used for internal structures.
 
 .. _managedstatic:
 
@@ -2112,19 +2204,10 @@ Lazy Initialization with ``ManagedStatic``
 ------------------------------------------
 
 ``ManagedStatic`` is a utility class in LLVM used to implement static
-initialization of static resources, such as the global type tables.  Before the
-invocation of ``llvm_shutdown()``, it implements a simple lazy initialization
-scheme.  Once ``llvm_start_multithreaded()`` returns, however, it uses
+initialization of static resources, such as the global type tables.  In a
+single-threaded environment, it implements a simple lazy initialization scheme.
+When LLVM is compiled with support for multi-threading, however, it uses
 double-checked locking to implement thread-safe lazy initialization.
-
-Note that, because no other threads are allowed to issue LLVM API calls before
-``llvm_start_multithreaded()`` returns, it is possible to have
-``ManagedStatic``\ s of ``llvm::sys::Mutex``\ s.
-
-The ``llvm_acquire_global_lock()`` and ``llvm_release_global_lock`` APIs provide
-access to the global lock used to implement the double-checked locking for lazy
-initialization.  These should only be used internally to LLVM, and only if you
-know what you're doing!
 
 .. _llvmcontext:
 
@@ -2416,6 +2499,92 @@ ensures that the first bytes of ``User`` (if interpreted as a pointer) never has
 the LSBit set. (Portability is relying on the fact that all known compilers
 place the ``vptr`` in the first word of the instances.)
 
+.. _polymorphism:
+
+Designing Type Hiercharies and Polymorphic Interfaces
+-----------------------------------------------------
+
+There are two different design patterns that tend to result in the use of
+virtual dispatch for methods in a type hierarchy in C++ programs. The first is
+a genuine type hierarchy where different types in the hierarchy model
+a specific subset of the functionality and semantics, and these types nest
+strictly within each other. Good examples of this can be seen in the ``Value``
+or ``Type`` type hierarchies.
+
+A second is the desire to dispatch dynamically across a collection of
+polymorphic interface implementations. This latter use case can be modeled with
+virtual dispatch and inheritance by defining an abstract interface base class
+which all implementations derive from and override. However, this
+implementation strategy forces an **"is-a"** relationship to exist that is not
+actually meaningful. There is often not some nested hierarchy of useful
+generalizations which code might interact with and move up and down. Instead,
+there is a singular interface which is dispatched across a range of
+implementations.
+
+The preferred implementation strategy for the second use case is that of
+generic programming (sometimes called "compile-time duck typing" or "static
+polymorphism"). For example, a template over some type parameter ``T`` can be
+instantiated across any particular implementation that conforms to the
+interface or *concept*. A good example here is the highly generic properties of
+any type which models a node in a directed graph. LLVM models these primarily
+through templates and generic programming. Such templates include the
+``LoopInfoBase`` and ``DominatorTreeBase``. When this type of polymorphism
+truly needs **dynamic** dispatch you can generalize it using a technique
+called *concept-based polymorphism*. This pattern emulates the interfaces and
+behaviors of templates using a very limited form of virtual dispatch for type
+erasure inside its implementation. You can find examples of this technique in
+the ``PassManager.h`` system, and there is a more detailed introduction to it
+by Sean Parent in several of his talks and papers:
+
+#. `Inheritance Is The Base Class of Evil
+   <http://channel9.msdn.com/Events/GoingNative/2013/Inheritance-Is-The-Base-Class-of-Evil>`_
+   - The GoingNative 2013 talk describing this technique, and probably the best
+   place to start.
+#. `Value Semantics and Concepts-based Polymorphism
+   <http://www.youtube.com/watch?v=_BpMYeUFXv8>`_ - The C++Now! 2012 talk
+   describing this technique in more detail.
+#. `Sean Parent's Papers and Presentations
+   <http://github.com/sean-parent/sean-parent.github.com/wiki/Papers-and-Presentations>`_
+   - A Github project full of links to slides, video, and sometimes code.
+
+When deciding between creating a type hierarchy (with either tagged or virtual
+dispatch) and using templates or concepts-based polymorphism, consider whether
+there is some refinement of an abstract base class which is a semantically
+meaningful type on an interface boundary. If anything more refined than the
+root abstract interface is meaningless to talk about as a partial extension of
+the semantic model, then your use case likely fits better with polymorphism and
+you should avoid using virtual dispatch. However, there may be some exigent
+circumstances that require one technique or the other to be used.
+
+If you do need to introduce a type hierarchy, we prefer to use explicitly
+closed type hierarchies with manual tagged dispatch and/or RTTI rather than the
+open inheritance model and virtual dispatch that is more common in C++ code.
+This is because LLVM rarely encourages library consumers to extend its core
+types, and leverages the closed and tag-dispatched nature of its hierarchies to
+generate significantly more efficient code. We have also found that a large
+amount of our usage of type hierarchies fits better with tag-based pattern
+matching rather than dynamic dispatch across a common interface. Within LLVM we
+have built custom helpers to facilitate this design. See this document's
+section on :ref:`isa and dyn_cast <isa>` and our :doc:`detailed document
+<HowToSetUpLLVMStyleRTTI>` which describes how you can implement this
+pattern for use with the LLVM helpers.
+
+.. _abi_breaking_checks:
+
+ABI Breaking Checks
+-------------------
+
+Checks and asserts that alter the LLVM C++ ABI are predicated on the
+preprocessor symbol `LLVM_ENABLE_ABI_BREAKING_CHECKS` -- LLVM
+libraries built with `LLVM_ENABLE_ABI_BREAKING_CHECKS` are not ABI
+compatible LLVM libraries built without it defined.  By default,
+turning on assertions also turns on `LLVM_ENABLE_ABI_BREAKING_CHECKS`
+so a default +Asserts build is not ABI compatible with a
+default -Asserts build.  Clients that want ABI compatibility
+between +Asserts and -Asserts builds should use the CMake or autoconf
+build systems to set `LLVM_ENABLE_ABI_BREAKING_CHECKS` independently
+of `LLVM_ENABLE_ASSERTIONS`.
+
 .. _coreclasses:
 
 The Core LLVM Class Hierarchy Reference
@@ -2429,8 +2598,9 @@ doxygen info: `Type Clases <http://llvm.org/doxygen/classllvm_1_1Type.html>`_
 
 The Core LLVM classes are the primary means of representing the program being
 inspected or transformed.  The core LLVM classes are defined in header files in
-the ``include/llvm/`` directory, and implemented in the ``lib/VMCore``
-directory.
+the ``include/llvm/IR`` directory, and implemented in the ``lib/IR``
+directory. It's worth noting that, for historical reasons, this library is
+called ``libLLVMCore.so``, not ``libLLVMIR.so`` as you might expect.
 
 .. _Type:
 
@@ -2498,7 +2668,7 @@ Important Derived Types
   Subclass of SequentialType for vector types.  A vector type is similar to an
   ArrayType but is distinguished because it is a first class type whereas
   ArrayType is not.  Vector types are used for vector operations and are usually
-  small vectors of of an integer or floating point type.
+  small vectors of an integer or floating point type.
 
 ``StructType``
   Subclass of DerivedTypes for struct types.

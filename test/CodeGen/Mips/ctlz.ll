@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=mipsel-linux-gnu -march=mipsel -mcpu=mips32 -mattr=+mips16 -soft-float -mips16-hard-float -relocation-model=static < %s | FileCheck %s -check-prefix=static
+; RUN: llc -mtriple=mipsel-linux-gnu -march=mipsel -mcpu=mips32 -mattr=+mips16 -relocation-model=static < %s | FileCheck %s -check-prefix=static
 
 @x = global i32 28912, align 4
 @y = common global i32 0, align 4
@@ -9,7 +9,7 @@ define i32 @main() #0 {
 entry:
   %retval = alloca i32, align 4
   store i32 0, i32* %retval
-  %0 = load i32* @x, align 4
+  %0 = load i32, i32* @x, align 4
   %1 = call i32 @llvm.ctlz.i32(i32 %0, i1 true)
   store i32 %1, i32* @y, align 4
   ret i32 0
