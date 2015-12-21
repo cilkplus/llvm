@@ -1,5 +1,4 @@
 {
-  "project_id" : "compiler-rt-cilk",
-  "conduit_uri" : "http://phabricator.kw.intel.com:8443",
-  "history.immutable" : true
+  "project_id" : "compiler-rt",
+  "conduit_uri" : "http://reviews.llvm.org/"
 }

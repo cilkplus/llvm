@@ -39,6 +39,9 @@ struct dfsan_label_info {
   void *userdata;
 };
 
+/// Signature of the callback argument to dfsan_set_write_callback().
+typedef void (*dfsan_write_callback_t)(int fd, const void *buf, size_t count);
+
 /// Computes the union of \c l1 and \c l2, possibly creating a union label in
 /// the process.
 dfsan_label dfsan_union(dfsan_label l1, dfsan_label l2);
@@ -74,6 +77,30 @@ int dfsan_has_label(dfsan_label label, dfsan_label elem);
 /// that label, else returns 0.
 dfsan_label dfsan_has_label_with_desc(dfsan_label label, const char *desc);
 
+/// Returns the number of labels allocated.
+size_t dfsan_get_label_count(void);
+
+/// Sets a callback to be invoked on calls to write().  The callback is invoked
+/// before the write is done.  The write is not guaranteed to succeed when the
+/// callback executes.  Pass in NULL to remove any callback.
+void dfsan_set_write_callback(dfsan_write_callback_t labeled_write_callback);
+
+/// Writes the labels currently used by the program to the given file
+/// descriptor. The lines of the output have the following format:
+///
+/// <label> <parent label 1> <parent label 2> <label description if any>
+void dfsan_dump_labels(int fd);
+
+/// Whenever a dfsan's custom function is called the corresponding
+/// hook is called it non-zero. The hooks should be defined by the user.
+/// The primary use case is taint-guided fuzzing, where the fuzzer
+/// needs to see the parameters of the function and the labels.
+/// FIXME: implement more hooks.
+
+/// memcmp hook.
+void dfsan_weak_hook_memcmp(void *caller_pc, const void *s1, const void *s2,
+                            size_t n, dfsan_label s1_label,
+                            dfsan_label s2_label, dfsan_label n_label);
 #ifdef __cplusplus
 }  // extern "C"
 
