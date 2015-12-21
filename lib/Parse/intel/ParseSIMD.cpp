@@ -10,6 +10,7 @@
 // This file implements parsing of simd loops.
 //
 //===----------------------------------------------------------------------===//
+#if INTEL_SPECIFIC_CILKPLUS
 
 #include "clang/Parse/Parser.h"
 #include "clang/Sema/Scope.h"
@@ -83,7 +84,7 @@ static bool ParseSIMDExpression(Parser &P, Sema &S, T &ItemParser) {
   if (Tok.isNot(tok::r_paren)) {
     if (ParsedItem) {
       P.Diag(Tok, diag::err_expected_rparen);
-      P.Diag(BDT.getOpenLocation(), diag::note_matching) << "(";
+      P.Diag(BDT.getOpenLocation(), diag::note_matching) << "'('";
       while (P.getCurToken().isNot(tok::eof) &&
              !P.SkipUntil(tok::annot_pragma_simd_end, Parser::StopBeforeMatch));
     }
@@ -222,7 +223,7 @@ struct SIMDReductionItemParser {
     ExprResult V = P.ParseConstantExpression();
     if (V.isInvalid())
       return false;
-    VarExprs.push_back(V.release());
+    VarExprs.push_back(V.get());
 
     return true;
   }
@@ -369,11 +370,11 @@ static void FinishPragmaSIMD(Parser &P, SourceLocation BeginLoc) {
 StmtResult Parser::ParseSIMDDirective() {
   assert(Tok.is(tok::annot_pragma_simd));
   SourceLocation Loc = Tok.getLocation();
-  SourceLocation HashLoc = PP.getDirectiveHashLoc();
+  SourceLocation HashLoc = Loc;
   ConsumeToken();
 
   SmallVector<Attr *, 4> SIMDAttrList;
-  SIMDAttrList.push_back(::new SIMDAttr(Loc, Actions.Context));
+  SIMDAttrList.push_back(::new SIMDAttr(Loc, Actions.Context, 0));
 
   if (!ParseSIMDClauses(*this, Actions, Loc, SIMDAttrList)) {
     while (Tok.isNot(tok::eof) &&
@@ -384,6 +385,7 @@ StmtResult Parser::ParseSIMDDirective() {
 
   FinishPragmaSIMD(*this, Loc);
 
+  StmtResult Pragma;
   // Parse the following statement.
   if (!Tok.is(tok::kw_for)) {
     PP.Diag(Loc, diag::err_pragma_simd_expected_for_loop);
@@ -436,17 +438,16 @@ StmtResult Parser::ParseSIMDDirective() {
     // no initialization, eat the ';'.
     Diag(Tok, diag::err_simd_for_missing_initialization);
     ConsumeToken();
-  } else if (isForInitDeclaration(false)) {  // for (int i = 0;
+  } else if (isForInitDeclaration()) {  // for (int i = 0;
     // Parse declaration, which eats the ';'.
     if (!C99orCXXorObjC)   // Use of C99-style for loops in C90 mode?
       Diag(Tok, diag::ext_c99_variable_decl_in_for_loop);
 
     SourceLocation DeclStart = Tok.getLocation();
     SourceLocation DeclEnd;
-    StmtVector Stmts;
 
     // Still use Declarator::ForContext.
-    DeclGroupPtrTy DG = ParseSimpleDeclaration(Stmts, Declarator::ForContext,
+    DeclGroupPtrTy DG = ParseSimpleDeclaration(Declarator::ForContext,
                                                DeclEnd, attrs,
                                                /*RequireSemi*/false,
                                                /*ForRangeInit*/0);
@@ -516,7 +517,7 @@ StmtResult Parser::ParseSIMDDirective() {
       ExprResult E = ParseExpression();
       // FIXME: The C++11 standard doesn't actually say that this is a
       // discarded-value expression, but it clearly should be.
-      ThirdPart = Actions.MakeFullDiscardedValueExpr(E.take());
+      ThirdPart = Actions.MakeFullDiscardedValueExpr(E.get());
     }
   }
 
@@ -547,14 +548,23 @@ StmtResult Parser::ParseSIMDDirective() {
 
   StmtResult Result = Actions.ActOnSIMDForStmt(HashLoc, SIMDAttrList, ForLoc,
                                                T.getOpenLocation(),
-                                               FirstPart.take(), SecondPart,
+                                               FirstPart.get(), SecondPart,
                                                ThirdPart, T.getCloseLocation(),
-                                               Body.take());
+                                               Body.get());
 
   if (Result.isInvalid()) {
     Actions.ActOnSIMDForStmtError();
     return StmtError();
   }
 
+  if (Pragma.isUsable()) {
+    Sema::CompoundScopeRAII CompoundScope(Actions);
+    Stmt *Args[] = {Pragma.get(), Result.get()};
+    return Actions.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Args,
+                                     false);
+  }
+
   return Result;
 }
+
+#endif // INTEL_SPECIFIC_CILKPLUS
