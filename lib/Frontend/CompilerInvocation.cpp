@@ -1380,6 +1380,11 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   }
   
   CompilerInvocation::setLangDefaults(Opts, IK, LangStd);
+#if INTEL_SPECIFIC_CILKPLUS
+  Opts.CilkPlus = Args.hasArg(OPT_fcilkplus);
+  if (Opts.CilkPlus && (Opts.ObjC1 || Opts.ObjC2))
+    Diags.Report(diag::err_drv_cilk_objc);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   // We abuse '-f[no-]gnu-keywords' to force overriding all GNU-extension
   // keywords. This behavior is provided by GCC's poorly named '-fasm' flag,

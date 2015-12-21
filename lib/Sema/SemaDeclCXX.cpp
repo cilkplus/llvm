@@ -67,7 +67,9 @@ namespace {
     bool VisitDeclRefExpr(DeclRefExpr *DRE);
     bool VisitCXXThisExpr(CXXThisExpr *ThisE);
     bool VisitLambdaExpr(LambdaExpr *Lambda);
+#if INTEL_SPECIFIC_CILKPLUS
     bool VisitCEANIndexExpr(CEANIndexExpr *Node);
+#endif // INTEL_SPECIFIC_CILKPLUS
     bool VisitPseudoObjectExpr(PseudoObjectExpr *POE);
   };
 
@@ -146,14 +148,16 @@ namespace {
     return S->Diag(Lambda->getLocStart(), 
                    diag::err_lambda_capture_default_arg);
   }
-
+#if INTEL_SPECIFIC_CILKPLUS
   bool CheckDefaultArgumentVisitor::VisitCEANIndexExpr(CEANIndexExpr *Node) {
     bool IsInvalid = false;
-    for (Stmt::child_range I = Node->children(); I; ++I)
+    Stmt::child_range Ch = Node->children();
+    for (auto I = Ch.begin(), E = Ch.end(); I != E; ++I)
       if (*I)
         IsInvalid |= Visit(*I);
     return IsInvalid;
   }
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 void

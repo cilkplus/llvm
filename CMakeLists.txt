@@ -265,6 +265,10 @@ if (LLVM_COMPILER_IS_GCC_COMPATIBLE)
   endif()
 endif ()
 
+#We're building CilkPlus version of clang
+#Put -DINTEL_SPECIFIC_CILKPLUS=0 if you'd like to remove CilkPlus support
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DINTEL_SPECIFIC_CILKPLUS=1")
+
 # Determine HOST_LINK_VERSION on Darwin.
 set(HOST_LINK_VERSION)
 if (APPLE)

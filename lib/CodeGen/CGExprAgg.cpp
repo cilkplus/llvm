@@ -122,7 +122,17 @@ public:
     if (E->getBuiltinKind() != CEANBuiltinExpr::ReduceMutating)
       Visit(E->getReturnExpr());
   }
-
+#if INTEL_SPECIFIC_CILKPLUS
+  void VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
+    CodeGenFunction::LocalVarsDeclGuard Guard(CGF);
+    CGF.EmitCEANBuiltinExprBody(E);
+    if (E->getBuiltinKind() != CEANBuiltinExpr::ReduceMutating)
+      Visit(E->getReturnExpr());
+  }
+  void VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+    CGF.EmitCilkSpawnExpr(E);
+  }
+#endif // INTEL_SPECIFIC_CILKPLUS
   // l-values.
   void VisitDeclRefExpr(DeclRefExpr *E) {
     // For aggregates, we should always be able to emit the variable

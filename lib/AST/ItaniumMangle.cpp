@@ -2735,8 +2735,11 @@ recurse:
   case Expr::AsTypeExprClass:
   case Expr::PseudoObjectExprClass:
   case Expr::AtomicExprClass:
+#if INTEL_SPECIFIC_CILKPLUS
+  case Expr::CilkSpawnExprClass:
   case Expr::CEANIndexExprClass:
   case Expr::CEANBuiltinExprClass:
+#endif // INTEL_SPECIFIC_CILKPLUS
   {
     // As bad as this diagnostic is, it's better than crashing.
     DiagnosticsEngine &Diags = Context.getDiags();

@@ -167,6 +167,10 @@ class Parser : public CodeCompletionHandler {
   std::unique_ptr<PragmaHandler> LoopHintHandler;
   std::unique_ptr<PragmaHandler> UnrollHintHandler;
   std::unique_ptr<PragmaHandler> NoUnrollHintHandler;
+#if INTEL_SPECIFIC_CILKPLUS
+  std::unique_ptr<PragmaHandler> CilkGrainsizeHandler;
+  std::unique_ptr<PragmaHandler> SIMDHandler;
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   std::unique_ptr<CommentHandler> CommentSemaHandler;
 
@@ -528,6 +532,25 @@ private:
   /// \brief Handle the annotation token produced for
   /// #pragma clang __debug captured
   StmtResult HandlePragmaCaptured();
+
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Initialize all Intel-specifc pragma handlers.
+  void initializeIntelPragmaHandlers();
+
+  /// \brief Destroy and reset all Intel-specific pragma handlers.
+  void resetIntelPragmaHandlers();
+
+  /// \brief Handle the annotation token produced for
+  /// #pragma simd
+  void HandlePragmaSIMD();
+
+  /// \brief Parse a pragma SIMD statement.
+  /// {code}
+  /// #pragma simd ...
+  /// for-statement
+  /// {code}
+  StmtResult ParseSIMDDirective();
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   /// \brief Handle the annotation token produced for
   /// #pragma clang loop and #pragma unroll.
@@ -1440,8 +1463,8 @@ private:
   bool ParseExpressionList(SmallVectorImpl<Expr *> &Exprs,
                            SmallVectorImpl<SourceLocation> &CommaLocs,
                            std::function<void()> Completer = nullptr);
-
-  /// ParseExpressionList - Used for C/C++ (argument-)expression-list.
+#if INTEL_SPECIFIC_CILKPLUS
+  /// ParseSecReduceExpressionList - Used for reducer (argument-)expression-list
   bool ParseSecReduceExpressionList(SmallVectorImpl<Expr*> &Exprs,
                            SmallVectorImpl<SourceLocation> &CommaLocs,
                            bool CheckReturnType,
@@ -1449,7 +1472,7 @@ private:
                                                    Expr *Data,
                                                    ArrayRef<Expr *> Args) = 0,
                            Expr *Data = 0);
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// ParseSimpleExpressionList - A simple comma-separated list of expressions,
   /// used for misc language extensions.
   bool ParseSimpleExpressionList(SmallVectorImpl<Expr*> &Exprs,
@@ -1688,7 +1711,14 @@ public:
   StmtResult ParsePragmaLoopHint(StmtVector &Stmts, bool OnlyStatement,
                                  SourceLocation *TrailingElseLoc,
                                  ParsedAttributesWithRange &Attrs);
-
+#if INTEL_SPECIFIC_CILKPLUS
+  StmtResult ParseCilkForStmt();
+  /// \brief Parse the Cilk grainsize pragma followed by a Cilk for statement.
+  ///
+  /// #pragma cilk grainsize = ...
+  /// _Cilk_for (...)
+  StmtResult ParsePragmaCilkGrainsize();
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Describes the behavior that should be taken for an __if_exists
   /// block.
   enum IfExistsBehavior {
@@ -2218,7 +2248,7 @@ private:
                                        IdentifierInfo *ScopeName,
                                        SourceLocation ScopeLoc,
                                        AttributeList::Syntax Syntax);
-
+#if INTEL_SPECIFIC_CILKPLUS
   void ParseCilkPlusElementalAttribute(IdentifierInfo &AttrName,
                                        SourceLocation AttrNameLoc,
                                        ParsedAttributes &Attrs,
@@ -2231,7 +2261,7 @@ private:
                                        SourceLocation *EndLoc,
                                        IdentifierInfo &ScopeName,
                                        SourceLocation ScopeLoc);
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   void ParseTypeTagForDatatypeAttribute(IdentifierInfo &AttrName,
                                         SourceLocation AttrNameLoc,
                                         ParsedAttributes &Attrs,

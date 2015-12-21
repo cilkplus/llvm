@@ -1,5 +1,10 @@
 set(LLVM_LINK_COMPONENTS support)
 
+if( INTEL_SPECIFIC_CILKPLUS )
+  add_subdirectory(intel)
+  set(LIBS clangASTIntel)
+endif()
+
 add_clang_library(clangAST
   APValue.cpp
   ASTConsumer.cpp
@@ -60,4 +65,5 @@ add_clang_library(clangAST
   LINK_LIBS
   clangBasic
   clangLex
+  ${LIBS}
   )

@@ -450,6 +450,7 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
     if (SemaBuiltinAnnotation(*this, TheCall))
       return ExprError();
     break;
+#if INTEL_SPECIFIC_CILKPLUS
   case Builtin::BI__sec_reduce_add:
   case Builtin::BI__sec_reduce_mul:
   case Builtin::BI__sec_reduce_max:
@@ -512,30 +513,7 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
                                 TheCall->getRParenLoc());
     }
     break;
-  case Builtin::BI__assume_aligned: {
-    if (checkArgCount(*this, TheCall, 2)) return ExprError();
-    Expr *Arg1 = TheCall->getArg(0);
-    Expr *Arg2 = TheCall->getArg(1);
-    QualType QTy1 = Arg1->getType();
-    QualType QTy2 = Arg2->getType();
-    if (QTy1->isDependentType() ||
-        QTy2->isDependentType() ||
-        QTy1->isInstantiationDependentType() ||
-        QTy2->isInstantiationDependentType()) break;
-    if (!QTy1->isPointerType()) {
-      Diag(Arg1->getExprLoc(), diag::err_assume_aligned_not_pointer)
-        << QTy1 << Arg1->getSourceRange();
-      return ExprError();
-    }
-    llvm::APSInt Result;
-    if (SemaBuiltinConstantArg(TheCall, 1, Result) || !Result.isStrictlyPositive() ||
-        !Result.isPowerOf2()) {
-      Diag(Arg2->getExprLoc(), diag::err_assume_aligned_not_integer)
-        << QTy2 << Arg2->getSourceRange();
-      return ExprError();
-    }
-    }
-    break;
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Builtin::BI__builtin_addressof:
     if (SemaBuiltinAddressof(*this, TheCall))
       return ExprError();
@@ -9270,6 +9248,7 @@ void Sema::DiagnoseEmptyLoopBody(const Stmt *S,
     StmtLoc = WS->getCond()->getSourceRange().getEnd();
     Body = WS->getBody();
     DiagID = diag::warn_empty_while_body;
+#if INTEL_SPECIFIC_CILKPLUS
   } else if (const CilkForStmt *CFS = dyn_cast<CilkForStmt>(S)) {
     StmtLoc = CFS->getCilkForLoc();
     Body = CFS->getBody()->getCapturedStmt();
@@ -9278,6 +9257,7 @@ void Sema::DiagnoseEmptyLoopBody(const Stmt *S,
     StmtLoc = FS->getForLoc();
     Body = FS->getBody()->getCapturedStmt();
     DiagID = diag::warn_empty_simd_for_body;
+#endif // INTEL_SPECIFIC_CILKPLUS
   } else
     return; // Neither `for' nor `while'.
 

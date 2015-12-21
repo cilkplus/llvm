@@ -35,6 +35,9 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Debug.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "clang/Basic/intel/StmtIntel.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 namespace llvm {
 class BasicBlock;
@@ -76,6 +79,9 @@ class ObjCAutoreleasePoolStmt;
 
 namespace CodeGen {
 class CodeGenTypes;
+#if INTEL_SPECIFIC_CILKPLUS
+class CGCilkImplicitSyncInfo;
+#endif // INTEL_SPECIFIC_CILKPLUS
 class CGFunctionInfo;
 class CGRecordLayout;
 class CGBlockInfo;
@@ -238,6 +244,281 @@ public:
     FieldDecl *CXXThisFieldDecl;
   };
   CGCapturedStmtInfo *CapturedStmtInfo;
+#if INTEL_SPECIFIC_CILKPLUS
+  class CGSIMDForStmtInfo; // Defined below, after simd wrappers.
+
+  /// \brief Wrapper for "#pragma simd" and "#pragma omp simd".
+  class CGPragmaSimdWrapper {
+    public:
+      // \brief Helper for EmitPragmaSimd - process 'safelen' clause.
+      virtual bool emitSafelen(CodeGenFunction *CGF) const = 0;
+
+      // \brief Emit updates of local variables from clauses
+      // and loop counters in the beginning of __simd_helper.
+      virtual bool walkLocalVariablesToEmit(
+                      CodeGenFunction *CGF,
+                      CGSIMDForStmtInfo *Info) const = 0;
+
+      /// \brief Emit the SIMD loop initalization, loop stride expression
+      /// as loop invariants, and cache those values.
+      virtual void emitInit(CodeGenFunction &CGF, Address &LoopIndex,
+                            llvm::Value *&LoopCount) = 0;
+
+      /// \brief Emit the loop increment.
+      virtual void emitIncrement(CodeGenFunction &CGF,
+                                 Address IndexVar) const = 0;
+
+      // \brief Emit final values of loop counters and linear vars.
+      virtual void emitLinearFinal(CodeGenFunction &CGF) const = 0;
+
+      /// \brief Get the beginning location of for stmt.
+      virtual SourceLocation getForLoc() const = 0;
+
+      /// \brief Get the source range.
+      virtual SourceRange getSourceRange() const = 0;
+
+      /// \brief Retrieve the initialization expression.
+      virtual const Stmt *getInit() const = 0;
+
+      /// \brief Retrieve the loop condition expression.
+      virtual const Expr *getCond() const = 0;
+
+      /// \brief Retrieve the loop body.
+      virtual const CapturedStmt *getAssociatedStmt() const = 0;
+
+      /// \brief Retrieve the loop count expression.
+      virtual const Expr *getLoopCount() const = 0;
+
+      /// \brief Extract the loop body from the collapsed loop nest.
+      /// Useful for openmp (it is noop for SIMDForStmt).
+      virtual Stmt *extractLoopBody(Stmt *S) const = 0;
+      virtual const Stmt *extractLoopBody(const Stmt *S) const = 0;
+
+      /// \brief Get the wrapped SIMDForStmt or OMPSimdDirective.
+      virtual const Stmt *getStmt() const = 0;
+
+      virtual ~CGPragmaSimdWrapper() { };
+  };
+
+  class CGPragmaSimd : public CGPragmaSimdWrapper {
+    public:
+      CGPragmaSimd(const SIMDForStmt *S)
+        : SimdFor(S), LCVAddr(Address::invalid()) {}
+
+      virtual bool emitSafelen(CodeGenFunction *CGF) const;
+      virtual bool walkLocalVariablesToEmit(
+                      CodeGenFunction *CGF,
+                      CGSIMDForStmtInfo *Info) const;
+
+      virtual void emitInit(CodeGenFunction &CGF, Address &LoopIndex,
+                            llvm::Value *&LoopCount);
+
+      virtual void emitIncrement(CodeGenFunction &CGF, Address IndexVar) const;
+
+      virtual void emitLinearFinal(CodeGenFunction &CGF) const { }
+
+      virtual SourceLocation getForLoc() const {
+        return SimdFor->getForLoc();
+      }
+
+      virtual SourceRange getSourceRange() const {
+        return SimdFor->getSourceRange();
+      }
+
+      virtual const Stmt *getInit() const {
+        return SimdFor->getInit();
+      }
+
+      virtual const Expr *getCond() const {
+        return SimdFor->getCond();
+      }
+
+      virtual const CapturedStmt *getAssociatedStmt() const {
+        return SimdFor->getBody();
+      }
+
+      virtual const Expr *getLoopCount() const {
+        return SimdFor->getLoopCount();
+      }
+
+      virtual Stmt *extractLoopBody(Stmt *S) const {
+        return S;
+      }
+
+      virtual const Stmt *extractLoopBody(const Stmt *S) const {
+        return S;
+      }
+
+      virtual const Stmt *getStmt() const { return SimdFor; }
+
+      virtual ~CGPragmaSimd() { }
+
+    private:
+      /// \brief Corresponding stmt.
+      const SIMDForStmt *SimdFor;
+
+      /// \brief The address of the loop control variable.
+      Address LCVAddr;
+
+      /// \brief The cached loop control variable initial value.
+      llvm::Value *LCVInitVal;
+
+      /// \brief The cached (normalized) loop stride value.
+      llvm::Value *LCVStrideVal;
+  };
+
+  /// \brief API for SIMD for statement code generation.
+  /// This class is intended to provide an interface to CG to work in the
+  /// same manner with "#pragma simd" and "#pragma omp simd", using wrapper
+  /// (CGPragmaSimdWrapper) for addressing any differences between them.
+  class CGSIMDForStmtInfo : public CGCapturedStmtInfo {
+    typedef llvm::SmallDenseMap<const VarDecl *, Address> SIMDVarsMap;
+
+  public:
+    CGSIMDForStmtInfo(const CGPragmaSimdWrapper &Wr, llvm::MDNode *LoopID,
+                      bool LoopParallel)
+      : CGCapturedStmtInfo(*(Wr.getAssociatedStmt()), CR_SIMDFor),
+        Wrapper(Wr), LoopID(LoopID), LoopParallel(LoopParallel),
+        ShouldReplaceWithLocal(true) { }
+
+    virtual StringRef getHelperName() const override {
+      return "__simd_for_helper";
+    }
+
+    virtual void EmitBody(CodeGenFunction &CGF, const Stmt *S) override {
+      CGF.EmitSIMDForHelperBody(Wrapper.extractLoopBody(S));
+    }
+
+    llvm::MDNode *getLoopID() const { return LoopID; }
+    bool getLoopParallel() const { return LoopParallel; }
+
+    /// \brief Update the address of a SIMD variable's local copy, such
+    /// that the captured body can use this local variable instead.
+    void updateLocalAddr(const VarDecl *VD, Address Addr) {
+      assert(VD && Addr.isValid() && "null values unexpected");
+      assert(!SIMDVars.count(VD) && "already exists");
+      SIMDVars.insert(std::make_pair(VD, Addr));
+    }
+
+    Address lookupLocalAddr(const VarDecl *VD) const {
+      auto I = SIMDVars.find(VD);
+      if (I != SIMDVars.end()) {
+        return I->second;
+      }
+      return Address::invalid();
+    }
+
+    bool shouldReplaceWithLocal() const {
+      return ShouldReplaceWithLocal;
+    }
+    void setShouldReplaceWithLocal(bool S) {
+      ShouldReplaceWithLocal = S;
+    }
+
+    const Stmt *getStmt() const { return Wrapper.getStmt(); }
+
+    // \brief Emit updates of local variables from clauses
+    // and loop counters in the beginning of __simd_helper.
+    bool walkLocalVariablesToEmit(CodeGenFunction *CGF) {
+      return Wrapper.walkLocalVariablesToEmit(CGF, this);
+    }
+
+    static bool classof(const CGSIMDForStmtInfo *) { return true; }
+    static bool classof(const CGCapturedStmtInfo *I) {
+      return I->getKind() == CR_SIMDFor;
+    }
+  private:
+    /// \brief Wrapper around SIMDForStmt/OMPSimdDirective.
+    const CGPragmaSimdWrapper &Wrapper;
+    /// \brief The loop id metadata.
+    llvm::MDNode *LoopID;
+    /// \brief Is loop parallel.
+    bool LoopParallel;
+    /// Note: the following fields are used by SIMDForStmt only.
+    /// \brief Keep the map between a SIMD variable and its local variable
+    /// address.
+    SIMDVarsMap SIMDVars;
+    /// \brief Replace all SIMD variable references with their local copies.
+    bool ShouldReplaceWithLocal;
+  };
+
+  /// \brief API for Cilk for statement code generation.
+  class CGCilkForStmtInfo : public CGCapturedStmtInfo {
+  public:
+    explicit CGCilkForStmtInfo(const CilkForStmt &S)
+      : CGCapturedStmtInfo(*S.getBody(), CR_CilkFor), TheCilkFor(S),
+        InnerLoopControlVarAddr(Address::invalid()) { }
+
+    virtual StringRef getHelperName() const override {
+      return "__cilk_for_helper";
+    }
+
+    virtual void EmitBody(CodeGenFunction &CGF, const Stmt *S) override {
+      CGF.EmitCilkForHelperBody(S);
+    }
+
+    const CilkForStmt &getCilkForStmt() const { return TheCilkFor; }
+
+    void setInnerLoopControlVarAddr(Address Addr) {
+      InnerLoopControlVarAddr = Addr;
+    }
+    Address getInnerLoopControlVarAddr() const {
+      return InnerLoopControlVarAddr;
+    }
+
+    static bool classof(const CGCilkForStmtInfo *) { return true; }
+    static bool classof(const CGCapturedStmtInfo *I) {
+      return I->getKind() == CR_CilkFor;
+    }
+  private:
+    /// \brief
+    const CilkForStmt &TheCilkFor;
+
+    /// \brief The address of the inner loop control variable. Any reference
+    /// to the loop control variable needs to load this the value instead.
+    Address InnerLoopControlVarAddr;
+  };
+
+  class CGCilkSpawnInfo : public CGCapturedStmtInfo {
+  public:
+    explicit CGCilkSpawnInfo(const CapturedStmt &S, VarDecl *VD)
+      : CGCapturedStmtInfo(S, CR_CilkSpawn), ReceiverDecl(VD),
+        ReceiverAddr(Address::invalid()), ReceiverTmp(Address::invalid()) { }
+
+    virtual void EmitBody(CodeGenFunction &CGF, const Stmt *S) override;
+    virtual StringRef getHelperName() const override {
+      return "__cilk_spawn_helper";
+    }
+
+    VarDecl *getReceiverDecl() const { return ReceiverDecl; }
+    bool isReceiverDecl(const NamedDecl *V) const {
+      return V && V == ReceiverDecl;
+    }
+
+    Address getReceiverAddr() const { return ReceiverAddr; }
+    void setReceiverAddr(Address val) { ReceiverAddr = val; }
+
+    Address getReceiverTmp() const { return ReceiverTmp; }
+    void setReceiverTmp(Address val) { ReceiverTmp = val; }
+
+    static bool classof(const CGCilkSpawnInfo *) { return true; }
+    static bool classof(const CGCapturedStmtInfo *I) {
+      return I->getKind() == CR_CilkSpawn;
+    }
+  private:
+    /// \brief The receiver declaration.
+    VarDecl *ReceiverDecl;
+
+    /// \brief The address of the receiver.
+    Address ReceiverAddr;
+
+    /// \brief The address of the receiver temporary.
+    Address ReceiverTmp;
+  };
+
+  /// \brief Information about implicit syncs used during code generation.
+  CGCilkImplicitSyncInfo *CurCGCilkImplicitSyncInfo;
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   /// \brief RAII for correct setting/restoring of CapturedStmtInfo.
   class CGCapturedStmtRAII {
@@ -988,24 +1269,27 @@ private:
   llvm::DebugLoc ReturnLoc;
 
 public:
-  /// This class is used for instantiation of local variables, but restores
+#if INTEL_SPECIFIC_CILKPLUS
+  /// This RAII class is used for instantiation of local variables, but restores
   /// LocalDeclMap state after instantiation. If Empty is true, the LocalDeclMap
   /// is cleared completely and then restored to original state upon
   /// destruction.
   class LocalVarsDeclGuard {
     CodeGenFunction &CGF;
     DeclMapTy LocalDeclMap;
-    public:
-      LocalVarsDeclGuard(CodeGenFunction &CGF, bool Empty = false)
+
+  public:
+    LocalVarsDeclGuard(CodeGenFunction &CGF, bool Empty = false)
         : CGF(CGF), LocalDeclMap() {
-          if (Empty) {
-            LocalDeclMap.swap(CGF.LocalDeclMap);
-          } else {
-            LocalDeclMap.copyFrom(CGF.LocalDeclMap);
-          }
-        }
-      ~LocalVarsDeclGuard() { CGF.LocalDeclMap.swap(LocalDeclMap); }
+      if (Empty) {
+        LocalDeclMap.swap(CGF.LocalDeclMap);
+      } else {
+        LocalDeclMap.copyFrom(CGF.LocalDeclMap);
+      }
+    }
+    ~LocalVarsDeclGuard() { CGF.LocalDeclMap.swap(LocalDeclMap); }
   };
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// A scope within which we are constructing the fields of an object which
   /// might use a CXXDefaultInitExpr. This stashes away a 'this' value to use
   /// if we need to evaluate a CXXDefaultInitExpr within the evaluation.
@@ -1064,10 +1348,10 @@ private:
 
   /// The current lexical scope.
   LexicalScope *CurLexicalScope;
-
-  /// ExceptionsDisabled - Whether exceptions are currently disabled.
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Whether exceptions are currently disabled.
   bool ExceptionsDisabled;
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// The current source location that should be used for exception
   /// handling code.
   SourceLocation CurEHLocation;
@@ -1138,7 +1422,10 @@ public:
     if (!EHStack.requiresLandingPad()) return nullptr;
     return getInvokeDestImpl();
   }
-
+#if INTEL_SPECIFIC_CILKPLUS
+  void disableExceptions() { ExceptionsDisabled = true; }
+  void enableExceptions() { ExceptionsDisabled = false; }
+#endif // INTEL__SPECIFIC_CILKPLUS
   bool currentFunctionUsesSEHTry() const {
     const auto *FD = dyn_cast_or_null<FunctionDecl>(CurCodeDecl);
     return FD && FD->usesSEHTry();
@@ -1830,9 +2117,9 @@ public:
   llvm::Value* EmitCXXTypeidExpr(const CXXTypeidExpr *E);
   llvm::Value *EmitDynamicCast(llvm::Value *V, const CXXDynamicCastExpr *DCE);
   llvm::Value* EmitCXXUuidofExpr(const CXXUuidofExpr *E);
-
+#if INTEL_SPECIFIC_CILKPLUS
   void EmitCEANBuiltinExprBody(const CEANBuiltinExpr *E);
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   void MaybeEmitStdInitializerListCleanup(llvm::Value *loc, const Expr *init);
   void EmitStdInitializerListCleanup(llvm::Value *loc,
                                      const InitListExpr *init);
@@ -2126,6 +2413,22 @@ public:
   llvm::Function *GenerateCapturedStmtFunctionEpilog(const CapturedStmt &S);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   llvm::Value *GenerateCapturedStmtArgument(const CapturedStmt &S);
+#if INTEL_SPECIFIC_CILKPLUS
+  llvm::Function *EmitSpawnCapturedStmt(const CapturedStmt &S, VarDecl *VD);
+  void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
+  void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);
+  void EmitCilkForHelperBody(const Stmt *S);
+  void EmitPragmaSimd(CGPragmaSimdWrapper &W);
+  llvm::Function *EmitSimdFunction(CGPragmaSimdWrapper &W);
+  void EmitSIMDForStmt(const SIMDForStmt &S);
+  void EmitSIMDForHelperCall(llvm::Function *BodyFunc, LValue CapStruct,
+                             Address LoopIndex, bool IsLastIter);
+  void EmitSIMDForHelperBody(const Stmt *S);
+  void EmitCilkSpawnExpr(const CilkSpawnExpr *E);
+  void EmitCilkSpawnDecl(const CilkSpawnDecl *D);
+
+  void EmitCilkRankedStmt(const CilkRankedStmt &S);
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Perform element by element copying of arrays with type \a
   /// OriginalType from \a SrcAddr to \a DestAddr using copying procedure
   /// generated by \a CopyGen.
@@ -2542,6 +2845,10 @@ public:
                   const CallArgList &Args,
                   const Decl *TargetDecl = nullptr,
                   llvm::Instruction **callOrInvoke = nullptr);
+#if INTEL_SPECIFIC_CILKPLUS
+                  ,
+                  bool IsCilkSpawnCall = false
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   RValue EmitCall(QualType FnType, llvm::Value *Callee, const CallExpr *E,
                   ReturnValueSlot ReturnValue,
@@ -2869,7 +3176,7 @@ public:
   /// Emit field annotations for the given field & value. Returns the
   /// annotation result.
   llvm::Value *EmitFieldAnnotations(const FieldDecl *D, llvm::Value *V);
-
+#if INTEL_SPECIFIC_CILKPLUS
   //===--------------------------------------------------------------------===//
   //                         Cilk Emission
   //===--------------------------------------------------------------------===//
@@ -2878,7 +3185,7 @@ public:
   /// Only allocation and cleanup will be emitted, and initialization will be
   /// emitted in the helper function.
   void EmitCaptureReceiverDecl(const VarDecl &D);
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   //===--------------------------------------------------------------------===//
   //                             Internal Helpers
   //===--------------------------------------------------------------------===//

@@ -12,6 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "intel/CGCilkPlusRuntime.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "CGCleanup.h"
 #include "CGCUDARuntime.h"
 #include "CGCXXABI.h"
@@ -39,6 +42,9 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
       Builder(cgm.getModule().getContext(), llvm::ConstantFolder(),
               CGBuilderInserterTy(this)),
       CurFn(nullptr), CapturedStmtInfo(nullptr),
+#if INTEL_SPECIFIC_CILKPLUS
+      CurCGCilkImplicitSyncInfo(nullptr),
+#endif // INTEL_SPECIFIC_CILKPLUS
       SanOpts(CGM.getLangOpts().Sanitize), IsSanitizerScope(false),
       CurFuncIsThunk(false), AutoreleaseResult(false), SawAsmBlock(false),
       IsOutlinedSEHHelper(false), BlockInfo(nullptr), BlockPointer(nullptr),
@@ -53,7 +59,11 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
       CXXABIThisValue(nullptr), CXXThisValue(nullptr),
       CXXDefaultInitExprThis(nullptr), CXXStructorImplicitParamDecl(nullptr),
       CXXStructorImplicitParamValue(nullptr), OutermostConditional(nullptr),
-      CurLexicalScope(nullptr), TerminateLandingPad(nullptr),
+      CurLexicalScope(nullptr),
+#if INTEL_SPECIFIC_CILKPLUS
+      ExceptionsDisabled(false),
+#endif // INTEL_SPECIFIC_CILKPLUS
+      TerminateLandingPad(nullptr),
       TerminateHandler(nullptr), TrapBB(nullptr) {
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
@@ -85,7 +95,9 @@ CodeGenFunction::~CodeGenFunction() {
   // something.
   if (FirstBlockInfo)
     destroyBlockInfos(FirstBlockInfo);
-
+#if INTEL_SPECIFIC_CILKPLUS
+  delete CurCGCilkImplicitSyncInfo;
+#endif // INTEL_SPECIFIC_CILKPLUS
   if (getLangOpts().OpenMP) {
     CGM.getOpenMPRuntime().functionFinished(*this);
   }
@@ -738,7 +750,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
   EmitStartEHSpec(CurCodeDecl);
 
   PrologueCleanupDepth = EHStack.stable_begin();
-
+#if INTEL_SPECIFIC_CILKPLUS
   // If emitting a spawning function, a Cilk stack frame will be allocated and
   // fully initialized before processing any function parameters, which
   // makes associated cleanups happen last.
@@ -751,7 +763,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
     if (CurCGCilkImplicitSyncInfo->needsImplicitSync())
       CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
   }
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);
 
   if (D && isa<CXXMethodDecl>(D) && cast<CXXMethodDecl>(D)->isInstance()) {

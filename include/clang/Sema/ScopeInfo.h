@@ -19,6 +19,9 @@
 #include "clang/AST/Type.h"
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "clang/Basic/intel/PragmaSIMD.h"
+#endif  // INTEL_SPECIFIC_CILKPLUS
 #include "clang/Sema/Ownership.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
@@ -53,7 +56,13 @@ namespace sema {
 class CompoundScopeInfo {
 public:
   CompoundScopeInfo()
-    : HasEmptyLoopBodies(false), HasCilkSpawn(false) { }
+      : HasEmptyLoopBodies(false)
+#if INTEL_SPECIFIC_CILKPLUS
+        ,
+        HasCilkSpawn(false)
+#endif // INTEL_SPECIFIC_CILKPLUS
+  {
+  }
 
   /// \brief Whether this compound stamement contains `for' or `while' loops
   /// with empty bodies.
@@ -62,13 +71,13 @@ public:
   void setHasEmptyLoopBodies() {
     HasEmptyLoopBodies = true;
   }
-
+#if INTEL_SPECIFIC_CILKPLUS
   /// \brief Whether this compound statement contains _Cilk_spawn statements.
   bool HasCilkSpawn;
-
   void setHasCilkSpawn() {
     HasCilkSpawn = true;
   }
+#endif // INTEL_SPECIFIC_CILKPLUS
 };
 
 class PossiblyUnreachableDiag {
@@ -90,9 +99,12 @@ protected:
     SK_Function,
     SK_Block,
     SK_Lambda,
-    SK_CapturedRegion,
+    SK_CapturedRegion
+#if INTEL_SPECIFIC_CILKPLUS
+    ,
     SK_CilkFor,
     SK_SIMDFor
+#endif // INTEL_SPECIFIC_CILKPLUS
   };
   
 public:
@@ -551,11 +563,13 @@ public:
     return Captures[Known->second - 1];
   }
 
-  static bool classof(const FunctionScopeInfo *FSI) { 
-    return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda
-                                 || FSI->Kind == SK_CapturedRegion
-                                 || FSI->Kind == SK_CilkFor
-                                 || FSI->Kind == SK_SIMDFor;
+  static bool classof(const FunctionScopeInfo *FSI) {
+    return FSI->Kind == SK_Block || FSI->Kind == SK_Lambda ||
+           FSI->Kind == SK_CapturedRegion
+#if INTEL_SPECIFIC_CILKPLUS
+           || FSI->Kind == SK_CilkFor || FSI->Kind == SK_SIMDFor
+#endif // INTEL_SPECIFIC_CILKPLUS
+        ;
   }
 };
 
@@ -599,16 +613,20 @@ public:
   ImplicitParamDecl *ContextParam;
   /// \brief The kind of captured region.
   CapturedRegionKind CapRegionKind;
-
+#if INTEL_SPECIFIC_CILKPLUS
   /// \brief Whether any of the capture expressions require cleanups.
   bool ExprNeedsCleanups;
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   CapturedRegionScopeInfo(DiagnosticsEngine &Diag, Scope *S, CapturedDecl *CD,
                           RecordDecl *RD, ImplicitParamDecl *Context,
                           CapturedRegionKind K)
     : CapturingScopeInfo(Diag, ImpCap_CapturedRegion),
       TheCapturedDecl(CD), TheRecordDecl(RD), TheScope(S),
-      ContextParam(Context), CapRegionKind(K), ExprNeedsCleanups(false)
+      ContextParam(Context), CapRegionKind(K)
+#if INTEL_SPECIFIC_CILKPLUS
+        ,
+        ExprNeedsCleanups(false)
+#endif // INTEL_SPECIFIC_CILKPLUS
   {
     Kind = SK_CapturedRegion;
   }
@@ -620,6 +638,14 @@ public:
     switch (CapRegionKind) {
     case CR_Default:
       return "default captured statement";
+#if INTEL_SPECIFIC_CILKPLUS
+    case CR_CilkSpawn:
+      return "_Cilk_spawn";
+    case CR_CilkFor:
+      return "_Cilk_for";
+    case CR_SIMDFor:
+      return "simd for";
+#endif // INTEL_SPECIFIC_CILKPLUS
     case CR_OpenMP:
       return "OpenMP region";
     }
@@ -627,11 +653,15 @@ public:
   }
 
   static bool classof(const FunctionScopeInfo *FSI) {
-    return FSI->Kind == SK_CapturedRegion || FSI->Kind == SK_CilkFor
-                                          || FSI->Kind == SK_SIMDFor;
+    return FSI->Kind == SK_CapturedRegion
+#if INTEL_SPECIFIC_CILKPLUS
+           || FSI->Kind == SK_CilkFor || FSI->Kind == SK_SIMDFor
+#endif // INTEL_SPECIFIC_CILKPLUS
+        ;
   }
 };
 
+#if INTEL_SPECIFIC_CILKPLUS
 /// \brief Retains information about a Cilk for capturing region.
 class CilkForScopeInfo : public CapturedRegionScopeInfo {
 public:
@@ -845,6 +875,7 @@ public:
     return FSI->Kind == SK_SIMDFor;
   }
 };
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 class LambdaScopeInfo : public CapturingScopeInfo {
 public:

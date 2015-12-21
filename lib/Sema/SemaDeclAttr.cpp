@@ -2370,6 +2370,13 @@ static void handleVecTypeHint(Sema &S, Decl *D, const AttributeList &Attr) {
                                                ParmTSI,
                                         Attr.getAttributeSpellingListIndex()));
 }
+#if INTEL_SPECIFIC_CILKPLUS
+static void handleCilkElementalAttr(Sema &S, Decl *D,
+                                    const AttributeList &Attr) {
+  assert(Attr.getKind() == AttributeList::AT_CilkElemental);
+  D->addAttr(::new (S.Context) CilkElementalAttr(Attr.getLoc(), S.Context,
+                                                 Attr.getScopeLoc(), 0));
+}
 
 static void handleCilkMaskAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   if (!checkAttributeNumArgs(S, Attr, 0))
@@ -2386,7 +2393,7 @@ static void handleCilkMaskAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     llvm_unreachable("attribute is not 'mask' or 'nomask'");
   }
   D->addAttr(::new (S.Context) CilkMaskAttr(Attr.getLoc(), S.Context,
-                                            Mask, Attr.getScopeLoc()));
+                                            Mask, Attr.getScopeLoc(), 0));
 }
 
 template<typename A>
@@ -2452,7 +2459,7 @@ static void handleCilkProcessorAttr(Sema &S, Decl *D,
   }
   D->addAttr(::new (S.Context)
              CilkProcessorAttr(Attr.getRange(), S.Context,
-                               Processor, Attr.getScopeLoc()));
+                               Processor, Attr.getScopeLoc(), 0));
 }
 
 static void handleCilkVecLengthAttr(Sema &S, Decl *D,
@@ -2477,7 +2484,7 @@ static void handleCilkVecLengthAttr(Sema &S, Decl *D,
 
     D->addAttr(::new (S.Context)
                CilkVecLengthAttr(Attr.getRange(), S.Context,
-                                 Result.get(), Attr.getScopeLoc()));
+                                 Result.get(), Attr.getScopeLoc(), 0));
   }
 }
 
@@ -2556,7 +2563,7 @@ static void handleCilkUniformAttr(Sema &S, Decl *D,
   // Add the uniform attribute to the function.
   CilkUniformAttr *UniformAttr = ::new (S.Context) CilkUniformAttr(
       Attr.getLoc(), S.Context, IdLoc ? IdLoc->Ident : 0,
-      IdLoc ? IdLoc->Loc : SourceLocation(), Attr.getScopeLoc());
+      IdLoc ? IdLoc->Loc : SourceLocation(), Attr.getScopeLoc(), 0);
   D->addAttr(UniformAttr);
 }
 
@@ -2586,7 +2593,7 @@ static void handleCilkLinearAttr(Sema &S, Decl *D, const AttributeList &Attr) {
         QualType Ty = StepParm->getType().getNonReferenceType();
         ExprResult Ref = S.BuildDeclRefExpr(StepParm, Ty, VK_LValue, StepLoc);
         assert(Ref.isUsable() && "reference cannot fail");
-        StepExpr = Ref.release();
+        StepExpr = Ref.get();
         break;
       }
     }
@@ -2615,7 +2622,7 @@ static void handleCilkLinearAttr(Sema &S, Decl *D, const AttributeList &Attr) {
         ExprResult Ref = S.BuildDeclarationNameExpr(SS, Result, /*ADL*/false);
         if (!Ref.isUsable())
           return;
-        StepExpr = Ref.release();
+        StepExpr = Ref.get();
       } else {
         S.Diag(StepLoc, diag::err_cilk_elemental_not_function_parameter);
         return;
@@ -2643,10 +2650,51 @@ static void handleCilkLinearAttr(Sema &S, Decl *D, const AttributeList &Attr) {
                                      IdLoc ? IdLoc->Ident : 0,
                                      IdLoc ? IdLoc->Loc : SourceLocation(),
                                      StepExpr,
-                                     Attr.getScopeLoc());
+                                     Attr.getScopeLoc(), 0);
   D->addAttr(LinearAttr);
 }
 
+static void handleCilkAlignedAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+  FunctionDecl *FD = dyn_cast<FunctionDecl>(D);
+  if (!FD || FD->isInvalidDecl())
+    return;
+
+  IdentifierLoc *IdLoc = 0;
+  if (!diagnoseCilkAttrSubject(S, FD, Attr, IdLoc))
+    return;
+  Expr *AlignExpr = 0;
+  unsigned NumArgs = Attr.getNumArgs();
+
+  if (NumArgs == 1)
+    // Use default alignment for the given argument
+    AlignExpr = IntegerLiteral::Create(S.Context, llvm::APInt(32, 0),
+                                       S.Context.IntTy, SourceLocation());
+  else if (NumArgs == 2) {
+    // FIXME: is it possible to use an identifier as the alignment value?
+    //        (we don't have any spec yet about aligned attribute)
+    // FIXME: it should be done in Sema::CheckCilkAlignedArg
+    if (Attr.getArg(1).is<IdentifierLoc *>()) {
+      S.Diag(Attr.getArg(1).get<IdentifierLoc *>()->Loc,
+             diag::err_cilk_elemental_aligned_not_constant);
+      return;
+    }
+    AlignExpr = Attr.getArg(1).get<Expr *>();
+  } else {
+    S.Diag(Attr.getLoc(), diag::err_attribute_wrong_number_arguments)
+        << Attr.getName() << 1;
+    return;
+  }
+  if (AlignExpr)
+    AlignExpr = S.CheckCilkAlignedArg(AlignExpr);
+  if (!AlignExpr)
+    return;
+  // Add the linear attribute to the function.
+  CilkAlignedAttr *AlignAttr = ::new (S.Context) CilkAlignedAttr(
+      Attr.getLoc(), S.Context, IdLoc ? IdLoc->Ident : 0,
+      IdLoc ? IdLoc->Loc : SourceLocation(), AlignExpr, Attr.getScopeLoc(), 0);
+  D->addAttr(AlignAttr);
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 SectionAttr *Sema::mergeSectionAttr(Decl *D, SourceRange Range,
                                     StringRef Name,
@@ -5382,6 +5430,31 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case AttributeList::AT_TypeTagForDatatype:
     handleTypeTagForDatatypeAttr(S, D, Attr);
     break;
+#if INTEL_SPECIFIC_CILKPLUS
+  // Cilk Plus attributes.
+  case AttributeList::AT_CilkElemental:
+    handleCilkElementalAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkMask:
+  case AttributeList::AT_CilkNoMask:
+    handleCilkMaskAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkProcessor:
+    handleCilkProcessorAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkLinear:
+    handleCilkLinearAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkAligned:
+    handleCilkAlignedAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkUniform:
+    handleCilkUniformAttr(S, D, Attr);
+    break;
+  case AttributeList::AT_CilkVecLength:
+    handleCilkVecLengthAttr(S, D, Attr);
+    break;
+#endif // INTEL_SPECIFIC_CILKPLUS
   }
 }
 

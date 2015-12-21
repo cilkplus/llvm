@@ -511,6 +511,10 @@ void ASTStmtWriter::VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
   Code = serialization::EXPR_ARRAY_SUBSCRIPT;
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
+//===----------------------------------------------------------------------===//
+// Cilk Plus Expressions and Statements.
+//===----------------------------------------------------------------------===//
 void ASTStmtWriter::VisitCEANIndexExpr(CEANIndexExpr *E) {
   VisitExpr(E);
   Writer.AddStmt(E->getLowerBound());
@@ -551,6 +555,48 @@ void ASTStmtWriter::VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
   Writer.AddStmt(E->getReturnExpr());
   Code = serialization::EXPR_CEAN_BUILTIN;
 }
+
+void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
+  VisitStmt(S);
+  Writer.AddSourceLocation(S->getSyncLoc(), Record);
+  Code = serialization::STMT_CILKSYNC;
+}
+
+void ASTStmtWriter::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
+  Code = serialization::STMT_CILK_FOR_GRAINSIZE;
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitCilkForStmt(CilkForStmt *S) {
+  Code = serialization::STMT_CILK_FOR;
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitSIMDForStmt(SIMDForStmt *S) {
+  Code = serialization::STMT_SIMD_FOR;
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitCilkRankedStmt(CilkRankedStmt *S) {
+  VisitStmt(S);
+  Record.push_back(S->getRank());
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getLengths()[i]);
+  }
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getVars()[i]);
+  }
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getIncrements()[i]);
+  }
+  Writer.AddStmt(S->getAssociatedStmt());
+  Writer.AddStmt(S->getInits());
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 void ASTStmtWriter::VisitCallExpr(CallExpr *E) {
   VisitExpr(E);

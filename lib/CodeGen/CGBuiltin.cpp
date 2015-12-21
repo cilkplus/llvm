@@ -1174,7 +1174,12 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
                                                RequiredArgs::All);
     llvm::FunctionType *FTy = CGM.getTypes().GetFunctionType(FuncInfo);
     llvm::Constant *Func = CGM.CreateRuntimeFunction(FTy, LibCallName);
+#if INTEL_SPECIFIC_CILKPLUS
+    return EmitCall(FuncInfo, Func, ReturnValueSlot(), Args, CGCalleeInfo(),
+                    nullptr, E->isCilkSpawnCall());
+#else
     return EmitCall(FuncInfo, Func, ReturnValueSlot(), Args);
+#endif // INTEL_SPECIFIC_CILKPLUS
   }
 
   case Builtin::BI__atomic_test_and_set: {

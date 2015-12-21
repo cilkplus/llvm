@@ -4307,6 +4307,10 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("CXXAccessSpecifier");
   case CXCursor_ModuleImportDecl:
     return cxstring::createRef("ModuleImport");
+#if INTEL_SPECIFIC_CILKPLUS
+  case CXCursor_CilkRankedStmt:
+    return cxstring::createRef("CilkRankedStmt");
+#endif // INTEL_SPECIFIC_CILKPLUS
   case CXCursor_OMPParallelDirective:
     return cxstring::createRef("OMPParallelDirective");
   case CXCursor_OMPSimdDirective:
@@ -5095,7 +5099,9 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::StaticAssert:
   case Decl::Block:
   case Decl::Captured:
+#if INTEL_SPECIFIC_CILKPLUS
   case Decl::CilkSpawn:
+#endif               // INTEL_SPECIFIC_CILKPLUS
   case Decl::Label:  // FIXME: Is this right??
   case Decl::ClassScopeFunctionSpecialization:
   case Decl::Import:

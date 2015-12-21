@@ -101,6 +101,9 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
     TUKind(TUKind),
     NumSFINAEErrors(0),
     CachedFakeTopLevelModule(nullptr),
+#if INTEL_SPECIFIC_CILKPLUS
+    CEANLevelCounter(0),
+#endif  // INTEL_SPECIFIC_CILKPLUS
     AccessCheckingSFINAE(false), InNonInstantiationSFINAEContext(false),
     NonInstantiationEntries(0), ArgumentPackSubstitutionIndex(-1),
     CurrentInstantiationScope(nullptr), DisableTypoCorrection(false),
@@ -111,7 +114,9 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
   TUScope = nullptr;
 
   LoadedExternalKnownNamespaces = false;
+#if INTEL_SPECIFIC_CILKPLUS
   StartCEAN(NoCEANAllowed);
+#endif // INTEL_SPECIFIC_CILKPLUS
   for (unsigned I = 0; I != NSAPI::NumNSNumberLiteralMethods; ++I)
     NSNumberLiteralMethods[I] = nullptr;
 
@@ -1113,6 +1118,28 @@ void Sema::PushBlockScope(Scope *BlockScope, BlockDecl *Block) {
   FunctionScopes.push_back(new BlockScopeInfo(getDiagnostics(),
                                               BlockScope, Block));
 }
+#if INTEL_SPECIFIC_CILKPLUS
+void Sema::PushCilkForScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
+                            const VarDecl *LoopControlVariable,
+                            SourceLocation CilkForLoc) {
+  CapturingScopeInfo *CSI =
+      new CilkForScopeInfo(getDiagnostics(), S, CD, RD, CD->getContextParam(),
+                           LoopControlVariable, CilkForLoc);
+
+  CSI->ReturnType = Context.VoidTy;
+  FunctionScopes.push_back(CSI);
+}
+
+void Sema::PushSIMDForScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
+                            SourceLocation PragmaLoc) {
+  CapturingScopeInfo *CSI =
+      new SIMDForScopeInfo(getDiagnostics(), S, CD, RD, CD->getContextParam(),
+                           PragmaLoc);
+
+  CSI->ReturnType = Context.VoidTy;
+  FunctionScopes.push_back(CSI);
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 LambdaScopeInfo *Sema::PushLambdaScope() {
   LambdaScopeInfo *const LSI = new LambdaScopeInfo(getDiagnostics());
@@ -1176,7 +1203,7 @@ BlockScopeInfo *Sema::getCurBlock() {
 
   return CurBSI;
 }
-
+#if INTEL_SPECIFIC_CILKPLUS
 CilkForScopeInfo *Sema::getCurCilkFor() {
   if (FunctionScopes.empty())
     return 0;
@@ -1190,6 +1217,7 @@ SIMDForScopeInfo *Sema::getCurSIMDFor() {
 
   return dyn_cast<SIMDForScopeInfo>(FunctionScopes.back());
 }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 LambdaScopeInfo *Sema::getCurLambda() {
   if (FunctionScopes.empty())
@@ -1214,16 +1242,6 @@ LambdaScopeInfo *Sema::getCurGenericLambda() {
   }
   return nullptr;
 }
-// We have a generic lambda if we parsed auto parameters, or we have 
-// an associated template parameter list.
-LambdaScopeInfo *Sema::getCurGenericLambda() {
-  if (LambdaScopeInfo *LSI =  getCurLambda()) {
-    return (LSI->AutoTemplateParams.size() ||
-                    LSI->GLTemplateParameterList) ? LSI : 0;
-  }
-  return 0;
-}
-
 
 
 void Sema::ActOnComment(SourceRange Comment) {

@@ -19,6 +19,11 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/AST/StmtOpenMP.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "clang/Basic/intel/DeclIntel.h"
+#include "clang/Basic/intel/ExprIntel.h"
+#include "clang/Basic/intel/StmtIntel.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 namespace clang {
 

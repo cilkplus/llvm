@@ -2,6 +2,11 @@ set(LLVM_LINK_COMPONENTS
   Support
   )
 
+if( INTEL_SPECIFIC_CILKPLUS )
+  add_subdirectory(intel)
+  set(LIBS clangSemaIntel)
+endif()
+
 add_clang_library(clangSema
   AnalysisBasedWarnings.cpp
   AttributeList.cpp
@@ -57,4 +62,5 @@ add_clang_library(clangSema
   clangBasic
   clangEdit
   clangLex
+  ${LIBS}
   )

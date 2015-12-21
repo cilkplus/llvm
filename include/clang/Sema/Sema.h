@@ -48,6 +48,12 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TinyPtrVector.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "clang/Basic/intel/DeclIntel.h"
+#include "clang/Basic/intel/ExprIntel.h"
+#include "clang/Basic/intel/StmtIntel.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
+
 #include <deque>
 #include <memory>
 #include <string>
@@ -191,15 +197,17 @@ namespace sema {
   class BlockScopeInfo;
   class CapturedRegionScopeInfo;
   class CapturingScopeInfo;
-  class CilkForScopeInfo;
   class CompoundScopeInfo;
   class DelayedDiagnostic;
   class DelayedDiagnosticPool;
   class FunctionScopeInfo;
   class LambdaScopeInfo;
   class PossiblyUnreachableDiag;
-  class SIMDForScopeInfo;
   class TemplateDeductionInfo;
+#if INTEL_SPECIFIC_CILKPLUS
+  class CilkForScopeInfo;
+  class SIMDForScopeInfo;
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 namespace threadSafety {
@@ -426,11 +434,17 @@ public:
   ///  of the enclosing full expression.  This is cleared at the end of each 
   ///  full expression. 
   llvm::SmallPtrSet<Expr*, 2> MaybeODRUseExprs;
-
+#if INTEL_SPECIFIC_CILKPLUS
   /// \brief All the Cilk spawn call expressions in this expression
   /// evaluation context.
   llvm::SmallVector<CallExpr*, 2> CilkSpawnCalls;
-
+  // FIXME: it's a temporary decision to call static feature
+  //        from another source file
+  void BuildCapturedStmtCaptureList(
+    SmallVectorImpl<CapturedStmt::Capture> &Captures,
+    SmallVectorImpl<Expr *> &CaptureInits,
+    ArrayRef<sema::CapturingScopeInfo::Capture> Candidates);
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Stack containing information about each of the nested
   /// function, block, and method scopes that are currently active.
   ///
@@ -818,11 +832,11 @@ public:
     unsigned NumTypos;
 
     llvm::SmallPtrSet<Expr*, 2> SavedMaybeODRUseExprs;
-
+#if INTEL_SPECIFIC_CILKPLUS
     /// \brief All the Cilk spawn call expressions when we entered this
     /// expression evaluation context.
     llvm::SmallVector<CallExpr*, 2> SavedCilkSpawnCalls;
-
+#endif // INTEL_SPECIFIC_CILKPLUS
     /// \brief The lambdas that are present within this context, if it
     /// is indeed an unevaluated context.
     SmallVector<LambdaExpr *, 2> Lambdas;
@@ -1139,6 +1153,13 @@ public:
   void PushCapturedRegionScope(Scope *RegionScope, CapturedDecl *CD,
                                RecordDecl *RD,
                                CapturedRegionKind K);
+#if INTEL_SPECIFIC_CILKPLUS
+  void PushCilkForScope(Scope *S, CapturedDecl *FD, RecordDecl *RD,
+                        const VarDecl *LoopControlVariable,
+                        SourceLocation CilkForLoc);
+  void PushSIMDForScope(Scope *S, CapturedDecl *FD, RecordDecl *RD,
+                        SourceLocation PragmaLoc);
+#endif // INTEL_SPECIFIC_CILKPLUS
   void
   PopFunctionScopeInfo(const sema::AnalysisBasedWarnings::Policy *WP = nullptr,
                        const Decl *D = nullptr,
@@ -1170,7 +1191,7 @@ public:
   void PopCompoundScope();
 
   sema::CompoundScopeInfo &getCurCompoundScope() const;
-
+#if INTEL_SPECIFIC_CILKPLUS
   /// \brief Retrieve the enclosing compound scope but skip Cilk for scopes.
   /// For example, the compound scope of the function body is returned in
   /// the following example:
@@ -1185,6 +1206,12 @@ public:
 
   sema::CompoundScopeInfo &getCurCompoundScopeSkipSIMDFor() const;
 
+  /// \brief Retrieve the current cilk for region, if any.
+  sema::CilkForScopeInfo *getCurCilkFor();
+
+  /// \brief Retrieve the current SIMD for region, if any.
+  sema::SIMDForScopeInfo *getCurSIMDFor();
+#endif // INTEL_SPECIFIC_CILKPLUS
   bool hasAnyUnrecoverableErrorsInThisFunction() const;
 
   /// \brief Retrieve the current block, if any.
@@ -1198,12 +1225,6 @@ public:
 
   /// \brief Retrieve the current captured region, if any.
   sema::CapturedRegionScopeInfo *getCurCapturedRegion();
-
-  /// \brief Retrieve the current cilk for region, if any.
-  sema::CilkForScopeInfo *getCurCilkFor();
-
-  /// \brief Retrieve the current SIMD for region, if any.
-  sema::SIMDForScopeInfo *getCurSIMDFor();
 
   /// WeakTopLevelDeclDecls - access to \#pragma weak-generated Decls
   SmallVectorImpl<Decl *> &WeakTopLevelDecls() { return WeakTopLevelDecl; }
@@ -1703,14 +1724,17 @@ public:
                                SourceLocation EqualLoc);
 
   void AddInitializerToDecl(Decl *dcl, Expr *init, bool DirectInit,
-                            bool TypeMayContainAuto) {
+                            bool TypeMayContainAuto)
+#if INTEL_SPECIFIC_CILKPLUS
+  {
     bool IsCilkSpawnReceiver = false;
     AddInitializerToDecl(dcl, init, DirectInit, TypeMayContainAuto,
                          IsCilkSpawnReceiver);
   }
   void AddInitializerToDecl(Decl *dcl, Expr *init, bool DirectInit,
-                            bool TypeMayContainAuto,
-                            bool &IsCilkSpawnReceiver);
+                            bool TypeMayContainAuto, bool &IsCilkSpawnReceiver)
+#endif // INTEL_SPECIFIC_CILKPLUS
+      ;
   void ActOnUninitializedDecl(Decl *dcl, bool TypeMayContainAuto);
   void ActOnInitializerError(Decl *Dcl);
   void ActOnPureSpecifier(Decl *D, SourceLocation PureSpecLoc);
@@ -2741,7 +2765,26 @@ private:
                              DeclContext *MemberContext, bool EnteringContext,
                              const ObjCObjectPointerType *OPT,
                              bool ErrorRecovery);
-
+#if INTEL_SPECIFIC_CILKPLUS
+public:
+  enum CEANSupportState {
+    NoCEANAllowed,
+    FullCEANAllowed,
+    OpenMPCEANAllowed
+  };
+private:
+  /// \brief Allow CEAN constructs in expressions.
+  llvm::SmallVector<CEANSupportState, 16> CEANStack;
+  unsigned CEANLevelCounter;
+public:
+  void StartCEAN(CEANSupportState Flag) { CEANStack.push_back(Flag); }
+  void EndCEAN() { CEANStack.pop_back(); }
+  bool IsCEANAllowed() { return CEANStack.back() == FullCEANAllowed; }
+  bool IsOpenMPCEANAllowed() {
+    return getLangOpts().OpenMP && CEANStack.back() == OpenMPCEANAllowed;
+  }
+  CEANSupportState GetCEANState() { return CEANStack.back(); }
+#endif // INTEL_SPECIFIC_CILKPLUS
 public:
   const TypoExprState &getTypoExprState(TypoExpr *TE) const;
 
@@ -3329,8 +3372,9 @@ public:
                                  SourceLocation WhileLoc,
                                  SourceLocation CondLParen, Expr *Cond,
                                  SourceLocation CondRParen);
-
+#if INTEL_SPECIFIC_CILKPLUS
   void CheckForLoopConditionalStatement(Expr *Second, Expr *Third, Stmt *Body);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   StmtResult ActOnForStmt(SourceLocation ForLoc,
                           SourceLocation LParenLoc,
@@ -3399,12 +3443,32 @@ public:
                              Scope *CurScope);
   StmtResult BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
   StmtResult ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
+#if INTEL_SPECIFIC_CILKPLUS
+  void DiagnoseCilkSpawn(Stmt *S, bool isStmtExpr = false);
+  void DiagnoseCilkElemental(FunctionDecl *D, Stmt *S);
+  bool DiagnoseElementalAttributes(FunctionDecl *FD);
+  Expr *CheckCilkVecLengthArg(Expr *E);
+  Expr *CheckCilkLinearArg(Expr *E);
+  Expr *CheckCilkAlignedArg(Expr *E);
 
+  StmtResult ActOnCilkSyncStmt(SourceLocation SyncLoc);
+  ExprResult ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
+  ExprResult BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E);
+
+  /// \brief Convert a full expression into a CilkSpawnExpr.
+  ExprResult BuildCilkSpawnExpr(Expr *E);
+
+  /// \brief Convert a declaration initialized by a Cilk spawn call into
+  /// a CilkSpawnDecl.
+  CilkSpawnDecl *BuildCilkSpawnDecl(Decl *D);
+
+  bool DiagCilkSpawnFullExpr(Expr *E);
   StmtResult ActOnCilkForGrainsizePragma(Expr *GrainsizeExpr,
                                          Stmt *CilkFor,
                                          SourceLocation LocStart);
 
   bool CheckIfBodyModifiesLoopControlVar(Stmt *Body);
+
   StmtResult ActOnCilkForStmt(SourceLocation CilkForLoc,
                               SourceLocation LParenLoc,
                               Stmt *First, FullExprArg Second,
@@ -3427,6 +3491,7 @@ public:
   ExprResult CalculateCilkForLoopCount(SourceLocation CilkForLoc, Expr *Span,
                                        Expr *Increment, Expr *StrideExpr,
                                        int Dir, BinaryOperatorKind Opcode);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
                              bool IsVolatile, unsigned NumOutputs,
@@ -3851,6 +3916,7 @@ public:
                                      Expr *Idx, SourceLocation RLoc);
   ExprResult CreateBuiltinArraySubscriptExpr(Expr *Base, SourceLocation LLoc,
                                              Expr *Idx, SourceLocation RLoc);
+#if INTEL_SPECIFIC_CILKPLUS
   ExprResult ActOnCEANIndexExpr(Scope *S, Expr *Base, Expr *LowerBound,
                                 SourceLocation ColonLoc1, Expr *Length,
                                 SourceLocation ColonLoc2, Expr *Stride);
@@ -3862,6 +3928,7 @@ public:
   ExprResult ActOnCEANBuiltinExpr(Scope *S, SourceLocation StartLoc,
                                   unsigned Kind, ArrayRef<Expr *> Args,
                                   SourceLocation RParenLoc);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   // This struct is for use by ActOnMemberAccess to allow
   // BuildMemberReferenceExpr to be able to reinvoke ActOnMemberAccess after
@@ -4809,10 +4876,29 @@ public:
     return ActOnFinishFullExpr(Expr, Expr ? Expr->getExprLoc()
                                           : SourceLocation());
   }
+#if INTEL_SPECIFIC_CILKPLUS
+  enum CilkReceiverKind {
+    CRK_MaybeReceiver,
+    CRK_IsReceiver,
+    CRK_IsNotReceiver
+  };
+  ExprResult ActOnFinishFullExpr(Expr *Expr, SourceLocation CC,
+                                 bool DiscardedValue = false,
+                                 bool IsConstexpr = false) {
+    CilkReceiverKind Kind = CRK_IsNotReceiver;
+    return ActOnFinishFullExpr(Expr, CC, Kind, DiscardedValue, IsConstexpr);
+  }
+  ExprResult ActOnFinishFullExpr(Expr *Expr, SourceLocation CC,
+                                 CilkReceiverKind &Kind,
+                                 bool DiscardedValue = false,
+                                 bool IsConstexpr = false,
+                                 bool IsLambdaInitCaptureInitializer = false);
+#else
   ExprResult ActOnFinishFullExpr(Expr *Expr, SourceLocation CC,
                                  bool DiscardedValue = false,
                                  bool IsConstexpr = false,
                                  bool IsLambdaInitCaptureInitializer = false);
+#endif // INTEL_SPECIFIC_CILKPLUS
   StmtResult ActOnFinishFullStmt(Stmt *Stmt);
 
   // Marks SS invalid if it represents an incomplete type.
@@ -7705,7 +7791,7 @@ public:
   /// ActOnPragmaFPContract - Called on well formed
   /// \#pragma {STDC,OPENCL} FP_CONTRACT
   void ActOnPragmaFPContract(tok::OnOffSwitch OOS);
-
+#if INTEL_SPECIFIC_CILKPLUS
   AttrResult ActOnPragmaSIMDLength(SourceLocation VectorLengthLoc,
                                    Expr *VectorLengthExpr);
 
@@ -7752,7 +7838,7 @@ public:
   AttrResult ActOnPragmaSIMDPrivate(SourceLocation PrivateLoc,
                                     llvm::MutableArrayRef<Expr *> Exprs,
                                     SIMDPrivateKind Kind);
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// AddAlignmentAttributesForRecord - Adds any needed alignment attributes to
   /// a the record decl, to handle '\#pragma pack' and '\#pragma options align'.
   void AddAlignmentAttributesForRecord(RecordDecl *RD);

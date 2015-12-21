@@ -35,8 +35,8 @@ namespace clang {
       DIAG_START_PARSE         = DIAG_START_LEX             +  300,
       DIAG_START_AST           = DIAG_START_PARSE           +  500,
       DIAG_START_COMMENT       = DIAG_START_AST             +  110,
-      DIAG_START_SEMA          = DIAG_START_COMMENT         +  100,
-      DIAG_START_ANALYSIS      = DIAG_START_SEMA            + 3000,
+      DIAG_START_SEMA          = DIAG_START_COMMENT         + 3300, // INTEL
+      DIAG_START_ANALYSIS      = DIAG_START_SEMA            + 5000, // INTEL
       DIAG_UPPER_LIMIT         = DIAG_START_ANALYSIS        +  100
     };
 

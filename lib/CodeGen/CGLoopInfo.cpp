@@ -77,6 +77,10 @@ LoopInfo::LoopInfo(BasicBlock *Header, const LoopAttributes &Attrs)
     : LoopID(nullptr), Header(Header), Attrs(Attrs) {
   LoopID = createMetadata(Header->getContext(), Attrs);
 }
+#if INTEL_SPECIFIC_CILKPLUS
+LoopInfo::LoopInfo(llvm::MDNode *LoopID, const LoopAttributes &Attrs)
+  : LoopID(LoopID), Header(0), Attrs(Attrs) { }
+#endif  // INTEL_SPECIFIC_CILKPLUS
 
 void LoopInfoStack::push(BasicBlock *Header,
                          ArrayRef<const clang::Attr *> Attrs) {
@@ -136,3 +140,11 @@ void LoopInfoStack::InsertHelper(Instruction *I) const {
   if (L.getAttributes().IsParallel && I->mayReadOrWriteMemory())
     I->setMetadata("llvm.mem.parallel_loop_access", L.getLoopID());
 }
+#if INTEL_SPECIFIC_CILKPLUS
+void LoopInfoStack::push(llvm::MDNode *LoopID, bool IsParallel) {
+  assert(Active.empty() && "cannot have an active loop");
+  Active.push_back(LoopInfo(LoopID, LoopAttributes(IsParallel)));
+  StagedAttrs.clear();
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
+

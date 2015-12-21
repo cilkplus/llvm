@@ -2237,7 +2237,12 @@ enum CXCursorKind {
    */
   CXCursor_OMPCancelDirective             = 256,
 
-  CXCursor_LastStmt                    = CXCursor_OMPCancelDirective,
+#if INTEL_SPECIFIC_CILKPLUS
+  CXCursor_CilkRankedStmt                = 261,
+  CXCursor_LastStmt                      = CXCursor_CilkRankedStmt,
+#else
+ CXCursor_LastStmt                    = CXCursor_OMPCancelDirective,
+#endif /* INTEL_SPECIFIC_CILKPLUS */
 
   /**
    * \brief Cursor that represents the translation unit itself.

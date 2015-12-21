@@ -88,6 +88,9 @@ class CGObjCRuntime;
 class CGOpenCLRuntime;
 class CGOpenMPRuntime;
 class CGCUDARuntime;
+#if INTEL_SPECIFIC_CILKPLUS
+class CGCilkPlusRuntime;
+#endif // INTEL_SPECIFIC_CILKPLUS
 class BlockFieldFlags;
 class FunctionArgList;
 class CoverageMappingModuleGen;
@@ -313,6 +316,31 @@ private:
   RREntrypoints *RRData;
   std::unique_ptr<llvm::IndexedInstrProfReader> PGOReader;
   InstrProfStats PGOStats;
+
+#if INTEL_SPECIFIC_CILKPLUS
+  CGCilkPlusRuntime *CilkPlusRuntime;
+  struct ElementalVariantInfo {
+    /// \brief The CodeGen infomation of this function.
+    const CGFunctionInfo *FnInfo;
+    /// \brief The elemental function declaration.
+    const FunctionDecl *FD;
+    /// \brief The LLVM function of this declaration.
+    llvm::Function *Fn;
+    /// \brief The metadata describing this elemental function.
+    llvm::MDNode *KernelMD;
+
+    ElementalVariantInfo(const CGFunctionInfo *FnInfo, const FunctionDecl *FD,
+                         llvm::Function *Fn, llvm::MDNode *KernelMD)
+    : FnInfo(FnInfo), FD(FD), Fn(Fn), KernelMD(KernelMD) { }
+  };
+
+  /// ElementalVariantToEmit - This contains all Cilk Plus elemental function
+  /// variants to be emitted.
+  llvm::SmallVector<ElementalVariantInfo, 8> ElementalVariantToEmit;
+
+  /// ElementalAttributes - This contains all attributes of elemental functions.
+  llvm::StringMap<llvm::Function *, llvm::BumpPtrAllocator> ElementalAttributes;
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   // A set of references that have only been seen via a weakref so far. This is
   // used to remove the weak of the reference if we ever see a direct reference
@@ -611,10 +639,10 @@ public:
   /// Emit all elemental function vector variants in this module.
   void EmitCilkElementalVariants();
 
-  ARCEntrypoints &getARCEntrypoints() const {
-    assert(getLangOpts().ObjCAutoRefCount && ARCData != nullptr);
-    return *ARCData;
-  }
+  /// Emit an attribute for given elemental function.
+  void EmitCilkElementalAttribute(llvm::Function *Func, llvm::MDNode *MD,
+                                  bool IsMasked);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   RREntrypoints &getRREntrypoints() const {
     assert(RRData != nullptr);

@@ -689,6 +689,16 @@ public:
   /// surround this expression.  Only skips ImplicitCastExprs.
   Expr *IgnoreImpCasts() LLVM_READONLY;
 
+  /// IgnoreImplicit - Skip past any implicit AST nodes which might
+  /// surround this expression.
+  Expr *IgnoreImplicit() LLVM_READONLY {
+    return cast<Expr>(Stmt::IgnoreImplicit());
+  }
+
+  const Expr *IgnoreImplicit() const LLVM_READONLY {
+    return const_cast<Expr*>(this)->IgnoreImplicit();
+  }
+#if INTEL_SPECIFIC_CILKPLUS
   /// \brief Skip past implicit casts or other intermediate nodes introduced
   /// by semantic analysis.
   Expr *IgnoreImpCastsAsWritten() LLVM_READONLY;
@@ -705,16 +715,6 @@ public:
     return const_cast<Expr*>(this)->getSubExprAsWritten();
   }
 
-  /// IgnoreImplicit - Skip past any implicit AST nodes which might
-  /// surround this expression.
-  Expr *IgnoreImplicit() LLVM_READONLY {
-    return cast<Expr>(Stmt::IgnoreImplicit());
-  }
-
-  const Expr *IgnoreImplicit() const LLVM_READONLY {
-    return const_cast<Expr*>(this)->IgnoreImplicit();
-  }
-
   /// \brief Skip past any implicit AST nodes and other immediate nodes
   /// introduced by semantics analysis for a Cilk spawn call.
   Expr *IgnoreImplicitForCilkSpawn();
@@ -724,7 +724,7 @@ public:
   /// \biref Returns true if this is a Cilk spawn call expression, with
   /// possible implicit AST nodes associated.
   bool isCilkSpawn() const;
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// IgnoreParens - Ignore parentheses.  If this Expr is a ParenExpr, return
   ///  its subexpression.  If that subexpression is also a ParenExpr,
   ///  then this method recursively returns its subexpression, and so forth.
@@ -2180,8 +2180,10 @@ class CallExpr : public Expr {
   Stmt **SubExprs;
   unsigned NumArgs;
   SourceLocation RParenLoc;
+#if INTEL_SPECIFIC_CILKPLUS
   // Valid only if it is a Cilk spawn call
   SourceLocation CilkSpawnLoc;
+#endif // INTEL_SPECIFIC_CILKPLUS
 protected:
   // These versions of the constructor are for derived classes.
   CallExpr(const ASTContext& C, StmtClass SC, Expr *fn, unsigned NumPreArgs,
@@ -2312,11 +2314,11 @@ public:
 
   SourceLocation getLocStart() const LLVM_READONLY;
   SourceLocation getLocEnd() const LLVM_READONLY;
-
+#if INTEL_SPECIFIC_CILKPLUS
   void setCilkSpawnLoc(SourceLocation Loc) { CilkSpawnLoc = Loc; }
   SourceLocation getCilkSpawnLoc() const LLVM_READONLY { return CilkSpawnLoc; }
   bool isCilkSpawnCall() const { return CilkSpawnLoc.isValid(); }
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   static bool classof(const Stmt *T) {
     return T->getStmtClass() >= firstCallExprConstant &&
            T->getStmtClass() <= lastCallExprConstant;
@@ -3946,7 +3948,11 @@ public:
 
   SourceLocation getLocStart() const LLVM_READONLY;
   SourceLocation getLocEnd() const LLVM_READONLY;
-
+#if INTEL_SPECIFIC_CILKPLUS
+  void setCilkSpawnLoc(SourceLocation Loc) { CilkSpawnLoc = Loc; }
+  SourceLocation getCilkSpawnLoc() const LLVM_READONLY { return CilkSpawnLoc; }
+  bool isCilkSpawnCall() const { return CilkSpawnLoc.isValid(); }
+#endif // INTEL_SPECIFIC_CILKPLUS
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == InitListExprClass;
   }

@@ -85,6 +85,10 @@ public:
     AS_ContextSensitiveKeyword,
     /// #pragma ...
     AS_Pragma
+#if INTEL_SPECIFIC_CILKPLUS
+    ,
+    AS_CilkKeyword
+#endif // INTEL_SPECIFIC_CILKPLUS
   };
 
 private:
@@ -368,6 +372,10 @@ public:
     return SyntaxUsed == AS_CXX11 || isAlignasAttribute();
   }
   bool isKeywordAttribute() const {
+#if INTEL_SPECIFIC_CILKPLUS
+    if (SyntaxUsed == AS_CilkKeyword)
+      return true;
+#endif // INTEL_SPECIFIC_CILKPLUS
     return SyntaxUsed == AS_Keyword || SyntaxUsed == AS_ContextSensitiveKeyword;
   }
 

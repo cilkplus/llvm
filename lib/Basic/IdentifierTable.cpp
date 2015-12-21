@@ -111,7 +111,16 @@ namespace {
     KEYCONCEPTS = 0x10000,
     KEYOBJC2    = 0x20000,
     KEYZVECTOR  = 0x40000,
-    KEYALL = (0x7ffff & ~KEYNOMS18 &
+    KEYCOROUTINES = 0x80000,
+#if INTEL_SPECIFIC_CILKPLUS
+    KEYCILKPLUS = 0x100000,
+    KEYFLOAT128 = 0x200000,
+    KEYRESTRICT = 0x400000,
+    KEYMSASM = 0x8000000,
+    KEYBASES = 0x10000000,
+    KEYNOINT128 = 0x20000000,
+#endif // INTEL_SPECIFIC_CILKPLUS
+    KEYALL = (0xffffffff & ~KEYNOMS18 & // INTEL_SPECIFIC_CILKPLUS 0xfffffff
               ~KEYNOOPENCL) // KEYNOMS18 and KEYNOOPENCL are used to exclude.
   };
 
@@ -135,6 +144,9 @@ static KeywordStatus getKeywordStatus(const LangOptions &LangOpts,
   if (LangOpts.GNUKeywords && (Flags & KEYGNU)) return KS_Extension;
   if (LangOpts.MicrosoftExt && (Flags & KEYMS)) return KS_Extension;
   if (LangOpts.Borland && (Flags & KEYBORLAND)) return KS_Extension;
+#if INTEL_SPECIFIC_CILKPLUS
+  if (LangOpts.CilkPlus && (Flags & KEYCILKPLUS)) return KS_Extension;
+#endif // INTEL_SPECIFIC_CILKPLUS
   if (LangOpts.Bool && (Flags & BOOLSUPPORT)) return KS_Enabled;
   if (LangOpts.Half && (Flags & HALFSUPPORT)) return KS_Enabled;
   if (LangOpts.WChar && (Flags & WCHARSUPPORT)) return KS_Enabled;

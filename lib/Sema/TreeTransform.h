@@ -25,6 +25,10 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/AST/StmtOpenMP.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "clang/Basic/Builtins.h"
+#include "clang/Basic/intel/StmtIntel.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "clang/Sema/Designator.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Ownership.h"
@@ -408,10 +412,10 @@ public:
 
     return D;
   }
-
+#if INTEL_SPECIFIC_CILKPLUS
   /// \brief Transform the SIMD attribute associated with a SIMD for loop.
   AttrResult TransformSIMDAttr(Attr *A);
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Transform the attributes associated with the given declaration and
   /// place them on the new declaration.
   ///
@@ -1860,6 +1864,7 @@ public:
                                              RBracketLoc);
   }
 
+#if INTEL_SPECIFIC_CILKPLUS
   /// \brief Build a new CEAN index expression.
   ///
   /// By default, performs semantic analysis to build the new expression.
@@ -1916,6 +1921,14 @@ public:
     return getSema().ActOnCEANBuiltinExpr(0, StartLoc, Kind, Args, RParenLoc);
   }
 
+  /// \brief Build a new Cilk spawn expression.
+  ///
+  /// By default, performs semantic analysis to build the new expression.
+  /// Subclasses may override this routine to provide different behavior.
+  ExprResult RebuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
+    return getSema().BuildCilkSpawnCall(SpawnLoc, E);
+  }
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Build a new call expression.
   ///
   /// By default, performs semantic analysis to build the new expression.
@@ -2993,12 +3006,15 @@ StmtResult TreeTransform<Derived>::TransformStmt(Stmt *S) {
 #define EXPR(Node, Parent) case Stmt::Node##Class:
 #include "clang/AST/StmtNodes.inc"
     {
+#if INTEL_SPECIFIC_CILKPLUS
       getSema().ActOnStartCEANExpr(Sema::FullCEANAllowed);
+#endif // INTEL_SPECIFIC_CILKPLUS
       ExprResult E = getDerived().TransformExpr(cast<Expr>(S));
+#if INTEL_SPECIFIC_CILKPLUS
       getSema().ActOnEndCEANExpr(E.get());
+#endif // INTEL_SPECIFIC_CILKPLUS
       if (E.isInvalid())
         return StmtError();
-
 
       return getSema().ActOnExprStmt(E);
     }
@@ -3034,13 +3050,18 @@ ExprResult TreeTransform<Derived>::TransformExpr(Expr *E) {
     case Stmt::NoStmtClass: break;
 #define STMT(Node, Parent) case Stmt::Node##Class: break;
 #define ABSTRACT_STMT(Stmt)
+#if INTEL_SPECIFIC_CILKPLUS
 #define EXPR(Node, Parent)                                              \
     case Stmt::Node##Class: {                                           \
       ExprResult Res = getDerived().Transform##Node(cast<Node>(E));     \
       if (getSema().CheckCEANExpr(0, Res.get()))                        \
         return ExprError();                                             \
       return Res;                                                       \
-    }
+  }
+#else
+#define EXPR(Node, Parent)                                              \
+    case Stmt::Node##Class: return getDerived().Transform##Node(cast<Node>(E));
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "clang/AST/StmtNodes.inc"
   }
 
@@ -6026,6 +6047,7 @@ StmtResult TreeTransform<Derived>::TransformAttributedStmt(AttributedStmt *S) {
                                             SubStmt.get());
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
 // FIXME: Use TableGen to generate this function
 template <typename Derived>
 AttrResult TreeTransform<Derived>::TransformSIMDAttr(Attr *A) {
@@ -6133,27 +6155,146 @@ AttrResult TreeTransform<Derived>::TransformSIMDAttr(Attr *A) {
   return R;
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
+// FIXME: Use TableGen to generate this function
+template <typename Derived>
+AttrResult TreeTransform<Derived>::TransformSIMDAttr(Attr *A) {
+  AttrResult R = AttrEmpty();
+
+  switch (A->getKind()) {
+  case attr::SIMD: {
+    R = AttrResult(A);
+    break;
+  }
+  case attr::SIMDLength: {
+    SIMDLengthAttr *LengthAttr = cast<SIMDLengthAttr>(A);
+    ExprResult E = getDerived().TransformExpr(LengthAttr->getValueExpr());
+    if (E.isUsable())
+      R = getSema().ActOnPragmaSIMDLength(LengthAttr->getLocation(), E.get());
+    break;
+  }
+  case attr::SIMDLinear: {
+    SIMDLinearAttr *LinearAttr = cast<SIMDLinearAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDLinearAttr::items_iterator it = LinearAttr->items_begin(),
+                                        end = LinearAttr->items_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      // We need to push even if it is an invalid expr to make a pair.
+      Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDLinear(LinearAttr->getLocation(), Exprs);
+    break;
+  }
+  case attr::SIMDPrivate: {
+    SIMDPrivateAttr *PrivateAttr = cast<SIMDPrivateAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDPrivateAttr::variables_iterator
+             it = PrivateAttr->variables_begin(),
+             end = PrivateAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDPrivate(PrivateAttr->getLocation(),
+                                         llvm::MutableArrayRef<Expr *>(Exprs),
+                                         Sema::SIMD_Private);
+    break;
+  }
+  case attr::SIMDFirstPrivate: {
+    SIMDFirstPrivateAttr *FirstPrivateAttr = cast<SIMDFirstPrivateAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDFirstPrivateAttr::variables_iterator
+             it = FirstPrivateAttr->variables_begin(),
+             end = FirstPrivateAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDPrivate(FirstPrivateAttr->getLocation(),
+                                         llvm::MutableArrayRef<Expr *>(Exprs),
+                                         Sema::SIMD_FirstPrivate);
+    break;
+  }
+  case attr::SIMDLastPrivate: {
+    SIMDLastPrivateAttr *LastPrivateAttr = cast<SIMDLastPrivateAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDLastPrivateAttr::variables_iterator
+             it = LastPrivateAttr->variables_begin(),
+             end = LastPrivateAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDPrivate(LastPrivateAttr->getLocation(),
+                                         llvm::MutableArrayRef<Expr *>(Exprs),
+                                         Sema::SIMD_LastPrivate);
+    break;
+  }
+  case attr::SIMDReduction: {
+    SIMDReductionAttr *ReductionAttr = cast<SIMDReductionAttr>(A);
+    SmallVector<Expr *, 1> Exprs;
+    for (SIMDReductionAttr::variables_iterator
+             it = ReductionAttr->variables_begin(),
+             end = ReductionAttr->variables_end();
+         it != end; ++it) {
+      ExprResult E = getDerived().TransformExpr(*it);
+      if (E.isUsable())
+        Exprs.push_back(E.get());
+    }
+
+    R = getSema().ActOnPragmaSIMDReduction(
+        ReductionAttr->getLocation(), ReductionAttr->Operator,
+        llvm::MutableArrayRef<Expr *>(Exprs));
+    break;
+  }
+
+  default:
+    llvm_unreachable("Unknown SIMD clause");
+    break;
+  }
+
+  return R;
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
+
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
   // Transform the condition
   ExprResult Cond;
   VarDecl *ConditionVar = nullptr;
+#if INTEL_SPECIFIC_CILKPLUS
+  getSema().ActOnStartCEANExpr(Sema::FullCEANAllowed);
+#endif // INTEL_SPECIFIC_CILKPLUS
   if (S->getConditionVariable()) {
     ConditionVar
       = cast_or_null<VarDecl>(
                    getDerived().TransformDefinition(
                                       S->getConditionVariable()->getLocation(),
                                                     S->getConditionVariable()));
-    if (!ConditionVar) {
+    if (!ConditionVar)
+#if INTEL_SPECIFIC_CILKPLUS
+    {
       getSema().ActOnEndCEANExpr(0);
+#endif // INTEL_SPECIFIC_CILKPLUS
       return StmtError();
     }
   } else {
     Cond = getDerived().TransformExpr(S->getCond());
 
-    if (Cond.isInvalid()) {
+    if (Cond.isInvalid())
+#if INTEL_SPECIFIC_CILKPLUS
+    {
       getSema().ActOnEndCEANExpr(0);
+#endif // INTEL_SPECIFIC_CILKPLUS
       return StmtError();
     }
 
@@ -6161,8 +6302,11 @@ TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
     if (S->getCond()) {
       ExprResult CondE = getSema().ActOnBooleanCondition(nullptr, S->getIfLoc(),
                                                          Cond.get());
-      if (CondE.isInvalid()) {
+      if (CondE.isInvalid())
+#if INTEL_SPECIFIC_CILKPLUS
+      {
         getSema().ActOnEndCEANExpr(0);
+#endif // INTEL_SPECIFIC_CILKPLUS
         return StmtError();
       }
 
@@ -6171,6 +6315,9 @@ TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
   }
 
   Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
+#if INTEL_SPECIFIC_CILKPLUS
+  getSema().ActOnEndCEANExpr(FullCond.get());
+#endif // INTEL_SPECIFIC_CILKPLUS
   if (!S->getConditionVariable() && S->getCond() && !FullCond.get())
     return StmtError();
 
@@ -8013,7 +8160,10 @@ TreeTransform<Derived>::TransformUnaryExprOrTypeTraitExpr(
   //   [...]
   EnterExpressionEvaluationContext Unevaluated(SemaRef, Sema::Unevaluated,
                                                Sema::ReuseLambdaContextDecl);
-
+#if INTEL_SPECIFIC_CILKPLUS
+  if (E->getKind() == UETT_SizeOf)
+    getSema().ActOnStartCEANExpr(Sema::FullCEANAllowed);
+#endif // INTEL_SPECIFIC_CILKPLUS
   // Try to recover if we have something like sizeof(T::X) where X is a type.
   // Notably, there must be *exactly* one set of parens if X is a type.
   TypeSourceInfo *RecoveryTSI = nullptr;
@@ -8025,7 +8175,10 @@ TreeTransform<Derived>::TransformUnaryExprOrTypeTraitExpr(
         PE, DRE, false, &RecoveryTSI);
   else
     SubExpr = getDerived().TransformExpr(E->getArgumentExpr());
-
+#if INTEL_SPECIFIC_CILKPLUS
+  if (E->getKind() == UETT_SizeOf)
+    getSema().ActOnEndCEANExpr(SubExpr.get());
+#endif // INTEL_SPECIFIC_CILKPLUS
   if (RecoveryTSI) {
     return getDerived().RebuildUnaryExprOrTypeTrait(
         RecoveryTSI, E->getOperatorLoc(), E->getKind(), E->getSourceRange());
@@ -8066,6 +8219,9 @@ TreeTransform<Derived>::TransformArraySubscriptExpr(ArraySubscriptExpr *E) {
 
 template<typename Derived>
 ExprResult
+#if INTEL_SPECIFIC_CILKPLUS
+template<typename Derived>
+ExprResult
 TreeTransform<Derived>::TransformCEANIndexExpr(CEANIndexExpr *E) {
   ExprResult Base = getDerived().TransformExpr(E->getBase());
   if (Base.isInvalid())
@@ -8085,7 +8241,7 @@ TreeTransform<Derived>::TransformCEANIndexExpr(CEANIndexExpr *E) {
       LowerBound.get() == E->getLowerBound() &&
       Length.get() == E->getLength() &&
       Stride.get() == E->getStride())
-    return SemaRef.Owned(E);
+    return E;
 
   return getDerived().RebuildCEANIndexExpr(Base.get(),
                                            LowerBound.get(),
@@ -8106,7 +8262,7 @@ TreeTransform<Derived>::TransformCEANBuiltinExpr(CEANBuiltinExpr *E) {
     ExprResult Argument = getDerived().TransformExpr(*I);
     if (Argument.isInvalid())
       return ExprError();
-    TArgs.push_back(Argument.take());
+    TArgs.push_back(Argument.get());
   }
 
   return getDerived().RebuildCEANBuiltinExpr(E->getLocStart(),
@@ -8114,6 +8270,7 @@ TreeTransform<Derived>::TransformCEANBuiltinExpr(CEANBuiltinExpr *E) {
                                              TArgs,
                                              E->getLocEnd());
 }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 template<typename Derived>
 ExprResult
@@ -8123,6 +8280,7 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
   if (Callee.isInvalid())
     return ExprError();
 
+#if INTEL_SPECIFIC_CILKPLUS
   unsigned BuiltinId = 0;
   if (Callee.isUsable()) {
     Expr *Fn = Callee.get()->IgnoreParens();
@@ -8150,11 +8308,15 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
   default:
     break;
   }
+#endif // INTEL_SPECIFIC_CILKPLUS
+
   // Transform arguments.
   bool ArgChanged = false;
   SmallVector<Expr*, 8> Args;
   if (getDerived().TransformExprs(E->getArgs(), E->getNumArgs(), true, Args,
-                                  &ArgChanged)) {
+                                  &ArgChanged))
+#if INTEL_SPECIFIC_CILKPLUS
+  {
     switch (BuiltinId) {
     case Builtin::BI__sec_reduce_add:
     case Builtin::BI__sec_reduce_mul:
@@ -8173,12 +8335,15 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
     default:
       break;
     }
+#endif // INTEL_SPECIFIC_CILKPLUS
     return ExprError();
   }
 
   if (!getDerived().AlwaysRebuild() &&
       Callee.get() == E->getCallee() &&
-      !ArgChanged) {
+      !ArgChanged)
+#if INTEL_SPECIFIC_CILKPLUS
+  {
     switch (BuiltinId) {
     case Builtin::BI__sec_reduce_add:
     case Builtin::BI__sec_reduce_mul:
@@ -8197,13 +8362,14 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
     default:
       break;
     }
+#endif // INTEL_SPECIFIC_CILKPLUS
     return SemaRef.MaybeBindToTemporary(E);
   }
 
   // FIXME: Wrong source location information for the '('.
   SourceLocation FakeLParenLoc
     = ((Expr *)Callee.get())->getSourceRange().getBegin();
-
+#if INTEL_SPECIFIC_CILKPLUS
   ExprResult CE = getDerived().RebuildCallExpr(Callee.get(), FakeLParenLoc,
                                                Args,
                                                E->getRParenLoc());
@@ -8230,6 +8396,11 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
     return CE;
 
   return getDerived().RebuildCilkSpawnCall(E->getCilkSpawnLoc(), CE.get());
+#else
+  return getDerived().RebuildCallExpr(Callee.get(), FakeLParenLoc,
+                                      Args,
+                                      E->getRParenLoc());
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 template<typename Derived>
@@ -10963,6 +11134,8 @@ TreeTransform<Derived>::TransformBlockExpr(BlockExpr *E) {
   return SemaRef.ActOnBlockStmtExpr(E->getCaretLocation(), body.get(),
                                     /*Scope=*/nullptr);
 }
+
+#if INTEL_SPECIFIC_CILKPLUS
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
@@ -10975,6 +11148,7 @@ TreeTransform<Derived>::TransformCilkSpawnExpr(CilkSpawnExpr *E) {
 
   return getSema().BuildCilkSpawnExpr(NewSpawn.get());
 }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 template<typename Derived>
 ExprResult
@@ -11500,6 +11674,7 @@ TreeTransform<Derived>::TransformCapturedStmt(CapturedStmt *S) {
   return getSema().ActOnCapturedRegionEnd(Body.get());
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformCilkSyncStmt(CilkSyncStmt *S) {
@@ -11515,7 +11690,7 @@ TreeTransform<Derived>::TransformCilkRankedStmt(CilkRankedStmt *S) {
     ExprResult SrcExpr = getDerived().TransformExpr(*I);
     if (SrcExpr.isInvalid())
       return StmtError();
-    Lengths.push_back(SrcExpr.take());
+    Lengths.push_back(SrcExpr.get());
   }
   SmallVector<Stmt *, 8> Vars;
   for (ArrayRef<Stmt *>::iterator I = S->getVars().begin(), E = S->getVars().end();
@@ -11523,7 +11698,7 @@ TreeTransform<Derived>::TransformCilkRankedStmt(CilkRankedStmt *S) {
     StmtResult SrcStmt = getDerived().TransformStmt(*I);
     if (SrcStmt.isInvalid())
       return StmtError();
-    Vars.push_back(SrcStmt.take());
+    Vars.push_back(SrcStmt.get());
   }
   SmallVector<Stmt *, 8> Increments;
   for (ArrayRef<Stmt *>::iterator I = S->getIncrements().begin(), E = S->getIncrements().end();
@@ -11531,7 +11706,7 @@ TreeTransform<Derived>::TransformCilkRankedStmt(CilkRankedStmt *S) {
     StmtResult SrcStmt = getDerived().TransformStmt(*I);
     if (SrcStmt.isInvalid())
       return StmtError();
-    Increments.push_back(SrcStmt.take());
+    Increments.push_back(SrcStmt.get());
   }
   StmtResult AssociatedStmt = getDerived().TransformStmt(S->getAssociatedStmt());
   if (AssociatedStmt.isInvalid())
@@ -11539,7 +11714,7 @@ TreeTransform<Derived>::TransformCilkRankedStmt(CilkRankedStmt *S) {
   StmtResult Inits = getDerived().TransformStmt(S->getInits());
   if (Inits.isInvalid())
     return StmtError();
-  return Owned(CilkRankedStmt::Create(getSema().Context, S->getLocStart(), S->getLocEnd(), Lengths, Vars, Increments, AssociatedStmt.take(), Inits.take()));
+  return Owned(CilkRankedStmt::Create(getSema().Context, S->getLocStart(), S->getLocEnd(), Lengths, Vars, Increments, AssociatedStmt.get(), Inits.get()));
 }
 
 template<typename Derived>
@@ -11558,7 +11733,7 @@ TreeTransform<Derived>::TransformCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
     Result.get() == Grainsize && SubS.get() == S->getCilkFor())
     return Owned(S);
 
-  return getSema().ActOnCilkForGrainsizePragma(Result.take(), SubS.take(),
+  return getSema().ActOnCilkForGrainsizePragma(Result.get(), SubS.get(),
                                                Grainsize->getLocStart());
 }
 
@@ -11584,7 +11759,7 @@ TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
     return StmtError();
   Cond = CondExpr.get();
 
-  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
   if (!FullCond.get())
     return StmtError();
 
@@ -11612,9 +11787,9 @@ TreeTransform<Derived>::TransformCilkForStmt(CilkForStmt *S) {
   }
 
   StmtResult Result = getSema().ActOnCilkForStmt(CilkForLoc, S->getLParenLoc(),
-                                                 Init.take(), FullCond,
+                                                 Init.get(), FullCond,
                                                  FullInc,  S->getRParenLoc(),
-                                                 Body.take());
+                                                 Body.get());
   if (Result.isInvalid()) {
     getSema().ActOnCilkForStmtError();
     return StmtError();
@@ -11661,7 +11836,7 @@ TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {
 
   Cond = CondExpr.get();
 
-  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
   if (!FullCond.get())
     return StmtError();
 
@@ -11684,8 +11859,8 @@ TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {
   }
 
   StmtResult Result = getSema().ActOnSIMDForStmt(
-      PragmaLoc, TransformedAttrs, ForLoc, S->getLParenLoc(), Init.take(),
-      FullCond, FullInc, S->getRParenLoc(), Body.take());
+      PragmaLoc, TransformedAttrs, ForLoc, S->getLParenLoc(), Init.get(),
+      FullCond, FullInc, S->getRParenLoc(), Body.get());
   if (Result.isInvalid()) {
     getSema().ActOnSIMDForStmtError();
     return StmtError();
@@ -11693,7 +11868,7 @@ TreeTransform<Derived>::TransformSIMDForStmt(SIMDForStmt *S) {
 
   return Result;
 }
-
+#endif // INTEL_SPECIFIC_CILKPLUS
 } // end namespace clang
 
 #endif

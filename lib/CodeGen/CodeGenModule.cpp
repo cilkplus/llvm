@@ -16,7 +16,9 @@
 #include "CGCXXABI.h"
 #include "CGCall.h"
 #include "CGDebugInfo.h"
-#include "CGCilkPlusRuntime.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "intel/CGCilkPlusRuntime.h"
+#endif  // INTEL_SPECIFIC_CILKPLUS
 #include "CGObjCRuntime.h"
 #include "CGOpenCLRuntime.h"
 #include "CGOpenMPRuntime.h"
@@ -89,6 +91,9 @@ CodeGenModule::CodeGenModule(ASTContext &C, const HeaderSearchOptions &HSO,
       OpenCLRuntime(nullptr), OpenMPRuntime(nullptr), CUDARuntime(nullptr),
       DebugInfo(nullptr), ARCData(nullptr),
       NoObjCARCExceptionsMetadata(nullptr), RRData(nullptr), PGOReader(nullptr),
+#if INTEL_SPECIFIC_CILKPLUS
+      CilkPlusRuntime(nullptr),
+#endif // INTEL_SPECIFIC_CILKPLUS
       CFConstantStringClassRef(nullptr), ConstantStringClassRef(nullptr),
       NSConstantStringType(nullptr), NSConcreteGlobalBlock(nullptr),
       NSConcreteStackBlock(nullptr), BlockObjectAssign(nullptr),
@@ -124,9 +129,10 @@ CodeGenModule::CodeGenModule(ASTContext &C, const HeaderSearchOptions &HSO,
     createOpenMPRuntime();
   if (LangOpts.CUDA)
     createCUDARuntime();
+#if INTEL_SPECIFIC_CILKPLUS
   if (LangOpts.CilkPlus)
     createCilkPlusRuntime();
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   // Enable TBAA unless it's suppressed. ThreadSanitizer needs TBAA even at O0.
   if (LangOpts.Sanitize.has(SanitizerKind::Thread) ||
       (!CodeGenOpts.RelaxedAliasing && CodeGenOpts.OptimizationLevel > 0))
@@ -206,6 +212,12 @@ void CodeGenModule::createOpenMPRuntime() {
 void CodeGenModule::createCUDARuntime() {
   CUDARuntime = CreateNVCUDARuntime(*this);
 }
+
+#if INTEL_SPECIFIC_CILKPLUS
+void CodeGenModule::createCilkPlusRuntime() {
+  CilkPlusRuntime = new CGCilkPlusRuntime;
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 void CodeGenModule::addReplacement(StringRef Name, llvm::Constant *C) {
   Replacements[Name] = C;
@@ -418,9 +430,10 @@ void CodeGenModule::Release() {
 
   if (getCodeGenOpts().EmitDeclMetadata)
     EmitDeclMetadata();
-
+#if INTEL_SPECIFIC_CILKPLUS
   if (getLangOpts().CilkPlus)
     EmitCilkElementalVariants();
+#endif  // INTEL_SPECIFIC_CILKPLUS
 
   if (getCodeGenOpts().EmitGcovArcs || getCodeGenOpts().EmitGcovNotes)
     EmitCoverageFile();
@@ -715,11 +728,12 @@ void CodeGenModule::SetLLVMFunctionAttributes(const Decl *D,
   ConstructAttributeList(Info, D, AttributeList, CallingConv, false);
   F->setAttributes(llvm::AttributeSet::get(getLLVMContext(), AttributeList));
   F->setCallingConv(static_cast<llvm::CallingConv::ID>(CallingConv));
-
+#if INTEL_SPECIFIC_CILKPLUS
   // Add metadata if this is a Cilk Plus elemental function.
   if (getLangOpts().CilkPlus)
     if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D))
       EmitCilkElementalMetadata(Info, FD, F);
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 /// Determines whether the language options require us to model

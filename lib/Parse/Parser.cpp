@@ -290,6 +290,9 @@ bool Parser::SkipUntil(ArrayRef<tok::TokenKind> Toks, SkipUntilFlags Flags) {
     case tok::annot_module_begin:
     case tok::annot_module_end:
     case tok::annot_module_include:
+#if INTEL_SPECIFIC_CILKPLUS
+    case tok::annot_pragma_simd_end:
+#endif // INTEL_SPECIFIC_CILKPLUS
       // Stop before we change submodules. They generally indicate a "good"
       // place to pick up parsing again (except in the special case where
       // we're trying to skip to EOF).
@@ -661,6 +664,11 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
     return DeclGroupPtrTy();
   case tok::annot_pragma_openmp:
     return ParseOpenMPDeclarativeDirective();
+#if INTEL_SPECIFIC_CILKPLUS
+  case tok::annot_pragma_simd:
+    HandlePragmaSIMD();
+    return DeclGroupPtrTy();
+#endif // INTEL_SPECIFIC_CILKPLUS
   case tok::annot_pragma_ms_pointers_to_members:
     HandlePragmaMSPointersToMembers();
     return DeclGroupPtrTy();

@@ -8672,6 +8672,11 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
 #define STMT(Node, Base) case Expr::Node##Class:
 #define EXPR(Node, Base)
 #include "clang/AST/StmtNodes.inc"
+#if INTEL_SPECIFIC_CILKPLUS
+  case Expr::CilkSpawnExprClass:
+  case Expr::CEANIndexExprClass:
+  case Expr::CEANBuiltinExprClass:
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Expr::PredefinedExprClass:
   case Expr::FloatingLiteralClass:
   case Expr::ImaginaryLiteralClass:

@@ -801,6 +801,13 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Expr::MSDependentExistsStmtClass:
     case Stmt::CapturedStmtClass:
     case Stmt::OMPParallelDirectiveClass:
+#if INTEL_SPECIFIC_CILKPLUS
+    case Stmt::CilkSyncStmtClass:
+    case Stmt::CilkForGrainsizeStmtClass:
+    case Stmt::CilkForStmtClass:
+    case Stmt::SIMDForStmtClass:
+    case Expr::CilkRankedStmtClass:
+#endif // INTEL_SPECIFIC_CILKPLUS
     case Stmt::OMPSimdDirectiveClass:
     case Stmt::OMPForDirectiveClass:
     case Stmt::OMPForSimdDirectiveClass:
@@ -881,8 +888,10 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::OpaqueValueExprClass:
     case Stmt::AsTypeExprClass:
     case Stmt::AtomicExprClass:
+#if INTEL_SPECIFIC_CILKPLUS
     case Stmt::CEANIndexExprClass:
     case Stmt::CEANBuiltinExprClass:
+#endif // INTEL_SPECIFIC_CILKPLUS
       // Fall through.
 
     // Cases we intentionally don't evaluate, since they don't need
@@ -1012,9 +1021,10 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
       VisitBlockExpr(cast<BlockExpr>(S), Pred, Dst);
       Bldr.addNodes(Dst);
       break;
-
+#if INTEL_SPECIFIC_CILKPLUS
     case Stmt::CilkSpawnExprClass:
       llvm_unreachable("not implemented yet");
+#endif // INTEL_SPECIFIC_CILKPLUS
 
     case Stmt::BinaryOperatorClass: {
       const BinaryOperator* B = cast<BinaryOperator>(S);

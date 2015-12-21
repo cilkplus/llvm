@@ -230,6 +230,9 @@ void Parser::initializePragmaHandlers() {
   LoopHintHandler.reset(new PragmaLoopHintHandler());
   PP.AddPragmaHandler("clang", LoopHintHandler.get());
 
+#if INTEL_SPECIFIC_CILKPLUS
+  initializeIntelPragmaHandlers ();
+#endif // INTEL_SPECIFIC_CILKPLUS
   UnrollHintHandler.reset(new PragmaUnrollHintHandler("unroll"));
   PP.AddPragmaHandler(UnrollHintHandler.get());
 
@@ -299,6 +302,9 @@ void Parser::resetPragmaHandlers() {
   PP.RemovePragmaHandler("clang", LoopHintHandler.get());
   LoopHintHandler.reset();
 
+#if INTEL_SPECIFIC_CILKPLUS
+  resetIntelPragmaHandlers();
+#endif // INTEL_SPECIFIC_CILKPLUS
   PP.RemovePragmaHandler(UnrollHintHandler.get());
   UnrollHintHandler.reset();
 

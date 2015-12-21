@@ -154,6 +154,17 @@ public:
     return ComplexPairTy();
   }
 
+#if INTEL_SPECIFC_CILKPLUS
+  ComplexPairTy VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
+    CodeGenFunction::LocalVarsDeclGuard Guard(CGF);
+    CGF.EmitCEANBuiltinExprBody(E);
+    if (E->getBuiltinKind() != CEANBuiltinExpr::ReduceMutating)
+      return E->getReturnExpr()->isRValue() ? Visit(E->getReturnExpr()) :
+                                              EmitLoadOfLValue(E->getReturnExpr());
+    return ComplexPairTy();
+  }
+#endif // INTEL_SPECIFC_CILKPLUS
+
   // FIXME: CompoundLiteralExpr
 
   ComplexPairTy EmitCast(CastKind CK, Expr *Op, QualType DestTy);
@@ -840,6 +851,17 @@ EmitCompoundAssignLValue(const CompoundAssignOperator *E,
   OpInfo.Ty = E->getComputationResultType();
   QualType ComplexElementTy = cast<ComplexType>(OpInfo.Ty)->getElementType();
 
+#if INTEL_SPECIFIC_CILKPLUS
+  LValue LHS;
+
+  // Cilk Plus needs the LHS evaluated first to handle cases such as
+  // array[f()] = _Cilk_spawn foo();
+  // This evaluation order requirement implies that _Cilk_spawn cannot
+  // spawn Objective C block calls.
+  if (CGF.getLangOpts().CilkPlus &&  E->getRHS()->isCilkSpawn())
+    LHS = CGF.EmitLValue(E->getLHS());
+#endif // INTEL_SPECIFIC_CILKPLUS
+
   // The RHS should have been converted to the computation type.
   if (E->getRHS()->getType()->isRealFloatingType()) {
     assert(
@@ -852,7 +874,12 @@ EmitCompoundAssignLValue(const CompoundAssignOperator *E,
     OpInfo.RHS = Visit(E->getRHS());
   }
 
+#if INTEL_SPECIFIC_CILKPLUS
+  if (!(CGF.getLangOpts().CilkPlus &&  E->getRHS()->isCilkSpawn()))
+    LHS = CGF.EmitLValue(E->getLHS());
+#else
   LValue LHS = CGF.EmitLValue(E->getLHS());
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   // Load from the l-value and convert it.
   if (LHSTy->isAnyComplexType()) {
@@ -914,9 +941,8 @@ LValue ComplexExprEmitter::EmitBinAssignLValue(const BinaryOperator *E,
          "Invalid assignment");
   TestAndClearIgnoreReal();
   TestAndClearIgnoreImag();
-
+#if INTEL_SPECIFIC_CILKPLUS
   LValue LHS;
-
   // Cilk Plus needs the LHS evaluated first to handle cases such as
   // array[f()] = _Cilk_spawn foo();
   // This evaluation order requirement implies that _Cilk_spawn cannot
@@ -927,11 +953,16 @@ LValue ComplexExprEmitter::EmitBinAssignLValue(const BinaryOperator *E,
   } else {
     // Emit the RHS.  __block variables need the RHS evaluated first.
     Val = Visit(E->getRHS());
-
     // Compute the address to store into.
     LHS = CGF.EmitLValue(E->getLHS());
   }
+#else
+  // Emit the RHS.  __block variables need the RHS evaluated first.
+  Val = Visit(E->getRHS());
 
+  // Compute the address to store into.
+  LValue LHS = CGF.EmitLValue(E->getLHS());
+#endif // INTEL_SPECIFIC_CILKPLUS
   // Store the result value into the LHS lvalue.
   EmitStoreOfComplex(Val, LHS, /*isInit*/ false);
 

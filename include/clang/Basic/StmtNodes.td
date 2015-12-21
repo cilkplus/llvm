@@ -94,9 +94,6 @@ def StmtExpr : DStmt<Expr>;
 def ChooseExpr : DStmt<Expr>;
 def GNUNullExpr : DStmt<Expr>;
 
-def CEANIndexExpr : DStmt<Expr>;
-def CEANBuiltinExpr : DStmt<Expr>;
-
 // C++ Expressions.
 def CXXOperatorCallExpr : DStmt<CallExpr>;
 def CXXMemberCallExpr : DStmt<CallExpr>;
@@ -183,14 +180,6 @@ def MSDependentExistsStmt : Stmt;
 // OpenCL Extensions.
 def AsTypeExpr : DStmt<Expr>;
 
-// Cilk Plus Extensions.
-def CilkSyncStmt : Stmt;
-def CilkForGrainsizeStmt : Stmt;
-def CilkForStmt : Stmt;
-def SIMDForStmt : Stmt;
-def CilkSpawnExpr : DStmt<Expr>;
-def CilkRankedStmt : Stmt;
-
 // OpenMP Directives.
 def OMPExecutableDirective : Stmt<1>;
 def OMPLoopDirective : DStmt<OMPExecutableDirective, 1>;
@@ -218,3 +207,4 @@ def OMPTargetDirective : DStmt<OMPExecutableDirective>;
 def OMPTeamsDirective : DStmt<OMPExecutableDirective>;
 def OMPCancellationPointDirective : DStmt<OMPExecutableDirective>;
 def OMPCancelDirective : DStmt<OMPExecutableDirective>;
+include "../Basic/intel/IntelStmtNodes.td"

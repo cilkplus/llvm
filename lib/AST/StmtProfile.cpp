@@ -646,11 +646,41 @@ void StmtProfiler::VisitArraySubscriptExpr(const ArraySubscriptExpr *S) {
   VisitExpr(S);
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
 void StmtProfiler::VisitCEANIndexExpr(const CEANIndexExpr *S) {
   VisitExpr(S);
 }
 
 void StmtProfiler::VisitCEANBuiltinExpr(const CEANBuiltinExpr *S) {
+  VisitExpr(S);
+}
+
+void StmtProfiler::VisitCilkSpawnExpr(const CilkSpawnExpr *S) {
+  llvm_unreachable("not implemented yet");
+}
+
+void StmtProfiler::VisitCilkSyncStmt(const CilkSyncStmt *S) {
+  VisitStmt(S);
+}
+
+void StmtProfiler::VisitCilkForGrainsizeStmt(const CilkForGrainsizeStmt *S) {
+  VisitStmt(S);
+}
+
+void StmtProfiler::VisitCilkForStmt(const CilkForStmt *S) {
+  VisitStmt(S);
+}
+
+void StmtProfiler::VisitSIMDForStmt(const SIMDForStmt *S) {
+  VisitStmt(S);
+}
+
+void StmtProfiler::VisitCilkRankedStmt(const CilkRankedStmt *S) {
+  VisitStmt(S);
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
+
+void StmtProfiler::VisitOMPArraySectionExpr(const OMPArraySectionExpr *S) {
   VisitExpr(S);
 }
 

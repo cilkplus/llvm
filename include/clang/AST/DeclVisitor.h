@@ -19,6 +19,9 @@
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/DeclTemplate.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "clang/Basic/intel/DeclIntel.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 namespace clang {
 namespace declvisitor {

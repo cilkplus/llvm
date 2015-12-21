@@ -3730,8 +3730,22 @@ void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
 
     // Parse attribute arguments
     if (Tok.is(tok::l_paren))
+#if INTEL_SPECIFIC_CILKPLUS
+    {
+      if ((ScopeName && ScopeName->isStr("gnu")) ||
+          (getLangOpts().CilkPlus &&
+           (!ScopeName || ScopeName->isStr("cilkplus")) &&
+           AttrName->isStr("vector"))) {
+        ParseGNUAttributeArgs(AttrName, AttrLoc, attrs, endLoc, ScopeName,
+                              ScopeLoc, AttributeList::AS_CXX11, nullptr);
+        AttrParsed = true;
+      } else
+#endif // INTEL_SPECIFIC_CILKPLUS
       AttrParsed = ParseCXX11AttributeArgs(AttrName, AttrLoc, attrs, endLoc,
                                            ScopeName, ScopeLoc);
+#if INTEL_SPECIFIC_CILKPLUS
+    }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
     if (!AttrParsed)
       attrs.addNew(AttrName,

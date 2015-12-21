@@ -587,9 +587,16 @@ void ASTStmtReader::VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
   E->setLHS(Reader.ReadSubExpr());
   E->setRHS(Reader.ReadSubExpr());
   E->setRBracketLoc(ReadSourceLocation(Record, Idx));
+#if INTEL_SPECIFIC_CILKPLUS
   if (CEANIndexExpr *CIE = dyn_cast_or_null<CEANIndexExpr>(E->getIdx()))
     CIE->setBase(E->getBase());
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
+
+#if INTEL_SPECIFIC_CILKPLUS
+//===----------------------------------------------------------------------===//
+// Cilk Plus Expressions and Statements.
+//===----------------------------------------------------------------------===//
 
 void ASTStmtReader::VisitCEANIndexExpr(CEANIndexExpr *E) {
   VisitExpr(E);
@@ -629,6 +636,52 @@ void ASTStmtReader::VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
   E->setInit(Reader.ReadSubStmt());
   E->setBody(Reader.ReadSubStmt());
   E->setReturnExpr(Reader.ReadSubExpr());
+}
+
+void ASTStmtReader::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtReader::VisitCilkSyncStmt(CilkSyncStmt *S) {
+  VisitStmt(S);
+  S->SyncLoc = ReadSourceLocation(Record, Idx);
+}
+
+void ASTStmtReader::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtReader::VisitSIMDForStmt(SIMDForStmt *S) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtReader::VisitCilkRankedStmt(CilkRankedStmt *S) {
+  VisitStmt(S);
+  ++Idx;
+  SmallVector<Expr *, 16> Lengths;
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
+    Lengths.push_back(Reader.ReadSubExpr());
+  if (S->getRank() > 0)
+    S->setLengths(Lengths);
+  SmallVector<Stmt *, 16> Vars;
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
+    Vars.push_back(Reader.ReadSubStmt());
+  if (S->getRank() > 0)
+    S->setVars(Vars);
+  Vars.clear();
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
+    Vars.push_back(Reader.ReadSubStmt());
+  if (S->getRank() > 0)
+    S->setIncrements(Vars);
+  S->setAssociatedStmt(Reader.ReadSubStmt());
+  S->setInits(Reader.ReadSubStmt());
+}
+
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 void ASTStmtReader::VisitCallExpr(CallExpr *E) {
@@ -693,6 +746,11 @@ void ASTStmtReader::VisitBinaryOperator(BinaryOperator *E) {
   E->setOpcode((BinaryOperator::Opcode)Record[Idx++]);
   E->setOperatorLoc(ReadSourceLocation(Record, Idx));
   E->setFPContractable((bool)Record[Idx++]);
+#if INTEL_SPECIFIC_CILKPLUS
+  if (E->Operator == OO_Subscript)
+    if (CEANIndexExpr *CIE = dyn_cast_or_null<CEANIndexExpr>(E->getArg(0)))
+      CIE->setBase(E->getCallee());
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 void ASTStmtReader::VisitCompoundAssignOperator(CompoundAssignOperator *E) {
@@ -1239,9 +1297,11 @@ void ASTStmtReader::VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
   E->Operator = (OverloadedOperatorKind)Record[Idx++];
   E->Range = Reader.ReadSourceRange(F, Record, Idx);
   E->setFPContractable((bool)Record[Idx++]);
+#if INTEL_SPECIFIC_CILKPLUS
   if (E->Operator == OO_Subscript)
     if (CEANIndexExpr *CIE = dyn_cast_or_null<CEANIndexExpr>(E->getArg(0)))
       CIE->setBase(E->getCallee());
+#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
@@ -2295,46 +2355,7 @@ void ASTStmtReader::VisitOMPOrderedDirective(OMPOrderedDirective *D) {
   VisitStmt(D);
   VisitOMPExecutableDirective(D);
 }
-// Cilk Plus Expressions and Statements.
-//===----------------------------------------------------------------------===//
-void ASTStmtReader::VisitCilkSyncStmt(CilkSyncStmt *S) {
-  VisitStmt(S);
-  S->SyncLoc = ReadSourceLocation(Record, Idx);
-}
 
-void ASTStmtReader::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtReader::VisitCilkForStmt(CilkForStmt *S) {
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtReader::VisitSIMDForStmt(SIMDForStmt *S) {
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtReader::VisitCilkRankedStmt(CilkRankedStmt *S) {
-  VisitStmt(S);
-  ++Idx;
-  SmallVector<Expr *, 16> Lengths;
-  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
-    Lengths.push_back(Reader.ReadSubExpr());
-  if (S->getRank() > 0)
-    S->setLengths(Lengths);
-  SmallVector<Stmt *, 16> Vars;
-  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
-    Vars.push_back(Reader.ReadSubStmt());
-  if (S->getRank() > 0)
-    S->setVars(Vars);
-  Vars.clear();
-  for (unsigned i = 0, N = S->getRank(); i < N; ++i)
-    Vars.push_back(Reader.ReadSubStmt());
-  if (S->getRank() > 0)
-    S->setIncrements(Vars);
-  S->setAssociatedStmt(Reader.ReadSubStmt());
-  S->setInits(Reader.ReadSubStmt());
-}
 
 void ASTStmtReader::VisitOMPAtomicDirective(OMPAtomicDirective *D) {
   VisitStmt(D);
@@ -2606,7 +2627,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case EXPR_ARRAY_SUBSCRIPT:
       S = new (Context) ArraySubscriptExpr(Empty);
       break;
-
+#if INTEL_SPECIFIC_CILKPLUS
     case EXPR_CEAN_INDEX:
       S = new (Context) CEANIndexExpr(Empty);
       break;
@@ -2614,6 +2635,8 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case EXPR_CEAN_BUILTIN:
       S = CEANBuiltinExpr::CreateEmpty(Context, Record[ASTStmtReader::NumExprFields],
                                        Record[ASTStmtReader::NumExprFields + 1]);
+      break;
+#endif // INTEL_SPECIFIC_CILKPLUS
       break;
 
     case EXPR_CALL:
@@ -3219,7 +3242,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
                                          NumArrayIndexVars);
       break;
     }
-
+#if INTEL_SPECIFIC_CILKPLUS
     case STMT_CILKSYNC:
       S = new (Context) CilkSyncStmt(Empty);
       break;
@@ -3241,6 +3264,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case STMT_SIMD_FOR:
       llvm_unreachable("not implemented yet");
       break;
+#endif // INTEL_SPECIFIC_CILKPLUS
     }
     
     // We hit a STMT_STOP, so we're done with this expression.

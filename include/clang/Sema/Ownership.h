@@ -25,6 +25,7 @@
 namespace clang {
   class CXXCtorInitializer;
   class CXXBaseSpecifier;
+  class Attr;                 //***INTEL
   class Decl;
   class Attr;
   class Expr;
@@ -277,6 +278,13 @@ namespace clang {
   inline ExprResult ExprEmpty() { return ExprResult(false); }
   inline StmtResult StmtEmpty() { return StmtResult(false); }
   inline AttrResult AttrEmpty() { return AttrResult(false); }
+
+#if INTEL_SPECIFIC_CILKPLUS
+  typedef ActionResult<Attr*> AttrResult;
+  inline AttrResult AttrError() { return AttrResult(true); }
+  inline AttrResult AttrError(const DiagnosticBuilder&) { return AttrError(); }
+  inline AttrResult AttrEmpty() { return AttrResult(false); }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   inline Expr *AssertSuccess(ExprResult R) {
     assert(!R.isInvalid() && "operation was asserted to never fail!");

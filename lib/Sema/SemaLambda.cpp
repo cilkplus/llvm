@@ -792,7 +792,13 @@ QualType Sema::performLambdaInitCaptureInitialization(SourceLocation Loc,
   // The init-capture initialization is a full-expression that must be
   // processed as one before we enter the declcontext of the lambda's
   // call-operator.
-  Result = ActOnFinishFullExpr(Init, Loc, /*DiscardedValue*/ false,
+#if INTEL_SPECIFIC_CILKPLUS
+  CilkReceiverKind CilkKind = CRK_MaybeReceiver;
+  Result = ActOnFinishFullExpr(Init, Loc, CilkKind,
+#else
+  Result = ActOnFinishFullExpr(Init, Loc,
+#endif // INTEL_SPECIFIC_CILKPLUS
+                                /*DiscardedValue*/ false,
                                /*IsConstexpr*/ false,
                                /*IsLambdaInitCaptureInitalizer*/ true);
   if (Result.isInvalid())

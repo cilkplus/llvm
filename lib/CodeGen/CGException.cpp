@@ -12,6 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "intel/CGCilkPlusRuntime.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "CGCXXABI.h"
 #include "CGCleanup.h"
 #include "CGObjCRuntime.h"
@@ -548,24 +551,37 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
-  {
-    if (getLangOpts().CilkPlus && CurCGCilkImplicitSyncInfo) {
-      // The following implicit sync is not required by the Cilk Plus
-      // Language Extension Specificition V1.1. However, this is required
-      // in N1665 [2.8.1] and other compilers also insert this implicit sync.
-      //
-      // Optimizations should be able to elide those unnecessary syncs.
-      CGM.getCilkPlusRuntime().EmitCilkSync(*this);
-    }
+#if INTEL_SPECIFIC_CILKPLUS
+  if (getLangOpts().CilkPlus) {
+    // CQ#372058 - associate landing pad in debug info with the end of the try
+    // scope. The landing pad is associated with CurEHLocation.
+    SourceLocation OldEHLocation = CurEHLocation;
+    CurEHLocation = S.getTryBlock()->getLocEnd();
+    {
+      if (CurCGCilkImplicitSyncInfo) {
+        // The following implicit sync is not required by the Cilk Plus
+        // Language Extension Specificition V1.1. However, this is required
+        // in N1665 [2.8.1] and other compilers also insert this implicit sync.
+        //
+        // Optimizations should be able to elide those unnecessary syncs.
+        CGM.getCilkPlusRuntime().EmitCilkSync(*this);
+      }
 
-    // Entering a new scope before we emit the try body. An implicit sync will
-    // be emitted on exiting the try (and before any catch blocks).
-    RunCleanupsScope Scope(*this);
-    if (CurCGCilkImplicitSyncInfo &&
-        CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
-      CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
+      // Entering a new scope before we emit the try body. An implicit sync will
+      // be emitted on exiting the try (and before any catch blocks).
+      RunCleanupsScope Scope(*this);
+      if (CurCGCilkImplicitSyncInfo &&
+          CurCGCilkImplicitSyncInfo->needsImplicitSync(&S))
+        CGM.getCilkPlusRuntime().pushCilkImplicitSyncCleanup(*this);
+      EmitStmt(S.getTryBlock());
+    }
+    // Restore EH location.
+    CurEHLocation = OldEHLocation;
+  } else
     EmitStmt(S.getTryBlock());
-  }
+#else
+  EmitStmt(S.getTryBlock());
+#endif // INTEL_SPECIFIC_CILKPLUS
   ExitCXXTryStmt(S);
 }
 
@@ -665,6 +681,11 @@ static bool isNonEHScope(const EHScope &S) {
 llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
   assert(EHStack.requiresLandingPad());
   assert(!EHStack.empty());
+
+#if INTEL_SPECIFIC_CILKPLUS
+  if (getLangOpts().CilkPlus && ExceptionsDisabled)
+    return nullptr;
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   // If exceptions are disabled, there are usually no landingpads. However, when
   // SEH is enabled, functions using SEH still get landingpads.

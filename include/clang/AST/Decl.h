@@ -1567,8 +1567,9 @@ private:
   bool HasImplicitReturnZero : 1;
   bool IsLateTemplateParsed : 1;
   bool IsConstexpr : 1;
+#if INTEL_SPECIFIC_CILKPLUS
   bool IsSpawning: 1;
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Indicates if the function uses __try.
   bool UsesSEHTry : 1;
 
@@ -1660,7 +1661,11 @@ protected:
       HasWrittenPrototype(true), IsDeleted(false), IsTrivial(false),
       IsDefaulted(false), IsExplicitlyDefaulted(false),
       HasImplicitReturnZero(false), IsLateTemplateParsed(false),
-      IsConstexpr(isConstexprSpecified), UsesSEHTry(false),
+      IsConstexpr(isConstexprSpecified),
+#if INTEL_SPECIFIC_CILKPLUS
+        IsSpawning(false),
+#endif // INTEL_SPECIFIC_CILKPLUS
+	  UsesSEHTry(false),
       HasSkippedBody(false), EndRangeLoc(NameInfo.getEndLoc()),
       TemplateOrSpecialization(),
       DNLoc(NameInfo.getInfo()) {}
@@ -1840,8 +1845,12 @@ public:
   /// Whether this is a (C++11) constexpr function or constexpr constructor.
   bool isConstexpr() const { return IsConstexpr; }
   void setConstexpr(bool IC) { IsConstexpr = IC; }
-
-  /// Whether this is a (C++11) constexpr function or constexpr constructor.
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Whether this function is a Cilk spawning function.
+  bool isSpawning() const { return IsSpawning; }
+  void setSpawning() { IsSpawning = true; }
+#endif // INTEL_SPECIFIC_CILKPLUS
+  /// \brief Indicates the function uses __try.
   bool usesSEHTry() const { return UsesSEHTry; }
   void setUsesSEHTry(bool UST) { UsesSEHTry = UST; }
 
@@ -3640,10 +3649,19 @@ private:
   unsigned ContextParam;
   /// \brief The body of the outlined function.
   llvm::PointerIntPair<Stmt *, 1, bool> BodyAndNothrow;
-
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Whether this CapturedDecl contains Cilk spawns.
+  bool IsSpawning;
+#endif // INTEL_SPECIFIC_CILKPLUS
   explicit CapturedDecl(DeclContext *DC, unsigned NumParams)
-    : Decl(Captured, DC, SourceLocation()), DeclContext(Captured),
-      NumParams(NumParams), ContextParam(0), BodyAndNothrow(nullptr, false) { }
+      : Decl(Captured, DC, SourceLocation()), DeclContext(Captured),
+        NumParams(NumParams), ContextParam(0), BodyAndNothrow(nullptr, false)
+#if INTEL_SPECIFIC_CILKPLUS
+        ,
+        IsSpawning(false)
+#endif // INTEL_SPECIFIC_CILKPLUS
+  {
+  }
 
   ImplicitParamDecl **getParams() const {
     return reinterpret_cast<ImplicitParamDecl **>(
@@ -3658,12 +3676,12 @@ public:
 
   Stmt *getBody() const override { return BodyAndNothrow.getPointer(); }
   void setBody(Stmt *B) { BodyAndNothrow.setPointer(B); }
-
-  bool isNothrow() const { return BodyAndNothrow.getInt(); }
-  void setNothrow(bool Nothrow = true) { BodyAndNothrow.setInt(Nothrow); }
-
+#if INTEL_SPECIFIC_CILKPLUS
   void setSpawning() { IsSpawning = true; }
   bool isSpawning() const { return IsSpawning; }
+#endif // INTEL_SPECIFIC_CILKPLUS
+  bool isNothrow() const { return BodyAndNothrow.getInt(); }
+  void setNothrow(bool Nothrow = true) { BodyAndNothrow.setInt(Nothrow); }
 
   unsigned getNumParams() const { return NumParams; }
 

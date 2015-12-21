@@ -19,7 +19,6 @@
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LLVM.h"
-#include "clang/Basic/PragmaSIMD.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -2066,11 +2065,43 @@ private:
   /// \brief The number of variable captured, including 'this'.
   unsigned NumCaptures;
 
-  /// \brief The implicit outlined function.
-  CapturedDecl *TheCapturedDecl;
+  /// \brief The pointer part is the implicit the outlined function and the
+  /// int part is the captured region kind, 'CR_Default' etc.
+#if INTEL_SPECIFIC_CILKPLUS
+  // The old code here used to use
+  //
+  // llvm::PointerIntPair<CapturedDecl *, 1, CapturedRegionKind> CapDeclAndKind;
+  //
+  // This had to be changed because PointerIntPair supports a maximum of
+  // only 2 bits for use for the integer, and for INTEL_CUSTOMIZATION
+  // there are at least 3 bits needed, since there are 5 separate values
+  // in the CapturedRegionKind type.  So, changed this code to use two
+  // separate fields, and created this new class that mimics some interfaces
+  // of llvm::PointerIntPair because that isolates all Intel specific
+  // changes to right here.
+  //
+  class CapturedDeclAndKindType {
+    public:
+    CapturedDeclAndKindType(CapturedDecl *CD, CapturedRegionKind CK) {
+      CapDecl = CD;
+      CapKind = CK;
+    }
 
-  /// \brief The kind of this statement, including 'CR_Default', etc.
-  CapturedRegionKind RegionKind;
+    CapturedDecl * getPointer() const { return CapDecl; }
+
+    CapturedRegionKind getInt() const { return CapKind; }
+
+    void setPointer(CapturedDecl * CD) { CapDecl = CD; }
+
+    void setInt(CapturedRegionKind CK)  { CapKind = CK; }
+
+    private:
+    CapturedDecl * CapDecl;
+    CapturedRegionKind CapKind;
+  } CapDeclAndKind;
+#else
+  llvm::PointerIntPair<CapturedDecl *, 1, CapturedRegionKind> CapDeclAndKind;
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   /// \brief The record for captured variables, a RecordDecl or CXXRecordDecl.
   RecordDecl *TheRecordDecl;

@@ -57,7 +57,10 @@ class LoopInfo {
 public:
   /// \brief Construct a new LoopInfo for the loop with entry Header.
   LoopInfo(llvm::BasicBlock *Header, const LoopAttributes &Attrs);
-
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Construct a new LoopInfo with a given loop id metadata.
+  LoopInfo(llvm::MDNode *LoopID, const LoopAttributes &Attrs);
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Get the loop id metadata for this loop.
   llvm::MDNode *getLoopID() const { return LoopID; }
 
@@ -90,6 +93,12 @@ public:
   /// applied to the loop and then cleared.
   void push(llvm::BasicBlock *Header,
             llvm::ArrayRef<const Attr *> Attrs = llvm::None);
+
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Extend the code region as part of a parallel loop which might be
+  /// inside another llvm function.
+  void push(llvm::MDNode *LoopID, bool IsParallel);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   /// \brief End the current loop.
   void pop();

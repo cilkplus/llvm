@@ -1267,6 +1267,7 @@ void StmtPrinter::VisitArraySubscriptExpr(ArraySubscriptExpr *Node) {
   OS << "]";
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
 void StmtPrinter::VisitCEANIndexExpr(CEANIndexExpr *Node) {
   if (Node->getLowerBound() && Node->getLowerBound()->getLocStart().isValid())
     PrintExpr(Node->getLowerBound());
@@ -1333,6 +1334,7 @@ void StmtPrinter::VisitCEANBuiltinExpr(CEANBuiltinExpr *Node) {
   }
   OS << ")";
 }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 void StmtPrinter::PrintCallArgs(CallExpr *Call) {
   for (unsigned i = 0, e = Call->getNumArgs(); i != e; ++i) {
@@ -1347,8 +1349,10 @@ void StmtPrinter::PrintCallArgs(CallExpr *Call) {
 }
 
 void StmtPrinter::VisitCallExpr(CallExpr *Call) {
+#if INTEL_SPECIFIC_CILKPLUS
   if (Call->isCilkSpawnCall())
     OS << "_Cilk_spawn ";
+#endif // INTEL_SPECIFIC_CILKPLUS
   PrintExpr(Call->getCallee());
   OS << "(";
   PrintCallArgs(Call);
@@ -2346,6 +2350,11 @@ void StmtPrinter::VisitAsTypeExpr(AsTypeExpr *Node) {
   OS << ")";
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
+void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
+  llvm_unreachable("not implemented yet");
+}
+
 void StmtPrinter::VisitCilkSyncStmt(CilkSyncStmt *) {
   Indent() << "_Cilk_sync;\n";
 }
@@ -2427,13 +2436,14 @@ void StmtPrinter::VisitCilkRankedStmt(CilkRankedStmt *Node) {
   }
   OS << "\n";
   Indent() << "{\n";
-  for (Stmt::child_range ChRange = Node->getInits()->children();
-       ChRange; ++ChRange)
-    PrintStmt(*ChRange);
+  Stmt::child_range Ch = Node->getInits()->children();
+  for (auto I = Ch.begin(), E = Ch.end(); I != E; ++I)
+    PrintStmt(*I);
   if (Node->getAssociatedStmt())
     PrintStmt(Node->getAssociatedStmt());
   Indent() << "}\n";
 }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 //===----------------------------------------------------------------------===//
 // Stmt method implementations

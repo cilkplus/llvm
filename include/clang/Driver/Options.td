@@ -209,6 +209,9 @@ def : Joined<["-"], "objcmt-white-list-dir-path=">, Flags<[CC1Option]>,
 def ccc_ : Joined<["-"], "ccc-">, Group<internal_Group>, Flags<[Unsupported]>;
 
 // Standard Options
+// if INTEL_SPECIFIC_CILKPLUS
+def fcilkplus : Flag <["-"], "fcilkplus">, Group<f_Group>, Flags<[CC1Option]>,  HelpText<"Enable Cilk Plus extensions">;
+// endif INTEL_SPECIFIC_CILKPLUS
 
 def _HASH_HASH_HASH : Flag<["-"], "###">, Flags<[DriverOption, CoreOption]>,
     HelpText<"Print (but do not run) the commands to run for this compilation">;

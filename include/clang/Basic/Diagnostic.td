@@ -57,8 +57,8 @@ class InGroup<DiagGroup G> { DiagGroup Group = G; }
 include "DiagnosticCategories.td"
 
 // This defines all of the named diagnostic groups.
+include "intel/DiagnosticIntelGroups.td"
 include "DiagnosticGroups.td"
-
 
 // All diagnostics emitted by the compiler are an indirect subclass of this.
 class Diagnostic<string text, DiagClass DC, Severity defaultmapping> {
@@ -125,3 +125,4 @@ include "DiagnosticParseKinds.td"
 include "DiagnosticSemaKinds.td"
 include "DiagnosticSerializationKinds.td"
 
+include "intel/DiagnosticIntel.td"

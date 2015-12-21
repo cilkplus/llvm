@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
-#include "CGCilkPlusRuntime.h"
 #include "CGDebugInfo.h"
 #include "CodeGenModule.h"
 #include "TargetInfo.h"
@@ -26,6 +25,11 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Intrinsics.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "intel/CGCilkPlusRuntime.h"
+#include "clang/Basic/CapturedStmt.h"
+#include "llvm/IR/TypeBuilder.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 using namespace clang;
 using namespace CodeGen;
 
@@ -82,7 +86,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHFinallyStmtClass:
   case Stmt::MSDependentExistsStmtClass:
     llvm_unreachable("invalid statement class to emit generically");
+#if INTEL_SPECIFIC_CILKPLUS
   case Stmt::CilkSyncStmtClass:
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Stmt::NullStmtClass:
   case Stmt::CompoundStmtClass:
   case Stmt::DeclStmtClass:
@@ -179,6 +185,20 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::SEHTryStmtClass:
     EmitSEHTryStmt(cast<SEHTryStmt>(*S));
     break;
+#if INTEL_SPECIFIC_CILKPLUS
+  case Stmt::CilkForGrainsizeStmtClass:
+    EmitCilkForGrainsizeStmt(cast<CilkForGrainsizeStmt>(*S));
+    break;
+  case Stmt::CilkForStmtClass:
+    EmitCilkForStmt(cast<CilkForStmt>(*S));
+    break;
+  case Stmt::SIMDForStmtClass:
+    EmitSIMDForStmt(cast<SIMDForStmt>(*S));
+    break;
+  case Stmt::CilkRankedStmtClass:
+    EmitCilkRankedStmt(cast<CilkRankedStmt>(*S));
+    break;
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Stmt::OMPParallelDirectiveClass:
     EmitOMPParallelDirective(cast<OMPParallelDirective>(*S));
     break;
@@ -257,8 +277,10 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
 bool CodeGenFunction::EmitSimpleStmt(const Stmt *S) {
   switch (S->getStmtClass()) {
   default: return false;
+#if INTEL_SPECIFIC_CILKPLUS
   case Stmt::CilkSyncStmtClass:
     CGM.getCilkPlusRuntime().EmitCilkSync(*this); break;
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Stmt::NullStmtClass: break;
   case Stmt::CompoundStmtClass: EmitCompoundStmt(cast<CompoundStmt>(*S)); break;
   case Stmt::DeclStmtClass:     EmitDeclStmt(cast<DeclStmt>(*S));         break;

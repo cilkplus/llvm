@@ -679,11 +679,24 @@ BUILTIN(__atomic_thread_fence, "vi", "n")
 BUILTIN(__atomic_signal_fence, "vi", "n")
 BUILTIN(__atomic_always_lock_free, "izvCD*", "n")
 BUILTIN(__atomic_is_lock_free, "izvCD*", "n")
-
-//AVT: maybe we'll include it later
-//***INTEL: Intel specific intrinsics
-//#include "../../../intel/include/Builtins.def"
 #undef ATOMIC_BUILTIN
+
+#if INTEL_SPECIFIC_CILKPLUS
+// CEAN intrinsics
+BUILTIN(__sec_reduce_add, "ii", "t")
+BUILTIN(__sec_reduce_mul, "ii", "t")
+BUILTIN(__sec_reduce_max, "ii", "t")
+BUILTIN(__sec_reduce_min, "ii", "t")
+BUILTIN(__sec_reduce_max_ind, "ii", "t")
+BUILTIN(__sec_reduce_min_ind, "ii", "t")
+BUILTIN(__sec_reduce_all_zero, "ii", "t")
+BUILTIN(__sec_reduce_all_nonzero, "ii", "t")
+BUILTIN(__sec_reduce_any_zero, "ii", "t")
+BUILTIN(__sec_reduce_any_nonzero, "ii", "t")
+BUILTIN(__sec_reduce, "iiiv*.", "t")
+BUILTIN(__sec_reduce_mutating, "vi&iv*.", "t")
+BUILTIN(__sec_implicit_index, "ii", "t")
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 // Non-overloaded atomic builtins.
 BUILTIN(__sync_synchronize, "v.", "n")

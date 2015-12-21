@@ -45,6 +45,9 @@ public:
   void VisitBlockExpr(PTR(BlockExpr) E) { }
   void VisitCXXUuidofExpr(PTR(CXXUuidofExpr) E) { }
   void VisitCXXNoexceptExpr(PTR(CXXNoexceptExpr) E) { }
+#if INTEL_SPECIFIC_CILKPLUS
+  void VisitCEANBuiltinExpr(PTR(CEANBuiltinExpr) E) { }
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   void VisitMemberExpr(PTR(MemberExpr) E) {
     // Only the base matters.

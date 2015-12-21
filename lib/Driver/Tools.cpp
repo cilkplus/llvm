@@ -4081,7 +4081,17 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
   Args.AddLastArg(CmdArgs, options::OPT_fdiagnostics_show_template_tree);
   Args.AddLastArg(CmdArgs, options::OPT_fno_elide_type);
+#if INTEL_SPECIFIC_CILKPLUS
   Args.AddLastArg(CmdArgs, options::OPT_fcilkplus);
+
+  if (Args.hasArg(options::OPT_fcilkplus))
+    if (getToolChain().getTriple().getOS() != llvm::Triple::Linux &&
+        getToolChain().getTriple().getOS() != llvm::Triple::UnknownOS &&
+        getToolChain().getTriple().getOS() != llvm::Triple::Win32 &&
+        !getToolChain().getTriple().isMacOSX() &&
+        !getToolChain().getTriple().isOSFreeBSD())
+      D.Diag(diag::err_drv_cilk_unsupported);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   // Forward flags for OpenMP
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
@@ -6553,6 +6563,11 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
+#if INTEL_SPECIFIC_CILKPLUS
+  if (Args.hasArg(options::OPT_fcilkplus))
+    CmdArgs.push_back("-lcilkrts");
+#endif // INTEL_SPECIFIC_CILKPLUS
+
   AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
   // Build the input file for -filelist (list of linker input files) in case we
   // need it later
@@ -8239,11 +8254,12 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-Bdynamic");
     CmdArgs.push_back("-lm");
   }
-  // Silence warnings when linking C code with a C++ '-stdlib' argument.
-  Args.ClaimAllArgs(options::OPT_stdlib_EQ);
-
+#if INTEL_SPECIFIC_CILKPLUS
   if (Args.hasArg(options::OPT_fcilkplus))
     CmdArgs.push_back("-lcilkrts");
+#endif // INTEL_SPECIFIC_CILKPLUS
+  // Silence warnings when linking C code with a C++ '-stdlib' argument.
+  Args.ClaimAllArgs(options::OPT_stdlib_EQ);
 
   if (!Args.hasArg(options::OPT_nostdlib)) {
     if (!Args.hasArg(options::OPT_nodefaultlibs)) {

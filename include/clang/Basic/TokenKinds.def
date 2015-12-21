@@ -388,7 +388,11 @@ KEYWORD(__FUNCSIG__                 , KEYMS)
 KEYWORD(L__FUNCTION__               , KEYMS)
 TYPE_TRAIT_1(__is_interface_class, IsInterfaceClass, KEYMS)
 TYPE_TRAIT_1(__is_sealed, IsSealed, KEYMS)
-
+#if INTEL_SPECIFIC_CILKPLUS
+KEYWORD(_Cilk_spawn                 , KEYCILKPLUS)
+KEYWORD(_Cilk_sync                  , KEYCILKPLUS)
+KEYWORD(_Cilk_for                   , KEYCILKPLUS)
+#endif  // INTEL_SPECIFIC_CILKPLUS
 // MSVC12.0 / VS2013 Type Traits
 TYPE_TRAIT_1(__is_destructible, IsDestructible, KEYMS)
 TYPE_TRAIT_1(__is_nothrow_destructible, IsNothrowDestructible, KEYMS)
@@ -753,6 +757,24 @@ ANNOTATION(pragma_cilk_grainsize_end)
 // handles #pragma omp ... directives.
 ANNOTATION(pragma_openmp)
 ANNOTATION(pragma_openmp_end)
+
+#if INTEL_SPECIFIC_CILKPLUS
+// Annotation for #pragma cilk grainsize...
+// The lexer produces these so that they only take effect when the parser
+// handles them.
+ANNOTATION(pragma_cilk_grainsize_begin)
+
+// Annotation for #pragma cilk grainsize...
+// The lexer produces these so that they only take effect when the parser
+// handles them.
+ANNOTATION(pragma_cilk_grainsize_end)
+
+// Annotation for #pragma simd
+// The lexer produces these so that they only take effect when the parser
+// handles them.
+ANNOTATION(pragma_simd)
+ANNOTATION(pragma_simd_end)
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 // Annotations for loop pragma directives #pragma clang loop ...
 // The lexer produces these so that they only take effect when the parser

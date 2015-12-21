@@ -8085,10 +8085,12 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
   // Filter out any non-conflicting previous declarations.
   filterNonConflictingPreviousDecls(*this, NewFD, Previous);
 
+#if INTEL_SPECIFIC_CILKPLUS
   // Check that Cilk elemental function requirements are met
   if (getLangOpts().CilkPlus && NewFD->hasAttr<CilkElementalAttr>() &&
       !DiagnoseElementalAttributes(NewFD))
     return false;
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   bool Redeclaration = false;
   NamedDecl *OldDecl = nullptr;
@@ -8862,8 +8864,12 @@ namespace {
 /// declaration dcl. If DirectInit is true, this is C++ direct
 /// initialization rather than copy initialization.
 void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
-                                bool DirectInit, bool TypeMayContainAuto,
-                                bool &IsCilkSpawnReceiver) {
+                                bool DirectInit, bool TypeMayContainAuto
+#if INTEL_SPECIFIC_CILKPLUS
+                                ,
+                                bool &IsCilkSpawnReceiver
+#endif // INTEL_SPECIFIC_CILKPLUS
+  ) {
   // If there is no declaration, there was an error parsing it.  Just ignore
   // the initializer.
   if (!RealDecl || RealDecl->isInvalidDecl()) {
@@ -9197,17 +9203,24 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
   //   struct T { S a, b; } t = { Temp(), Temp() }
   //
   // we should destroy the first Temp before constructing the second.
-  //
+#if INTEL_SPECIFIC_CILKPLUS
   // We may initlize this variable with a Cilk Spawn:
   //
   //  int x = _Cilk_spawn func();
   //
   CilkReceiverKind Kind = CRK_MaybeReceiver;
-  ExprResult Result = ActOnFinishFullExpr(Init, VDecl->getLocation(), Kind,
-                                          false, VDecl->isConstexpr());
+#endif // INTEL_SPECIFIC_CILKPLUS
+  ExprResult Result = ActOnFinishFullExpr(Init, VDecl->getLocation(),
+#if INTEL_SPECIFIC_CILKPLUS
+                                          Kind,
+#endif // INTEL_SPECIFIC_CILKPLUS
+
+                                          false,
+                                          VDecl->isConstexpr());
+#if INTEL_SPECIFIC_CILKPLUS
   // Confirm if this is initializing a variable with a spawn call.
   IsCilkSpawnReceiver = getLangOpts().CilkPlus && (Kind == CRK_IsReceiver);
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   if (Result.isInvalid()) {
     VDecl->setInvalidDecl();
     return;
@@ -10989,9 +11002,10 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
       MarkBaseAndMemberDestructorsReferenced(Destructor->getLocation(),
                                              Destructor->getParent());
     }
-
+#if INTEL_SPECIFIC_CILKPLUS
     if (FD && FD->hasAttr<CilkElementalAttr>())
       DiagnoseCilkElemental(FD, Body);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
     // If any errors have occurred, clear out any temporaries that may have
     // been leftover. This ensures that these temporaries won't be picked up for

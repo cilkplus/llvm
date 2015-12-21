@@ -11,6 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if INTEL_SPECIFIC_CILKPLUS
+#include "clang/Basic/intel/DeclIntel.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTMutationListener.h"
@@ -608,6 +611,9 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
       return IDNS_Ordinary | IDNS_Tag | IDNS_Type;
 
     // Never have names.
+#if INTEL_SPECIFIC_CILKPLUS
+    case CilkSpawn:
+#endif // INTEL_SPECIFIC_CILKPLUS
     case Friend:
     case FriendTemplate:
     case AccessSpec:

@@ -4,6 +4,12 @@ set(LLVM_LINK_COMPONENTS
   Support
   )
 
+if( INTEL_SPECIFIC_CILKPLUS )
+  add_subdirectory(intel)
+  set(LIBS clangParseIntel)
+endif()
+
+
 add_clang_library(clangParse
   ParseAST.cpp
   ParseCXXInlineMethods.cpp
@@ -26,4 +32,5 @@ add_clang_library(clangParse
   clangBasic
   clangLex
   clangSema
+  ${LIBS}
   )

@@ -1107,7 +1107,9 @@ CanThrowResult Sema::canThrow(const Expr *E) {
   case Expr::AsTypeExprClass:
   case Expr::BinaryConditionalOperatorClass:
   case Expr::BlockExprClass:
+#if INTEL_SPECIFIC_CILKPLUS
   case Expr::CilkSpawnExprClass:
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Expr::CUDAKernelCallExprClass:
   case Expr::DeclRefExprClass:
   case Expr::ObjCBridgedCastExprClass:
@@ -1155,7 +1157,7 @@ CanThrowResult Sema::canThrow(const Expr *E) {
   case Expr::StringLiteralClass:
     // These expressions can never throw.
     return CT_Cannot;
-
+#if INTEL_SPECIFIC_CILKPLUS
   case Expr::CEANIndexExprClass: {
     CanThrowResult CT = E->isTypeDependent() ? CT_Dependent : CT_Cannot;
     return mergeCanThrow(CT, canSubExprsThrow(*this, E));
@@ -1174,7 +1176,7 @@ CanThrowResult Sema::canThrow(const Expr *E) {
       CT = mergeCanThrow(CT, canSubExprsThrow(*this, *I));
     return mergeCanThrow(CT, canSubExprsThrow(*this, cast<CEANBuiltinExpr>(E)->getReturnExpr()));
   }
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Expr::MSPropertyRefExprClass:
     llvm_unreachable("Invalid class for expression");
 

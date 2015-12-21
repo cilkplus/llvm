@@ -258,8 +258,6 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::ObjCDictionaryLiteralClass:
   case Stmt::ObjCBoxedExprClass:
   case Stmt::ObjCSubscriptRefExprClass:
-  case Stmt::CEANIndexExprClass:
-  case Stmt::CEANBuiltinExprClass:
     K = CXCursor_UnexposedExpr;
     break;
 
@@ -527,7 +525,10 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::MSDependentExistsStmtClass:
     K = CXCursor_UnexposedStmt;
     break;
-
+#if INTEL_SPECIFIC_CILKPLUS
+  case Stmt::CEANIndexExprClass:
+  case Stmt::CEANBuiltinExprClass:
+    K = CXCursor_UnexposedExpr;
   case Stmt::CilkSyncStmtClass:
   case Stmt::CilkSpawnExprClass:
   case Stmt::CilkForGrainsizeStmtClass:
@@ -535,7 +536,10 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::SIMDForStmtClass:
     K = CXCursor_UnexposedStmt;
     break;
-
+  case Stmt::CilkRankedStmtClass:
+    K = CXCursor_CilkRankedStmt;
+    break;
+#endif // INTEL_SPECIFIC_CILKPLUS
   case Stmt::OMPParallelDirectiveClass:
     K = CXCursor_OMPParallelDirective;
     break;

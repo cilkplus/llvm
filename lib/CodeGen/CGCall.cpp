@@ -14,7 +14,9 @@
 
 #include "CGCall.h"
 #include "ABIInfo.h"
-#include "CGCilkPlusRuntime.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "intel/CGCilkPlusRuntime.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "CGCXXABI.h"
 #include "CodeGenFunction.h"
 #include "CodeGenModule.h"
@@ -3107,7 +3109,11 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                                  const CallArgList &CallArgs,
                                  const Decl *TargetDecl,
                                  llvm::Instruction **callOrInvoke,
-                                 bool IsCilkSpawnCall) {
+#if INTEL_SPECIFIC_CILKPLUS
+                                 ,
+                                 bool IsCilkSpawnCall
+#endif // INTEL_SPECIFIC_CILKPLUS
+                                ) {
   // FIXME: We no longer need the types from CallArgs; lift up and simplify.
 
   // Handle struct-return functions by passing a pointer to the
@@ -3449,7 +3455,12 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                              CallingConv, true);
   llvm::AttributeSet Attrs = llvm::AttributeSet::get(getLLVMContext(),
                                                      AttributeList);
-
+#if INTEL_SPECIFIC_CILKPLUS
+  // If this call is a Cilk spawn call, then we need to emit the prologue
+  // before emitting the real call.
+  if (IsCilkSpawnCall)
+    CGM.getCilkPlusRuntime().EmitCilkHelperPrologue(*this);
+#endif // INTEL_SPECIFIC_CILKPLUS
   llvm::BasicBlock *InvokeDest = nullptr;
   if (!Attrs.hasAttribute(llvm::AttributeSet::FunctionIndex,
                           llvm::Attribute::NoUnwind) ||

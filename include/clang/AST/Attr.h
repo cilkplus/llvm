@@ -39,7 +39,7 @@ namespace clang {
   class QualType;
   class FunctionDecl;
   class TypeSourceInfo;
-  class Sema;
+  class Sema;           //***INTEL_SPECIFIC_CILKPLUS
 
 /// Attr - This represents one attribute.
 class Attr {

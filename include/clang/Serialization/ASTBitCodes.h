@@ -1246,10 +1246,11 @@ namespace clang {
       EXPR_PSEUDO_OBJECT,
       /// \brief An AtomicExpr record.
       EXPR_ATOMIC,
+#if INTEL_SPECIFIC_CILKPLUS
       /// \brief A CEANIndexExpr record.
       EXPR_CEAN_INDEX,
       EXPR_CEAN_BUILTIN,
-
+#endif // INTEL_SPECIFIC_CILKPLUS
       // Objective-C
 
       /// \brief An ObjCStringLiteral record.
@@ -1414,14 +1415,16 @@ namespace clang {
       EXPR_OBJC_BRIDGED_CAST,     // ObjCBridgedCastExpr
       
       STMT_MS_DEPENDENT_EXISTS,   // MSDependentExistsStmt
-      EXPR_LAMBDA,                // LambdaExpr
-
+      EXPR_LAMBDA                 // LambdaExpr
+#if INTEL_SPECIFIC_CILKPLUS
       // Cilk Plus
+      ,
       STMT_CILKSYNC,
       STMT_CILK_FOR_GRAINSIZE,
       STMT_CILK_FOR,
       STMT_SIMD_FOR,
       STMT_CILK_RANKED
+#endif // INTEL_SPECIFIC_CILKPLUS
     };
 
     /// \brief The kinds of designators that can occur in a
