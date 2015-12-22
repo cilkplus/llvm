@@ -1238,21 +1238,6 @@ BUILTIN(__builtin_subcll, "ULLiULLiCULLiCULLiCULLi*", "n")
 BUILTIN(__notify_intrinsic, "vcC*vCD*", "n")
 BUILTIN(__notify_zc_intrinsic, "vcC*vCD*", "n")
 
-// CEAN intrinsics
-BUILTIN(__sec_reduce_add, "ii", "t")
-BUILTIN(__sec_reduce_mul, "ii", "t")
-BUILTIN(__sec_reduce_max, "ii", "t")
-BUILTIN(__sec_reduce_min, "ii", "t")
-BUILTIN(__sec_reduce_max_ind, "ii", "t")
-BUILTIN(__sec_reduce_min_ind, "ii", "t")
-BUILTIN(__sec_reduce_all_zero, "ii", "t")
-BUILTIN(__sec_reduce_all_nonzero, "ii", "t")
-BUILTIN(__sec_reduce_any_zero, "ii", "t")
-BUILTIN(__sec_reduce_any_nonzero, "ii", "t")
-BUILTIN(__sec_reduce, "iiiv*", "t")
-BUILTIN(__sec_reduce_mutating, "vi&iv*", "t")
-BUILTIN(__sec_implicit_index, "ii", "t")
-
 BUILTIN(__assume_aligned, "v.", "tn")
 
 // Checked Arithmetic Builtins for Security.

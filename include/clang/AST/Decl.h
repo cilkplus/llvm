@@ -1248,10 +1248,6 @@ public:
     NonParmVarDeclBits.IsInitCapture = IC;
   }
 
-  /// Whether this variable is the implicit variable for a lambda init-capture.
-  bool isInitCapture() const { return VarDeclBits.IsInitCapture; }
-  void setInitCapture(bool IC) { VarDeclBits.IsInitCapture = IC; }
-
   /// Whether this local extern variable declaration's previous declaration
   /// was declared in the same block scope. Only correct in C++.
   bool isPreviousDeclInSameBlockScope() const {
@@ -2455,10 +2451,6 @@ public:
   FieldDecl *getCanonicalDecl() override { return getFirstDecl(); }
   const FieldDecl *getCanonicalDecl() const { return getFirstDecl(); }
 
-  /// Retrieves the canonical declaration of this field.
-  FieldDecl *getCanonicalDecl() { return getFirstDecl(); }
-  const FieldDecl *getCanonicalDecl() const { return getFirstDecl(); }
-
   // Implement isa/cast/dyncast/etc.
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K >= firstField && K <= lastField; }
@@ -2499,10 +2491,6 @@ public:
 
   /// Retrieves the canonical declaration of this enumerator.
   EnumConstantDecl *getCanonicalDecl() override { return getFirstDecl(); }
-  const EnumConstantDecl *getCanonicalDecl() const { return getFirstDecl(); }
-
-  /// Retrieves the canonical declaration of this enumerator.
-  EnumConstantDecl *getCanonicalDecl() { return getFirstDecl(); }
   const EnumConstantDecl *getCanonicalDecl() const { return getFirstDecl(); }
 
   // Implement isa/cast/dyncast/etc.
@@ -3726,41 +3714,6 @@ public:
   static CapturedDecl *castFromDeclContext(const DeclContext *DC) {
     return static_cast<CapturedDecl *>(const_cast<DeclContext *>(DC));
   }
-
-  friend class ASTDeclReader;
-  friend class ASTDeclWriter;
-};
-
-class CilkSpawnDecl : public Decl {
-  /// \brief The CapturedStmt associated to the expression or statement with
-  /// a Cilk spawn call.
-  CapturedStmt *CapturedSpawn;
-
-  CilkSpawnDecl(DeclContext *DC, CapturedStmt *Spawn);
-
-public:
-  static CilkSpawnDecl *Create(ASTContext &C, DeclContext *DC,
-                               CapturedStmt *Spawn);
-  static CilkSpawnDecl *CreateDeserialized(ASTContext &C, unsigned ID);
-
-  /// \brief Returns if this Cilk spawn has a receiver.
-  bool hasReceiver() const;
-
-  /// \brief Returns the receiver declaration.
-  VarDecl *getReceiverDecl() const;
-
-  /// \brief Returns the expression or statement with a Cilk spawn.
-  Stmt *getSpawnStmt();
-  const Stmt *getSpawnStmt() const {
-    return const_cast<CilkSpawnDecl *>(this)->getSpawnStmt();
-  }
-
-  /// \brief Returns the associated CapturedStmt.
-  CapturedStmt *getCapturedStmt() { return CapturedSpawn; }
-  const CapturedStmt *getCapturedStmt() const { return CapturedSpawn; }
-
-  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
-  static bool classofKind(Kind K) { return K == CilkSpawn; }
 
   friend class ASTDeclReader;
   friend class ASTDeclWriter;

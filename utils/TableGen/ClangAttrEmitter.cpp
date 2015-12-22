@@ -2292,7 +2292,9 @@ void EmitClangAttrTemplateInstantiate(RecordKeeper &Records, raw_ostream &OS) {
      << "} // end namespace clang\n";
 }
 
-typedef std::vector<std::pair<std::string, Record *> > ParsedAttrMap;
+// Emits the list of parsed attributes.
+void EmitClangAttrParsedAttrList(RecordKeeper &Records, raw_ostream &OS) {
+  emitSourceFileHeader("List of all attributes that Clang recognizes", OS);
 
   OS << "#ifndef PARSED_ATTR\n";
   OS << "#define PARSED_ATTR(NAME) NAME\n";

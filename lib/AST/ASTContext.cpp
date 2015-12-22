@@ -57,7 +57,7 @@ unsigned ASTContext::NumImplicitDestructors;
 unsigned ASTContext::NumImplicitDestructorsDeclared;
 
 enum FloatingRank {
-  HalfRank, FloatRank, DoubleRank, LongDoubleRank, Float128Rank
+  HalfRank, FloatRank, DoubleRank, LongDoubleRank
 };
 
 RawComment *ASTContext::getRawCommentForDeclNoCache(const Decl *D) const {
@@ -1082,15 +1082,6 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target) {
   // half type (OpenCL 6.1.1.1) / ARM NEON __fp16
   InitBuiltinType(HalfTy, BuiltinType::Half);
 
-  // float128 type
-  if (LangOpts.Float128) {
-    InitBuiltinType(Float128Ty, BuiltinType::Float128);
-    Float128ComplexTy = getComplexType(Float128Ty);
-  } else {
-    Float128Ty = LongDoubleTy;
-    Float128ComplexTy = LongDoubleComplexTy;
-  }
-
   // Builtin type used to help define __builtin_va_list.
   VaListTagTy = QualType();
 }
@@ -1312,8 +1303,6 @@ const llvm::fltSemantics &ASTContext::getFloatTypeSemantics(QualType T) const {
   case BuiltinType::Float:      return Target->getFloatFormat();
   case BuiltinType::Double:     return Target->getDoubleFormat();
   case BuiltinType::LongDouble: return Target->getLongDoubleFormat();
-  case BuiltinType::Float128: return LangOpts.Float128 ? llvm::APFloat::IEEEquad
-                                                       : Target->getLongDoubleFormat();
   }
 }
 
@@ -1611,10 +1600,6 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     case BuiltinType::Half:
       Width = Target->getHalfWidth();
       Align = Target->getHalfAlign();
-      break;
-    case BuiltinType::Float128:
-      Width = LangOpts.Float128 ? 128 : Target->getLongDoubleWidth();
-      Align = LangOpts.Float128 ? 128 : Target->getLongDoubleAlign();
       break;
     case BuiltinType::Float:
       Width = Target->getFloatWidth();
@@ -4539,7 +4524,6 @@ static FloatingRank getFloatingRank(QualType T) {
   case BuiltinType::Float:      return FloatRank;
   case BuiltinType::Double:     return DoubleRank;
   case BuiltinType::LongDouble: return LongDoubleRank;
-  case BuiltinType::Float128: return Float128Rank;
   }
 }
 
@@ -4556,8 +4540,6 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
     case FloatRank:      return FloatComplexTy;
     case DoubleRank:     return DoubleComplexTy;
     case LongDoubleRank: return LongDoubleComplexTy;
-    case Float128Rank: return LangOpts.Float128 ?
-                              Float128ComplexTy : LongDoubleComplexTy;
     }
   }
 
@@ -4567,8 +4549,6 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
   case FloatRank:      return FloatTy;
   case DoubleRank:     return DoubleTy;
   case LongDoubleRank: return LongDoubleTy;
-  case Float128Rank: return LangOpts.Float128 ?
-                            Float128Ty : LongDoubleTy;
   }
   llvm_unreachable("getFloatingRank(): illegal value for rank");
 }
@@ -5370,7 +5350,6 @@ static char getObjCEncodingForPrimitiveKind(const ASTContext *C,
     case BuiltinType::Float:      return 'f';
     case BuiltinType::Double:     return 'd';
     case BuiltinType::LongDouble: return 'D';
-    case BuiltinType::Float128:   return 'Q';
     case BuiltinType::NullPtr:    return '*'; // like char*
 
     case BuiltinType::Half:

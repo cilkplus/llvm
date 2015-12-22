@@ -27,7 +27,6 @@ namespace clang {
   class CXXBaseSpecifier;
   class Attr;                 //***INTEL
   class Decl;
-  class Attr;
   class Expr;
   class ParsedTemplateArgument;
   class QualType;
@@ -253,7 +252,6 @@ namespace clang {
 
   typedef ActionResult<Expr*> ExprResult;
   typedef ActionResult<Stmt*> StmtResult;
-  typedef ActionResult<Attr*> AttrResult;
   typedef ActionResult<ParsedType> TypeResult;
   typedef ActionResult<CXXBaseSpecifier*> BaseResult;
   typedef ActionResult<CXXCtorInitializer*> MemInitResult;
@@ -269,15 +267,12 @@ namespace clang {
 
   inline ExprResult ExprError() { return ExprResult(true); }
   inline StmtResult StmtError() { return StmtResult(true); }
-  inline AttrResult AttrError() { return AttrResult(true); }
 
   inline ExprResult ExprError(const DiagnosticBuilder&) { return ExprError(); }
   inline StmtResult StmtError(const DiagnosticBuilder&) { return StmtError(); }
-  inline AttrResult AttrError(const DiagnosticBuilder&) { return AttrError(); }
 
   inline ExprResult ExprEmpty() { return ExprResult(false); }
   inline StmtResult StmtEmpty() { return StmtResult(false); }
-  inline AttrResult AttrEmpty() { return AttrResult(false); }
 
 #if INTEL_SPECIFIC_CILKPLUS
   typedef ActionResult<Attr*> AttrResult;

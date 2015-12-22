@@ -34,8 +34,6 @@ class ASTUnresolvedSet {
 
   friend class LazyASTUnresolvedSet;
 
-  friend class LazyASTUnresolvedSet;
-
 public:
   ASTUnresolvedSet() {}
   ASTUnresolvedSet(ASTContext &C, unsigned N) : Decls(C, N) {}

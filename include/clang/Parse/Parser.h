@@ -174,11 +174,6 @@ class Parser : public CodeCompletionHandler {
 
   std::unique_ptr<CommentHandler> CommentSemaHandler;
 
-  // Pragma region
-  OwningPtr<PragmaHandler> RegionHandler;
-  // Pragma endregion
-  OwningPtr<PragmaHandler> EndRegionHandler;
-
   /// Whether the '>' token acts as an operator or not. This will be
   /// true except when we are parsing an expression within a C++
   /// template argument list, where the '>' closes the template
@@ -1519,13 +1514,14 @@ private:
                                   bool EnteringContext, IdentifierInfo &II,
                                   CXXScopeSpec &SS);
 
-public:
+public:   //***INTEL
   bool ParseOptionalCXXScopeSpecifier(CXXScopeSpec &SS,
                                       ParsedType ObjectType,
                                       bool EnteringContext,
                                       bool *MayBePseudoDestructor = nullptr,
                                       bool IsTypename = false,
                                       IdentifierInfo **LastII = nullptr);
+private:  //***INTEL
 
   void CheckForLParenAfterColonColon();
 
@@ -2035,11 +2031,6 @@ public:
   TPResult
   isCXXDeclarationSpecifier(TPResult BracedCastResult = TPResult::False,
                             bool *HasMissingTypename = nullptr);
-
-  /// Given that isCXXDeclarationSpecifier returns \c TPResult::True or
-  /// \c TPResult::Ambiguous, determine whether the decl-specifier would be
-  /// a type-specifier other than a cv-qualifier.
-  bool isCXXDeclarationSpecifierAType();
 
   /// Given that isCXXDeclarationSpecifier returns \c TPResult::True or
   /// \c TPResult::Ambiguous, determine whether the decl-specifier would be

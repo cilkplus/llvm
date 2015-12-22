@@ -237,26 +237,6 @@ public:
   virtual void PragmaWarningPop(SourceLocation Loc) {
   }
 
-  /// \brief Called when an OpenCL extension is either disabled or
-  /// enabled with a pragma.
-  virtual void PragmaOpenCLExtension(SourceLocation NameLoc, 
-                                     const IdentifierInfo *Name,
-                                     SourceLocation StateLoc, unsigned State) {
-  }
-
-  /// \brief Callback invoked when a \#pragma warning directive is read.
-  virtual void PragmaWarning(SourceLocation Loc, StringRef WarningSpec,
-                             ArrayRef<int> Ids) {
-  }
-
-  /// \brief Callback invoked when a \#pragma warning(push) directive is read.
-  virtual void PragmaWarningPush(SourceLocation Loc, int Level) {
-  }
-
-  /// \brief Callback invoked when a \#pragma warning(pop) directive is read.
-  virtual void PragmaWarningPop(SourceLocation Loc) {
-  }
-
   /// \brief Called by Preprocessor::HandleMacroExpandedIdentifier when a
   /// macro invocation is found.
   virtual void MacroExpands(const Token &MacroNameTok,

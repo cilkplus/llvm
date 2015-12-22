@@ -45,17 +45,6 @@ void LazyASTUnresolvedSet::getFromExternalSource(ASTContext &C) const {
   Impl.Decls.setLazy(false);
 }
 
-void LazyASTUnresolvedSet::getFromExternalSource(ASTContext &C) const {
-  ExternalASTSource *Source = C.getExternalSource();
-  assert(Impl.Decls.isLazy() && "getFromExternalSource for non-lazy set");
-  assert(Source && "getFromExternalSource with no external source");
-
-  for (ASTUnresolvedSet::iterator I = Impl.begin(); I != Impl.end(); ++I)
-    I.setDecl(cast<NamedDecl>(Source->GetExternalDecl(
-        reinterpret_cast<uintptr_t>(I.getDecl()) >> 2)));
-  Impl.Decls.setLazy(false);
-}
-
 CXXRecordDecl::DefinitionData::DefinitionData(CXXRecordDecl *D)
   : UserDeclaredConstructor(false), UserDeclaredSpecialMembers(0),
     Aggregate(true), PlainOldData(true), Empty(true), Polymorphic(false),

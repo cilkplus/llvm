@@ -916,37 +916,6 @@ public:
     return IdentifierNamespace & IDNS_LocalExtern;
   }
 
-  /// \brief Whether this declaration has Cilk spawns.
-  ///
-  /// Currently only FunctionDecl and CapturedDecl can have Cilk spawns.
-  bool isSpawning() const;
-
-  /// \brief Changes the namespace of this declaration to reflect that it's
-  /// a function-local extern declaration.
-  ///
-  /// These declarations appear in the lexical context of the extern
-  /// declaration, but in the semantic context of the enclosing namespace
-  /// scope.
-  void setLocalExternDecl() {
-    assert((IdentifierNamespace == IDNS_Ordinary ||
-            IdentifierNamespace == IDNS_OrdinaryFriend) &&
-           "namespace is not ordinary");
-
-    Decl *Prev = getPreviousDecl();
-    IdentifierNamespace &= ~IDNS_Ordinary;
-
-    IdentifierNamespace |= IDNS_LocalExtern;
-    if (Prev && Prev->getIdentifierNamespace() & IDNS_Ordinary)
-      IdentifierNamespace |= IDNS_Ordinary;
-  }
-
-  /// \brief Determine whether this is a block-scope declaration with linkage.
-  /// This will either be a local variable declaration declared 'extern', or a
-  /// local function declaration.
-  bool isLocalExternDecl() {
-    return IdentifierNamespace & IDNS_LocalExtern;
-  }
-
   /// \brief Changes the namespace of this declaration to reflect that it's
   /// the object of a friend declaration.
   ///

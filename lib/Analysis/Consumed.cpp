@@ -27,7 +27,6 @@
 #include "clang/Basic/OperatorKinds.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/raw_ostream.h"
@@ -675,14 +674,6 @@ bool ConsumedStmtVisitor::handleCall(const CallExpr *Call, const Expr *ObjArg,
       PropagationMap.insert(PairType(Call,
         PropagationInfo(PInfo.getVar(), testsFor(FunD))));
     }
-  } else if (Constructor->isCopyConstructor()) {
-    forwardInfo(Call->getArg(0), Call);
-    
-  } else {
-    // TODO: Adjust state of args appropriately.
-    
-    ConsumedState RetState = mapConsumableAttrState(ThisType);
-    PropagationMap.insert(PairType(Call, PropagationInfo(RetState)));
   }
   return false;
 }
@@ -1096,65 +1087,13 @@ void ConsumedBlockInfo::discardInfo(const CFGBlock *Block) {
   StateMapsArray[BlockID] = nullptr;
 }
 
-ConsumedStateMap* ConsumedBlockInfo::getInfo(const CFGBlock *Block) {
+std::unique_ptr<ConsumedStateMap>
+ConsumedBlockInfo::getInfo(const CFGBlock *Block) {
   assert(Block && "Block pointer must not be NULL");
-  
-  ConsumedStateMap *StateMap = StateMapsArray[Block->getBlockID()];
-  if (isBackEdgeTarget(Block)) {
-    return new ConsumedStateMap(*StateMap);
-  } else {
-    StateMapsArray[Block->getBlockID()] = nullptr;
-    return StateMap;
-  }
-  return false;
-}
 
-void ConsumedStateMap::checkParamsForReturnTypestate(SourceLocation BlameLoc,
-  ConsumedWarningsHandlerBase &WarningsHandler) const {
-  
-  ConsumedState ExpectedState;
-  
-  for (VarMapType::const_iterator DMI = VarMap.begin(), DME = VarMap.end();
-       DMI != DME; ++DMI) {
-    
-    if (isa<ParmVarDecl>(DMI->first)) {
-      const ParmVarDecl *Param = cast<ParmVarDecl>(DMI->first);
-      
-      if (!Param->hasAttr<ReturnTypestateAttr>()) continue;
-      
-      ExpectedState =
-        mapReturnTypestateAttrState(Param->getAttr<ReturnTypestateAttr>());
-      
-      if (DMI->second != ExpectedState) {
-        WarningsHandler.warnParamReturnTypestateMismatch(BlameLoc,
-          Param->getNameAsString(), stateToString(ExpectedState),
-          stateToString(DMI->second));
-      }
-    }
-  }
-}
-
-void ConsumedStateMap::clearTemporaries() {
-  TmpMap.clear();
-}
-
-ConsumedState ConsumedStateMap::getState(const VarDecl *Var) const {
-  VarMapType::const_iterator Entry = VarMap.find(Var);
-  
-  if (Entry != VarMap.end())
-    return Entry->second;
-    
-  return CS_None;
-}
-
-ConsumedState
-ConsumedStateMap::getState(const CXXBindTemporaryExpr *Tmp) const {
-  TmpMapType::const_iterator Entry = TmpMap.find(Tmp);
-  
-  if (Entry != TmpMap.end())
-    return Entry->second;
-  
-  return CS_None;
+  auto &Entry = StateMapsArray[Block->getBlockID()];
+  return isBackEdgeTarget(Block) ? llvm::make_unique<ConsumedStateMap>(*Entry)
+                                 : std::move(Entry);
 }
 
 bool ConsumedBlockInfo::isBackEdge(const CFGBlock *From, const CFGBlock *To) {

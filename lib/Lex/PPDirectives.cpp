@@ -1721,20 +1721,6 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
           CurPTHLexer->getEOF(Result);
         }
       }
-
-      if (IncludeKind != 3) {
-        // Let the parser know that we hit a module import, and it should
-        // make the module visible.
-        // FIXME: Produce this as the current token directly, rather than
-        // allocating a new token for it.
-        Token *Tok = new Token[1];
-        Tok[0].startToken();
-        Tok[0].setKind(tok::annot_module_include);
-        Tok[0].setLocation(HashLoc);
-        Tok[0].setAnnotationEndLoc(End);
-        Tok[0].setAnnotationValue(Imported);
-        EnterTokenStream(Tok, 1, true, true);
-      }
       return;
     }
   }

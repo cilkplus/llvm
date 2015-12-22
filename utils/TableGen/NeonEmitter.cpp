@@ -982,11 +982,6 @@ std::string Intrinsic::getInstTypeCode(Type T, ClassKind CK) {
   if (CK == ClassB) {
     typeCode = '\0';
   }
-  char ins = Insert_BHSD_Suffix(typestr);
-  if(ins){
-    size_t pos = s.find('_');
-    s = s.insert(pos, &ins, 1);
-  }
 
   std::string S;
   if (typeCode != '\0')
@@ -995,6 +990,10 @@ std::string Intrinsic::getInstTypeCode(Type T, ClassKind CK) {
     S += utostr(T.getElementSizeInBits());
 
   return S;
+}
+
+static bool isFloatingPointProtoModifier(char Mod) {
+  return Mod == 'F' || Mod == 'f';
 }
 
 std::string Intrinsic::getBuiltinTypeStr() {
@@ -1363,75 +1362,6 @@ void Intrinsic::emitBodyAsBuiltinCall() {
     }
 
     S += Arg + ", ";
-  }
-  case OpScalarQDMullLane: {
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    s += MangleName("vqdmull", typestr, ClassS) + "(__a, " +
-    "vget_lane_" + typeCode + "(b, __c));";
-    break;
-  }
-  case OpScalarQDMullLaneQ: {
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    s += MangleName("vqdmull", typestr, ClassS) + "(__a, " +
-    "vgetq_lane_" + typeCode + "(b, __c));";
-    break;
-  }
-  case OpScalarQDMulHiLane: {
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    s += MangleName("vqdmulh", typestr, ClassS) + "(__a, " +
-    "vget_lane_" + typeCode + "(__b, __c));";
-    break;
-  }
-  case OpScalarQDMulHiLaneQ: {
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    s += MangleName("vqdmulh", typestr, ClassS) + "(__a, " +
-    "vgetq_lane_" + typeCode + "(__b, __c));";
-    break;
-  }
-  case OpScalarQRDMulHiLane: {
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    s += MangleName("vqrdmulh", typestr, ClassS) + "(__a, " +
-    "vget_lane_" + typeCode + "(__b, __c));";
-    break;
-  }
-  case OpScalarQRDMulHiLaneQ: {
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    s += MangleName("vqrdmulh", typestr, ClassS) + "(__a, " +
-    "vgetq_lane_" + typeCode + "(__b, __c));";
-    break;
-  }
-  case OpScalarGetLane:{
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    if (quad) {
-     s += "int16x8_t __a1 = vreinterpretq_s16_f16(__a);\\\n";
-     s += "  vgetq_lane_s16(__a1, __b);";
-    } else {
-     s += "int16x4_t __a1 = vreinterpret_s16_f16(__a);\\\n";
-     s += "  vget_lane_s16(__a1, __b);";
-    }
-    break;
-  }
-  case OpScalarSetLane:{
-    std::string typeCode = "";
-    InstructionTypeCode(typestr, ClassS, quad, typeCode);
-    s += "int16_t __a1 = (int16_t)__a;\\\n";
-    if (quad) {
-     s += "  int16x8_t __b1 = vreinterpretq_s16_f16(b);\\\n";
-     s += "  int16x8_t __b2 = vsetq_lane_s16(__a1, __b1, __c);\\\n";
-     s += "  vreinterpretq_f16_s16(__b2);";
-    } else {
-     s += "  int16x4_t __b1 = vreinterpret_s16_f16(b);\\\n";
-     s += "  int16x4_t __b2 = vset_lane_s16(__a1, __b1, __c);\\\n";
-     s += "  vreinterpret_f16_s16(__b2);";
-    }
-    break;
   }
 
   // Extra constant integer to hold type class enum for this function, e.g. s8

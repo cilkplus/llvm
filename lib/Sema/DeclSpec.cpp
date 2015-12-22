@@ -351,10 +351,9 @@ bool Declarator::isStaticMember() {
               getName().OperatorFunctionId.Operator));
 }
 
-bool DeclSpec::hasTagDefinition() const {
-  if (!TypeSpecOwned)
-    return false;
-  return cast<TagDecl>(getRepAsDecl())->isCompleteDefinition();
+bool Declarator::isCtorOrDtor() {
+  return (getName().getKind() == UnqualifiedId::IK_ConstructorName) ||
+         (getName().getKind() == UnqualifiedId::IK_DestructorName);
 }
 
 bool DeclSpec::hasTagDefinition() const {

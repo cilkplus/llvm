@@ -7047,10 +7047,6 @@ def warn_empty_if_body : Warning<
   "if statement has empty body">, InGroup<EmptyBody>;
 def warn_empty_for_body : Warning<
   "for loop has empty body">, InGroup<EmptyBody>;
-def warn_empty_cilk_for_body : Warning<
-  "Cilk for loop has empty body">, InGroup<EmptyBody>;
-def warn_empty_simd_for_body : Warning<
-  "SIMD for loop has empty body">, InGroup<EmptyBody>;
 def warn_empty_range_based_for_body : Warning<
   "range-based for loop has empty body">, InGroup<EmptyBody>;
 def warn_empty_while_body : Warning<

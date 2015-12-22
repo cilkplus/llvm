@@ -523,7 +523,6 @@ NumericLiteralParser::NumericLiteralParser(StringRef TokSpelling,
   isUnsigned = false;
   isLongLong = false;
   isFloat = false;
-  isFloat128 = false;
   isImaginary = false;
   MicrosoftInteger = 0;
   hadError = false;
@@ -583,15 +582,8 @@ NumericLiteralParser::NumericLiteralParser(StringRef TokSpelling,
     case 'f':      // FP Suffix for "float"
     case 'F':
       if (!isFPConstant) break;  // Error for integer constant.
-      if (isFloat || isLong || isFloat128) break; // FF, LF invalid.
+      if (isFloat || isLong) break; // FF, LF invalid.
       isFloat = true;
-      continue;  // Success.
-    case 'q':      // FP Suffix for "_Quad"
-    case 'Q':
-      if (!PP.getLangOpts().Float128) break;
-      if (!isFPConstant) break;  // Error for integer constant.
-      if (isFloat || isLong || isFloat128) break; // FF, LF invalid.
-      isFloat128 = true;
       continue;  // Success.
     case 'u':
     case 'U':
@@ -601,7 +593,7 @@ NumericLiteralParser::NumericLiteralParser(StringRef TokSpelling,
       continue;  // Success.
     case 'l':
     case 'L':
-      if (isLong || isLongLong || isFloat128) break;  // Cannot be repeated.
+      if (isLong || isLongLong) break;  // Cannot be repeated.
       if (isFloat) break;               // LF invalid.
 
       // Check for long long.  The L's need to be adjacent and the same case.

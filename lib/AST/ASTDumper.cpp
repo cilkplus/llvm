@@ -509,7 +509,6 @@ namespace  {
     void VisitCompoundAssignOperator(const CompoundAssignOperator *Node);
     void VisitAddrLabelExpr(const AddrLabelExpr *Node);
     void VisitBlockExpr(const BlockExpr *Node);
-    void VisitCilkSpawnExpr(const CilkSpawnExpr *Node);
     void VisitOpaqueValueExpr(const OpaqueValueExpr *Node);
 
     // C++
@@ -1680,17 +1679,6 @@ void ASTDumper::VisitAttributedStmt(const AttributedStmt *Node) {
     dumpAttr(*I);
 }
 
-void ASTDumper::VisitSIMDForStmt(const SIMDForStmt *Node) {
-  VisitStmt(Node);
-  for (ArrayRef<Attr *>::iterator I = Node->getSIMDAttrs().begin(),
-                                  E = Node->getSIMDAttrs().end();
-       I != E; ++I) {
-    if (I + 1 == E)
-      lastChild();
-    dumpAttr(*I);
-  }
-}
-
 void ASTDumper::VisitLabelStmt(const LabelStmt *Node) {
   VisitStmt(Node);
   OS << " '" << Node->getName() << "'";
@@ -1971,11 +1959,6 @@ void ASTDumper::VisitCompoundAssignOperator(
 void ASTDumper::VisitBlockExpr(const BlockExpr *Node) {
   VisitExpr(Node);
   dumpDecl(Node->getBlockDecl());
-}
-
-void ASTDumper::VisitCilkSpawnExpr(const CilkSpawnExpr *Node) {
-  VisitExpr(Node);
-  dumpDecl(Node->getSpawnDecl());
 }
 
 void ASTDumper::VisitOpaqueValueExpr(const OpaqueValueExpr *Node) {

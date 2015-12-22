@@ -28,7 +28,6 @@ class EditedSource {
   const SourceManager &SourceMgr;
   const LangOptions &LangOpts;
   const PPConditionalDirectiveRecord *PPRec;
-  const bool ForceCommitInSystemHeader;
 
   struct FileEdit {
     StringRef Text;
@@ -54,10 +53,6 @@ public:
   const LangOptions &getLangOpts() const { return LangOpts; }
   const PPConditionalDirectiveRecord *getPPCondDirectiveRecord() const {
     return PPRec;
-  }
-  
-  bool getForceCommitInSystemHeader() const {
-    return ForceCommitInSystemHeader;
   }
 
   bool canInsertInOffset(SourceLocation OrigLoc, FileOffset Offs);

@@ -240,15 +240,6 @@ public:
   /// method returns NULL.
   const void *getMemoizationData() const { return MemoizationData; }
 
-  /// \brief Prints the node to the given output stream.
-  void print(llvm::raw_ostream &OS, const PrintingPolicy &PP) const;
-
-  /// \brief Dumps the node to the given output stream.
-  void dump(llvm::raw_ostream &OS, SourceManager &SM) const;
-
-  /// \brief For nodes which represent textual entities in the source code,
-  /// return their SourceRange.  For all other nodes, return SourceRange().
-  SourceRange getSourceRange() const;
 
   /// \brief Prints the node to the given output stream.
   void print(llvm::raw_ostream &OS, const PrintingPolicy &PP) const;

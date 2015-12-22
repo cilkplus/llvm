@@ -15,7 +15,7 @@
 #include "clang/AST/ASTDiagnostic.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
-#include "clang/AST/ExprOpenMP.h"
+//#include "clang/AST/ExprOpenMP.h"
 #include "clang/AST/Stmt.h"
 #include "clang/Basic/intel/StmtIntel.h"
 #include "clang/AST/StmtCXX.h"

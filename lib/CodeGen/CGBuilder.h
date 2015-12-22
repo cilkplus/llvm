@@ -11,6 +11,7 @@
 #define LLVM_CLANG_LIB_CODEGEN_CGBUILDER_H
 
 #include "llvm/IR/IRBuilder.h"
+#include "Address.h"
 
 namespace clang {
 namespace CodeGen {

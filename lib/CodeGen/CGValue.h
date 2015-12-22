@@ -20,6 +20,7 @@
 #include "clang/AST/Type.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/Type.h"
+#include "Address.h"
 
 namespace llvm {
   class Constant;

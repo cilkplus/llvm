@@ -3948,11 +3948,7 @@ public:
 
   SourceLocation getLocStart() const LLVM_READONLY;
   SourceLocation getLocEnd() const LLVM_READONLY;
-#if INTEL_SPECIFIC_CILKPLUS
-  void setCilkSpawnLoc(SourceLocation Loc) { CilkSpawnLoc = Loc; }
-  SourceLocation getCilkSpawnLoc() const LLVM_READONLY { return CilkSpawnLoc; }
-  bool isCilkSpawnCall() const { return CilkSpawnLoc.isValid(); }
-#endif // INTEL_SPECIFIC_CILKPLUS
+
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == InitListExprClass;
   }
@@ -4677,39 +4673,6 @@ public:
   }
 
   // Iterators
-  child_range children() { return child_range(); }
-};
-
-/// \brief Adaptor class for mixing a CilkSpawnDecl with expressions.
-class CilkSpawnExpr : public Expr {
-  CilkSpawnDecl *TheSpawn;
-
-public:
-  explicit CilkSpawnExpr(CilkSpawnDecl *D, QualType Ty)
-    : Expr(CilkSpawnExprClass, Ty, VK_RValue, OK_Ordinary,
-           Ty->isDependentType(), Ty->isDependentType(),
-           Ty->isInstantiationDependentType(), false), TheSpawn(D) { }
-
-  /// \brief Build an empty block expression.
-  explicit CilkSpawnExpr(EmptyShell Empty) : Expr(CilkSpawnExprClass, Empty) { }
-
-  const CilkSpawnDecl *getSpawnDecl() const { return TheSpawn; }
-  CilkSpawnDecl *getSpawnDecl() { return TheSpawn; }
-  void setSpawnDecl(CilkSpawnDecl *D) { TheSpawn = D; }
-
-  Stmt *getSpawnStmt() { return TheSpawn->getSpawnStmt(); }
-  const Stmt *getSpawnStmt() const { return TheSpawn->getSpawnStmt(); }
-
-  Expr *getSpawnExpr() { return dyn_cast<Expr>(getSpawnStmt()); }
-  const Expr *getSpawnExpr() const { return dyn_cast<Expr>(getSpawnStmt()); }
-
-  SourceLocation getLocStart() const LLVM_READONLY;
-  SourceLocation getLocEnd() const LLVM_READONLY;
-
-  static bool classof(const Stmt *T) {
-    return T->getStmtClass() == CilkSpawnExprClass;
-  }
-
   child_range children() { return child_range(); }
 };
 

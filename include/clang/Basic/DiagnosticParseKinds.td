@@ -973,64 +973,6 @@ def warn_pragma_expected_enable_disable : Warning<
 def warn_pragma_unknown_extension : Warning<
   "unknown OpenCL extension %0 - ignoring">, InGroup<IgnoredPragmas>;
 
-// Cilk Plus
-def err_cilkplus_disable: Error<
-  "Cilk Plus support disabled - compile with -fcilkplus">;
-
-def err_cilk_for_missing_control_variable: Error<
-  "missing control variable declaration and initialization in '_Cilk_for'">;
-
-def err_cilk_for_missing_condition: Error<
-  "missing loop condition expression in '_Cilk_for'">;
-
-def err_cilk_for_missing_increment: Error<
-  "missing loop increment expression in '_Cilk_for'">;
-
-def err_cilk_for_missing_semi: Error<
-  "expected ';' in '_Cilk_for'">;
-
-def err_cilk_for_expect_grainsize: Error<
-  "expected 'grainsize' in '#pragma cilk'">;
-
-def err_cilk_for_expect_assign: Error<
-  "expected '=' in '#pragma cilk'">;
-
-def warn_cilk_for_following_grainsize: Warning<
-  "'#pragma cilk' ignored, because it is not followed by a '_Cilk_for' loop">,
-  InGroup<SourceUsesCilkPlus>;
-
-// Pragma SIMD
-def err_simd_for_missing_initialization: Error<
-  "missing initialization in simd for">;
-
-def err_simd_for_missing_condition: Error<
-  "missing loop condition expression in simd for">;
-
-def err_simd_for_missing_increment: Error<
-  "missing loop increment expression in simd for">;
-
-def err_simd_for_missing_semi: Error<
-  "expected ';' in simd for">;
-
-def err_simd_invalid_clause: Error<
-  "invalid pragma simd clause">;
-
-def err_simd_expected_reduction_operator: Error<
-  "expected reduction operator">;
-
-// Cilk elemental functions
-def err_elemental_parameter_pack_unsupported: Error<
-  "template parameter pack is not supported in '%0' attribute">;
-def err_elemental_clause_takes_no_args : Error<
-  "%0 clause takes no arguments">;
-def err_expected_rparen_or_comma : Error<"expected ')' or ','">;
-
-def warn_elemental_attribute_ignored : Warning<
-  "unknown attribute %0 - ignored">, InGroup<SourceUsesCilkPlus>;
-
-def err_expected_ident_or_this : Error<
-  "expected identifier or this">;
-
 // OpenMP support.
 def warn_pragma_omp_ignored : Warning<
   "unexpected '#pragma omp ...' in program">, InGroup<SourceUsesOpenMP>, DefaultIgnore;

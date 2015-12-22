@@ -1049,30 +1049,6 @@ public:
     return static_cast<LambdaCaptureDefault>(getLambdaData().CaptureDefault);
   }
 
-  /// \brief Determine whether this class describes a generic 
-  /// lambda function object (i.e. function call operator is
-  /// a template). 
-  bool isGenericLambda() const; 
-
-  /// \brief Retrieve the lambda call operator of the closure type
-  /// if this is a closure type.
-  CXXMethodDecl *getLambdaCallOperator() const; 
-
-  /// \brief Retrieve the lambda static invoker, the address of which
-  /// is returned by the conversion operator, and the body of which
-  /// is forwarded to the lambda call operator. 
-  CXXMethodDecl *getLambdaStaticInvoker() const; 
-
-  /// \brief Retrieve the generic lambda's template parameter list.
-  /// Returns null if the class does not represent a lambda or a generic 
-  /// lambda.
-  TemplateParameterList *getGenericLambdaTemplateParameterList() const;
-
-  LambdaCaptureDefault getLambdaCaptureDefault() const {
-    assert(isLambda());
-    return static_cast<LambdaCaptureDefault>(getLambdaData().CaptureDefault);
-  }
-
   /// \brief For a closure type, retrieve the mapping from captured
   /// variables and \c this to the non-static data members that store the
   /// values or references of the captures.
@@ -1808,17 +1784,6 @@ public:
 
   CXXMethodDecl *getCanonicalDecl() override {
     return cast<CXXMethodDecl>(FunctionDecl::getCanonicalDecl());
-  }
-  const CXXMethodDecl *getCanonicalDecl() const {
-    return const_cast<CXXMethodDecl*>(this)->getCanonicalDecl();
-  }
-
-  CXXMethodDecl *getMostRecentDecl() {
-    return cast<CXXMethodDecl>(
-            static_cast<FunctionDecl *>(this)->getMostRecentDecl());
-  }
-  const CXXMethodDecl *getMostRecentDecl() const {
-    return const_cast<CXXMethodDecl*>(this)->getMostRecentDecl();
   }
   const CXXMethodDecl *getCanonicalDecl() const {
     return const_cast<CXXMethodDecl*>(this)->getCanonicalDecl();

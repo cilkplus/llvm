@@ -415,8 +415,8 @@ def Annotate : InheritableParamAttr {
 }
 
 def ARMInterrupt : InheritableAttr, TargetSpecificAttr<TargetARM> {
-  // NOTE: If you add any additional spellings, MSP430Interrupt's spellings
-  // must match.
+  // NOTE: If you add any additional spellings, MSP430Interrupt's and
+  // MipsInterrupt's spellings must match.
   let Spellings = [GNU<"interrupt">];
   let Args = [EnumArgument<"Interrupt", "InterruptType",
                            ["IRQ", "FIQ", "SWI", "ABORT", "UNDEF", ""],
@@ -425,14 +425,6 @@ def ARMInterrupt : InheritableAttr, TargetSpecificAttr<TargetARM> {
   let ParseKind = "Interrupt";
   let HasCustomParsing = 1;
   let Documentation = [ARMInterruptDocs];
-}
-
-def ARMInterrupt : InheritableAttr, TargetSpecificAttr {
-  let Spellings = [GNU<"interrupt">];
-  let Args = [EnumArgument<"Interrupt", "InterruptType",
-                           ["IRQ", "FIQ", "SWI", "ABORT", "UNDEF", ""],
-                           ["IRQ", "FIQ", "SWI", "ABORT", "UNDEF", "Generic"],
-                           1>];
 }
 
 def AsmLabel : InheritableAttr {
@@ -1264,10 +1256,6 @@ def SysVABI : InheritableAttr {
   let Spellings = [GCC<"sysv_abi">];
 //  let Subjects = [Function, ObjCMethod];
   let Documentation = [Undocumented];
-}
-
-def SysVABI : InheritableAttr {
-  let Spellings = [GNU<"sysv_abi">, CXX11<"gnu", "sysv_abi">];
 }
 
 def ThisCall : InheritableAttr {

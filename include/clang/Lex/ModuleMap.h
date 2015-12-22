@@ -274,8 +274,15 @@ public:
   /// \returns The module KnownHeader, which provides the module that owns the
   /// given header file.  The KnownHeader is default constructed to indicate
   /// that no module owns this header file.
-  KnownHeader findModuleForHeader(const FileEntry *File,
-                                  Module *RequestingModule = NULL);
+  KnownHeader findModuleForHeader(const FileEntry *File);
+
+  /// \brief Retrieve all the modules that contain the given header file. This
+  /// may not include umbrella modules, nor information from external sources,
+  /// if they have not yet been inferred / loaded.
+  ///
+  /// Typically, \ref findModuleForHeader should be used instead, as it picks
+  /// the preferred module for the header.
+  ArrayRef<KnownHeader> findAllModulesForHeader(const FileEntry *File) const;
 
   /// \brief Reports errors if a module must not include a specific file.
   ///

@@ -1591,8 +1591,7 @@ ObjCIvarDecl *ObjCIvarDecl::Create(ASTContext &C, ObjCContainerDecl *DC,
                                    SourceLocation IdLoc, IdentifierInfo *Id,
                                    QualType T, TypeSourceInfo *TInfo,
                                    AccessControl ac, Expr *BW,
-                                   bool synthesized,
-                                   bool backingIvarReferencedInAccessor) {
+                                   bool synthesized) {
   if (DC) {
     // Ivar's can only appear in interfaces, implementations (via synthesized
     // properties), and class extensions (via direct declaration, or synthesized

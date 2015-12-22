@@ -143,10 +143,6 @@ public:
   /// the required state of that feature.
   typedef std::pair<std::string, bool> Requirement;
 
-  /// \brief An individual requirement: a feature name and a flag indicating
-  /// the required state of that feature.
-  typedef std::pair<std::string, bool> Requirement;
-
   /// \brief The set of language features required to use this module.
   ///
   /// If any of these requirements are not available, the \c IsAvailable bit

@@ -309,7 +309,6 @@ private:
   CGOpenCLRuntime* OpenCLRuntime;
   CGOpenMPRuntime* OpenMPRuntime;
   CGCUDARuntime* CUDARuntime;
-  CGCilkPlusRuntime *CilkPlusRuntime;
   CGDebugInfo* DebugInfo;
   ARCEntrypoints *ARCData;
   llvm::MDNode *NoObjCARCExceptionsMetadata;
@@ -485,8 +484,9 @@ private:
   void createOpenCLRuntime();
   void createOpenMPRuntime();
   void createCUDARuntime();
+#if INTEL_SPECIFIC_CILKPLUS
   void createCilkPlusRuntime();
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   bool isTriviallyRecursive(const FunctionDecl *F);
   bool shouldEmitFunction(GlobalDecl GD);
 
@@ -563,7 +563,7 @@ public:
     assert(CUDARuntime != nullptr);
     return *CUDARuntime;
   }
-
+#if INTEL_SPECIFIC_CILKPLUS
   CGCilkPlusRuntime &getCilkPlusRuntime() {
     assert(CilkPlusRuntime != 0);
     return *CilkPlusRuntime;
@@ -1122,10 +1122,6 @@ public:
   void EmitVTable(CXXRecordDecl *Class);
 
   /// Emit the RTTI descriptors for the builtin types.
-  void EmitFundamentalRTTIDescriptors();
-
-  /// EmitFundamentalRTTIDescriptors - Emit the RTTI descriptors for the
-  /// builtin types.
   void EmitFundamentalRTTIDescriptors();
 
   /// \brief Appends Opts to the "Linker Options" metadata value.

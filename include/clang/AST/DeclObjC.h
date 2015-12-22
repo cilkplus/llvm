@@ -1621,8 +1621,7 @@ private:
   ObjCIvarDecl(ObjCContainerDecl *DC, SourceLocation StartLoc,
                SourceLocation IdLoc, IdentifierInfo *Id,
                QualType T, TypeSourceInfo *TInfo, AccessControl ac, Expr *BW,
-               bool synthesized,
-               bool backingIvarReferencedInAccessor)
+               bool synthesized)
     : FieldDecl(ObjCIvar, DC, StartLoc, IdLoc, Id, T, TInfo, BW,
                 /*Mutable=*/false, /*HasInit=*/ICIS_NoInit),
       NextIvar(nullptr), DeclAccess(ac), Synthesized(synthesized) {}

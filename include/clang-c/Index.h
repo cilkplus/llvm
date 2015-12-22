@@ -32,7 +32,7 @@
  * compatible, thus CINDEX_VERSION_MAJOR is expected to remain stable.
  */
 #define CINDEX_VERSION_MAJOR 0
-#define CINDEX_VERSION_MINOR 30
+#define CINDEX_VERSION_MINOR 32
 
 #define CINDEX_VERSION_ENCODE(major, minor) ( \
       ((major) * 10000)                       \
@@ -3298,23 +3298,6 @@ CINDEX_LINKAGE long long clang_Type_getSizeOf(CXType T);
  *   CXTypeLayoutError_InvalidFieldName is returned.
  */
 CINDEX_LINKAGE long long clang_Type_getOffsetOf(CXType T, const char *S);
-
-enum CXRefQualifierKind {
-  /** \brief No ref-qualifier was provided. */
-  CXRefQualifier_None = 0,
-  /** \brief An lvalue ref-qualifier was provided (\c &). */
-  CXRefQualifier_LValue,
-  /** \brief An rvalue ref-qualifier was provided (\c &&). */
-  CXRefQualifier_RValue
-};
-
-/**
- * \brief Retrieve the ref-qualifier kind of a function or method.
- *
- * The ref-qualifier is returned for C++ functions or methods. For other types
- * or non-C++ declarations, CXRefQualifier_None is returned.
- */
-CINDEX_LINKAGE enum CXRefQualifierKind clang_Type_getCXXRefQualifier(CXType T);
 
 /**
  * \brief Return the offset of the field represented by the Cursor.

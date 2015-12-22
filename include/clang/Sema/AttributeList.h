@@ -351,15 +351,9 @@ public:
   
   bool hasParsedType() const { return HasParsedType; }
 
-  bool hasParsedType() const { return HasParsedType; }
-
   /// Is this the Microsoft __declspec(property) attribute?
   bool isDeclspecPropertyAttribute() const  {
     return IsProperty;
-  }
-
-  bool hasIdentifierArgs() const {
-    return HasIdentifierDataArgs;
   }
 
   bool isAlignasAttribute() const {
@@ -619,20 +613,6 @@ public:
                                           scopeName, scopeLoc,
                                           args, numArgs, syntax,
                                           ellipsisLoc));
-  }
-
-  AttributeList *createWithIdArgs(
-                    IdentifierInfo *attrName, SourceRange attrRange,
-                    IdentifierInfo *scopeName, SourceLocation scopeLoc,
-                    IdentifierInfo *parmName, SourceLocation parmLoc,
-                    AttributeList::IdentifierData *args, unsigned numArgs,
-                    AttributeList::Syntax syntax) {
-    void *memory = allocate(sizeof(AttributeList)
-                            + numArgs * sizeof(AttributeList::IdentifierData));
-    return add(new (memory) AttributeList(attrName, attrRange,
-                                          scopeName, scopeLoc,
-                                          parmName, parmLoc,
-                                          args, numArgs, syntax));
   }
 
   AttributeList *create(IdentifierInfo *attrName, SourceRange attrRange,

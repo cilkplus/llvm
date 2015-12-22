@@ -3054,12 +3054,6 @@ public:
       return Result;
     }
 
-    ExtProtoInfo(CallingConv CC)
-        : ExtInfo(CC), Variadic(false), HasTrailingReturn(false), TypeQuals(0),
-          ExceptionSpecType(EST_None), RefQualifier(RQ_None), NumExceptions(0),
-          Exceptions(0), NoexceptExpr(0), ExceptionSpecDecl(0),
-          ExceptionSpecTemplate(0), ConsumedArguments(0) {}
-
     FunctionType::ExtInfo ExtInfo;
     bool Variadic : 1;
     bool HasTrailingReturn : 1;

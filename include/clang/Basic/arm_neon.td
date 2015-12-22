@@ -860,67 +860,6 @@ def VLDRQ : WInst<"vldrq", "sc", "Pk">;
 def VSTRQ : WInst<"vstrq", "vps", "Pk">;
 
 ////////////////////////////////////////////////////////////////////////////////
-// Load/Store
-// With additional QUl, Ql, d, Qd, Pl, QPl type.
-def LD1 : WInst<"vld1", "dc",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-def LD2 : WInst<"vld2", "2c",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-def LD3 : WInst<"vld3", "3c",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-def LD4 : WInst<"vld4", "4c",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-def ST1 : WInst<"vst1", "vpd",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-def ST2 : WInst<"vst2", "vp2",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-def ST3 : WInst<"vst3", "vp3",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-def ST4 : WInst<"vst4", "vp4",
-                "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsUcUsUiUlcsilhfdPcPsPlQPl">;
-
-def LD1_X2 : WInst<"vld1_x2", "2c",
-                   "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD3_x3 : WInst<"vld1_x3", "3c",
-                   "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD4_x4 : WInst<"vld1_x4", "4c",
-                   "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-
-def ST1_X2 : WInst<"vst1_x2", "vp2",
-                   "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def ST1_X3 : WInst<"vst1_x3", "vp3",
-                   "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def ST1_X4 : WInst<"vst1_x4", "vp4",
-                   "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-
-// With additional QUl, Ql, d, Qd, Pl, QPl type.
-def LD1_LANE : WInst<"vld1_lane", "dcdi",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD2_LANE : WInst<"vld2_lane", "2c2i",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD3_LANE : WInst<"vld3_lane", "3c3i",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD4_LANE : WInst<"vld4_lane", "4c4i",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def ST1_LANE : WInst<"vst1_lane", "vpdi",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def ST2_LANE : WInst<"vst2_lane", "vp2i",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def ST3_LANE : WInst<"vst3_lane", "vp3i",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def ST4_LANE : WInst<"vst4_lane", "vp4i",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-
-def LD1_DUP  : WInst<"vld1_dup", "dc",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD2_DUP  : WInst<"vld2_dup", "2c",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD3_DUP  : WInst<"vld3_dup", "3c",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-def LD4_DUP  : WInst<"vld4_dup", "4c",
-                    "QUcQUsQUiQUlQcQsQiQlQhQfQdQPcQPsQPlUcUsUiUlcsilhfdPcPsPl">;
-
-////////////////////////////////////////////////////////////////////////////////
 // Addition
 def ADD : IOpInst<"vadd", "ddd", "dQd", OP_ADD>;
 

@@ -85,4 +85,4 @@ def ClassScopeFunctionSpecialization : Decl;
 def Import : Decl;
 def OMPThreadPrivate : Decl;
 def Empty : Decl;
-include "../Basic/intel/IntelDeclNodes.td"
+//AVT: include "../Basic/intel/IntelDeclNodes.td"

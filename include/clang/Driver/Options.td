@@ -749,8 +749,6 @@ def fno_implicit_modules :
   Flag <["-"], "fno-implicit-modules">,
   Group<f_Group>, Flags<[DriverOption, CC1Option]>;
 def fretain_comments_from_system_headers : Flag<["-"], "fretain-comments-from-system-headers">, Group<f_Group>, Flags<[CC1Option]>;
-def fcilkplus : Flag <["-"], "fcilkplus">, Group<f_Group>, Flags<[CC1Option]>,
-  HelpText<"Enable Cilk Plus extensions">;
 
 def fmudflapth : Flag<["-"], "fmudflapth">, Group<f_Group>;
 def fmudflap : Flag<["-"], "fmudflap">, Group<f_Group>;
@@ -820,8 +818,6 @@ def fimplicit_modules : Flag <["-"], "fimplicit-modules">, Group<f_Group>,
 def fmodule_file_deps : Flag <["-"], "fmodule-file-deps">, Group<f_Group>,
   Flags<[DriverOption]>;
 def fno_module_file_deps : Flag <["-"], "fno-module-file-deps">, Group<f_Group>,
-  Flags<[DriverOption]>;
-def fno_modules_decluse : Flag <["-"], "fno-modules-decluse">, Group<f_Group>,
   Flags<[DriverOption]>;
 def fno_ms_extensions : Flag<["-"], "fno-ms-extensions">, Group<f_Group>;
 def fno_ms_compatibility : Flag<["-"], "fno-ms-compatibility">, Group<f_Group>;

@@ -3202,17 +3202,6 @@ private:
     return TypoCorrection();
   }
 
-  /// \brief Record the typo correction failure and return an empty correction.
-  TypoCorrection FailedCorrection(IdentifierInfo *Typo, SourceLocation TypoLoc,
-                                  bool RecordFailure = true,
-                                  bool IsUnqualifiedLookup = false) {
-    if (IsUnqualifiedLookup)
-      (void)UnqualifiedTyposCorrected[Typo];
-    if (RecordFailure)
-      TypoCorrectionFailures[Typo].insert(TypoLoc);
-    return TypoCorrection();
-  }
-
 public:
   /// AddInstanceMethodToGlobalPool - All instance methods in a translation
   /// unit are added to a global pool. This allows us to efficiently associate
@@ -3946,6 +3935,7 @@ public:
       CXXScopeSpec &SS, SourceLocation TemplateKWLoc,
       NamedDecl *FirstQualifierInScope, const DeclarationNameInfo &NameInfo,
       const TemplateArgumentListInfo *TemplateArgs,
+      const Scope *S,
       ActOnMemberAccessExtraArgs *ExtraArgs = nullptr);
 
   ExprResult
@@ -3954,6 +3944,7 @@ public:
                            SourceLocation TemplateKWLoc,
                            NamedDecl *FirstQualifierInScope, LookupResult &R,
                            const TemplateArgumentListInfo *TemplateArgs,
+                           const Scope *S,
                            bool SuppressQualifierCheck = false,
                            ActOnMemberAccessExtraArgs *ExtraArgs = nullptr);
 
@@ -4865,12 +4856,6 @@ public:
   Expr *MaybeCreateExprWithCleanups(Expr *SubExpr);
   Stmt *MaybeCreateStmtWithCleanups(Stmt *SubStmt);
   ExprResult MaybeCreateExprWithCleanups(ExprResult SubExpr);
-
-  enum CilkReceiverKind {
-    CRK_MaybeReceiver,
-    CRK_IsReceiver,
-    CRK_IsNotReceiver
-  };
 
   ExprResult ActOnFinishFullExpr(Expr *Expr) {
     return ActOnFinishFullExpr(Expr, Expr ? Expr->getExprLoc()
@@ -6979,14 +6964,6 @@ public:
 
   /// \brief The number of typos corrected by CorrectTypo.
   unsigned TyposCorrected;
-
-  typedef llvm::SmallSet<SourceLocation, 2> SrcLocSet;
-  typedef llvm::DenseMap<IdentifierInfo *, SrcLocSet> IdentifierSourceLocations;
-
-  /// \brief A cache containing identifiers for which typo correction failed and
-  /// their locations, so that repeated attempts to correct an identifier in a
-  /// given location are ignored if typo correction already failed for it.
-  IdentifierSourceLocations TypoCorrectionFailures;
 
   typedef llvm::SmallSet<SourceLocation, 2> SrcLocSet;
   typedef llvm::DenseMap<IdentifierInfo *, SrcLocSet> IdentifierSourceLocations;
