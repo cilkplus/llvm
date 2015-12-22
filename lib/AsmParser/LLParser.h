@@ -52,13 +52,14 @@ namespace llvm {
       t_Null, t_Undef, t_Zero,    // No value.
       t_EmptyArray,               // No value:  []
       t_Constant,                 // Value in ConstantVal.
-      t_InlineAsm,                // Value in StrVal/StrVal2/UIntVal.
+      t_InlineAsm,                // Value in FTy/StrVal/StrVal2/UIntVal.
       t_ConstantStruct,           // Value in ConstantStructElts.
       t_PackedConstantStruct      // Value in ConstantStructElts.
     } Kind;
 
     LLLexer::LocTy Loc;
     unsigned UIntVal;
+    FunctionType *FTy;
     std::string StrVal, StrVal2;
     APSInt APSIntVal;
     APFloat APFloatVal;
@@ -142,6 +143,8 @@ namespace llvm {
         : Context(M->getContext()), Lex(F, SM, Err, M->getContext()), M(M),
           Slots(Slots), BlockAddressPFS(nullptr) {}
     bool Run();
+
+    bool parseStandaloneConstantValue(Constant *&C);
 
     LLVMContext &getContext() { return Context; }
 
@@ -343,6 +346,7 @@ namespace llvm {
     bool ConvertValIDToValue(Type *Ty, ValID &ID, Value *&V,
                              PerFunctionState *PFS);
 
+    bool parseConstantValue(Type *Ty, Constant *&C);
     bool ParseValue(Type *Ty, Value *&V, PerFunctionState *PFS);
     bool ParseValue(Type *Ty, Value *&V, PerFunctionState &PFS) {
       return ParseValue(Ty, V, &PFS);
@@ -380,6 +384,9 @@ namespace llvm {
                             PerFunctionState &PFS,
                             bool IsMustTailCall = false,
                             bool InVarArgsFunc = false);
+
+    bool ParseExceptionArgs(SmallVectorImpl<Value *> &Args,
+                            PerFunctionState &PFS);
 
     // Constant Parsing.
     bool ParseValID(ValID &ID, PerFunctionState *PFS = nullptr);
@@ -441,6 +448,12 @@ namespace llvm {
     bool ParseIndirectBr(Instruction *&Inst, PerFunctionState &PFS);
     bool ParseInvoke(Instruction *&Inst, PerFunctionState &PFS);
     bool ParseResume(Instruction *&Inst, PerFunctionState &PFS);
+    bool ParseCleanupRet(Instruction *&Inst, PerFunctionState &PFS);
+    bool ParseCatchRet(Instruction *&Inst, PerFunctionState &PFS);
+    bool ParseCatchPad(Instruction *&Inst, PerFunctionState &PFS);
+    bool ParseTerminatePad(Instruction *&Inst, PerFunctionState &PFS);
+    bool ParseCleanupPad(Instruction *&Inst, PerFunctionState &PFS);
+    bool ParseCatchEndPad(Instruction *&Inst, PerFunctionState &PFS);
 
     bool ParseArithmetic(Instruction *&I, PerFunctionState &PFS, unsigned Opc,
                          unsigned OperandType);

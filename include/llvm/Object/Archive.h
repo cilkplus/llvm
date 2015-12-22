@@ -62,6 +62,8 @@ public:
       return reinterpret_cast<const ArchiveMemberHeader *>(Data.data());
     }
 
+    bool isThinMember() const;
+
   public:
     Child(const Archive *Parent, const char *Start);
 
@@ -74,6 +76,7 @@ public:
       return Data.begin() < other.Data.begin();
     }
 
+    const Archive *getParent() const { return Parent; }
     Child getNext() const;
 
     ErrorOr<StringRef> getName() const;

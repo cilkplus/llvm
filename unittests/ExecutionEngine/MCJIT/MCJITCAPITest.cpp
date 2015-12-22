@@ -496,9 +496,7 @@ TEST_F(MCJITCAPITest, addGlobalMapping) {
   buildMCJITOptions();
   buildMCJITEngine();
 
-  LLVMAddGlobalMapping(
-      Engine, MappedFn,
-      reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(&localTestFunc)));
+  LLVMAddGlobalMapping(Engine, MappedFn, reinterpret_cast<void*>(&localTestFunc));
 
   buildAndRunPasses();
 

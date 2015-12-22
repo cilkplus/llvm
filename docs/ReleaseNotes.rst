@@ -1,15 +1,21 @@
 ======================
-LLVM 3.7 Release Notes
+LLVM 3.8 Release Notes
 ======================
 
 .. contents::
     :local:
 
+.. warning::
+   These are in-progress notes for the upcoming LLVM 3.8 release.  You may
+   prefer the `LLVM 3.6 Release Notes <http://llvm.org/releases/3.6.0/docs
+   /ReleaseNotes.html>`_.
+
+
 Introduction
 ============
 
 This document contains the release notes for the LLVM Compiler Infrastructure,
-release 3.7.  Here we describe the status of LLVM, including major improvements
+release 3.8.  Here we describe the status of LLVM, including major improvements
 from the previous release, improvements in various subprojects of LLVM, and
 some of the current users of the code.  All LLVM releases may be downloaded
 from the `LLVM releases web site <http://llvm.org/releases/>`_.
@@ -63,22 +69,7 @@ Non-comprehensive list of changes in 3.7.0
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
-* The minimum required Visual Studio version for building LLVM is now 2013
-  Update 4.
-
-* A new documentation page, :doc:`Frontend/PerformanceTips`, contains a
-  collection of tips for frontend authors on how to generate IR which LLVM is
-  able to effectively optimize.
-
-* The ``DataLayout`` is no longer optional. All the IR level optimizations expects
-  it to be present and the API has been changed to use a reference instead of
-  a pointer to make it explicit. The Module owns the datalayout and it has to
-  match the one attached to the TargetMachine for generating code.
-
-  In 3.6, a pass was inserted in the pipeline to make the ``DataLayout`` accessible:
-    ``MyPassManager->add(new DataLayoutPass(MyTargetMachine->getDataLayout()));``
-  In 3.7, you don't need a pass, you set the ``DataLayout`` on the ``Module``:
-    ``MyModule->setDataLayout(MyTargetMachine->createDataLayout());``
+* ... next change ...
 
   The LLVM C API ``LLVMGetTargetMachineData`` is deprecated to reflect the fact
   that it won't be available anymore from ``TargetMachine`` in 3.8.
@@ -411,12 +402,12 @@ specifying `-DLIBCXXABI_USE_LLVM_UNWINDER=YES` and
 
 The new repository can also be built standalone if just `libunwind` is desired.
 
-External Open Source Projects Using LLVM 3.7
+External Open Source Projects Using LLVM 3.8
 ============================================
 
 An exciting aspect of LLVM is that it is used as an enabling technology for
 a lot of other language and tools projects. This section lists some of the
-projects that have already been updated to work with LLVM 3.7.
+projects that have already been updated to work with LLVM 3.8.
 
 DXR
 ---

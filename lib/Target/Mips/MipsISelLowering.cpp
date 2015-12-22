@@ -1719,6 +1719,9 @@ lowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const
   // Local Exec TLS Model.
 
   GlobalAddressSDNode *GA = cast<GlobalAddressSDNode>(Op);
+  if (DAG.getTarget().Options.EmulatedTLS)
+    return LowerToTLSEmulatedModel(GA, DAG);
+
   SDLoc DL(GA);
   const GlobalValue *GV = GA->getGlobal();
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
@@ -1813,7 +1816,8 @@ lowerConstantPool(SDValue Op, SelectionDAG &DAG) const
         static_cast<const MipsTargetObjectFile *>(
             getTargetMachine().getObjFileLowering());
 
-    if (TLOF->IsConstantInSmallSection(N->getConstVal(), getTargetMachine()))
+    if (TLOF->IsConstantInSmallSection(DAG.getDataLayout(), N->getConstVal(),
+                                       getTargetMachine()))
       // %gp_rel relocation
       return getAddrGPRel(N, SDLoc(N), Ty, DAG);
 

@@ -942,9 +942,9 @@ static void getMaxByValAlign(Type *Ty, unsigned &MaxAlign,
     if (EltAlign > MaxAlign)
       MaxAlign = EltAlign;
   } else if (StructType *STy = dyn_cast<StructType>(Ty)) {
-    for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
+    for (auto *EltTy : STy->elements()) {
       unsigned EltAlign = 0;
-      getMaxByValAlign(STy->getElementType(i), EltAlign, MaxMaxAlign);
+      getMaxByValAlign(EltTy, EltAlign, MaxMaxAlign);
       if (EltAlign > MaxAlign)
         MaxAlign = EltAlign;
       if (MaxAlign == MaxMaxAlign)
@@ -2092,6 +2092,9 @@ SDValue PPCTargetLowering::LowerGlobalTLSAddress(SDValue Op,
   // large models could be added if users need it, at the cost of
   // additional complexity.
   GlobalAddressSDNode *GA = cast<GlobalAddressSDNode>(Op);
+  if (DAG.getTarget().Options.EmulatedTLS)
+    return LowerToTLSEmulatedModel(GA, DAG);
+
   SDLoc dl(GA);
   const GlobalValue *GV = GA->getGlobal();
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
@@ -9137,7 +9140,7 @@ SDValue PPCTargetLowering::getRecipEstimate(SDValue Operand,
   return SDValue();
 }
 
-bool PPCTargetLowering::combineRepeatedFPDivisors(unsigned NumUsers) const {
+unsigned PPCTargetLowering::combineRepeatedFPDivisors() const {
   // Note: This functionality is used only when unsafe-fp-math is enabled, and
   // on cores with reciprocal estimates (which are used when unsafe-fp-math is
   // enabled for division), this functionality is redundant with the default
@@ -9150,12 +9153,12 @@ bool PPCTargetLowering::combineRepeatedFPDivisors(unsigned NumUsers) const {
   // one FP pipeline) for three or more FDIVs (for generic OOO cores).
   switch (Subtarget.getDarwinDirective()) {
   default:
-    return NumUsers > 2;
+    return 3;
   case PPC::DIR_440:
   case PPC::DIR_A2:
   case PPC::DIR_E500mc:
   case PPC::DIR_E5500:
-    return NumUsers > 1;
+    return 2;
   }
 }
 
