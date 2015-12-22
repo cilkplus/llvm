@@ -32,9 +32,6 @@ class LLVMContext;
 class Module;
 class ModuleSlotTracker;
 
-template<typename ValueSubClass, typename ItemParentClass>
-  class SymbolTableListTraits;
-
 enum LLVMConstants : uint32_t {
   DEBUG_METADATA_VERSION = 3 // Current debug info version number.
 };
@@ -86,7 +83,9 @@ public:
     DIImportedEntityKind,
     ConstantAsMetadataKind,
     LocalAsMetadataKind,
-    MDStringKind
+    MDStringKind,
+    DIMacroKind,
+    DIMacroFileKind
   };
 
 protected:
@@ -126,9 +125,10 @@ public:
   /// If \c M is provided, metadata nodes will be numbered canonically;
   /// otherwise, pointer addresses are substituted.
   /// @{
-  void print(raw_ostream &OS, const Module *M = nullptr) const;
-  void print(raw_ostream &OS, ModuleSlotTracker &MST,
-             const Module *M = nullptr) const;
+  void print(raw_ostream &OS, const Module *M = nullptr,
+             bool IsForDebug = false) const;
+  void print(raw_ostream &OS, ModuleSlotTracker &MST, const Module *M = nullptr,
+             bool IsForDebug = false) const;
   /// @}
 
   /// \brief Print as operand.
@@ -576,10 +576,12 @@ struct AAMDNodes {
 template<>
 struct DenseMapInfo<AAMDNodes> {
   static inline AAMDNodes getEmptyKey() {
-    return AAMDNodes(DenseMapInfo<MDNode *>::getEmptyKey(), 0, 0);
+    return AAMDNodes(DenseMapInfo<MDNode *>::getEmptyKey(),
+                     nullptr, nullptr);
   }
   static inline AAMDNodes getTombstoneKey() {
-    return AAMDNodes(DenseMapInfo<MDNode *>::getTombstoneKey(), 0, 0);
+    return AAMDNodes(DenseMapInfo<MDNode *>::getTombstoneKey(),
+                     nullptr, nullptr);
   }
   static unsigned getHashValue(const AAMDNodes &Val) {
     return DenseMapInfo<MDNode *>::getHashValue(Val.TBAA) ^
@@ -834,10 +836,11 @@ public:
   /// \brief Resolve cycles.
   ///
   /// Once all forward declarations have been resolved, force cycles to be
-  /// resolved.
+  /// resolved. If \p MDMaterialized is true, then any temporary metadata
+  /// is ignored, otherwise it asserts when encountering temporary metadata.
   ///
   /// \pre No operands (or operands' operands, etc.) have \a isTemporary().
-  void resolveCycles();
+  void resolveCycles(bool MDMaterialized = true);
 
   /// \brief Replace a temporary node with a permanent one.
   ///
@@ -885,6 +888,7 @@ protected:
   void storeDistinctInContext();
   template <class T, class StoreT>
   static T *storeImpl(T *N, StorageType Storage, StoreT &Store);
+  template <class T> static T *storeImpl(T *N, StorageType Storage);
 
 private:
   void handleChangedOperand(void *Ref, Metadata *New);
@@ -917,13 +921,13 @@ private:
     N->recalculateHash();
   }
   template <class NodeTy>
-  static void dispatchRecalculateHash(NodeTy *N, std::false_type) {}
+  static void dispatchRecalculateHash(NodeTy *, std::false_type) {}
   template <class NodeTy>
   static void dispatchResetHash(NodeTy *N, std::true_type) {
     N->setHash(0);
   }
   template <class NodeTy>
-  static void dispatchResetHash(NodeTy *N, std::false_type) {}
+  static void dispatchResetHash(NodeTy *, std::false_type) {}
 
 public:
   typedef const MDOperand *op_iterator;
@@ -967,6 +971,8 @@ public:
   static MDNode *getMostGenericFPMath(MDNode *A, MDNode *B);
   static MDNode *getMostGenericRange(MDNode *A, MDNode *B);
   static MDNode *getMostGenericAliasScope(MDNode *A, MDNode *B);
+  static MDNode *getMostGenericAlignmentOrDereferenceable(MDNode *A, MDNode *B);
+
 };
 
 /// \brief Tuple of metadata.
@@ -1129,7 +1135,6 @@ public:
 ///
 /// TODO: Inherit from Metadata.
 class NamedMDNode : public ilist_node<NamedMDNode> {
-  friend class SymbolTableListTraits<NamedMDNode, Module>;
   friend struct ilist_traits<NamedMDNode>;
   friend class LLVMContextImpl;
   friend class Module;
@@ -1197,7 +1202,7 @@ public:
   void addOperand(MDNode *M);
   void setOperand(unsigned I, MDNode *New);
   StringRef getName() const;
-  void print(raw_ostream &ROS) const;
+  void print(raw_ostream &ROS, bool IsForDebug = false) const;
   void dump() const;
 
   // ---------------------------------------------------------------------------
@@ -1212,13 +1217,13 @@ public:
   const_op_iterator op_end()   const { return const_op_iterator(this, getNumOperands()); }
 
   inline iterator_range<op_iterator>  operands() {
-    return iterator_range<op_iterator>(op_begin(), op_end());
+    return make_range(op_begin(), op_end());
   }
   inline iterator_range<const_op_iterator> operands() const {
-    return iterator_range<const_op_iterator>(op_begin(), op_end());
+    return make_range(op_begin(), op_end());
   }
 };
 
 } // end llvm namespace
 
-#endif
+#endif // LLVM_IR_METADATA_H

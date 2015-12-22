@@ -7,7 +7,7 @@ LLVM 3.8 Release Notes
 
 .. warning::
    These are in-progress notes for the upcoming LLVM 3.8 release.  You may
-   prefer the `LLVM 3.6 Release Notes <http://llvm.org/releases/3.6.0/docs
+   prefer the `LLVM 3.7 Release Notes <http://llvm.org/releases/3.7.0/docs
    /ReleaseNotes.html>`_.
 
 
@@ -61,6 +61,40 @@ Major changes in 3.7.1
 
 Non-comprehensive list of changes in 3.7.0
 =================================================
+* With this release, the minimum Windows version required for running LLVM is
+  Windows 7. Earlier versions, including Windows Vista and XP are no longer
+  supported.
+
+* With this release, the autoconf build system is deprecated. It will be removed
+  in the 3.9 release. Please migrate to using CMake. For more information see:
+  `Building LLVM with CMake <CMake.html>`_
+
+* The C API function LLVMLinkModules is deprecated. It will be removed in the
+  3.9 release. Please migrate to LLVMLinkModules2. Unlike the old function the
+  new one
+
+   * Doesn't take an unused parameter.
+   * Destroys the source instead of only damaging it.
+   * Does not record a message. Use the diagnostic handler instead.
+
+* The C API functions LLVMParseBitcode, LLVMParseBitcodeInContext,
+  LLVMGetBitcodeModuleInContext and LLVMGetBitcodeModule have been deprecated.
+  They will be removed in 3.9. Please migrate to the versions with a 2 suffix.
+  Unlike the old ones the new ones do not record a diagnostic message. Use
+  the diagnostic handler instead.
+
+* The deprecated C APIs LLVMGetBitcodeModuleProviderInContext and
+  LLVMGetBitcodeModuleProvider have been removed.
+
+* The deprecated C APIs LLVMCreateExecutionEngine, LLVMCreateInterpreter,
+  LLVMCreateJITCompiler, LLVMAddModuleProvider and LLVMRemoveModuleProvider
+  have been removed.
+
+* With this release, the C API headers have been reorganized to improve build
+  time. Type specific declarations have been moved to Type.h, and error
+  handling routines have been moved to ErrorHandling.h. Both are included in
+  Core.h so nothing should change for projects directly including the headers,
+  but transitive dependencies may be affected.
 
 .. NOTE
    For small 1-3 sentence descriptions, just add an entry at the end of
@@ -230,28 +264,15 @@ There are numerous improvements to the PowerPC target in this release:
 * PowerPC now has support for i128 and v1i128 types.  The types differ
   in how they are passed in registers for the ELFv2 ABI.
 
-* Disassembly will now print shorter mnemonic aliases when available.
+Changes to the X86 Target
+-----------------------------
 
-* Optional register name prefixes for VSX and QPX registers are now
-  supported in the assembly parser.
+ During this release ...
 
-* The back end now contains a pass to remove unnecessary vector swaps
-  from POWER8 little-endian code generation.  Additional improvements
-  are planned for release 3.8.
+* TLS is enabled for Cygwin as emutls.
 
-* The undefined-behavior sanitizer (UBSan) is now supported for PowerPC.
 
-* Many new vector programming APIs have been added to altivec.h.
-  Additional ones are planned for release 3.8.
-
-* PowerPC now supports __builtin_call_with_static_chain.
-
-* PowerPC now supports the revised -mrecip option that permits finer
-  control over reciprocal estimates.
-
-* Many bugs have been identified and fixed.
-
-Changes to the SystemZ Target
+Changes to the OCaml bindings
 -----------------------------
 
 * LLVM no longer attempts to automatically detect the current host CPU when
@@ -301,106 +322,9 @@ vectorization. As a generic loop optimization infrastructure it allows
 developers to get a per-loop-iteration model of a loop nest on which detailed
 analysis and transformations can be performed.
 
-Changes since the last release:
+* The ocaml function link_modules has been replaced with link_modules' which
+  uses LLVMLinkModules2.
 
-* isl imported into Polly distribution
-
-  `isl <http://repo.or.cz/w/isl.git>`_, the math library Polly uses, has been
-  imported into the source code repository of Polly and is now distributed as part
-  of Polly. As this was the last external library dependency of Polly, Polly can
-  now be compiled right after checking out the Polly source code without the need
-  for any additional libraries to be pre-installed.
-
-* Small integer optimization of isl
-
-  The MIT licensed imath backend using in `isl <http://repo.or.cz/w/isl.git>`_ for
-  arbitrary width integer computations has been optimized to use native integer
-  operations for the common case where the operands of a computation fit into 32
-  bit and to only fall back to large arbitrary precision integers for the
-  remaining cases. This optimization has greatly improved the compile-time
-  performance of Polly, both due to faster native operations also due to a
-  reduction in malloc traffic and pointer indirections. As a result, computations
-  that use arbitrary precision integers heavily have been speed up by almost 6x.
-  As a result, the compile-time of Polly on the Polybench test kernels in the LNT
-  suite has been reduced by 20% on average with compile time reductions between
-  9-43%.
-
-* Schedule Trees
-
-  Polly now uses internally so-called > Schedule Trees < to model the loop
-  structure it optimizes. Schedule trees are an easy to understand tree structure
-  that describes a loop nest using integer constraint sets to keep track of
-  execution constraints. It allows the developer to use per-tree-node operations
-  to modify the loop tree. Programatic analysis that work on the schedule tree
-  (e.g., as dependence analysis) also show a visible speedup as they can exploit
-  the tree structure of the schedule and need to fall back to ILP based
-  optimization problems less often. Section 6 of `Polyhedral AST generation is
-  more than scanning polyhedra
-  <http://www.grosser.es/#pub-polyhedral-AST-generation>`_ gives a detailed
-  explanation of this schedule trees.
-
-* Scalar and PHI node modeling - Polly as an analysis
-
-  Polly now requires almost no preprocessing to analyse LLVM-IR, which makes it
-  easier to use Polly as a pure analysis pass e.g. to provide more precise
-  dependence information to non-polyhedral transformation passes. Originally,
-  Polly required the input LLVM-IR to be preprocessed such that all scalar and
-  PHI-node dependences are translated to in-memory operations. Since this release,
-  Polly has full support for scalar and PHI node dependences and requires no
-  scalar-to-memory translation for such kind of dependences.
-
-* Modeling of modulo and non-affine conditions
-
-  Polly can now supports modulo operations such as A[t%2][i][j] as they appear
-  often in stencil computations and also allows data-dependent conditional
-  branches as they result e.g. from ternary conditions ala A[i] > 255 ? 255 :
-  A[i].
-
-* Delinearization
-
-  Polly now support the analysis of manually linearized multi-dimensional arrays
-  as they result form macros such as
-  "#define 2DARRAY(A,i,j) (A.data[(i) * A.size + (j)]". Similar constructs appear
-  in old C code written before C99, C++ code such as boost::ublas, LLVM exported
-  from Julia, Matlab generated code and many others. Our work titled
-  `Optimistic Delinearization of Parametrically Sized Arrays
-  <http://www.grosser.es/#pub-optimistic-delinerization>`_ gives details.
-
-* Compile time improvements
-
-  Pratik Bahtu worked on compile-time performance tuning of Polly. His work
-  together with the support for schedule trees and the small integer optimization
-  in isl notably reduced the compile time.
-
-* Increased compute timeouts
-
-  As Polly's compile time has been notabily improved, we were able to increase
-  the compile time saveguards in Polly. As a result, the default configuration
-  of Polly can now analyze larger loop nests without running into compile time
-  restrictions.
-
-* Export Debug Locations via JSCoP file
-
-  Polly's JSCoP import/export format gained support for debug locations that show
-  to the user the source code location of detected scops.
-
-* Improved windows support
-
-  The compilation of Polly on windows using cmake has been improved and several
-  visual studio build issues have been addressed.
-
-* Many bug fixes
-
-libunwind
----------
-
-The unwind implementation which use to reside in `libc++abi` has been moved into
-a separate repository.  This implementation can still be used for `libc++abi` by
-specifying `-DLIBCXXABI_USE_LLVM_UNWINDER=YES` and
-`-DLIBCXXABI_LIBUNWIND_PATH=<path to libunwind source>` when configuring
-`libc++abi`, which defaults to `true` when building on ARM.
-
-The new repository can also be built standalone if just `libunwind` is desired.
 
 External Open Source Projects Using LLVM 3.8
 ============================================
