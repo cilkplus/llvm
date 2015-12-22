@@ -52,11 +52,10 @@ The scripts are in the ``utils/release`` directory.
 test-release.sh
 ---------------
 
-This script will check-out, configure and compile LLVM+Clang (+ most add-ons,
-like ``compiler-rt``, ``libcxx`` and ``clang-extra-tools``) in three stages, and
-will test the final stage.  It'll have installed the final binaries on the
-Phase3/Releasei(+Asserts) directory, and that's the one you should use for the
-test-suite and other external tests.
+This script will check-out, configure and compile LLVM+Clang (+ most add-ons, like ``compiler-rt``,
+``libcxx``, ``libomp`` and ``clang-extra-tools``) in three stages, and will test the final stage.
+It'll have installed the final binaries on the Phase3/Releasei(+Asserts) directory, and
+that's the one you should use for the test-suite and other external tests.
 
 To run the script on a specific release candidate run::
 
