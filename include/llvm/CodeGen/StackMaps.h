@@ -127,64 +127,6 @@ private:
   const MachineInstr *MI;
 };
 
-/// \brief MI-level patchpoint operands.
-///
-/// MI patchpoint operations take the form:
-/// [<def>], <id>, <numBytes>, <target>, <numArgs>, <cc>, ...
-///
-/// IR patchpoint intrinsics do not have the <cc> operand because calling
-/// convention is part of the subclass data.
-///
-/// SD patchpoint nodes do not have a def operand because it is part of the
-/// SDValue.
-///
-/// Patchpoints following the anyregcc convention are handled specially. For
-/// these, the stack map also records the location of the return value and
-/// arguments.
-class PatchPointOpers {
-public:
-  /// Enumerate the meta operands.
-  enum { IDPos, NBytesPos, TargetPos, NArgPos, CCPos, MetaEnd };
-private:
-  const MachineInstr *MI;
-  bool HasDef;
-  bool IsAnyReg;
-public:
-  explicit PatchPointOpers(const MachineInstr *MI);
-
-  bool isAnyReg() const { return IsAnyReg; }
-  bool hasDef() const { return HasDef; }
-
-  unsigned getMetaIdx(unsigned Pos = 0) const {
-    assert(Pos < MetaEnd && "Meta operand index out of range.");
-    return (HasDef ? 1 : 0) + Pos;
-  }
-
-  const MachineOperand &getMetaOper(unsigned Pos) {
-    return MI->getOperand(getMetaIdx(Pos));
-  }
-
-  unsigned getArgIdx() const { return getMetaIdx() + MetaEnd; }
-
-  /// Get the operand index of the variable list of non-argument operands.
-  /// These hold the "live state".
-  unsigned getVarIdx() const {
-    return getMetaIdx() + MetaEnd
-      + MI->getOperand(getMetaIdx(NArgPos)).getImm();
-  }
-
-  /// Get the index at which stack map locations will be recorded.
-  /// Arguments are not recorded unless the anyregcc convention is used.
-  unsigned getStackMapStartIdx() const {
-    if (IsAnyReg)
-      return getArgIdx();
-    return getVarIdx();
-  }
-
-  /// \brief Get the next scratch register operand index.
-  unsigned getNextScratchIdx(unsigned StartIdx = 0) const;
-};
-
 class StackMaps {
 public:
   struct Location {

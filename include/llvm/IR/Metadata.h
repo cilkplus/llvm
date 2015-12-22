@@ -500,10 +500,6 @@ dyn_extract_or_null(Y &&MD) {
 
 } // end namespace mdconst
 
-enum LLVMConstants LLVM_ENUM_INT_TYPE(uint32_t) {
-  DEBUG_METADATA_VERSION = 1  // Current debug info version number.
-};
-
 //===----------------------------------------------------------------------===//
 /// \brief A single uniqued string.
 ///
