@@ -1867,15 +1867,15 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
   };
 
   static IntrinsicKind getIntrinsicKind(Intrinsic::ID iid) {
-    const int DoesNotAccessMemory = IK_DoesNotAccessMemory;
-    const int OnlyReadsArgumentPointees = IK_OnlyReadsMemory;
-    const int OnlyReadsMemory = IK_OnlyReadsMemory;
-    const int OnlyAccessesArgumentPointees = IK_WritesMemory;
-    const int UnknownModRefBehavior = IK_WritesMemory;
+    const int FMRB_DoesNotAccessMemory = IK_DoesNotAccessMemory;
+    const int FMRB_OnlyReadsArgumentPointees = IK_OnlyReadsMemory;
+    const int FMRB_OnlyReadsMemory = IK_OnlyReadsMemory;
+    const int FMRB_OnlyAccessesArgumentPointees = IK_WritesMemory;
+    const int FMRB_UnknownModRefBehavior = IK_WritesMemory;
 #define GET_INTRINSIC_MODREF_BEHAVIOR
-#define ModRefBehavior IntrinsicKind
+#define FunctionModRefBehavior IntrinsicKind
 #include "llvm/IR/Intrinsics.gen"
-#undef ModRefBehavior
+#undef FunctionModRefBehavior
 #undef GET_INTRINSIC_MODREF_BEHAVIOR
   }
 
@@ -2653,6 +2653,30 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     setOrigin(&I, getCleanOrigin());
   }
 
+  void visitCleanupPadInst(CleanupPadInst &I) {
+    if (!I.getType()->isVoidTy()) {
+      setShadow(&I, getCleanShadow(&I));
+      setOrigin(&I, getCleanOrigin());
+    }
+  }
+
+  void visitCatchPad(CatchPadInst &I) {
+    if (!I.getType()->isVoidTy()) {
+      setShadow(&I, getCleanShadow(&I));
+      setOrigin(&I, getCleanOrigin());
+    }
+  }
+
+  void visitTerminatePad(TerminatePadInst &I) {
+    DEBUG(dbgs() << "TerminatePad: " << I << "\n");
+    // Nothing to do here.
+  }
+
+  void visitCatchEndPadInst(CatchEndPadInst &I) {
+    DEBUG(dbgs() << "CatchEndPad: " << I << "\n");
+    // Nothing to do here.
+  }
+
   void visitGetElementPtrInst(GetElementPtrInst &I) {
     handleShadowOr(I);
   }
@@ -2693,6 +2717,16 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
 
   void visitResumeInst(ResumeInst &I) {
     DEBUG(dbgs() << "Resume: " << I << "\n");
+    // Nothing to do here.
+  }
+
+  void visitCleanupReturnInst(CleanupReturnInst &CRI) {
+    DEBUG(dbgs() << "CleanupReturn: " << CRI << "\n");
+    // Nothing to do here.
+  }
+
+  void visitCatchReturnInst(CatchReturnInst &CRI) {
+    DEBUG(dbgs() << "CatchReturn: " << CRI << "\n");
     // Nothing to do here.
   }
 

@@ -800,7 +800,7 @@ private:
 public:
   X86AsmParser(MCSubtargetInfo &sti, MCAsmParser &Parser,
                const MCInstrInfo &mii, const MCTargetOptions &Options)
-      : MCTargetAsmParser(), STI(sti), MII(mii), InstInfo(nullptr) {
+      : MCTargetAsmParser(Options), STI(sti), MII(mii), InstInfo(nullptr) {
 
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
@@ -911,6 +911,11 @@ bool X86AsmParser::ParseRegister(unsigned &RegNo,
   // If the match failed, try the register name as lowercase.
   if (RegNo == 0)
     RegNo = MatchRegisterName(Tok.getString().lower());
+
+  // The "flags" register cannot be referenced directly.
+  // Treat it as an identifier instead.
+  if (isParsingInlineAsm() && isParsingIntelSyntax() && RegNo == X86::EFLAGS)
+    RegNo = 0;
 
   if (!is64BitMode()) {
     // FIXME: This should be done using Requires<Not64BitMode> and
@@ -1044,6 +1049,7 @@ static unsigned getIntelMemOperandSize(StringRef OpStr) {
     .Cases("DWORD", "dword", 32)
     .Cases("QWORD", "qword", 64)
     .Cases("XWORD", "xword", 80)
+    .Cases("TBYTE", "tbyte", 80)
     .Cases("XMMWORD", "xmmword", 128)
     .Cases("YMMWORD", "ymmword", 256)
     .Cases("ZMMWORD", "zmmword", 512)
@@ -2346,11 +2352,12 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
   // instalias with an immediate operand yet.
   if (Name == "int" && Operands.size() == 2) {
     X86Operand &Op1 = static_cast<X86Operand &>(*Operands[1]);
-    if (Op1.isImm() && isa<MCConstantExpr>(Op1.getImm()) &&
-        cast<MCConstantExpr>(Op1.getImm())->getValue() == 3) {
-      Operands.erase(Operands.begin() + 1);
-      static_cast<X86Operand &>(*Operands[0]).setTokenValue("int3");
-    }
+    if (Op1.isImm())
+      if (auto *CE = dyn_cast<MCConstantExpr>(Op1.getImm()))
+        if (CE->getValue() == 3) {
+          Operands.erase(Operands.begin() + 1);
+          static_cast<X86Operand &>(*Operands[0]).setTokenValue("int3");
+        }
   }
 
   return false;

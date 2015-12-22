@@ -624,9 +624,9 @@ void SelectionDAG::RemoveDeadNodes() {
   SmallVector<SDNode*, 128> DeadNodes;
 
   // Add all obviously-dead nodes to the DeadNodes worklist.
-  for (allnodes_iterator I = allnodes_begin(), E = allnodes_end(); I != E; ++I)
-    if (I->use_empty())
-      DeadNodes.push_back(I);
+  for (SDNode &Node : allnodes())
+    if (Node.use_empty())
+      DeadNodes.push_back(&Node);
 
   RemoveDeadNodes(DeadNodes);
 
@@ -1852,8 +1852,7 @@ SDValue SelectionDAG::getShiftAmountOperand(EVT LHSTy, SDValue Op) {
   EVT ShTy = TLI->getShiftAmountTy(LHSTy, getDataLayout());
   if (OpTy == ShTy || OpTy.isVector()) return Op;
 
-  ISD::NodeType Opcode = OpTy.bitsGT(ShTy) ?  ISD::TRUNCATE : ISD::ZERO_EXTEND;
-  return getNode(Opcode, SDLoc(Op), ShTy, Op);
+  return getZExtOrTrunc(Op, SDLoc(Op), ShTy);
 }
 
 /// CreateStackTemporary - Create a stack temporary, suitable for holding the
@@ -1872,8 +1871,7 @@ SDValue SelectionDAG::CreateStackTemporary(EVT VT, unsigned minAlign) {
 /// CreateStackTemporary - Create a stack temporary suitable for holding
 /// either of the specified value types.
 SDValue SelectionDAG::CreateStackTemporary(EVT VT1, EVT VT2) {
-  unsigned Bytes = std::max(VT1.getStoreSizeInBits(),
-                            VT2.getStoreSizeInBits())/8;
+  unsigned Bytes = std::max(VT1.getStoreSize(), VT2.getStoreSize());
   Type *Ty1 = VT1.getTypeForEVT(*getContext());
   Type *Ty2 = VT2.getTypeForEVT(*getContext());
   const DataLayout &DL = getDataLayout();
@@ -4153,6 +4151,18 @@ static bool FindOptimalMemOpLowering(std::vector<EVT> &MemOps,
   return true;
 }
 
+static bool shouldLowerMemFuncForSize(const MachineFunction &MF) {
+  const Function *F = MF.getFunction();
+  bool HasMinSize = F->hasFnAttribute(Attribute::MinSize);
+  bool HasOptSize = F->hasFnAttribute(Attribute::OptimizeForSize);
+
+  // On Darwin, -Os means optimize for size without hurting performance, so
+  // only really optimize for size when -Oz (MinSize) is used.
+  if (MF.getTarget().getTargetTriple().isOSDarwin())
+    return HasMinSize;
+  return HasOptSize || HasMinSize;
+}
+
 static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, SDLoc dl,
                                        SDValue Chain, SDValue Dst,
                                        SDValue Src, uint64_t Size,
@@ -4173,7 +4183,7 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, SDLoc dl,
   bool DstAlignCanChange = false;
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
-  bool OptSize = MF.getFunction()->hasFnAttribute(Attribute::OptimizeForSize);
+  bool OptSize = shouldLowerMemFuncForSize(MF);
   FrameIndexSDNode *FI = dyn_cast<FrameIndexSDNode>(Dst);
   if (FI && !MFI->isFixedObjectIndex(FI->getIndex()))
     DstAlignCanChange = true;
@@ -4286,7 +4296,7 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, SDLoc dl,
   bool DstAlignCanChange = false;
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
-  bool OptSize = MF.getFunction()->hasFnAttribute(Attribute::OptimizeForSize);
+  bool OptSize = shouldLowerMemFuncForSize(MF);
   FrameIndexSDNode *FI = dyn_cast<FrameIndexSDNode>(Dst);
   if (FI && !MFI->isFixedObjectIndex(FI->getIndex()))
     DstAlignCanChange = true;
@@ -4380,7 +4390,7 @@ static SDValue getMemsetStores(SelectionDAG &DAG, SDLoc dl,
   bool DstAlignCanChange = false;
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
-  bool OptSize = MF.getFunction()->hasFnAttribute(Attribute::OptimizeForSize);
+  bool OptSize = shouldLowerMemFuncForSize(MF);
   FrameIndexSDNode *FI = dyn_cast<FrameIndexSDNode>(Dst);
   if (FI && !MFI->isFixedObjectIndex(FI->getIndex()))
     DstAlignCanChange = true;
@@ -6470,8 +6480,8 @@ unsigned SelectionDAG::AssignTopologicalOrder() {
 
   // Visit all the nodes. As we iterate, move nodes into sorted order,
   // such that by the time the end is reached all nodes will be sorted.
-  for (allnodes_iterator I = allnodes_begin(),E = allnodes_end(); I != E; ++I) {
-    SDNode *N = I;
+  for (SDNode &Node : allnodes()) {
+    SDNode *N = &Node;
     checkForCycles(N, this);
     // N is in sorted position, so all its uses have one less operand
     // that needs to be sorted.
@@ -6493,8 +6503,9 @@ unsigned SelectionDAG::AssignTopologicalOrder() {
         P->setNodeId(Degree);
       }
     }
-    if (I == SortedPos) {
+    if (&Node == SortedPos) {
 #ifndef NDEBUG
+      allnodes_iterator I = N;
       SDNode *S = ++I;
       dbgs() << "Overran sorted position:\n";
       S->dumprFull(this); dbgs() << "\n";

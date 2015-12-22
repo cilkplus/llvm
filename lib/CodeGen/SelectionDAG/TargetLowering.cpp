@@ -115,7 +115,6 @@ TargetLowering::makeLibCall(SelectionDAG &DAG,
   return LowerCallTo(CLI);
 }
 
-
 /// SoftenSetCCOperands - Soften the operands of a comparison.  This code is
 /// shared among BR_CC, SELECT_CC, and SETCC handlers.
 void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
@@ -127,6 +126,7 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
 
   // Expand into one or more soft-fp libcall(s).
   RTLIB::Libcall LC1 = RTLIB::UNKNOWN_LIBCALL, LC2 = RTLIB::UNKNOWN_LIBCALL;
+  bool ShouldInvertCC = false;
   switch (CCCode) {
   case ISD::SETEQ:
   case ISD::SETOEQ:
@@ -166,34 +166,38 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
     LC1 = (VT == MVT::f32) ? RTLIB::O_F32 :
           (VT == MVT::f64) ? RTLIB::O_F64 : RTLIB::O_F128;
     break;
-  default:
+  case ISD::SETONE:
+    // SETONE = SETOLT | SETOGT
+    LC1 = (VT == MVT::f32) ? RTLIB::OLT_F32 :
+          (VT == MVT::f64) ? RTLIB::OLT_F64 : RTLIB::OLT_F128;
+    LC2 = (VT == MVT::f32) ? RTLIB::OGT_F32 :
+          (VT == MVT::f64) ? RTLIB::OGT_F64 : RTLIB::OGT_F128;
+    break;
+  case ISD::SETUEQ:
     LC1 = (VT == MVT::f32) ? RTLIB::UO_F32 :
           (VT == MVT::f64) ? RTLIB::UO_F64 : RTLIB::UO_F128;
+    LC2 = (VT == MVT::f32) ? RTLIB::OEQ_F32 :
+          (VT == MVT::f64) ? RTLIB::OEQ_F64 : RTLIB::OEQ_F128;
+    break;
+  default:
+    // Invert CC for unordered comparisons
+    ShouldInvertCC = true;
     switch (CCCode) {
-    case ISD::SETONE:
-      // SETONE = SETOLT | SETOGT
-      LC1 = (VT == MVT::f32) ? RTLIB::OLT_F32 :
-            (VT == MVT::f64) ? RTLIB::OLT_F64 : RTLIB::OLT_F128;
-      // Fallthrough
-    case ISD::SETUGT:
-      LC2 = (VT == MVT::f32) ? RTLIB::OGT_F32 :
-            (VT == MVT::f64) ? RTLIB::OGT_F64 : RTLIB::OGT_F128;
-      break;
-    case ISD::SETUGE:
-      LC2 = (VT == MVT::f32) ? RTLIB::OGE_F32 :
+    case ISD::SETULT:
+      LC1 = (VT == MVT::f32) ? RTLIB::OGE_F32 :
             (VT == MVT::f64) ? RTLIB::OGE_F64 : RTLIB::OGE_F128;
       break;
-    case ISD::SETULT:
-      LC2 = (VT == MVT::f32) ? RTLIB::OLT_F32 :
-            (VT == MVT::f64) ? RTLIB::OLT_F64 : RTLIB::OLT_F128;
-      break;
     case ISD::SETULE:
-      LC2 = (VT == MVT::f32) ? RTLIB::OLE_F32 :
+      LC1 = (VT == MVT::f32) ? RTLIB::OGT_F32 :
+            (VT == MVT::f64) ? RTLIB::OGT_F64 : RTLIB::OGT_F128;
+      break;
+    case ISD::SETUGT:
+      LC1 = (VT == MVT::f32) ? RTLIB::OLE_F32 :
             (VT == MVT::f64) ? RTLIB::OLE_F64 : RTLIB::OLE_F128;
       break;
-    case ISD::SETUEQ:
-      LC2 = (VT == MVT::f32) ? RTLIB::OEQ_F32 :
-            (VT == MVT::f64) ? RTLIB::OEQ_F64 : RTLIB::OEQ_F128;
+    case ISD::SETUGE:
+      LC1 = (VT == MVT::f32) ? RTLIB::OLT_F32 :
+            (VT == MVT::f64) ? RTLIB::OLT_F64 : RTLIB::OLT_F128;
       break;
     default: llvm_unreachable("Do not know how to soften this setcc!");
     }
@@ -203,16 +207,20 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
   EVT RetVT = getCmpLibcallReturnType();
   SDValue Ops[2] = { NewLHS, NewRHS };
   NewLHS = makeLibCall(DAG, LC1, RetVT, Ops, 2, false/*sign irrelevant*/,
-                       dl).first;
+					   dl).first;
   NewRHS = DAG.getConstant(0, dl, RetVT);
+
   CCCode = getCmpLibcallCC(LC1);
+  if (ShouldInvertCC)
+    CCCode = getSetCCInverse(CCCode, /*isInteger=*/true);
+
   if (LC2 != RTLIB::UNKNOWN_LIBCALL) {
     SDValue Tmp = DAG.getNode(
         ISD::SETCC, dl,
         getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(), RetVT),
         NewLHS, NewRHS, DAG.getCondCode(CCCode));
     NewLHS = makeLibCall(DAG, LC2, RetVT, Ops, 2, false/*sign irrelevant*/,
-                         dl).first;
+      dl).first;
     NewLHS = DAG.getNode(
         ISD::SETCC, dl,
         getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(), RetVT),
@@ -3035,4 +3043,47 @@ bool TargetLowering::expandFP_TO_SINT(SDNode *Node, SDValue &Result,
   Result = DAG.getSelectCC(dl, Exponent, DAG.getConstant(0, dl, IntVT),
       DAG.getConstant(0, dl, NVT), Ret, ISD::SETLT);
   return true;
+}
+
+//===----------------------------------------------------------------------===//
+// Implementation of Emulated TLS Model
+//===----------------------------------------------------------------------===//
+
+SDValue TargetLowering::LowerToTLSEmulatedModel(const GlobalAddressSDNode *GA,
+                                                SelectionDAG &DAG) const {
+  // Access to address of TLS varialbe xyz is lowered to a function call:
+  //   __emutls_get_address( address of global variable named "__emutls_v.xyz" )
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+  PointerType *VoidPtrType = Type::getInt8PtrTy(*DAG.getContext());
+  SDLoc dl(GA);
+
+  ArgListTy Args;
+  ArgListEntry Entry;
+  std::string NameString = ("__emutls_v." + GA->getGlobal()->getName()).str();
+  Module *VariableModule = const_cast<Module*>(GA->getGlobal()->getParent());
+  StringRef EmuTlsVarName(NameString);
+  GlobalVariable *EmuTlsVar = VariableModule->getNamedGlobal(EmuTlsVarName);
+  if (!EmuTlsVar)
+    EmuTlsVar = dyn_cast_or_null<GlobalVariable>(
+        VariableModule->getOrInsertGlobal(EmuTlsVarName, VoidPtrType));
+  Entry.Node = DAG.getGlobalAddress(EmuTlsVar, dl, PtrVT);
+  Entry.Ty = VoidPtrType;
+  Args.push_back(Entry);
+
+  SDValue EmuTlsGetAddr = DAG.getExternalSymbol("__emutls_get_address", PtrVT);
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(DAG.getEntryNode());
+  CLI.setCallee(CallingConv::C, VoidPtrType, EmuTlsGetAddr, std::move(Args), 0);
+  std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
+
+  // TLSADDR will be codegen'ed as call. Inform MFI that function has calls.
+  // At last for X86 targets, maybe good for other targets too?
+  MachineFrameInfo *MFI = DAG.getMachineFunction().getFrameInfo();
+  MFI->setAdjustsStack(true);  // Is this only for X86 target?
+  MFI->setHasCalls(true);
+
+  assert((GA->getOffset() == 0) &&
+         "Emulated TLS must have zero offset in GlobalAddressSDNode");
+  return CallResult.first;
 }

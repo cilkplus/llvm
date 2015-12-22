@@ -156,6 +156,8 @@ class CallAnalyzer : public InstVisitor<CallAnalyzer, bool> {
   bool visitSwitchInst(SwitchInst &SI);
   bool visitIndirectBrInst(IndirectBrInst &IBI);
   bool visitResumeInst(ResumeInst &RI);
+  bool visitCleanupReturnInst(CleanupReturnInst &RI);
+  bool visitCatchReturnInst(CatchReturnInst &RI);
   bool visitUnreachableInst(UnreachableInst &I);
 
 public:
@@ -903,6 +905,18 @@ bool CallAnalyzer::visitResumeInst(ResumeInst &RI) {
   return false;
 }
 
+bool CallAnalyzer::visitCleanupReturnInst(CleanupReturnInst &CRI) {
+  // FIXME: It's not clear that a single instruction is an accurate model for
+  // the inline cost of a cleanupret instruction.
+  return false;
+}
+
+bool CallAnalyzer::visitCatchReturnInst(CatchReturnInst &CRI) {
+  // FIXME: It's not clear that a single instruction is an accurate model for
+  // the inline cost of a cleanupret instruction.
+  return false;
+}
+
 bool CallAnalyzer::visitUnreachableInst(UnreachableInst &I) {
   // FIXME: It might be reasonably to discount the cost of instructions leading
   // to unreachable as they have the lowest possible impact on both runtime and
@@ -1346,7 +1360,7 @@ static bool attributeMatches(Function *F1, Function *F2, AttrKind Attr) {
 static bool functionsHaveCompatibleAttributes(Function *Caller,
                                               Function *Callee,
                                               TargetTransformInfo &TTI) {
-  return TTI.hasCompatibleFunctionAttributes(Caller, Callee) &&
+  return TTI.areInlineCompatible(Caller, Callee) &&
          attributeMatches(Caller, Callee, Attribute::SanitizeAddress) &&
          attributeMatches(Caller, Callee, Attribute::SanitizeMemory) &&
          attributeMatches(Caller, Callee, Attribute::SanitizeThread);
