@@ -191,6 +191,8 @@ int run() {
 
 }
 
-int run = test(); //expected-note {{instantiation}}
-
+namespace N3922 {
+  struct X { X(); explicit X(const X&); int n; };
+  auto a = [x{X()}] { return x.n; }; // ok
+  auto b = [x = {X()}] {}; // expected-error{{<initializer_list>}}
 }

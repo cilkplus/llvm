@@ -1,6 +1,6 @@
-=======================
-Clang 3.7 Release Notes
-=======================
+=====================================
+Clang 3.8 (In-Progress) Release Notes
+=====================================
 
 .. contents::
    :local:
@@ -8,12 +8,17 @@ Clang 3.7 Release Notes
 
 Written by the `LLVM Team <http://llvm.org/>`_
 
+.. warning::
+
+   These are in-progress notes for the upcoming Clang 3.8 release. You may
+   prefer the `Clang 3.7 Release Notes
+   <http://llvm.org/releases/3.7.0/tools/clang/docs/ReleaseNotes.html>`_.
 
 Introduction
 ============
 
 This document contains the release notes for the Clang C/C++/Objective-C
-frontend, part of the LLVM Compiler Infrastructure, release 3.7. Here we
+frontend, part of the LLVM Compiler Infrastructure, release 3.8. Here we
 describe the status of Clang in some detail, including major
 improvements from the previous release and new feature work. For the
 general LLVM release notes, see `the LLVM
@@ -25,7 +30,7 @@ For more information about Clang or LLVM, including information about the
 latest release, please check out the main `Clang Web Site
 <http://clang.llvm.org>`_ or the `LLVM Web Site <http://llvm.org>`_.
 
-What's New in Clang 3.7?
+What's New in Clang 3.8?
 ========================
 
 Some of the major new features and improvements to Clang are listed here.
@@ -36,10 +41,7 @@ to Clang's support for those languages.
 Major New Features
 ------------------
 
-- Use of the ``__declspec`` language extension for declaration attributes now
-  requires passing the -fms-extensions or -fborland compiler flag. This language
-  extension is also enabled when compiling CUDA code, but its use should be
-  viewed as an implementation detail that is subject to change.
+- Feature1...
 
 - On Windows targets, some uses of the ``__try``, ``__except``, and
   ``__finally`` language constructs are supported in Clang 3.7. MSVC-compatible
@@ -58,20 +60,7 @@ Improvements to Clang's diagnostics
 
 Clang's diagnostics are constantly being improved to catch more issues,
 explain them more clearly, and provide more accurate source information
-about them. The improvements since the 3.6 release include:
-
-- -Wrange-loop-analysis analyzes the loop variable type and the container type
-  to determine whether copies are made of the container elements.  If possible,
-  suggest a const reference type to prevent copies, or a non-reference type
-  to indicate a copy is made.
-
-- -Wredundant-move warns when a parameter variable is moved on return and the
-  return type is the same as the variable.  Returning the variable directly
-  will already make a move, so the call is not needed.
-
-- -Wpessimizing-move warns when a local variable is moved on return and the
-  return type is the same as the variable.  Copy elision cannot take place with
-  a move, but can take place if the variable is returned directly.
+about them. The improvements since the 3.7 release include:
 
 - -Wmove is a new warning group which has the previous two warnings,
   -Wredundant-move and -Wpessimizing-move, as well as previous warning
@@ -87,11 +76,7 @@ about them. The improvements since the 3.6 release include:
 New Compiler Flags
 ------------------
 
-The sized deallocation feature of C++14 is now controlled by the
-``-fsized-deallocation`` flag. This feature relies on library support that
-isn't yet widely deployed, so the user must supply an extra flag to get the
-extra functionality.
-
+The option ....
 
 In addition, ``[[deprecated]]`` is now accepted as a synonym for Clang's
 existing ``deprecated`` attribute.
@@ -189,16 +174,56 @@ Added new checks:
 * misc-macro-repeated-side-effects: checks for repeated argument with side
   effects in macros.
 
-* misc-noexcept-move-constructor: flags user-defined move constructors and
-  assignment operators not marked with ``noexcept`` or marked with
-  ``noexcept(expr)`` where ``expr`` evaluates to ``false`` (but is not a
-  ``false`` literal itself).
+These are major API changes that have happened since the 3.7 release of
+Clang. If upgrading an external codebase that uses Clang as a library,
+this section should help get you past the largest hurdles of upgrading.
 
-* misc-static-assert: replaces ``assert()`` with ``static_assert()`` if the
-  condition is evaluable at compile time.
+-  ...
 
-* readability-container-size-empty: checks whether a call to the ``size()``
-  method can be replaced with a call to ``empty()``.
+AST Matchers
+------------
+The AST matcher functions were renamed to reflect the exact AST node names,
+which is a breaking change to AST matching code. The following matchers were
+affected:
+
+=======================	============================
+Previous Matcher Name	New Matcher Name
+=======================	============================
+recordDecl		recordDecl and cxxRecordDecl
+ctorInitializer		cxxCtorInitializer
+constructorDecl		cxxConstructorDecl
+destructorDecl		cxxDestructorDecl
+methodDecl		cxxMethodDecl
+conversionDecl		cxxConversionDecl
+memberCallExpr		cxxMemberCallExpr
+constructExpr		cxxConstructExpr
+unresolvedConstructExpr	cxxUnresolvedConstructExpr
+thisExpr		cxxThisExpr
+bindTemporaryExpr	cxxBindTemporaryExpr
+newExpr			cxxNewExpr
+deleteExpr		cxxDeleteExpr
+defaultArgExpr		cxxDefaultArgExpr
+operatorCallExpr	cxxOperatorCallExpr
+forRangeStmt		cxxForRangeStmt
+catchStmt		cxxCatchStmt
+tryStmt			cxxTryStmt
+throwExpr		cxxThrowExpr
+boolLiteral		cxxBoolLiteral
+nullPtrLiteralExpr	cxxNullPtrLiteralExpr
+reinterpretCastExpr	cxxReinterpretCastExpr
+staticCastExpr		cxxStaticCastExpr
+dynamicCastExpr		cxxDynamicCastExpr
+constCastExpr		cxxConstCastExpr
+functionalCastExpr	cxxFunctionalCastExpr
+temporaryObjectExpr	cxxTemporaryObjectExpr
+CUDAKernalCallExpr	cudaKernelCallExpr
+=======================	============================
+
+recordDecl() previously matched AST nodes of type CXXRecordDecl, but now
+matches AST nodes of type RecordDecl. If a CXXRecordDecl is required, use the
+cxxRecordDecl() matcher instead.
+
+...
 
 * readability-else-after-return: flags conditional statements having the
   ``else`` branch, when the ``true`` branch has a ``return`` as the last statement.
