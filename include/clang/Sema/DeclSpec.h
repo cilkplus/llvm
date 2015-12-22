@@ -31,7 +31,6 @@
 #include "clang/Lex/Token.h"
 #include "clang/Sema/AttributeList.h"
 #include "clang/Sema/Ownership.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -41,14 +40,10 @@ namespace clang {
   class CXXRecordDecl;
   class TypeLoc;
   class LangOptions;
-  class DiagnosticsEngine;
   class IdentifierInfo;
   class NamespaceAliasDecl;
   class NamespaceDecl;
-  class NestedNameSpecifier;
-  class NestedNameSpecifierLoc;
   class ObjCDeclSpec;
-  class Preprocessor;
   class Sema;
   class Declarator;
   struct TemplateIdAnnotation;
@@ -70,8 +65,8 @@ class CXXScopeSpec {
   NestedNameSpecifierLocBuilder Builder;
 
 public:
-  const SourceRange &getRange() const { return Range; }
-  void setRange(const SourceRange &R) { Range = R; }
+  SourceRange getRange() const { return Range; }
+  void setRange(SourceRange R) { Range = R; }
   void setBeginLoc(SourceLocation Loc) { Range.setBegin(Loc); }
   void setEndLoc(SourceLocation Loc) { Range.setEnd(Loc); }
   SourceLocation getBeginLoc() const { return Range.getBegin(); }
@@ -302,6 +297,7 @@ public:
   static const TST TST_decltype_auto = clang::TST_decltype_auto;
   static const TST TST_underlyingType = clang::TST_underlyingType;
   static const TST TST_auto = clang::TST_auto;
+  static const TST TST_auto_type = clang::TST_auto_type;
   static const TST TST_unknown_anytype = clang::TST_unknown_anytype;
   static const TST TST_atomic = clang::TST_atomic;
   static const TST TST_error = clang::TST_error;
@@ -494,7 +490,7 @@ public:
   CXXScopeSpec &getTypeSpecScope() { return TypeScope; }
   const CXXScopeSpec &getTypeSpecScope() const { return TypeScope; }
 
-  const SourceRange &getSourceRange() const LLVM_READONLY { return Range; }
+  SourceRange getSourceRange() const LLVM_READONLY { return Range; }
   SourceLocation getLocStart() const LLVM_READONLY { return Range.getBegin(); }
   SourceLocation getLocEnd() const LLVM_READONLY { return Range.getEnd(); }
 
@@ -513,7 +509,8 @@ public:
   void setTypeofParensRange(SourceRange range) { TypeofParensRange = range; }
 
   bool containsPlaceholderType() const {
-    return TypeSpecType == TST_auto || TypeSpecType == TST_decltype_auto;
+    return (TypeSpecType == TST_auto || TypeSpecType == TST_auto_type ||
+            TypeSpecType == TST_decltype_auto);
   }
 
   bool hasTagDefinition() const;
@@ -743,8 +740,7 @@ public:
   /// Finish - This does final analysis of the declspec, issuing diagnostics for
   /// things like "_Imaginary" (lacking an FP type).  After calling this method,
   /// DeclSpec is guaranteed self-consistent, even if an error occurred.
-  void Finish(DiagnosticsEngine &D, Preprocessor &PP,
-              const PrintingPolicy &Policy);
+  void Finish(Sema &S, const PrintingPolicy &Policy);
 
   const WrittenBuiltinSpecs& getWrittenBuiltinSpecs() const {
     return writtenBS;
@@ -1256,8 +1252,11 @@ struct DeclaratorChunk {
     /// any.
     unsigned MutableLoc;
 
-    /// \brief The location of the keyword introducing the spec, if any.
-    unsigned ExceptionSpecLoc;
+    /// \brief The beginning location of the exception specification, if any.
+    unsigned ExceptionSpecLocBeg;
+
+    /// \brief The end location of the exception specification, if any.
+    unsigned ExceptionSpecLocEnd;
 
     /// Params - This is a pointer to a new[]'d array of ParamInfo objects that
     /// describe the parameters specified by this function declarator.  null if
@@ -1324,8 +1323,16 @@ struct DeclaratorChunk {
       return SourceLocation::getFromRawEncoding(RParenLoc);
     }
 
-    SourceLocation getExceptionSpecLoc() const {
-      return SourceLocation::getFromRawEncoding(ExceptionSpecLoc);
+    SourceLocation getExceptionSpecLocBeg() const {
+      return SourceLocation::getFromRawEncoding(ExceptionSpecLocBeg);
+    }
+
+    SourceLocation getExceptionSpecLocEnd() const {
+      return SourceLocation::getFromRawEncoding(ExceptionSpecLocEnd);
+    }
+
+    SourceRange getExceptionSpecRange() const {
+      return SourceRange(getExceptionSpecLocBeg(), getExceptionSpecLocEnd());
     }
 
     /// \brief Retrieve the location of the ref-qualifier, if any.
@@ -1497,7 +1504,7 @@ struct DeclaratorChunk {
                                      SourceLocation RestrictQualifierLoc,
                                      SourceLocation MutableLoc,
                                      ExceptionSpecificationType ESpecType,
-                                     SourceLocation ESpecLoc,
+                                     SourceRange ESpecRange,
                                      ParsedType *Exceptions,
                                      SourceRange *ExceptionRanges,
                                      unsigned NumExceptions,
@@ -1705,7 +1712,7 @@ public:
   }
 
   /// \brief Get the source range that spans this declarator.
-  const SourceRange &getSourceRange() const LLVM_READONLY { return Range; }
+  SourceRange getSourceRange() const LLVM_READONLY { return Range; }
   SourceLocation getLocStart() const LLVM_READONLY { return Range.getBegin(); }
   SourceLocation getLocEnd() const LLVM_READONLY { return Range.getEnd(); }
 
@@ -1725,7 +1732,7 @@ public:
   /// given declspec, unless its location is invalid. Adopts the range start if
   /// the current range start is invalid.
   void ExtendWithDeclSpec(const DeclSpec &DS) {
-    const SourceRange &SR = DS.getSourceRange();
+    SourceRange SR = DS.getSourceRange();
     if (Range.getBegin().isInvalid())
       Range.setBegin(SR.getBegin());
     if (!SR.getEnd().isInvalid())
@@ -2198,6 +2205,9 @@ public:
   /// redeclaration time if the decl is static.
   bool isStaticMember();
 
+  /// Returns true if this declares a constructor or a destructor.
+  bool isCtorOrDtor();
+
   void setRedeclaration(bool Val) { Redeclaration = Val; }
   bool isRedeclaration() const { return Redeclaration; }
 };
@@ -2252,6 +2262,13 @@ private:
   SourceLocation LastLocation;
 };
 
+enum class LambdaCaptureInitKind {
+  NoInit,     //!< [a]
+  CopyInit,   //!< [a = b], [a = {b}]
+  DirectInit, //!< [a(b)]
+  ListInit    //!< [a{b}]
+};
+
 /// \brief Represents a complete lambda introducer.
 struct LambdaIntroducer {
   /// \brief An individual capture in a lambda introducer.
@@ -2260,13 +2277,15 @@ struct LambdaIntroducer {
     SourceLocation Loc;
     IdentifierInfo *Id;
     SourceLocation EllipsisLoc;
+    LambdaCaptureInitKind InitKind;
     ExprResult Init;
     ParsedType InitCaptureType;
     LambdaCapture(LambdaCaptureKind Kind, SourceLocation Loc,
                   IdentifierInfo *Id, SourceLocation EllipsisLoc,
-                  ExprResult Init, ParsedType InitCaptureType)
-        : Kind(Kind), Loc(Loc), Id(Id), EllipsisLoc(EllipsisLoc), Init(Init),
-          InitCaptureType(InitCaptureType) {}
+                  LambdaCaptureInitKind InitKind, ExprResult Init,
+                  ParsedType InitCaptureType)
+        : Kind(Kind), Loc(Loc), Id(Id), EllipsisLoc(EllipsisLoc),
+          InitKind(InitKind), Init(Init), InitCaptureType(InitCaptureType) {}
   };
 
   SourceRange Range;
@@ -2282,10 +2301,11 @@ struct LambdaIntroducer {
                   SourceLocation Loc,
                   IdentifierInfo* Id,
                   SourceLocation EllipsisLoc,
+                  LambdaCaptureInitKind InitKind,
                   ExprResult Init, 
                   ParsedType InitCaptureType) {
-    Captures.push_back(LambdaCapture(Kind, Loc, Id, EllipsisLoc, Init, 
-        InitCaptureType));
+    Captures.push_back(LambdaCapture(Kind, Loc, Id, EllipsisLoc, InitKind, Init,
+                                     InitCaptureType));
   }
 };
 

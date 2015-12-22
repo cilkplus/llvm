@@ -1166,6 +1166,7 @@ public:
 /// [GNU]     typeof-specifier
 /// [GNU]     '_Complex'
 /// [C++11]   'auto'
+/// [GNU]     '__auto_type'
 /// [C++11]   'decltype' ( expression )
 /// [C++1y]   'decltype' ( 'auto' )
 ///
@@ -1339,6 +1340,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
   case tok::kw_restrict:
   case tok::kw__Complex:
   case tok::kw___attribute:
+  case tok::kw___auto_type:
     return TPResult::True;
 
     // Microsoft
@@ -1593,6 +1595,7 @@ bool Parser::isCXXDeclarationSpecifierAType() {
   case tok::kw_double:
   case tok::kw_void:
   case tok::kw___unknown_anytype:
+  case tok::kw___auto_type:
     return true;
 
   case tok::kw_auto:

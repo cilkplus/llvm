@@ -112,15 +112,7 @@ namespace {
     KEYOBJC2    = 0x20000,
     KEYZVECTOR  = 0x40000,
     KEYCOROUTINES = 0x80000,
-#if INTEL_SPECIFIC_CILKPLUS
-    KEYCILKPLUS = 0x100000,
-    KEYFLOAT128 = 0x200000,
-    KEYRESTRICT = 0x400000,
-    KEYMSASM = 0x8000000,
-    KEYBASES = 0x10000000,
-    KEYNOINT128 = 0x20000000,
-#endif // INTEL_SPECIFIC_CILKPLUS
-    KEYALL = (0xffffffff & ~KEYNOMS18 & // INTEL_SPECIFIC_CILKPLUS 0xfffffff
+    KEYALL = (0xfffff & ~KEYNOMS18 &
               ~KEYNOOPENCL) // KEYNOMS18 and KEYNOOPENCL are used to exclude.
   };
 
@@ -159,6 +151,7 @@ static KeywordStatus getKeywordStatus(const LangOptions &LangOpts,
   if (LangOpts.ObjC2 && (Flags & KEYARC)) return KS_Enabled;
   if (LangOpts.ConceptsTS && (Flags & KEYCONCEPTS)) return KS_Enabled;
   if (LangOpts.ObjC2 && (Flags & KEYOBJC2)) return KS_Enabled;
+  if (LangOpts.Coroutines && (Flags & KEYCOROUTINES)) return KS_Enabled;
   if (LangOpts.CPlusPlus && (Flags & KEYCXX11)) return KS_Future;
   return KS_Disabled;
 }
@@ -232,10 +225,7 @@ void IdentifierTable::AddKeywords(const LangOptions &LangOpts) {
     AddKeyword("__unknown_anytype", tok::kw___unknown_anytype, KEYALL,
                LangOpts, *this);
 
-  // FIXME: __declspec isn't really a CUDA extension, however it is required for
-  // supporting cuda_builtin_vars.h, which uses __declspec(property). Once that
-  // has been rewritten in terms of something more generic, remove this code.
-  if (LangOpts.CUDA)
+  if (LangOpts.DeclSpecKeyword)
     AddKeyword("__declspec", tok::kw___declspec, KEYALL, LangOpts, *this);
 }
 

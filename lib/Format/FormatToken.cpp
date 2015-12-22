@@ -13,8 +13,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "FormatToken.h"
 #include "ContinuationIndenter.h"
+#include "FormatToken.h"
 #include "clang/Format/Format.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
@@ -155,7 +155,7 @@ void CommaSeparatedList::precomputeFormattingInfos(const FormatToken *Token) {
     return;
 
   // Column format doesn't really make sense if we don't align after brackets.
-  if (!Style.AlignAfterOpenBracket)
+  if (Style.AlignAfterOpenBracket == FormatStyle::BAS_DontAlign)
     return;
 
   FormatToken *ItemBegin = Token->Next;
@@ -183,7 +183,8 @@ void CommaSeparatedList::precomputeFormattingInfos(const FormatToken *Token) {
       ItemEnd = Token->MatchingParen;
       const FormatToken *NonCommentEnd = ItemEnd->getPreviousNonComment();
       ItemLengths.push_back(CodePointsBetween(ItemBegin, NonCommentEnd));
-      if (Style.Cpp11BracedListStyle) {
+      if (Style.Cpp11BracedListStyle &&
+          !ItemEnd->Previous->isTrailingComment()) {
         // In Cpp11 braced list style, the } and possibly other subsequent
         // tokens will need to stay on a line with the last element.
         while (ItemEnd->Next && !ItemEnd->Next->CanBreakBefore)

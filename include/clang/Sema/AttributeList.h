@@ -16,11 +16,11 @@
 #define LLVM_CLANG_SEMA_ATTRIBUTELIST_H
 
 #include "clang/Basic/SourceLocation.h"
+#include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/VersionTuple.h"
 #include "clang/Sema/Ownership.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Support/Allocator.h"
 #include <cassert>
 
@@ -141,11 +141,9 @@ private:
   AttributeList *NextInPool;
 
   /// Arguments, if any, are stored immediately following the object.
-  ArgsUnion *getArgsBuffer() {
-    return reinterpret_cast<ArgsUnion*>(this+1);
-  }
+  ArgsUnion *getArgsBuffer() { return reinterpret_cast<ArgsUnion *>(this + 1); }
   ArgsUnion const *getArgsBuffer() const {
-    return reinterpret_cast<ArgsUnion const *>(this+1);
+    return reinterpret_cast<ArgsUnion const *>(this + 1);
   }
 
   enum AvailabilitySlot {
@@ -483,7 +481,7 @@ public:
   bool hasVariadicArg() const;
   bool diagnoseAppertainsTo(class Sema &S, const Decl *D) const;
   bool diagnoseLangOpts(class Sema &S) const;
-  bool existsInTarget(const llvm::Triple &T) const;
+  bool existsInTarget(const TargetInfo &Target) const;
   bool isKnownToGCC() const;
 
   /// \brief If the parsed attribute has a semantic equivalent, and it would
@@ -576,8 +574,10 @@ public:
   /// Create a new pool for a factory.
   AttributePool(AttributeFactory &factory) : Factory(factory), Head(nullptr) {}
 
+  AttributePool(const AttributePool &) = delete;
+
   /// Move the given pool's allocations to this pool.
-  AttributePool(AttributePool &pool) : Factory(pool.Factory), Head(pool.Head) {
+  AttributePool(AttributePool &&pool) : Factory(pool.Factory), Head(pool.Head) {
     pool.Head = nullptr;
   }
 
@@ -871,7 +871,8 @@ enum AttributeDeclKind {
   ExpectedStructOrUnionOrTypedef,
   ExpectedStructOrTypedef,
   ExpectedObjectiveCInterfaceOrProtocol,
-  ExpectedKernelFunction
+  ExpectedKernelFunction,
+  ExpectedFunctionWithProtoType
 };
 
 }  // end namespace clang
