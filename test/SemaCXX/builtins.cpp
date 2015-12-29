@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 %s -fsyntax-only -verify -std=c++11 -fms-extensions
+// RUN: %clang_cc1 %s -fsyntax-only -verify -std=c++11
 typedef const struct __CFString * CFStringRef;
 #define CFSTR __builtin___CFStringMakeConstantString
 

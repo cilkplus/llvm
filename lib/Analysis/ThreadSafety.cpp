@@ -1614,13 +1614,6 @@ void BuildLockset::checkAccess(const Expr *Exp, AccessKind AK,
     return;
   }
 
-  if (const ArraySubscriptExpr *AE = dyn_cast<ArraySubscriptExpr>(Exp)) {
-    if (Analyzer->Handler.issueBetaWarnings()) {
-      checkPtAccess(AE->getLHS(), AK);
-      return;
-    }
-  }
-
   if (const MemberExpr *ME = dyn_cast<MemberExpr>(Exp)) {
     if (ME->isArrow())
       checkPtAccess(ME->getBase(), AK, POK);

@@ -3441,7 +3441,7 @@ ExprResult Sema::ActOnCEANBuiltinExpr(Scope *S, SourceLocation StartLoc,
                  Context.getRecordType(
                      ULE->getNamingClass()->getCanonicalDecl()),
                  Args[0]->getType().getCanonicalType()) ||
-             IsDerivedFrom(Args[0]->getType(),
+             IsDerivedFrom(ULE->getNameLoc(), Args[0]->getType(),
                            Context.getRecordType(
                                ULE->getNamingClass()->getCanonicalDecl())))) {
           CXXScopeSpec SS;
@@ -3547,7 +3547,7 @@ ExprResult Sema::ActOnCEANBuiltinExpr(Scope *S, SourceLocation StartLoc,
           (Context.hasSameUnqualifiedType(
                Context.getRecordType(ULE->getNamingClass()->getCanonicalDecl()),
                Args[0]->getType().getCanonicalType()) ||
-           IsDerivedFrom(Args[0]->getType(),
+           IsDerivedFrom(ULE->getNameLoc(), Args[0]->getType(),
                          Context.getRecordType(
                              ULE->getNamingClass()->getCanonicalDecl())))) {
         CXXScopeSpec SS;

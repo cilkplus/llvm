@@ -104,12 +104,6 @@ enum ParameterPackingKind { PPK_BinPacked, PPK_OnePerLine, PPK_Inconclusive };
 
 enum FormatDecision { FD_Unformatted, FD_Continue, FD_Break };
 
-enum FormatDecision {
-  FD_Unformatted,
-  FD_Continue,
-  FD_Break
-};
-
 class TokenRole;
 class AnnotatedLine;
 
@@ -211,10 +205,6 @@ struct FormatToken {
   /// \brief The original 0-based column of this token, including expanded tabs.
   /// The configured TabWidth is used as tab width.
   unsigned OriginalColumn = 0;
-
-  /// \brief The original 0-based column of this token, including expanded tabs.
-  /// The configured TabWidth is used as tab width.
-  unsigned OriginalColumn;
 
   /// \brief The length of following tokens until the next natural split point,
   /// or the next token that can be broken.
@@ -345,12 +335,6 @@ struct FormatToken {
                     TT_LambdaArrow);
   }
 
-  /// \brief Returns \c true if this is a "." or "->" accessing a member.
-  bool isMemberAccess() const {
-    return isOneOf(tok::arrow, tok::period) &&
-           Type != TT_DesignatedInitializerPeriod;
-  }
-
   bool isUnaryOperator() const {
     switch (Tok.getKind()) {
     case tok::plus:
@@ -439,16 +423,6 @@ struct FormatToken {
   bool closesBlockOrBlockTypeList(const FormatStyle &Style) const {
     return MatchingParen && MatchingParen->opensBlockOrBlockTypeList(Style);
   }
-
-  SmallVector<AnnotatedLine *, 1> Children;
-
-  /// \brief Stores the formatting decision for the token once it was made.
-  FormatDecision Decision;
-
-  /// \brief If \c true, this token has been fully formatted (indented and
-  /// potentially re-formatted inside), and we do not allow further formatting
-  /// changes.
-  bool Finalized;
 
 private:
   // Disallow copying.

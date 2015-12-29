@@ -406,21 +406,6 @@ static void checkAtomicPropertyMismatch(Sema &S,
   S.Diag(OldProperty->getLocation(), diag::note_property_declare);
 }
 
-static const char *NameOfOwnershipAttribute(unsigned attr) {
-  if (attr & ObjCPropertyDecl::OBJC_PR_assign)
-    return "assign";
-  if (attr & ObjCPropertyDecl::OBJC_PR_retain )
-    return "retain";
-  if (attr & ObjCPropertyDecl::OBJC_PR_copy)
-    return "copy";
-  if (attr & ObjCPropertyDecl::OBJC_PR_weak)
-    return "weak";
-  if (attr & ObjCPropertyDecl::OBJC_PR_strong)
-    return "strong";
-  assert(attr & ObjCPropertyDecl::OBJC_PR_unsafe_unretained);
-  return "unsafe_unretained";
-}
-
 ObjCPropertyDecl *
 Sema::HandlePropertyInClassExtension(Scope *S,
                                      SourceLocation AtLoc,

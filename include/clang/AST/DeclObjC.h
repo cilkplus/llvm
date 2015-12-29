@@ -1649,13 +1649,6 @@ public:
     return DeclAccess == None ? Protected : AccessControl(DeclAccess);
   }
 
-  void setBackingIvarReferencedInAccessor(bool val) {
-    BackingIvarReferencedInAccessor = val;
-  }
-  bool getBackingIvarReferencedInAccessor() const {
-    return BackingIvarReferencedInAccessor;
-  }
-  
   void setSynthesize(bool synth) { Synthesized = synth; }
   bool getSynthesize() const { return Synthesized; }
 
@@ -1674,7 +1667,6 @@ private:
   // NOTE: VC++ treats enums as signed, avoid using the AccessControl enum
   unsigned DeclAccess : 3;
   unsigned Synthesized : 1;
-  unsigned BackingIvarReferencedInAccessor : 1;
 };
 
 

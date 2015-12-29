@@ -66,4 +66,3 @@ void g(T, Ts...) {
   __if_not_exists(Ts::operator T) { // expected-error{{__if_not_exists name contains unexpanded parameter pack 'Ts'}}
   }
 }
-

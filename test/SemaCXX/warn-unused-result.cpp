@@ -160,19 +160,3 @@ void g() {
   (void)noexcept(f(), false); // Should not warn.
 }
 }
-
-namespace PR17587 {
-struct [[clang::warn_unused_result]] Status;
-
-struct Foo {
-  Status Bar();
-};
-
-struct Status {};
-
-void Bar() {
-  Foo f;
-  f.Bar(); // expected-warning {{ignoring return value}}
-};
-
-}

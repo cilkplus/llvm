@@ -1032,18 +1032,6 @@ static void handleSetTypestateAttr(Sema &S, Decl *D, const AttributeList &Attr) 
     return;
   }
   
-  // FIXME: This check is currently being done in the analysis.  It can be
-  //        enabled here only after the parser propagates attributes at
-  //        template specialization definition, not declaration.
-  //QualType ReturnType = cast<ParmVarDecl>(D)->getType();
-  //const CXXRecordDecl *RD = ReturnType->getAsCXXRecordDecl();
-  //
-  //if (!RD || !RD->hasAttr<ConsumableAttr>()) {
-  //    S.Diag(Attr.getLoc(), diag::warn_return_state_for_unconsumable_type) <<
-  //      ReturnType.getAsString();
-  //    return;
-  //}
-  
   D->addAttr(::new (S.Context)
              SetTypestateAttr(Attr.getRange(), S.Context, NewState,
                               Attr.getAttributeSpellingListIndex()));

@@ -204,7 +204,6 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasDecayedType);
   REGISTER_MATCHER(hasDeclaration);
   REGISTER_MATCHER(hasDeclContext);
-  REGISTER_MATCHER(hasDeclaration);
   REGISTER_MATCHER(hasDeducedType);
   REGISTER_MATCHER(hasDescendant);
   REGISTER_MATCHER(hasDestinationType);

@@ -89,10 +89,6 @@ public:
                      std::shared_ptr<PCHContainerOperations> PCHContainerOps,
                      DiagnosticConsumer *DiagConsumer) override;
 
-  /// \brief Invokes the compiler with a FrontendAction created by create().
-  bool runInvocation(clang::CompilerInvocation *Invocation, FileManager *Files,
-                     DiagnosticConsumer *DiagConsumer);
-
   /// \brief Returns a new clang::FrontendAction.
   ///
   /// The caller takes ownership of the returned action.
@@ -206,26 +202,6 @@ std::unique_ptr<ASTUnit> buildASTFromCodeWithArgs(
     std::shared_ptr<PCHContainerOperations> PCHContainerOps =
         std::make_shared<PCHContainerOperations>());
 
-/// \brief Builds an AST for 'Code'.
-///
-/// \param Code C++ code.
-/// \param FileName The file name which 'Code' will be mapped as.
-///
-/// \return The resulting AST or null if an error occurred.
-ASTUnit *buildASTFromCode(const Twine &Code,
-                          const Twine &FileName = "input.cc");
-
-/// \brief Builds an AST for 'Code' with additional flags.
-///
-/// \param Code C++ code.
-/// \param Args Additional flags to pass on.
-/// \param FileName The file name which 'Code' will be mapped as.
-///
-/// \return The resulting AST or null if an error occurred.
-ASTUnit *buildASTFromCodeWithArgs(const Twine &Code,
-                                  const std::vector<std::string> &Args,
-                                  const Twine &FileName = "input.cc");
-
 /// \brief Utility to run a FrontendAction in a single clang invocation.
 class ToolInvocation {
 public:
@@ -262,19 +238,6 @@ public:
   void setDiagnosticConsumer(DiagnosticConsumer *DiagConsumer) {
     this->DiagConsumer = DiagConsumer;
   }
-
-  /// \brief Create a tool invocation.
-  ///
-  /// \param CommandLine The command line arguments to clang.
-  /// \param Action The action to be executed.
-  /// \param Files The FileManager used for the execution.
-  ToolInvocation(ArrayRef<std::string> CommandLine, ToolAction *Action,
-                 FileManager *Files);
-
-  ~ToolInvocation();
-
-  /// \brief Set a \c DiagnosticConsumer to use during parsing.
-  void setDiagnosticConsumer(DiagnosticConsumer *DiagConsumer);
 
   /// \brief Map a virtual file to be used while running the tool.
   ///
@@ -334,9 +297,6 @@ class ClangTool {
   void setDiagnosticConsumer(DiagnosticConsumer *DiagConsumer) {
     this->DiagConsumer = DiagConsumer;
   }
-
-  /// \brief Set a \c DiagnosticConsumer to use during parsing.
-  void setDiagnosticConsumer(DiagnosticConsumer *DiagConsumer);
 
   /// \brief Map a virtual file to be used while running the tool.
   ///

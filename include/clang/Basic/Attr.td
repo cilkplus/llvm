@@ -2170,3 +2170,5 @@ def InternalLinkage : InheritableAttr {
   let Subjects = SubjectList<[Var, Function, CXXRecord]>;
   let Documentation = [InternalLinkageDocs];
 }
+
+include "../Basic/intel/IntelAttr.td"

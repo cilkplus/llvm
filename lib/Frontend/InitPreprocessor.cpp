@@ -511,8 +511,8 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   // As sad as it is, enough software depends on the __VERSION__ for version
   // checks that it is necessary to report 4.2.1 (the base GCC version we claim
   // compatibility with) first.
-  Builder.defineMacro("__VERSION__", "\"" +
-                                     Twine(getClangFullCPPVersion()) + "\"");
+  Builder.defineMacro("__VERSION__", "\"4.2.1 Compatible " + 
+                      Twine(getClangFullCPPVersion()) + "\"");
 
   // Initialize language-specific preprocessor defines.
 
@@ -901,10 +901,6 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     //   version of the OpenMP API that the implementation support.
     Builder.defineMacro("_OPENMP", "201307");
   }
-  Builder.defineMacro("__I__", "1j");
-
-  if (LangOpts.CilkPlus)
-    Builder.defineMacro("__cilk", "200");
 
   // CUDA device path compilaton
   if (LangOpts.CUDAIsDevice) {

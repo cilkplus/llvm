@@ -89,8 +89,6 @@
 //  j -> returns_twice (like setjmp)
 //  u -> arguments are not evaluated for their side-effects
 //  FIXME: gcc has nonnull
-//***INTEL: Intel specific context
-//  I -> translated as F if no -intel-tbaa, and as f if -intel-tbaa
 
 #if defined(BUILTIN) && !defined(LIBBUILTIN)
 #  define LIBBUILTIN(ID, TYPE, ATTRS, HEADER, BUILTIN_LANG) BUILTIN(ID, TYPE, ATTRS)
@@ -469,8 +467,7 @@ BUILTIN(__builtin_extend_pointer, "ULLiv*", "n") // _Unwind_Word == uint64_t
 
 // GCC Object size checking builtins
 BUILTIN(__builtin_object_size, "zvC*i", "nu")
-//***INTEL: Intel specific builtins
-BUILTIN(__builtin___memcpy_chk, "v*v*vC*zz", "nI")
+BUILTIN(__builtin___memcpy_chk, "v*v*vC*zz", "nF")
 BUILTIN(__builtin___memccpy_chk, "v*v*vC*izz", "nF")
 BUILTIN(__builtin___memmove_chk, "v*v*vC*zz", "nF")
 BUILTIN(__builtin___mempcpy_chk, "v*v*vC*zz", "nF")
@@ -680,6 +677,7 @@ BUILTIN(__atomic_thread_fence, "vi", "n")
 BUILTIN(__atomic_signal_fence, "vi", "n")
 BUILTIN(__atomic_always_lock_free, "izvCD*", "n")
 BUILTIN(__atomic_is_lock_free, "izvCD*", "n")
+
 #undef ATOMIC_BUILTIN
 
 #if INTEL_SPECIFIC_CILKPLUS
@@ -1234,12 +1232,6 @@ BUILTIN(__builtin_subcs, "UsUsCUsCUsCUs*", "n")
 BUILTIN(__builtin_subc, "UiUiCUiCUiCUi*", "n")
 BUILTIN(__builtin_subcl, "ULiULiCULiCULiCULi*", "n")
 BUILTIN(__builtin_subcll, "ULLiULLiCULLiCULLiCULLi*", "n")
-
-// Notify intrinsics
-BUILTIN(__notify_intrinsic, "vcC*vCD*", "n")
-BUILTIN(__notify_zc_intrinsic, "vcC*vCD*", "n")
-
-BUILTIN(__assume_aligned, "v.", "tn")
 
 // Checked Arithmetic Builtins for Security.
 BUILTIN(__builtin_add_overflow, "v.", "nt")

@@ -264,8 +264,3 @@ void testObjCModifierFlags() {
   NSLog(@"%2$[tt]@ %1$[tt]s", @"Foo", @"Bar"); // expected-warning {{object format flags cannot be used with 's' conversion specifier}}
 }
 
-void testUnicode() {
-  NSLog(@"%C", 0x2022); // no-warning
-  NSLog(@"%C", 0x202200); // expected-warning{{format specifies type 'unichar' (aka 'unsigned short') but the argument has type 'int'}}
-}
-

@@ -20,9 +20,6 @@
 /* Directories clang will search for headers */
 #define C_INCLUDE_DIRS "${C_INCLUDE_DIRS}"
 
-/* Directories clang will search for headers */
-#define CXX_INCLUDE_DIRS "${CXX_INCLUDE_DIRS}"
-
 /* Default <path> to all compiler invocations for --sysroot=<path>. */
 #define DEFAULT_SYSROOT "${DEFAULT_SYSROOT}"
 

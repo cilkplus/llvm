@@ -4022,17 +4022,6 @@ Sema::CheckObjCARCConversion(SourceRange castRange, QualType castType,
   if (castACTC == ACTC_indirectRetainable && exprACTC == ACTC_voidPtr &&
       CCK != CCK_ImplicitConversion)
     return ACR_okay;
-  
-  if (castACTC == ACTC_retainable && exprACTC == ACTC_coreFoundation &&
-      (CCK == CCK_CStyleCast || CCK == CCK_FunctionalCast))
-    if (CheckObjCBridgeNSCast(*this, castType, castExpr))
-      return ACR_okay;
-    
-  if (castACTC == ACTC_coreFoundation && exprACTC == ACTC_retainable &&
-      (CCK == CCK_CStyleCast || CCK == CCK_FunctionalCast))
-    if (CheckObjCBridgeCFCast(*this, castType, castExpr))
-      return ACR_okay;
-    
 
   switch (ARCCastChecker(Context, exprACTC, castACTC, false).Visit(castExpr)) {
   // For invalid casts, fall through.

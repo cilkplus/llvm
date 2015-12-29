@@ -94,6 +94,9 @@ CodeGenModule::CodeGenModule(ASTContext &C, const HeaderSearchOptions &HSO,
       OpenCLRuntime(nullptr), OpenMPRuntime(nullptr), CUDARuntime(nullptr),
       DebugInfo(nullptr), ObjCData(nullptr),
       NoObjCARCExceptionsMetadata(nullptr), PGOReader(nullptr),
+#if INTEL_SPECIFIC_CILKPLUS
+      CilkPlusRuntime(nullptr),
+#endif // INTEL_SPECIFIC_CILKPLUS
       CFConstantStringClassRef(nullptr), ConstantStringClassRef(nullptr),
       NSConstantStringType(nullptr), NSConcreteGlobalBlock(nullptr),
       NSConcreteStackBlock(nullptr), BlockObjectAssign(nullptr),
@@ -673,10 +676,6 @@ StringRef CodeGenModule::getBlockMangledName(GlobalDecl GD,
 
   auto Result = Manglings.insert(std::make_pair(Out.str(), BD));
   return Result.first->first();
-}
-
-void CodeGenModule::registerAsMangled(StringRef Name, GlobalDecl GD) {
-  MangledDeclNames[GD.getCanonicalDecl()] = Name;
 }
 
 llvm::GlobalValue *CodeGenModule::GetGlobalValue(StringRef Name) {
@@ -3627,9 +3626,6 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
     break;
   }
 
-//AVT: Maybe we'll support it later
-//***INTEL: pragma support
-//#include "../../intel/lib/CodeGenModule.cpp"
   case Decl::Import: {
     auto *Import = cast<ImportDecl>(D);
 
@@ -3747,9 +3743,6 @@ void CodeGenModule::EmitDeferredUnusedCoverageMappings() {
       break;
     };
   }
-//AVT: maybe we'll support it later
-//***INTEL: pragma support
-//#include "../../intel/lib/CodeGenModule_EmitIntelAttribute.cpp"
 }
 
 /// Turns the given pointer into a constant.

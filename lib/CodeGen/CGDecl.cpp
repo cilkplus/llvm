@@ -13,6 +13,10 @@
 
 #include "CodeGenFunction.h"
 #include "CGBlocks.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "intel/CGCilkPlusRuntime.h"
+#include "clang/Basic/intel/DeclIntel.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "CGCleanup.h"
 #include "CGDebugInfo.h"
 #include "CGOpenCLRuntime.h"
@@ -916,7 +920,7 @@ void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
       return;
     }
   }
-
+#endif // INTEL_SPECIFIC_CILKPLUS
   AutoVarEmission emission = EmitAutoVarAlloca(D);
   EmitAutoVarInit(emission);
   EmitAutoVarCleanups(emission);
@@ -1136,6 +1140,9 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
     vla->setAlignment(alignment.getQuantity());
 
     address = Address(vla, alignment);
+#if INTEL_SPECIFIC_CILKPLUS
+    }
+#endif // INTEL_SPECIFIC_CILKPLUS
   }
 
   setAddrOfLocalVar(&D, address);

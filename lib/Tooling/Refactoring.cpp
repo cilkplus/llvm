@@ -21,8 +21,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_os_ostream.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Path.h"
 
 namespace clang {
 namespace tooling {

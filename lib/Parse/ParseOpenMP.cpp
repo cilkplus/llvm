@@ -972,15 +972,10 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
                      Tok.isNot(tok::annot_pragma_openmp_end))) {
     ColonProtectionRAIIObject ColonRAII(*this, MayHaveTail);
     // Parse variable
-#if INTEL_SPECIFIC_CILKPLUS
     Actions.StartCEAN(Sema::OpenMPCEANAllowed);
-#endif // INTEL_SPECIFIC_CILKPLUS
     ExprResult VarExpr =
         Actions.CorrectDelayedTyposInExpr(ParseAssignmentExpression());
-#if INTEL_SPECIFIC_CILKPLUS
     Actions.EndCEAN();
-#endif // INTEL_SPECIFIC_CILKPLUS
-
     if (VarExpr.isUsable()) {
       Vars.push_back(VarExpr.get());
     } else {

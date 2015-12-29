@@ -570,7 +570,6 @@ ALIAS("__signed"     , signed     , KEYALL)
 ALIAS("__signed__"   , signed     , KEYALL)
 ALIAS("__typeof"     , typeof     , KEYALL)
 ALIAS("__typeof__"   , typeof     , KEYALL)
-ALIAS("_Typeof"      , typeof     , KEYALL)
 ALIAS("__volatile"   , volatile   , KEYALL)
 ALIAS("__volatile__" , volatile   , KEYALL)
 

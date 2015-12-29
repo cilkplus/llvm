@@ -37,9 +37,7 @@ namespace clang {
   class CapturedDecl;
   class Decl;
   class Expr;
-  class FunctionDecl;
   class IdentifierInfo;
-  class ImplicitParamDecl;
   class LabelDecl;
   class ParmVarDecl;
   class PrinterHelper;
@@ -329,7 +327,6 @@ protected:
   explicit Stmt(StmtClass SC, EmptyShell) : Stmt(SC) {}
 
 public:
-
   Stmt(StmtClass SC) {
     static_assert(sizeof(*this) % llvm::AlignOf<void *>::Alignment == 0,
                   "Insufficient alignment!");

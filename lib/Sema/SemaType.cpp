@@ -1331,7 +1331,6 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
     break;
   case DeclSpec::TST_half: Result = Context.HalfTy; break;
   case DeclSpec::TST_float: Result = Context.FloatTy; break;
-  case DeclSpec::TST_float128: Result = Context.Float128Ty; break;
   case DeclSpec::TST_double:
     if (DS.getTypeSpecWidth() == DeclSpec::TSW_long)
       Result = Context.LongDoubleTy;
@@ -2297,8 +2296,6 @@ QualType Sema::BuildMemberPointerType(QualType T, QualType Class,
       (Entity.getNameKind() == DeclarationName::CXXDestructorName);
   if (T->isFunctionType())
     adjustMemberFunctionCC(T, /*IsStatic=*/false, IsCtorOrDtor, Loc);
-
-  // FIXME: Adjust member function pointer calling conventions.
 
   return Context.getMemberPointerType(T, Class.getTypePtr());
 }
@@ -5435,136 +5432,6 @@ namespace {
   };
 }
 
-namespace {
-  /// A helper class to unwrap a type down to a function for the
-  /// purposes of applying attributes there.
-  ///
-  /// Use:
-  ///   FunctionTypeUnwrapper unwrapped(SemaRef, T);
-  ///   if (unwrapped.isFunctionType()) {
-  ///     const FunctionType *fn = unwrapped.get();
-  ///     // change fn somehow
-  ///     T = unwrapped.wrap(fn);
-  ///   }
-  struct FunctionTypeUnwrapper {
-    enum WrapKind {
-      Desugar,
-      Parens,
-      Pointer,
-      BlockPointer,
-      Reference,
-      MemberPointer
-    };
-
-    QualType Original;
-    const FunctionType *Fn;
-    SmallVector<unsigned char /*WrapKind*/, 8> Stack;
-
-    FunctionTypeUnwrapper(Sema &S, QualType T) : Original(T) {
-      while (true) {
-        const Type *Ty = T.getTypePtr();
-        if (isa<FunctionType>(Ty)) {
-          Fn = cast<FunctionType>(Ty);
-          return;
-        } else if (isa<ParenType>(Ty)) {
-          T = cast<ParenType>(Ty)->getInnerType();
-          Stack.push_back(Parens);
-        } else if (isa<PointerType>(Ty)) {
-          T = cast<PointerType>(Ty)->getPointeeType();
-          Stack.push_back(Pointer);
-        } else if (isa<BlockPointerType>(Ty)) {
-          T = cast<BlockPointerType>(Ty)->getPointeeType();
-          Stack.push_back(BlockPointer);
-        } else if (isa<MemberPointerType>(Ty)) {
-          T = cast<MemberPointerType>(Ty)->getPointeeType();
-          Stack.push_back(MemberPointer);
-        } else if (isa<ReferenceType>(Ty)) {
-          T = cast<ReferenceType>(Ty)->getPointeeType();
-          Stack.push_back(Reference);
-        } else {
-          const Type *DTy = Ty->getUnqualifiedDesugaredType();
-          if (Ty == DTy) {
-            Fn = 0;
-            return;
-          }
-
-          T = QualType(DTy, 0);
-          Stack.push_back(Desugar);
-        }
-      }
-    }
-
-    bool isFunctionType() const { return (Fn != 0); }
-    const FunctionType *get() const { return Fn; }
-
-    QualType wrap(Sema &S, const FunctionType *New) {
-      // If T wasn't modified from the unwrapped type, do nothing.
-      if (New == get()) return Original;
-
-      Fn = New;
-      return wrap(S.Context, Original, 0);
-    }
-
-  private:
-    QualType wrap(ASTContext &C, QualType Old, unsigned I) {
-      if (I == Stack.size())
-        return C.getQualifiedType(Fn, Old.getQualifiers());
-
-      // Build up the inner type, applying the qualifiers from the old
-      // type to the new type.
-      SplitQualType SplitOld = Old.split();
-
-      // As a special case, tail-recurse if there are no qualifiers.
-      if (SplitOld.Quals.empty())
-        return wrap(C, SplitOld.Ty, I);
-      return C.getQualifiedType(wrap(C, SplitOld.Ty, I), SplitOld.Quals);
-    }
-
-    QualType wrap(ASTContext &C, const Type *Old, unsigned I) {
-      if (I == Stack.size()) return QualType(Fn, 0);
-
-      switch (static_cast<WrapKind>(Stack[I++])) {
-      case Desugar:
-        // This is the point at which we potentially lose source
-        // information.
-        return wrap(C, Old->getUnqualifiedDesugaredType(), I);
-
-      case Parens: {
-        QualType New = wrap(C, cast<ParenType>(Old)->getInnerType(), I);
-        return C.getParenType(New);
-      }
-
-      case Pointer: {
-        QualType New = wrap(C, cast<PointerType>(Old)->getPointeeType(), I);
-        return C.getPointerType(New);
-      }
-
-      case BlockPointer: {
-        QualType New = wrap(C, cast<BlockPointerType>(Old)->getPointeeType(),I);
-        return C.getBlockPointerType(New);
-      }
-
-      case MemberPointer: {
-        const MemberPointerType *OldMPT = cast<MemberPointerType>(Old);
-        QualType New = wrap(C, OldMPT->getPointeeType(), I);
-        return C.getMemberPointerType(New, OldMPT->getClass());
-      }
-
-      case Reference: {
-        const ReferenceType *OldRef = cast<ReferenceType>(Old);
-        QualType New = wrap(C, OldRef->getPointeeType(), I);
-        if (isa<LValueReferenceType>(OldRef))
-          return C.getLValueReferenceType(New, OldRef->isSpelledAsLValue());
-        else
-          return C.getRValueReferenceType(New);
-      }
-      }
-
-      llvm_unreachable("unknown wrapping kind");
-    }
-  };
-}
-
 static bool handleMSPointerTypeQualifierAttr(TypeProcessingState &State,
                                              AttributeList &Attr,
                                              QualType &Type) {
@@ -6738,14 +6605,6 @@ bool Sema::RequireCompleteTypeImpl(SourceLocation Loc, QualType T,
 
     return false;
   }
-
-  // FIXME: If there's an unimported definition of this type in a module (for
-  // instance, because we forward declared it, then imported the definition),
-  // import that definition now.
-  // FIXME: What about other cases where an import extends a redeclaration
-  // chain for a declaration that can be accessed through a mechanism other
-  // than name lookup (eg, referenced in a template, or a variable whose type
-  // could be completed by the module)?
 
   const TagType *Tag = T->getAs<TagType>();
   const ObjCInterfaceType *IFace = T->getAs<ObjCInterfaceType>();

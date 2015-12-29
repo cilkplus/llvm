@@ -1213,9 +1213,6 @@ static void ParseHeaderSearchArgs(HeaderSearchOptions &Opts, ArgList &Args) {
     StringRef MacroDef = A->getValue();
     Opts.ModulesIgnoreMacros.insert(MacroDef.split('=').first);
   }
-  std::vector<std::string> ModuleMapFiles =
-      Args.getAllArgValues(OPT_fmodule_map_file);
-  Opts.ModuleMapFiles.insert(ModuleMapFiles.begin(), ModuleMapFiles.end());
 
   // Add -I..., -F..., and -index-header-map options in order.
   bool IsIndexHeaderMap = false;
@@ -1380,9 +1377,6 @@ void CompilerInvocation::setLangDefaults(LangOptions &Opts, InputKind IK,
   Opts.CXXOperatorNames = Opts.CPlusPlus;
 
   Opts.DollarIdents = !Opts.AsmPreprocessor;
-
-  // C++1y onwards has sized global deallocation functions.
-  Opts.SizedDeallocation = Opts.CPlusPlus1y;
 }
 
 /// Attempt to parse a visibility value out of the given argument.
@@ -1635,11 +1629,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.PascalStrings = Args.hasArg(OPT_fpascal_strings);
   Opts.VtorDispMode = getLastArgIntValue(Args, OPT_vtordisp_mode_EQ, 1, Diags);
   Opts.Borland = Args.hasArg(OPT_fborland_extensions);
-
-  Opts.CilkPlus = Args.hasArg(OPT_fcilkplus);
-  if (Opts.CilkPlus && (Opts.ObjC1 || Opts.ObjC2))
-    Diags.Report(diag::err_drv_cilk_objc);
-
   Opts.WritableStrings = Args.hasArg(OPT_fwritable_strings);
   Opts.ConstStrings = Args.hasFlag(OPT_fconst_strings, OPT_fno_const_strings,
                                    Opts.ConstStrings);
@@ -1797,34 +1786,10 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     Opts.setMSPointerToMemberRepresentationMethod(InheritanceModel);
   }
 
-  if (Arg *A = Args.getLastArg(OPT_faddress_space_map_mangling_EQ)) {
-    switch (llvm::StringSwitch<unsigned>(A->getValue())
-      .Case("target", LangOptions::ASMM_Target)
-      .Case("no", LangOptions::ASMM_Off)
-      .Case("yes", LangOptions::ASMM_On)
-      .Default(255)) {
-    default:
-      Diags.Report(diag::err_drv_invalid_value) 
-        << "-faddress-space-map-mangling=" << A->getValue();
-      break;
-    case LangOptions::ASMM_Target:
-      Opts.setAddressSpaceMapMangling(LangOptions::ASMM_Target);
-      break;
-    case LangOptions::ASMM_On:
-      Opts.setAddressSpaceMapMangling(LangOptions::ASMM_On);
-      break;
-    case LangOptions::ASMM_Off:
-      Opts.setAddressSpaceMapMangling(LangOptions::ASMM_Off);
-      break;
-    }
-  }
-
   // Check if -fopenmp is specified.
   Opts.OpenMP = Args.hasArg(options::OPT_fopenmp);
   Opts.OpenMPUseTLS =
       Opts.OpenMP && !Args.hasArg(options::OPT_fnoopenmp_use_tls);
-
-  Opts.Float128 = Args.hasArg(OPT_extended_float_types);
 
   // Record whether the __DEPRECATED define was requested.
   Opts.Deprecated = Args.hasFlag(OPT_fdeprecated_macro,

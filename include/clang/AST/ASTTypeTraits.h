@@ -251,7 +251,6 @@ public:
                : nullptr;
   }
 
-
   /// \brief Prints the node to the given output stream.
   void print(llvm::raw_ostream &OS, const PrintingPolicy &PP) const;
 

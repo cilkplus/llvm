@@ -4634,94 +4634,6 @@ TEST_F(FormatTest, BreaksConditionalExpressionsAfterOperator) {
                Style);
 }
 
-TEST_F(FormatTest, BreaksConditionalExpressionsAfterOperator) {
-  FormatStyle Style = getLLVMStyle();
-  Style.BreakBeforeTernaryOperators = false;
-  Style.ColumnLimit = 70;
-  verifyFormat(
-      "aaaa(aaaaaaaaaaaaaaaaaaaa, aaaaaaaaaaaaaaaaaaaaaaaaaa ?\n"
-      "                               aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa :\n"
-      "                               aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);",
-      Style);
-  verifyFormat(
-      "aaaa(aaaaaaaaaaaaaaaaaaaa, aaaaaaa ? aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa :\n"
-      "                                     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);",
-      Style);
-  verifyFormat(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(aaaaaaaaaaaaaaaaaaaa ? aaaa(aaaaaa) :\n"
-      "                                                      aaaaaaaaaaaaa);",
-      Style);
-  verifyFormat(
-      "aaaaaaaaaaaaaaaaaa(aaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-      "                   aaaaaaaaaaaaaaaa ? aaaaaaaaaaaaaaaaaaaaaaaaaaaaa :\n"
-      "                                      aaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-      "                   aaaaaaaaaaaaa);",
-      Style);
-  verifyFormat(
-      "aaaaaaaaaaaaaaaaaa(aaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-      "                   aaaaaaaaaaaaaaaa ?: aaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-      "                   aaaaaaaaaaaaa);",
-      Style);
-  verifyFormat("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ?\n"
-               "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
-               "        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) :\n"
-               "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
-               "        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);",
-               Style);
-  verifyFormat("aaaaaa(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-               "       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ?\n"
-               "           aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
-               "               aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) :\n"
-               "           aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
-               "               aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),\n"
-               "       aaaaaaaaaaaaaaaaaaaaaaaaaaa);",
-               Style);
-  verifyFormat("aaaaaa(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-               "       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ?:\n"
-               "           aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
-               "               aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),\n"
-               "       aaaaaaaaaaaaaaaaaaaaaaaaaaa);",
-               Style);
-  verifyFormat("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ?\n"
-               "    aaaaaaaaaaaaaaaaaaaaaaaaaaa :\n"
-               "    aaaaaaaaaaaaaaaaaaaaaaaaaaa;",
-               Style);
-  verifyFormat("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaa =\n"
-               "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ?\n" 
-               "        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa :\n"
-               "        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;",
-               Style);
-  verifyFormat(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa == aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ?\n"
-      "    aaaaaaaaaaaaaaa :\n"
-      "    aaaaaaaaaaaaaaa;",
-      Style);
-  verifyFormat("f(aaaaaaaaaaaaaaaa == // force break\n"
-               "          aaaaaaaaa ?\n"
-               "      b :\n"
-               "      c);",
-               Style);
-  verifyFormat(
-      "unsigned Indent =\n"
-      "    format(TheLine.First, IndentForLevel[TheLine.Level] >= 0 ?\n"
-      "                              IndentForLevel[TheLine.Level] :\n"
-      "                              TheLine * 2,\n"
-      "           TheLine.InPPDirective, PreviousEndOfLineColumn);",
-      Style);
-  verifyFormat("bool aaaaaa = aaaaaaaaaaaaa ? //\n"
-               "                  aaaaaaaaaaaaaaa :\n"
-               "                  bbbbbbbbbbbbbbb ? //\n"
-               "                      ccccccccccccccc :\n"
-               "                      ddddddddddddddd;",
-               Style);
-  verifyFormat("bool aaaaaa = aaaaaaaaaaaaa ? //\n"
-               "                  aaaaaaaaaaaaaaa :\n"
-               "                  (bbbbbbbbbbbbbbb ? //\n"
-               "                       ccccccccccccccc :\n"
-               "                       ddddddddddddddd);",
-               Style);
-}
-
 TEST_F(FormatTest, DeclarationsOfMultipleVariables) {
   verifyFormat("bool aaaaaaaaaaaaaaaaa = aaaaaa->aaaaaaaaaaaaaaaaa(),\n"
                "     aaaaaaaaaaa = aaaaaa->aaaaaaaaaaa();");
@@ -7685,7 +7597,6 @@ TEST_F(FormatTest, ObjCLiterals) {
   verifyFormat("NSNumber *piOverTwo = @(M_PI / 2);");
   verifyFormat("NSNumber *favoriteColor = @(Green);");
   verifyFormat("NSString *path = @(getenv(\"PATH\"));");
-}
 
   verifyFormat("[dictionary setObject:@(1) forKey:@\"number\"];");
 }
@@ -7932,12 +7843,6 @@ TEST_F(FormatTest, BreaksStringLiterals) {
              "aaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaa "
              "aaaaaaaaaaaaaaaaaaaaaa\");",
              getGoogleStyle()));
-  EXPECT_EQ("return \"aaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaa \"\n"
-            "       \"aaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaa\";",
-            format("return \"aaaaaaaaaaaaaaaaaaaaaa "
-                   "aaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaa "
-                   "aaaaaaaaaaaaaaaaaaaaaa\";",
-                   getGoogleStyle()));
   EXPECT_EQ("return \"aaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaa \"\n"
             "       \"aaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaa\";",
             format("return \"aaaaaaaaaaaaaaaaaaaaaa "
@@ -8300,43 +8205,6 @@ TEST_F(FormatTest, ConfigurableUseOfTab) {
                "\t\t    parameter1,  \\\n"
                "\t\t    parameter2); \\\n"
                "\t}",
-               Tab);
-  EXPECT_EQ("void f() {\n"
-            "\tf();\n"
-            "\tg();\n"
-            "}",
-            format("void f() {\n"
-                   "\tf();\n"
-                   "\tg();\n"
-                   "}",
-                   0, 0, Tab));
-  EXPECT_EQ("void f() {\n"
-            "\tf();\n"
-            "\tg();\n"
-            "}",
-            format("void f() {\n"
-                   "\tf();\n"
-                   "\tg();\n"
-                   "}",
-                   16, 0, Tab));
-  EXPECT_EQ("void f() {\n"
-            "  \tf();\n"
-            "\tg();\n"
-            "}",
-            format("void f() {\n"
-                   "  \tf();\n"
-                   "  \tg();\n"
-                   "}",
-                   21, 0, Tab));
-
-  Tab.TabWidth = 4;
-  Tab.IndentWidth = 8;
-  verifyFormat("class TabWidth4Indent8 {\n"
-               "\t\tvoid f() {\n"
-               "\t\t\t\tsomeFunction(parameter1,\n"
-               "\t\t\t\t\t\t\t parameter2);\n"
-               "\t\t}\n"
-               "};",
                Tab);
 
   Tab.TabWidth = 4;
@@ -9201,18 +9069,6 @@ TEST_F(FormatTest, AlignConsecutiveDeclarations) {
                Alignment);
   Alignment.BinPackParameters = true;
   Alignment.ColumnLimit = 80;
-}
-
-TEST_F(FormatTest, ConfigurableSpaceBeforeAssignmentOperators) {
-  verifyFormat("int a = 5;");
-  verifyFormat("a += 42;");
-  verifyFormat("a or_eq 8;");
-
-  FormatStyle Spaces = getLLVMStyle();
-  Spaces.SpaceBeforeAssignmentOperators = false;
-  verifyFormat("int a= 5;", Spaces);
-  verifyFormat("a+= 42;", Spaces);
-  verifyFormat("a or_eq 8;", Spaces);
 }
 
 TEST_F(FormatTest, LinuxBraceBreaking) {

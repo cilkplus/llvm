@@ -66,7 +66,6 @@ typedef char BOOL;
 
 @property (nonatomic, assign) id xxxdelegateYYY;
 
-@property (nonatomic, retain) id MYtarget;
 
 @property (nonatomic, strong) id MYtarget;
 

@@ -1179,9 +1179,6 @@ namespace clang {
       STMT_DEFAULT,
       /// \brief A LabelStmt record.
       STMT_LABEL,
-//AVT: maybe we'll support it soon	  
-//***INTEL: pragma support
-//#include "../../../intel/include/ASTBitCodes_Stmt.h"
       /// \brief An AttributedStmt record.
       STMT_ATTRIBUTED,
       /// \brief An IfStmt record.

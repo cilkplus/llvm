@@ -1877,21 +1877,6 @@ void ItaniumVTableBuilder::LayoutVTablesForVirtualBases(
   }
 }
 
-struct ItaniumThunkInfoComparator {
-  bool operator() (const ThunkInfo &LHS, const ThunkInfo &RHS) {
-    assert(LHS.Method == 0);
-    assert(RHS.Method == 0);
-
-    if (LHS.This != RHS.This)
-      return LHS.This < RHS.This;
-
-    if (LHS.Return != RHS.Return)
-      return LHS.Return < RHS.Return;
-
-    return false;
-  }
-};
-
 /// dumpLayout - Dump the vtable layout.
 void ItaniumVTableBuilder::dumpLayout(raw_ostream &Out) {
   // FIXME: write more tests that actually use the dumpLayout output to prevent
@@ -2496,9 +2481,6 @@ private:
   /// ComputeThisOffset - Returns the 'this' argument offset for the given
   /// method, relative to the beginning of the MostDerivedClass.
   CharUnits ComputeThisOffset(FinalOverriders::OverriderInfo Overrider);
-
-  void CalculateVtordispAdjustment(FinalOverriders::OverriderInfo Overrider,
-                                   CharUnits ThisOffset, ThisAdjustment &TA);
 
   void CalculateVtordispAdjustment(FinalOverriders::OverriderInfo Overrider,
                                    CharUnits ThisOffset, ThisAdjustment &TA);
@@ -3130,57 +3112,6 @@ static void dumpMicrosoftThunkAdjustment(const ThunkInfo &TI, raw_ostream &Out,
       if (T.Virtual.Microsoft.VBPtrOffset) {
         Out << "vbptr at " << T.Virtual.Microsoft.VBPtrOffset
             << " to the left,";
-        assert(T.Virtual.Microsoft.VBOffsetOffset > 0);
-        Out << LinePrefix << " vboffset at "
-            << T.Virtual.Microsoft.VBOffsetOffset << " in the vbtable, ";
-      }
-    }
-    Out << T.NonVirtual << " non-virtual]";
-  }
-}
-
-struct MicrosoftThunkInfoStableSortComparator {
-  bool operator() (const ThunkInfo &LHS, const ThunkInfo &RHS) {
-    if (LHS.This != RHS.This)
-      return LHS.This < RHS.This;
-
-    if (LHS.Return != RHS.Return)
-      return LHS.Return < RHS.Return;
-
-    // Keep different thunks with the same adjustments in the order they
-    // were put into the vector.
-    return false;
-  }
-};
-
-static void dumpMicrosoftThunkAdjustment(const ThunkInfo &TI, raw_ostream &Out,
-                                         bool ContinueFirstLine) {
-  const ReturnAdjustment &R = TI.Return;
-  bool Multiline = false;
-  const char *LinePrefix = "\n        ";
-  if (!R.isEmpty()) {
-    if (!ContinueFirstLine)
-      Out << LinePrefix;
-    Out << "[return adjustment: ";
-    if (R.Virtual.Microsoft.VBPtrOffset)
-      Out << "vbptr at offset " << R.Virtual.Microsoft.VBPtrOffset << ", ";
-    if (R.Virtual.Microsoft.VBIndex)
-      Out << "vbase #" << R.Virtual.Microsoft.VBIndex << ", ";
-    Out << R.NonVirtual << " non-virtual]";
-    Multiline = true;
-  }
-
-  const ThisAdjustment &T = TI.This;
-  if (!T.isEmpty()) {
-    if (Multiline || !ContinueFirstLine)
-      Out << LinePrefix;
-    Out << "[this adjustment: ";
-    if (!TI.This.Virtual.isEmpty()) {
-      assert(T.Virtual.Microsoft.VtordispOffset < 0);
-      Out << "vtordisp at " << T.Virtual.Microsoft.VtordispOffset << ", ";
-      if (T.Virtual.Microsoft.VBPtrOffset) {
-        Out << "vbptr at " << T.Virtual.Microsoft.VBPtrOffset
-            << " to the left, ";
         assert(T.Virtual.Microsoft.VBOffsetOffset > 0);
         Out << LinePrefix << " vboffset at "
             << T.Virtual.Microsoft.VBOffsetOffset << " in the vbtable, ";

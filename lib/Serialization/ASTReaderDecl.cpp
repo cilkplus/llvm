@@ -988,8 +988,6 @@ void ASTDeclReader::VisitObjCIvarDecl(ObjCIvarDecl *IVD) {
   IVD->setNextIvar(nullptr);
   bool synth = Record[Idx++];
   IVD->setSynthesize(synth);
-  bool backingIvarReferencedInAccessor = Record[Idx++];
-  IVD->setBackingIvarReferencedInAccessor(backingIvarReferencedInAccessor);
 }
 
 void ASTDeclReader::VisitObjCProtocolDecl(ObjCProtocolDecl *PD) {
@@ -1819,11 +1817,6 @@ ASTDeclReader::VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D) {
   // FIXME: Actually merge here, don't just overwrite.
   D->Common = D->getCanonicalDecl()->Common;
 
-  // If we merged the template with a prior declaration chain, merge the common
-  // pointer.
-  // FIXME: Actually merge here, don't just overwrite.
-  D->Common = D->getCanonicalDecl()->Common;
-
   return Redecl;
 }
 
@@ -2329,28 +2322,6 @@ void ASTDeclReader::mergeRedeclarable(Redeclarable<T> *DBase, T *Existing,
     if (Redecl.isKeyDecl())
       Reader.KeyDecls[ExistingCanon].push_back(Redecl.getFirstID());
   }
-}
-
-/// \brief Attempts to merge the given declaration (D) with another declaration
-/// of the same entity, for the case where the entity is not actually
-/// redeclarable. This happens, for instance, when merging the fields of
-/// identical class definitions from two different modules.
-template<typename T>
-void ASTDeclReader::mergeMergeable(Mergeable<T> *D) {
-  // If modules are not available, there is no reason to perform this merge.
-  if (!Reader.getContext().getLangOpts().Modules)
-    return;
-
-  // ODR-based merging is only performed in C++. In C, identically-named things
-  // in different translation units are not redeclarations (but may still have
-  // compatible types).
-  if (!Reader.getContext().getLangOpts().CPlusPlus)
-    return;
-
-  if (FindExistingResult ExistingRes = findExisting(static_cast<T*>(D)))
-    if (T *Existing = ExistingRes)
-      Reader.Context.setPrimaryMergedDecl(static_cast<T*>(D),
-                                          Existing->getCanonicalDecl());
 }
 
 /// \brief Attempts to merge the given declaration (D) with another declaration

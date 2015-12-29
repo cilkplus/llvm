@@ -2091,17 +2091,69 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
           }
           return MakeAddrLValue(it->second, T);
         }
+#if INTEL_SPECIFIC_CILKPLUS
+        else {
+          // If referencing a loop control variable, then load its
+          // corresponding inner loop control variable.
+          if (CapturedStmtInfo->getKind() == CR_CilkFor) {
+            CGCilkForStmtInfo *CFSI =
+                reinterpret_cast<CGCilkForStmtInfo *>(CapturedStmtInfo);
+            if (CFSI->getCilkForStmt().getLoopControlVar() == VD) {
+              auto Addr = CFSI->getInnerLoopControlVarAddr();
+              assert(Addr.isValid() &&
+                     "missing inner loop control variable address");
+              return MakeAddrLValue(Addr, T);
+            }
+          } else if (CapturedStmtInfo->getKind() == CR_SIMDFor) {
+            // If this variable is a SIMD data-privatization variable, then
+            // load its corresponding local copy.
+            CGSIMDForStmtInfo *FSI = cast<CGSIMDForStmtInfo>(CapturedStmtInfo);
+            if (FSI->shouldReplaceWithLocal()) {
+              auto Addr = FSI->lookupLocalAddr(VD);
+              if (Addr.isValid())
+                return MakeAddrLValue(Addr, T);
+            }
+          } else if (CapturedStmtInfo->getKind() == CR_CilkSpawn) {
+            CGCilkSpawnInfo *SSI = cast<CGCilkSpawnInfo>(CapturedStmtInfo);
+            if (SSI->isReceiverDecl(ND)) {
+              auto Addr = SSI->getReceiverAddr();
+              if (Addr.isValid())
+                return MakeAddrLValue(Addr, T);
+            }
+          }
+// Otherwise load it from the captured struct.
+#endif // INTEL_SPECIFIC_CILKPLUS
         LValue CapLVal =
             EmitCapturedFieldLValue(*this, CapturedStmtInfo->lookup(VD),
                                     CapturedStmtInfo->getContextValue());
         return MakeAddrLValue(
             Address(CapLVal.getPointer(), getContext().getDeclAlign(VD)),
             CapLVal.getType(), AlignmentSource::Decl);
+#if INTEL_SPECIFIC_CILKPLUS
+        }
+#endif // INTEL_SPECIFIC_CILKPLUS
       }
 
+#if INTEL_SPECIFIC_CILKPLUS
+      if (isa<BlockDecl>(CurCodeDecl) || LocalDeclMap.count(VD) == 0) {
+#endif  // INTEL_SPECIFIC_CILKPLUS
       assert(isa<BlockDecl>(CurCodeDecl));
       Address addr = GetAddrOfBlockDecl(VD, VD->hasAttr<BlocksAttr>());
       return MakeAddrLValue(addr, T, AlignmentSource::Decl);
+#if INTEL_SPECIFIC_CILKPLUS
+      }
+#endif  // INTEL_SPECIFIC_CILKPLUS
+    }
+
+#if INTEL_SPECIFIC_CILKPLUS
+    // special case of receiver declared in advance
+    // int i;
+    // i = Spawn foo();
+    else if (CapturedStmtInfo &&
+             (CapturedStmtInfo->getKind() == CR_CilkSpawn) &&
+             CapturedStmtInfo->lookup(VD)) {
+      return EmitCapturedFieldLValue(*this, CapturedStmtInfo->lookup(VD),
+                                     CapturedStmtInfo->getContextValue());
     }
 #endif // INTEL_SPECIFIC_CILKPLUS
 
@@ -3944,7 +3996,12 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, llvm::Value *Callee,
   }
 
   return EmitCall(FnInfo, Callee, ReturnValue, Args,
-                  CGCalleeInfo(NonCanonicalFTP, TargetDecl));
+                  CGCalleeInfo(NonCanonicalFTP, TargetDecl)
+#if INTEL_SPECIFIC_CILKPLUS
+                  ,
+                  /*callOrInvoke=*/0, E->isCilkSpawnCall()
+#endif // INTEL_SPECIFIC_CILKPLUS
+                      );
 }
 
 LValue CodeGenFunction::

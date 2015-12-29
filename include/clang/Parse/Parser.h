@@ -1923,9 +1923,9 @@ private:  //***INTEL
   /// expression in the context of the C 'clause-1' or the C++
   // 'for-init-statement' part of a 'for' statement.
   /// Returns true for declaration, false for expression.
-  bool isForInitDeclaration(bool AllowForRangeDecl = true) {
+  bool isForInitDeclaration() {
     if (getLangOpts().CPlusPlus)
-      return isCXXSimpleDeclaration(AllowForRangeDecl);
+      return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/true);
     return isDeclarationSpecifier(true);
   }
 
@@ -2272,11 +2272,6 @@ private:
                                  SourceLocation ScopeLoc,
                                  AttributeList::Syntax Syntax);
 
-  void ParseAttributeWithTypeArg(IdentifierInfo &AttrName,
-                                 SourceLocation AttrNameLoc,
-                                 ParsedAttributes &Attrs,
-                                 SourceLocation *EndLoc);
-
   void ParseTypeofSpecifier(DeclSpec &DS);
   SourceLocation ParseDecltypeSpecifier(DeclSpec &DS);
   void AnnotateExistingDecltypeSpecifier(const DeclSpec &DS,
@@ -2511,8 +2506,7 @@ private:
   /// in current directive.
   ///
   OMPClause *ParseOpenMPClause(OpenMPDirectiveKind DKind,
-                               OpenMPClauseKind CKind,
-                               bool FirstClause);
+                               OpenMPClauseKind CKind, bool FirstClause);
   /// \brief Parses clause with a single expression of a kind \a Kind.
   ///
   /// \param Kind Kind of current clause.

@@ -1725,7 +1725,7 @@ void ItaniumRecordLayoutBuilder::LayoutField(const FieldDecl *D,
     FieldSize = FieldInfo.first;
     FieldAlign = FieldInfo.second;
 
-    if (IsMsStruct && !FieldPacked) {
+    if (IsMsStruct) {
       // If MS bitfield layout is required, figure out what type is being
       // laid out and align the field to the width of that type.
       

@@ -288,7 +288,6 @@ bool Declarator::isDeclarationOfFunction() const {
     case TST_decimal32:
     case TST_decimal64:
     case TST_double:
-    case TST_float128:
     case TST_enum:
     case TST_error:
     case TST_float:
@@ -346,12 +345,6 @@ bool Declarator::isStaticMember() {
 bool Declarator::isCtorOrDtor() {
   return (getName().getKind() == UnqualifiedId::IK_ConstructorName) ||
          (getName().getKind() == UnqualifiedId::IK_DestructorName);
-}
-
-bool DeclSpec::hasTagDefinition() const {
-  if (!TypeSpecOwned)
-    return false;
-  return cast<TagDecl>(getRepAsDecl())->isCompleteDefinition();
 }
 
 bool DeclSpec::hasTagDefinition() const {

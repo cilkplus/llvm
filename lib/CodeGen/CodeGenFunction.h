@@ -175,7 +175,6 @@ public:
   /// AllocaInsertPoint - This is an instruction in the entry block before which
   /// we prefer to insert allocas.
   llvm::AssertingVH<llvm::Instruction> AllocaInsertPt;
-  llvm::AssertingVH<llvm::Instruction> FirstprivateInsertPt;
 
   /// \brief API for captured statement code generation.
   class CGCapturedStmtInfo {
@@ -226,11 +225,6 @@ public:
 
     /// \brief Get the name of the capture helper.
     virtual StringRef getHelperName() const { return "__captured_stmt"; }
-
-    static bool classof(const CGCapturedStmtInfo *) { return true; }
-
-    virtual void addCachedVar(const VarDecl *VD, llvm::Value *Addr) { }
-    virtual llvm::Value *getCachedVar(const VarDecl *VD) { return 0; }
 
   private:
     /// \brief The kind of captured statement being generated.
@@ -1300,9 +1294,6 @@ private:
   /// The last regular (non-return) debug location (breakpoint) in the function.
   SourceLocation LastStopPoint;
 
-  /// The location for one and only ReturnStmt.
-  llvm::DebugLoc ReturnLoc;
-
 public:
 #if INTEL_SPECIFIC_CILKPLUS
   /// This RAII class is used for instantiation of local variables, but restores
@@ -1415,7 +1406,7 @@ private:
   ///   "work_group_size_hint", and three 32-bit integers X, Y and Z.
   /// - A node for the reqd_work_group_size(X,Y,Z) qualifier contains string 
   ///   "reqd_work_group_size", and three 32-bit integers X, Y and Z.
-  void EmitOpenCLKernelMetadata(const FunctionDecl *FD,
+  void EmitOpenCLKernelMetadata(const FunctionDecl *FD, 
                                 llvm::Function *Fn);
 
 public:
@@ -1668,7 +1659,7 @@ public:
   void EmitCtorPrologue(const CXXConstructorDecl *CD, CXXCtorType Type,
                         FunctionArgList &Args);
 
-  void EmitInitializerForField(const FieldDecl *Field, LValue LHS, Expr *Init,
+  void EmitInitializerForField(FieldDecl *Field, LValue LHS, Expr *Init,
                                ArrayRef<VarDecl *> ArrayIndexes);
 
   /// Struct with all informations about dynamic [sub]class needed to set vptr.
@@ -2218,7 +2209,9 @@ public:
   llvm::Value *EmitCXXTypeidExpr(const CXXTypeidExpr *E);
   llvm::Value *EmitDynamicCast(Address V, const CXXDynamicCastExpr *DCE);
   Address EmitCXXUuidofExpr(const CXXUuidofExpr *E);
-
+#if INTEL_SPECIFIC_CILKPLUS
+  void EmitCEANBuiltinExprBody(const CEANBuiltinExpr *E);
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Situations in which we might emit a check for the suitability of a
   ///        pointer or glvalue.
   enum TypeCheckKind {
@@ -2525,6 +2518,24 @@ public:
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
+
+#if INTEL_SPECIFIC_CILKPLUS
+  llvm::Function *EmitSpawnCapturedStmt(const CapturedStmt &S, VarDecl *VD);
+  void EmitCilkForGrainsizeStmt(const CilkForGrainsizeStmt &S);
+  void EmitCilkForStmt(const CilkForStmt &S, llvm::Value *Grainsize = 0);
+  void EmitCilkForHelperBody(const Stmt *S);
+  void EmitPragmaSimd(CGPragmaSimdWrapper &W);
+  llvm::Function *EmitSimdFunction(CGPragmaSimdWrapper &W);
+  void EmitSIMDForStmt(const SIMDForStmt &S);
+  void EmitSIMDForHelperCall(llvm::Function *BodyFunc, LValue CapStruct,
+                             Address LoopIndex, bool IsLastIter);
+  void EmitSIMDForHelperBody(const Stmt *S);
+  void EmitCilkSpawnExpr(const CilkSpawnExpr *E);
+  void EmitCilkSpawnDecl(const CilkSpawnDecl *D);
+
+  void EmitCilkRankedStmt(const CilkRankedStmt &S);
+#endif // INTEL_SPECIFIC_CILKPLUS
+
   llvm::Function *GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars);
@@ -2949,11 +2960,12 @@ public:
   RValue EmitCall(const CGFunctionInfo &FnInfo, llvm::Value *Callee,
                   ReturnValueSlot ReturnValue, const CallArgList &Args,
                   CGCalleeInfo CalleeInfo = CGCalleeInfo(),
-                  llvm::Instruction **callOrInvoke = nullptr);
+                  llvm::Instruction **callOrInvoke = nullptr
 #if INTEL_SPECIFIC_CILKPLUS
                   ,
                   bool IsCilkSpawnCall = false
 #endif // INTEL_SPECIFIC_CILKPLUS
+                );
 
   RValue EmitCall(QualType FnType, llvm::Value *Callee, const CallExpr *E,
                   ReturnValueSlot ReturnValue,
@@ -3278,6 +3290,10 @@ public:
   /// Emit field annotations for the given field & value. Returns the
   /// annotation result.
   Address EmitFieldAnnotations(const FieldDecl *D, Address V);
+#if INTEL_SPECIFIC_CILKPLUS
+  //===--------------------------------------------------------------------===//
+  //                         Cilk Emission
+  //===--------------------------------------------------------------------===//
 
   /// \brief Emit the receiver declaration for a captured statement.
   /// Only allocation and cleanup will be emitted, and initialization will be

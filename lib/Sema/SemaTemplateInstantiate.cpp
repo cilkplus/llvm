@@ -2872,4 +2872,3 @@ NamedDecl *LocalInstantiationScope::getPartiallySubstitutedPack(
 
   return nullptr;
 }
-

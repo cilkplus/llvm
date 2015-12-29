@@ -1942,7 +1942,3 @@ void CodeGenFunction::EmitSEHLeaveStmt(const SEHLeaveStmt &S) {
 
   EmitBranchThroughCleanup(*SEHTryEpilogueStack.back());
 }
-
-void CodeGenFunction::EmitSEHTryStmt(const SEHTryStmt &S) {
-  CGM.ErrorUnsupported(&S, "SEH __try");
-}

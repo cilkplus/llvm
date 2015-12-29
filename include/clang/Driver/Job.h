@@ -11,15 +11,10 @@
 #define LLVM_CLANG_DRIVER_JOB_H
 
 #include "clang/Basic/LLVM.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/Option/Option.h"
 #include <memory>
-
-namespace llvm {
-  class raw_ostream;
-}
 
 namespace llvm {
   class raw_ostream;
@@ -101,12 +96,6 @@ public:
   virtual int Execute(const StringRef **Redirects, std::string *ErrMsg,
                       bool *ExecutionFailed) const;
 
-  virtual void Print(llvm::raw_ostream &OS, const char *Terminator,
-                     bool Quote, bool CrashReport = false) const;
-
-  virtual int Execute(const StringRef **Redirects, std::string *ErrMsg,
-                      bool *ExecutionFailed) const;
-
   /// getSource - Return the Action which caused the creation of this job.
   const Action &getSource() const { return Source; }
 
@@ -163,9 +152,6 @@ private:
 public:
   void Print(llvm::raw_ostream &OS, const char *Terminator,
              bool Quote, CrashReportInfo *CrashInfo = nullptr) const;
-
-  virtual void Print(llvm::raw_ostream &OS, const char *Terminator,
-                     bool Quote, bool CrashReport = false) const;
 
   /// Add a job to the list (taking ownership).
   void addJob(std::unique_ptr<Command> J) { Jobs.push_back(std::move(J)); }

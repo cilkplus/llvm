@@ -3054,21 +3054,6 @@ ExprResult Sema::ActOnPredefinedExpr(SourceLocation Loc, tok::TokenKind Kind) {
   return BuildPredefinedExpr(Loc, IT);
 }
 
-ExprResult Sema::ActOnPredefinedExpr(SourceLocation Loc, tok::TokenKind Kind) {
-  PredefinedExpr::IdentType IT;
-
-  switch (Kind) {
-  default: llvm_unreachable("Unknown simple primary expr!");
-  case tok::kw___func__: IT = PredefinedExpr::Func; break; // [C99 6.4.2.2]
-  case tok::kw___FUNCTION__: IT = PredefinedExpr::Function; break;
-  case tok::kw___FUNCDNAME__: IT = PredefinedExpr::FuncDName; break; // [MS]
-  case tok::kw_L__FUNCTION__: IT = PredefinedExpr::LFunction; break;
-  case tok::kw___PRETTY_FUNCTION__: IT = PredefinedExpr::PrettyFunction; break;
-  }
-
-  return BuildPredefinedExpr(Loc, IT);
-}
-
 ExprResult Sema::ActOnCharacterConstant(const Token &Tok, Scope *UDLScope) {
   SmallString<16> CharBuffer;
   bool Invalid = false;
@@ -3310,8 +3295,6 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
     QualType Ty;
     if (Literal.isFloat)
       Ty = Context.FloatTy;
-    else if (Literal.isFloat128)
-      Ty = Context.Float128Ty;
     else if (!Literal.isLong)
       Ty = Context.DoubleTy;
     else
@@ -4478,7 +4461,6 @@ Sema::ConvertArgumentsForCall(CallExpr *Call, Expr *Fn,
   // arguments for the remaining parameters), don't make the call.
   if (Args.size() < NumParams) {
     if (Args.size() < MinArgs) {
-      MemberExpr *ME = dyn_cast<MemberExpr>(Fn);
       TypoCorrection TC;
       if (FDecl && (TC = TryTypoCorrectionForCall(*this, Fn, FDecl, Args))) {
         unsigned diag_id =
@@ -5027,19 +5009,6 @@ ExprResult Sema::ActOnAsTypeExpr(Expr *E, ParsedType ParsedDestTy,
                      << SrcTy
                      << E->getSourceRange());
   return new (Context) AsTypeExpr(E, DstTy, VK, OK, BuiltinLoc, RParenLoc);
-}
-
-/// ActOnConvertVectorExpr - create a new convert-vector expression from the
-/// provided arguments.
-///
-/// __builtin_convertvector( value, dst type )
-///
-ExprResult Sema::ActOnConvertVectorExpr(Expr *E, ParsedType ParsedDestTy,
-                                        SourceLocation BuiltinLoc,
-                                        SourceLocation RParenLoc) {
-  TypeSourceInfo *TInfo;
-  GetTypeFromParser(ParsedDestTy, &TInfo);
-  return SemaConvertVectorExpr(E, TInfo, BuiltinLoc, RParenLoc);
 }
 
 /// ActOnConvertVectorExpr - create a new convert-vector expression from the
@@ -14942,46 +14911,4 @@ Sema::ActOnObjCBoolLiteral(SourceLocation OpLoc, tok::TokenKind Kind) {
     BoolT = Context.getBOOLType();
   return new (Context)
       ObjCBoolLiteralExpr(Kind == tok::kw___objc_yes, BoolT, OpLoc);
-}
-
-ExprResult
-Sema::ActOnCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
-  assert(FunctionScopes.size() > 0 && "FunctionScopes missing TU scope");
-  if (FunctionScopes.size() < 1 ||
-      getCurFunction()->CompoundScopes.size() < 1) {
-    Diag(SpawnLoc, diag::err_spawn_invalid_scope);
-    return ExprError();
-  }
-
-  return BuildCilkSpawnCall(SpawnLoc, E);
-}
-
-ExprResult
-Sema::BuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
-  assert(E && "null expression");
-
-  Expr *InnerE = E;
-  if (CXXBindTemporaryExpr *T = dyn_cast<CXXBindTemporaryExpr>(E))
-    InnerE = T->getSubExpr();
-
-  bool isCall = isa<CallExpr>(InnerE);
-  if (CXXOperatorCallExpr *O = dyn_cast<CXXOperatorCallExpr>(InnerE))
-    isCall = O->getOperator() == OO_Call;
-
-  if (!isCall) {
-    Diag(E->getExprLoc(), PDiag(diag::err_not_a_call) << getExprRange(E));
-    return ExprError();
-  }
-
-  CallExpr *Call = cast<CallExpr>(InnerE);
-  if (Call->isCilkSpawnCall()) {
-    Diag(E->getExprLoc(), diag::err_spawn_spawn);
-    return ExprError();
-  }
-
-  Call->setCilkSpawnLoc(SpawnLoc);
-  getCurCompoundScope().setHasCilkSpawn();
-  CilkSpawnCalls.push_back(Call);
-
-  return Owned(E);
 }

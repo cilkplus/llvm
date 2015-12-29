@@ -1192,28 +1192,6 @@ inline Matcher<T> DynTypedMatcher::unconditionalConvertTo() const {
   return Matcher<T>(*this);
 }
 
-/// @}
-
-/// \brief Matches nodes for which all provided matchers match.
-bool AllOfVariadicOperator(const ast_type_traits::DynTypedNode DynNode,
-                           ASTMatchFinder *Finder,
-                           BoundNodesTreeBuilder *Builder,
-                           ArrayRef<DynTypedMatcher> InnerMatchers);
-
-/// \brief Matches nodes for which at least one of the provided matchers
-/// matches, but doesn't stop at the first match.
-bool EachOfVariadicOperator(const ast_type_traits::DynTypedNode DynNode,
-                            ASTMatchFinder *Finder,
-                            BoundNodesTreeBuilder *Builder,
-                            ArrayRef<DynTypedMatcher> InnerMatchers);
-
-/// \brief Matches nodes for which at least one of the provided matchers
-/// matches.
-bool AnyOfVariadicOperator(const ast_type_traits::DynTypedNode DynNode,
-                           ASTMatchFinder *Finder,
-                           BoundNodesTreeBuilder *Builder,
-                           ArrayRef<DynTypedMatcher> InnerMatchers);
-
 /// \brief Creates a Matcher<T> that matches if all inner matchers match.
 template<typename T>
 BindableMatcher<T> makeAllOfComposite(

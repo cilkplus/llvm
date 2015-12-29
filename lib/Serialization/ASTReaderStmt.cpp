@@ -702,7 +702,6 @@ void ASTStmtReader::VisitCilkRankedStmt(CilkRankedStmt *S) {
 }
 
 #endif // INTEL_SPECIFIC_CILKPLUS
-}
 
 void ASTStmtReader::VisitOMPArraySectionExpr(OMPArraySectionExpr *E) {
   VisitExpr(E);
@@ -775,11 +774,6 @@ void ASTStmtReader::VisitBinaryOperator(BinaryOperator *E) {
   E->setOpcode((BinaryOperator::Opcode)Record[Idx++]);
   E->setOperatorLoc(ReadSourceLocation(Record, Idx));
   E->setFPContractable((bool)Record[Idx++]);
-#if INTEL_SPECIFIC_CILKPLUS
-  if (E->Operator == OO_Subscript)
-    if (CEANIndexExpr *CIE = dyn_cast_or_null<CEANIndexExpr>(E->getArg(0)))
-      CIE->setBase(E->getCallee());
-#endif // INTEL_SPECIFIC_CILKPLUS
 }
 
 void ASTStmtReader::VisitCompoundAssignOperator(CompoundAssignOperator *E) {
@@ -1004,10 +998,6 @@ void ASTStmtReader::VisitConvertVectorExpr(ConvertVectorExpr *E) {
 void ASTStmtReader::VisitBlockExpr(BlockExpr *E) {
   VisitExpr(E);
   E->setBlockDecl(ReadDeclAs<BlockDecl>(Record, Idx));
-}
-
-void ASTStmtReader::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
-  llvm_unreachable("not implemented yet");
 }
 
 void ASTStmtReader::VisitGenericSelectionExpr(GenericSelectionExpr *E) {
@@ -1837,7 +1827,6 @@ void ASTStmtReader::VisitAsTypeExpr(AsTypeExpr *E) {
 }
 
 //===----------------------------------------------------------------------===//
-//===----------------------------------------------------------------------===//
 // OpenMP Clauses.
 //===----------------------------------------------------------------------===//
 
@@ -2513,7 +2502,6 @@ void ASTStmtReader::VisitOMPOrderedDirective(OMPOrderedDirective *D) {
   VisitOMPExecutableDirective(D);
 }
 
-
 void ASTStmtReader::VisitOMPAtomicDirective(OMPAtomicDirective *D) {
   VisitStmt(D);
   // The NumClauses field was read in ReadStmtFromStream.
@@ -2814,7 +2802,6 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
                                        Record[ASTStmtReader::NumExprFields + 1]);
       break;
 #endif // INTEL_SPECIFIC_CILKPLUS
-      break;
 
     case EXPR_OMP_ARRAY_SECTION:
       S = new (Context) OMPArraySectionExpr(Empty);

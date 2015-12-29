@@ -353,18 +353,10 @@ class OMPLoopDirective : public OMPExecutableDirective {
   }
 
   /// \brief Get the updates storage.
-  MutableArrayRef<Expr *> getInits() {
-    Expr **Storage = reinterpret_cast<Expr **>(
-        &*std::next(child_begin(),
-                    getArraysOffset(getDirectiveKind()) + 3 * CollapsedNum));
-    return MutableArrayRef<Expr *>(Storage, CollapsedNum);
-  }
-
-  /// \brief Get the updates storage.
   MutableArrayRef<Expr *> getUpdates() {
     Expr **Storage = reinterpret_cast<Expr **>(
         &*std::next(child_begin(),
-                    getArraysOffset(getDirectiveKind()) + 2 * CollapsedNum));
+                    getArraysOffset(getDirectiveKind()) + 3 * CollapsedNum));
     return MutableArrayRef<Expr *>(Storage, CollapsedNum);
   }
 

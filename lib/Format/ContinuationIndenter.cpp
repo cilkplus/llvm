@@ -1011,41 +1011,6 @@ unsigned ContinuationIndenter::addMultilineToken(const FormatToken &Current,
   return 0;
 }
 
-unsigned ContinuationIndenter::addMultilineToken(const FormatToken &Current,
-                                                 LineState &State) {
-  // Break before further function parameters on all levels.
-  for (unsigned i = 0, e = State.Stack.size(); i != e; ++i)
-    State.Stack[i].BreakBeforeParameter = true;
-
-  unsigned ColumnsUsed = State.Column;
-  // We can only affect layout of the first and the last line, so the penalty
-  // for all other lines is constant, and we ignore it.
-  State.Column = Current.LastLineColumnWidth;
-
-  if (ColumnsUsed > getColumnLimit(State))
-    return Style.PenaltyExcessCharacter * (ColumnsUsed - getColumnLimit(State));
-  return 0;
-}
-
-static bool getRawStringLiteralPrefixPostfix(StringRef Text,
-                                             StringRef &Prefix,
-                                             StringRef &Postfix) {
-  if (Text.startswith(Prefix = "R\"") || Text.startswith(Prefix = "uR\"") ||
-      Text.startswith(Prefix = "UR\"") || Text.startswith(Prefix = "u8R\"") ||
-      Text.startswith(Prefix = "LR\"")) {
-    size_t ParenPos = Text.find('(');
-    if (ParenPos != StringRef::npos) {
-      StringRef Delimiter =
-          Text.substr(Prefix.size(), ParenPos - Prefix.size());
-      Prefix = Text.substr(0, ParenPos + 1);
-      Postfix = Text.substr(Text.size() - 2 - Delimiter.size());
-      return Postfix.front() == ')' && Postfix.back() == '"' &&
-             Postfix.substr(1).startswith(Delimiter);
-    }
-  }
-  return false;
-}
-
 unsigned ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
                                                     LineState &State,
                                                     bool DryRun) {

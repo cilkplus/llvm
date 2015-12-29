@@ -16,7 +16,6 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/CharUnits.h"
-#include "clang/AST/CXXInheritance.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
@@ -369,6 +368,7 @@ bool MicrosoftMangleContextImpl::shouldMangleCXXName(const NamedDecl *D) {
         !isa<VarTemplateSpecializationDecl>(D) &&
         D->getIdentifier() != nullptr)
       return false;
+  }
 
   return true;
 }
@@ -2678,14 +2678,6 @@ void MicrosoftMangleContextImpl::mangleSEHFinallyBlock(
   // <mangled-name> ::= ?fin$ <filter-number> @0
   Mangler.getStream() << "\01?fin$" << SEHFinallyIds[EnclosingDecl]++ << "@0@";
   Mangler.mangleName(EnclosingDecl);
-}
-
-void MicrosoftMangleContextImpl::mangleTypeName(QualType T, raw_ostream &Out) {
-  // This is just a made up unique string for the purposes of tbaa.  undname
-  // does *not* know how to demangle it.
-  MicrosoftCXXNameMangler Mangler(*this, Out);
-  Mangler.getStream() << '?';
-  Mangler.mangleType(T, SourceRange());
 }
 
 void MicrosoftMangleContextImpl::mangleTypeName(QualType T, raw_ostream &Out) {

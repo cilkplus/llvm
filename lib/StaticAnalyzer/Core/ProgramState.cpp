@@ -184,14 +184,6 @@ ProgramState::invalidateRegionsImpl(ValueList Values,
   if (!ITraits)
     ITraits = &ITraitsLocal;
 
-  InvalidatedSymbols Invalidated;
-  if (!IS)
-    IS = &Invalidated;
-
-  RegionAndSymbolInvalidationTraits ITraitsLocal;
-  if (!ITraits)
-    ITraits = &ITraitsLocal;
-
   if (Eng) {
     StoreManager::InvalidatedRegions TopLevelInvalidated;
     StoreManager::InvalidatedRegions Invalidated;

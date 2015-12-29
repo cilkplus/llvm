@@ -113,9 +113,6 @@ D::~D() { }
 // CHECKMS-LABEL: define x86_thiscallcc %class.D* @"\01??0D@@QAE@XZ"(%class.D* returned %this, i32 %is_most_derived)
 // CHECKMS-LABEL: define x86_thiscallcc void @"\01??1D@@UAE@XZ"(%class.D*)
 
-// CHECKMS-LABEL: define x86_thiscallcc %class.D* @"\01??0D@@QAE@XZ"(%class.D* returned %this, i32 %is_most_derived)
-// CHECKMS-LABEL: define x86_thiscallcc void @"\01??1D@@QAE@XZ"(%class.D* %this)
-
 class E {
 public:
   E();

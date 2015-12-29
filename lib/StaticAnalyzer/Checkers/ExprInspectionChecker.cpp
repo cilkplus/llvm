@@ -122,17 +122,6 @@ void ExprInspectionChecker::analyzerWarnIfReached(const CallExpr *CE,
   C.emitReport(llvm::make_unique<BugReport>(*BT, "REACHABLE", N));
 }
 
-void ExprInspectionChecker::analyzerWarnIfReached(const CallExpr *CE,
-                                                  CheckerContext &C) const {
-  ExplodedNode *N = C.getPredecessor();
-
-  if (!BT)
-    BT.reset(new BugType("Checking analyzer assumptions", "debug"));
-
-  BugReport *R = new BugReport(*BT, "REACHABLE", N);
-  C.emitReport(R);
-}
-
 void ExprInspectionChecker::analyzerCheckInlined(const CallExpr *CE,
                                                  CheckerContext &C) const {
   const LocationContext *LC = C.getPredecessor()->getLocationContext();

@@ -1742,20 +1742,6 @@ static bool isMips16(const ArgList &Args) {
   return A && A->getOption().matches(options::OPT_mips16);
 }
 
-static bool isMips32r2(const ArgList &Args) {
-  Arg *A = Args.getLastArg(options::OPT_march_EQ,
-                           options::OPT_mcpu_EQ);
-
-  return A && A->getValue() == StringRef("mips32r2");
-}
-
-static bool isMips64r2(const ArgList &Args) {
-  Arg *A = Args.getLastArg(options::OPT_march_EQ,
-                           options::OPT_mcpu_EQ);
-
-  return A && A->getValue() == StringRef("mips64r2");
-}
-
 static bool isMicroMips(const ArgList &Args) {
   Arg *A = Args.getLastArg(options::OPT_mmicromips, options::OPT_mno_micromips);
   return A && A->getOption().matches(options::OPT_mmicromips);
@@ -4546,78 +4532,4 @@ SanitizerMask PS4CPU::getSupportedSanitizers() const {
   Res |= SanitizerKind::Address;
   Res |= SanitizerKind::Vptr;
   return Res;
-}
-
-
-/// XCore tool chain
-XCore::XCore(const Driver &D, const llvm::Triple &Triple,
-             const ArgList &Args) : ToolChain(D, Triple, Args) {
-  // ProgramPaths are found via 'PATH' environment variable.
-}
-
-Tool *XCore::buildAssembler() const {
-  return new tools::XCore::Assemble(*this);
-}
-
-Tool *XCore::buildLinker() const {
-  return new tools::XCore::Link(*this);
-}
-
-bool XCore::isPICDefault() const {
-  return false;
-}
-
-bool XCore::isPIEDefault() const {
-  return false;
-}
-
-bool XCore::isPICDefaultForced() const {
-  return false;
-}
-
-bool XCore::SupportsProfiling() const {
-  return false;
-}
-
-bool XCore::hasBlocksRuntime() const {
-  return false;
-}
-
-
-void XCore::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
-                                      ArgStringList &CC1Args) const {
-  if (DriverArgs.hasArg(options::OPT_nostdinc) ||
-      DriverArgs.hasArg(options::OPT_nostdlibinc))
-    return;
-  if (const char *cl_include_dir = getenv("XCC_C_INCLUDE_PATH")) {
-    SmallVector<StringRef, 4> Dirs;
-    const char EnvPathSeparatorStr[] = {llvm::sys::EnvPathSeparator,'\0'};
-    StringRef(cl_include_dir).split(Dirs, StringRef(EnvPathSeparatorStr));
-    ArrayRef<StringRef> DirVec(Dirs);
-    addSystemIncludes(DriverArgs, CC1Args, DirVec);
-  }
-}
-
-void XCore::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                                     llvm::opt::ArgStringList &CC1Args) const {
-  CC1Args.push_back("-nostdsysteminc");
-}
-
-void XCore::AddClangCXXStdlibIncludeArgs(const ArgList &DriverArgs,
-                                         ArgStringList &CC1Args) const {
-  if (DriverArgs.hasArg(options::OPT_nostdinc) ||
-      DriverArgs.hasArg(options::OPT_nostdlibinc))
-    return;
-  if (const char *cl_include_dir = getenv("XCC_CPLUS_INCLUDE_PATH")) {
-    SmallVector<StringRef, 4> Dirs;
-    const char EnvPathSeparatorStr[] = {llvm::sys::EnvPathSeparator,'\0'};
-    StringRef(cl_include_dir).split(Dirs, StringRef(EnvPathSeparatorStr));
-    ArrayRef<StringRef> DirVec(Dirs);
-    addSystemIncludes(DriverArgs, CC1Args, DirVec);
-  }
-}
-
-void XCore::AddCXXStdlibLibArgs(const ArgList &Args,
-                                ArgStringList &CmdArgs) const {
-  // We don't output any lib args. This is handled by xcc.
 }

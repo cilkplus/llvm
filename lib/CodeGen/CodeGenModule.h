@@ -554,6 +554,86 @@ public:
     assert(CUDARuntime != nullptr);
     return *CUDARuntime;
   }
+#if INTEL_SPECIFIC_CILKPLUS
+  CGCilkPlusRuntime &getCilkPlusRuntime() {
+    assert(CilkPlusRuntime != 0);
+    return *CilkPlusRuntime;
+  }
+
+  // A common data structure to represent vector function attributes in
+  // cilk vector functions and 'omp declare simd' functions.
+  struct CilkElementalGroup {
+    typedef SmallVector<CilkProcessorAttr::CilkProcessor, 1> ProcessorVector;
+    typedef SmallVector<QualType, 1> VecLengthForVector;
+    typedef SmallVector<unsigned, 1> VecLengthVector;
+    // Masking: 0-nomask/notinbranch, 1-mask/inbranch
+    typedef SmallVector<unsigned, 2> MaskVector;
+    typedef std::map<std::string, std::pair<int,std::string> > LinearMap;
+    typedef std::map<std::string, unsigned> AlignedMap;
+    typedef std::set<std::string> UniformSet;
+
+    ProcessorVector Processor;
+    VecLengthVector VecLength;
+    VecLengthForVector VecLengthFor;
+    LinearMap  LinearParms;
+    AlignedMap AlignedParms;
+    UniformSet UniformParms;
+    MaskVector Mask;
+
+    bool getUniformAttr(std::string Name) const {
+      return UniformParms.count(Name) != 0;
+    }
+
+    bool getLinearAttr(std::string Name, std::pair<int,std::string> *out_step) const {
+      const LinearMap::const_iterator it = LinearParms.find(Name);
+      if (it == LinearParms.end()) return false;
+      *out_step = it->second;
+      return true;
+    }
+
+    bool getAlignedAttr(std::string Name, unsigned *out_alignment) const {
+      const AlignedMap::const_iterator I = AlignedParms.find(Name);
+      if (I == AlignedParms.end()) return false;
+      *out_alignment = I->second;
+      return true;
+    }
+
+    void setLinear(std::string Name, std::string Idname, int Step) {
+      LinearParms[Name].first = Step;
+      LinearParms[Name].second = Idname;
+    }
+
+    void setAligned(std::string Name, unsigned Alignment) {
+      AlignedParms[Name] = Alignment;
+    }
+
+    void setUniform(std::string Name) {
+      UniformParms.insert(Name);
+    }
+  };
+
+  typedef llvm::SmallDenseMap<unsigned, CilkElementalGroup, 4> GroupMap;
+
+  // The following is common part for 'cilk vector functions' and
+  // 'omp declare simd' functions metadata generation.
+  //
+  void EmitVectorVariantsMetadata(const CGFunctionInfo &FnInfo,
+                                  const FunctionDecl *FD,
+                                  llvm::Function *Fn,
+                                  GroupMap &Groups);
+
+  /// Add an elemental function metadata node to the named metadata node
+  /// 'cilk.functions'.
+  void EmitCilkElementalMetadata(const CGFunctionInfo &FnInfo,
+                                 const FunctionDecl *FD, llvm::Function *Fn);
+
+  /// Emit all elemental function vector variants in this module.
+  void EmitCilkElementalVariants();
+
+  /// Emit an attribute for given elemental function.
+  void EmitCilkElementalAttribute(llvm::Function *Func, llvm::MDNode *MD,
+                                  bool IsMasked);
+#endif // INTEL_SPECIFIC_CILKPLUS
 
   ObjCEntrypoints &getObjCEntrypoints() const {
     assert(ObjCData != nullptr);

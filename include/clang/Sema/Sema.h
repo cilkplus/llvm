@@ -3969,6 +3969,19 @@ public:
                                      Expr *Idx, SourceLocation RLoc);
   ExprResult CreateBuiltinArraySubscriptExpr(Expr *Base, SourceLocation LLoc,
                                              Expr *Idx, SourceLocation RLoc);
+#if INTEL_SPECIFIC_CILKPLUS
+  ExprResult ActOnCEANIndexExpr(Scope *S, Expr *Base, Expr *LowerBound,
+                                SourceLocation ColonLoc1, Expr *Length,
+                                SourceLocation ColonLoc2, Expr *Stride);
+  bool CheckCEANExpr(Scope *S, Expr *E);
+  void ActOnStartCEANExpr(CEANSupportState Flag);
+  void ActOnEndCEANExpr(Expr *E);
+  StmtResult ActOnCEANExpr(Expr *E);
+  StmtResult ActOnCEANIfStmt(Stmt *S);
+  ExprResult ActOnCEANBuiltinExpr(Scope *S, SourceLocation StartLoc,
+                                  unsigned Kind, ArrayRef<Expr *> Args,
+                                  SourceLocation RParenLoc);
+#endif // INTEL_SPECIFIC_CILKPLUS
   ExprResult ActOnOMPArraySectionExpr(Expr *Base, SourceLocation LBLoc,
                                       Expr *LowerBound, SourceLocation ColonLoc,
                                       Expr *Length, SourceLocation RBLoc);
@@ -7958,10 +7971,8 @@ private:
   /// \brief Initialization of data-sharing attributes stack.
   void InitDataSharingAttributesStack();
   void DestroyDataSharingAttributesStack();
-  ExprResult
-  VerifyPositiveIntegerConstantInClause(Expr *Op, OpenMPClauseKind CKind,
-                                        bool StrictlyPositive = true);
-
+  ExprResult VerifyPositiveIntegerConstantInClause(Expr *Op,
+                                                   OpenMPClauseKind CKind);
 public:
   /// \brief Return true if the provided declaration \a VD should be captured by
   /// reference in the provided scope \a RSI. This will take into account the

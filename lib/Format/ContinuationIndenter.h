@@ -262,10 +262,6 @@ struct ParenState {
   // "function" in JavaScript) is not wrapped to a new line.
   bool NestedBlockInlined : 1;
 
-  /// \brief \c true if this \c ParenState contains multiple segments of a
-  /// builder-type call on one line.
-  bool ContainsUnwrappedBuilder;
-
   bool operator<(const ParenState &Other) const {
     if (Indent != Other.Indent)
       return Indent < Other.Indent;

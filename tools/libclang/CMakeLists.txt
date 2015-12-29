@@ -68,8 +68,6 @@ if(MSVC)
   set(LLVM_EXPORTED_SYMBOL_FILE)
 endif()
 
-set(EXPORTED_SYMBOL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/libclang.exports)
-
 if( LLVM_ENABLE_PIC )
   set(ENABLE_SHARED SHARED)
 endif()

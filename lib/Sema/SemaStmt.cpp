@@ -30,6 +30,7 @@
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Scope.h"
+#include "clang/Sema/ScopeInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -550,6 +551,11 @@ Sema::ActOnIfStmt(SourceLocation IfLoc, FullExprArg CondVal, Decl *CondVar,
                                                   Context.BoolTy, VK_RValue);
   }
 
+#if INTEL_SPECIFIC_CILKPLUS
+  return ActOnCEANIfStmt(new (Context) IfStmt(Context, IfLoc, ConditionVar,
+                              ConditionExpr,
+                              thenStmt, ElseLoc, elseStmt));
+#else
   return new (Context) IfStmt(Context, IfLoc, ConditionVar, ConditionExpr,
                               thenStmt, ElseLoc, elseStmt);
 #endif // INTEL_SPECIFIC_CILKPLUS
@@ -4016,8 +4022,6 @@ void Sema::ActOnCapturedRegionStart(SourceLocation Loc, Scope *CurScope,
   // Enter the capturing scope for this captured region.
   PushCapturedRegionScope(CurScope, CD, RD, Kind);
 
-  PushCompoundScope();
-
   if (CurScope)
     PushDeclContext(CurScope, CD);
   else
@@ -4039,8 +4043,6 @@ void Sema::ActOnCapturedRegionError() {
               SourceLocation(), SourceLocation(), /*AttributeList=*/nullptr);
 
   PopDeclContext();
-  // Pop the compound scope we inserted implicitly.
-  PopCompoundScope();
   PopFunctionScopeInfo();
 }
 
@@ -4074,8 +4076,6 @@ StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
   PopExpressionEvaluationContext();
 
   PopDeclContext();
-  // Pop the compound scope we inserted implicitly.
-  PopCompoundScope();
   PopFunctionScopeInfo();
 
   return Res;

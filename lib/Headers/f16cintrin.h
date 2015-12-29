@@ -25,15 +25,11 @@
 #error "Never use <f16cintrin.h> directly; include <emmintrin.h> instead."
 #endif
 
-#ifndef __F16C__
-# error "F16C instruction is not enabled"
-#endif /* __F16C__ */
-
 #ifndef __F16CINTRIN_H
 #define __F16CINTRIN_H
 
 /* Define the default attributes for the functions in this file. */
-#define __DEFAULT_FN_ATTRS __attribute__((__always_inline__, __nodebug__))
+#define __DEFAULT_FN_ATTRS __attribute__((__always_inline__, __nodebug__, __target__("f16c")))
 
 #define _mm_cvtps_ph(a, imm) __extension__ ({ \
  (__m128i)__builtin_ia32_vcvtps2ph((__v4sf)(__m128)(a), (imm)); })

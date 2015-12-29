@@ -2011,6 +2011,72 @@ public:
                                              RBracketLoc);
   }
 
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Build a new CEAN index expression.
+  ///
+  /// By default, performs semantic analysis to build the new expression.
+  /// Subclasses may override this routine to provide different behavior.
+  ExprResult RebuildCEANIndexExpr(Expr *Base, Expr *LowerBound,
+                                  SourceLocation ColonLoc1,
+                                  Expr *Length,
+                                  SourceLocation ColonLoc2,
+                                  Expr *Stride) {
+    return getSema().ActOnCEANIndexExpr(0, Base, LowerBound, ColonLoc1,
+                                        Length, ColonLoc2, Stride);
+  }
+
+  /// \brief Build a new CEAN builtin expression.
+  ///
+  /// By default, performs semantic analysis to build the new expression.
+  /// Subclasses may override this routine to provide different behavior.
+  ExprResult RebuildCEANBuiltinExpr(SourceLocation StartLoc,
+                                    unsigned Kind,
+                                    ArrayRef<Expr *> Args,
+                                    SourceLocation RParenLoc) {
+    bool Res = false;
+    switch(Kind) {
+    case CEANBuiltinExpr::ReduceAdd:
+    case CEANBuiltinExpr::ReduceMul:
+    case CEANBuiltinExpr::ReduceMax:
+    case CEANBuiltinExpr::ReduceMin:
+    case CEANBuiltinExpr::ReduceMaxIndex:
+    case CEANBuiltinExpr::ReduceMinIndex:
+    case CEANBuiltinExpr::ReduceAllZero:
+    case CEANBuiltinExpr::ReduceAllNonZero:
+    case CEANBuiltinExpr::ReduceAnyZero:
+    case CEANBuiltinExpr::ReduceAnyNonZero:
+      getSema().ActOnStartCEANExpr(Sema::FullCEANAllowed);
+      getSema().ActOnEndCEANExpr(Args[0]);
+      break;
+    case CEANBuiltinExpr::Reduce:
+    case CEANBuiltinExpr::ReduceMutating:
+      getSema().StartCEAN(Sema::FullCEANAllowed);
+      Res = getSema().CheckCEANExpr(0, Args[0]);
+      Res = Res || getSema().CheckCEANExpr(0, Args[2]);
+      getSema().EndCEAN();
+      getSema().ActOnStartCEANExpr(Sema::FullCEANAllowed);
+      getSema().ActOnEndCEANExpr(Args[1]);
+      break;
+    case CEANBuiltinExpr::ImplicitIndex:
+      getSema().StartCEAN(Sema::NoCEANAllowed);
+      Res = getSema().CheckCEANExpr(0, Args[0]);
+      getSema().EndCEAN();
+      break;
+    }
+    if (Res) return ExprError();
+
+    return getSema().ActOnCEANBuiltinExpr(0, StartLoc, Kind, Args, RParenLoc);
+  }
+
+  /// \brief Build a new Cilk spawn expression.
+  ///
+  /// By default, performs semantic analysis to build the new expression.
+  /// Subclasses may override this routine to provide different behavior.
+  ExprResult RebuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
+    return getSema().BuildCilkSpawnCall(SpawnLoc, E);
+  }
+#endif // INTEL_SPECIFIC_CILKPLUS
+
   /// \brief Build a new array section expression.
   ///
   /// By default, performs semantic analysis to build the new expression.
@@ -2033,14 +2099,6 @@ public:
                                    Expr *ExecConfig = nullptr) {
     return getSema().ActOnCallExpr(/*Scope=*/nullptr, Callee, LParenLoc,
                                    Args, RParenLoc, ExecConfig);
-  }
-
-  /// \brief Build a new Cilk spawn expression.
-  ///
-  /// By default, performs semantic analysis to build the new expression.
-  /// Subclasses may override this routine to provide different behavior.
-  ExprResult RebuildCilkSpawnCall(SourceLocation SpawnLoc, Expr *E) {
-    return getSema().BuildCilkSpawnCall(SpawnLoc, E);
   }
 
   /// \brief Build a new member access expression.
@@ -2949,14 +3007,6 @@ public:
 
     // Type-check the __builtin_shufflevector expression.
     return SemaRef.SemaBuiltinShuffleVector(cast<CallExpr>(TheCall.get()));
-  }
-
-  /// \brief Build a new convert vector expression.
-  ExprResult RebuildConvertVectorExpr(SourceLocation BuiltinLoc,
-                                      Expr *SrcExpr, TypeSourceInfo *DstTInfo,
-                                      SourceLocation RParenLoc) {
-    return SemaRef.SemaConvertVectorExpr(SrcExpr, DstTInfo,
-                                         BuiltinLoc, RParenLoc);
   }
 
   /// \brief Build a new convert vector expression.
@@ -6238,114 +6288,6 @@ AttrResult TreeTransform<Derived>::TransformSIMDAttr(Attr *A) {
         llvm::MutableArrayRef<Expr *>(Exprs));
     break;
   }
-  default:
-    llvm_unreachable("Unknown SIMD clause");
-    break;
-  }
-
-  return R;
-}
-
-#if INTEL_SPECIFIC_CILKPLUS
-// FIXME: Use TableGen to generate this function
-template <typename Derived>
-AttrResult TreeTransform<Derived>::TransformSIMDAttr(Attr *A) {
-  AttrResult R = AttrEmpty();
-
-  switch (A->getKind()) {
-  case attr::SIMD: {
-    R = AttrResult(A);
-    break;
-  }
-  case attr::SIMDLength: {
-    SIMDLengthAttr *LengthAttr = cast<SIMDLengthAttr>(A);
-    ExprResult E = getDerived().TransformExpr(LengthAttr->getValueExpr());
-    if (E.isUsable())
-      R = getSema().ActOnPragmaSIMDLength(LengthAttr->getLocation(), E.get());
-    break;
-  }
-  case attr::SIMDLinear: {
-    SIMDLinearAttr *LinearAttr = cast<SIMDLinearAttr>(A);
-    SmallVector<Expr *, 1> Exprs;
-    for (SIMDLinearAttr::items_iterator it = LinearAttr->items_begin(),
-                                        end = LinearAttr->items_end();
-         it != end; ++it) {
-      ExprResult E = getDerived().TransformExpr(*it);
-      // We need to push even if it is an invalid expr to make a pair.
-      Exprs.push_back(E.get());
-    }
-
-    R = getSema().ActOnPragmaSIMDLinear(LinearAttr->getLocation(), Exprs);
-    break;
-  }
-  case attr::SIMDPrivate: {
-    SIMDPrivateAttr *PrivateAttr = cast<SIMDPrivateAttr>(A);
-    SmallVector<Expr *, 1> Exprs;
-    for (SIMDPrivateAttr::variables_iterator
-             it = PrivateAttr->variables_begin(),
-             end = PrivateAttr->variables_end();
-         it != end; ++it) {
-      ExprResult E = getDerived().TransformExpr(*it);
-      if (E.isUsable())
-        Exprs.push_back(E.get());
-    }
-
-    R = getSema().ActOnPragmaSIMDPrivate(PrivateAttr->getLocation(),
-                                         llvm::MutableArrayRef<Expr *>(Exprs),
-                                         Sema::SIMD_Private);
-    break;
-  }
-  case attr::SIMDFirstPrivate: {
-    SIMDFirstPrivateAttr *FirstPrivateAttr = cast<SIMDFirstPrivateAttr>(A);
-    SmallVector<Expr *, 1> Exprs;
-    for (SIMDFirstPrivateAttr::variables_iterator
-             it = FirstPrivateAttr->variables_begin(),
-             end = FirstPrivateAttr->variables_end();
-         it != end; ++it) {
-      ExprResult E = getDerived().TransformExpr(*it);
-      if (E.isUsable())
-        Exprs.push_back(E.get());
-    }
-
-    R = getSema().ActOnPragmaSIMDPrivate(FirstPrivateAttr->getLocation(),
-                                         llvm::MutableArrayRef<Expr *>(Exprs),
-                                         Sema::SIMD_FirstPrivate);
-    break;
-  }
-  case attr::SIMDLastPrivate: {
-    SIMDLastPrivateAttr *LastPrivateAttr = cast<SIMDLastPrivateAttr>(A);
-    SmallVector<Expr *, 1> Exprs;
-    for (SIMDLastPrivateAttr::variables_iterator
-             it = LastPrivateAttr->variables_begin(),
-             end = LastPrivateAttr->variables_end();
-         it != end; ++it) {
-      ExprResult E = getDerived().TransformExpr(*it);
-      if (E.isUsable())
-        Exprs.push_back(E.get());
-    }
-
-    R = getSema().ActOnPragmaSIMDPrivate(LastPrivateAttr->getLocation(),
-                                         llvm::MutableArrayRef<Expr *>(Exprs),
-                                         Sema::SIMD_LastPrivate);
-    break;
-  }
-  case attr::SIMDReduction: {
-    SIMDReductionAttr *ReductionAttr = cast<SIMDReductionAttr>(A);
-    SmallVector<Expr *, 1> Exprs;
-    for (SIMDReductionAttr::variables_iterator
-             it = ReductionAttr->variables_begin(),
-             end = ReductionAttr->variables_end();
-         it != end; ++it) {
-      ExprResult E = getDerived().TransformExpr(*it);
-      if (E.isUsable())
-        Exprs.push_back(E.get());
-    }
-
-    R = getSema().ActOnPragmaSIMDReduction(
-        ReductionAttr->getLocation(), ReductionAttr->Operator,
-        llvm::MutableArrayRef<Expr *>(Exprs));
-    break;
-  }
 
   default:
     llvm_unreachable("Unknown SIMD clause");
@@ -6399,8 +6341,9 @@ TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
         getSema().ActOnEndCEANExpr(0);
 #endif // INTEL_SPECIFIC_CILKPLUS
         return StmtError();
+#if INTEL_SPECIFIC_CILKPLUS
       }
-
+#endif // INTEL_SPECIFIC_CILKPLUS
       Cond = CondE.get();
     }
   }
@@ -6552,11 +6495,6 @@ TreeTransform<Derived>::TransformForStmt(ForStmt *S) {
   StmtResult Init = getDerived().TransformStmt(S->getInit());
   if (Init.isInvalid())
     return StmtError();
-
-  // In OpenMP loop region loop control variable must be captured and be
-  // private. Perform analysis of first part (if any).
-  if (getSema().getLangOpts().OpenMP && Init.isUsable())
-    getSema().ActOnOpenMPLoopInitialization(S->getForLoc(), Init.get());
 
   // Transform the condition
   ExprResult Cond;
@@ -8537,8 +8475,6 @@ TreeTransform<Derived>::TransformOMPArraySectionExpr(OMPArraySectionExpr *E) {
       Length.get(), E->getRBracketLoc());
 }
 
-template<typename Derived>
-ExprResult
 #if INTEL_SPECIFIC_CILKPLUS
 template<typename Derived>
 ExprResult
@@ -10346,7 +10282,6 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
   Sema::ContextRAII SavedContext(getSema(), NewCallOperator,
                                  /*NewThisContext*/false);
 
-  LambdaScopeInfo *const LSI = getSema().getCurLambda();
   // Enter the scope of the lambda.
   getSema().buildLambdaScope(LSI, NewCallOperator,
                              E->getIntroducerRange(),

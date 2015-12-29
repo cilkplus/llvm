@@ -784,8 +784,8 @@ bool Preprocessor::LexOnOffSwitch(tok::OnOffSwitch &Result) {
   LexUnexpandedToken(Tok);
 
   if (Tok.isNot(tok::identifier)) {
-     Diag(Tok, diag::ext_on_off_switch_syntax);
-     return true;
+    Diag(Tok, diag::ext_on_off_switch_syntax);
+    return true;
   }
   IdentifierInfo *II = Tok.getIdentifierInfo();
   if (II->isStr("ON"))
@@ -836,7 +836,7 @@ struct PragmaPoisonHandler : public PragmaHandler {
   }
 };
 
-/// PragmaSystemHeaderHandler - "#pragma system_header" marks the current file
+/// PragmaSystemHeaderHandler - "\#pragma system_header" marks the current file
 /// as a system header, which silences warnings in it.
 struct PragmaSystemHeaderHandler : public PragmaHandler {
   PragmaSystemHeaderHandler() : PragmaHandler("system_header") {}
@@ -1411,7 +1411,6 @@ struct PragmaAssumeNonNullHandler : public PragmaHandler {
 /// \note This is
 /// <a href="http://msdn.microsoft.com/en-us/library/b6xkz944(v=vs.80).aspx">editor-only</a>
 /// pragma, just skipped by compiler.
-/*
 struct PragmaRegionHandler : public PragmaHandler {
   PragmaRegionHandler(const char *pragma) : PragmaHandler(pragma) { }
 
@@ -1423,7 +1422,7 @@ struct PragmaRegionHandler : public PragmaHandler {
     // to handle a _Pragma differently.
   }
 };
-*/
+
 }  // end anonymous namespace
 
 
@@ -1462,8 +1461,8 @@ void Preprocessor::RegisterBuiltinPragmas() {
   if (LangOpts.MicrosoftExt) {
     AddPragmaHandler(new PragmaWarningHandler());
     AddPragmaHandler(new PragmaIncludeAliasHandler());
-//    AddPragmaHandler(new PragmaRegionHandler("region"));
-//    AddPragmaHandler(new PragmaRegionHandler("endregion"));
+    AddPragmaHandler(new PragmaRegionHandler("region"));
+    AddPragmaHandler(new PragmaRegionHandler("endregion"));
   }
 }
 

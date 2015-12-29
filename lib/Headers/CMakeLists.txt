@@ -31,7 +31,6 @@ set(files
   Intrin.h
   inttypes.h
   iso646.h
-  Intrin.h
   limits.h
   lzcntintrin.h
   mm3dnow.h

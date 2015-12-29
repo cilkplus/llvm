@@ -31,7 +31,6 @@
 namespace clang {
 struct ASTTemplateArgumentListInfo;
 class CXXTemporary;
-class CapturedStmt;
 class CompoundStmt;
 class DependentFunctionTemplateSpecializationInfo;
 class Expr;
@@ -1853,7 +1852,11 @@ public:
   /// Whether this is a (C++11) constexpr function or constexpr constructor.
   bool isConstexpr() const { return IsConstexpr; }
   void setConstexpr(bool IC) { IsConstexpr = IC; }
-
+#if INTEL_SPECIFIC_CILKPLUS
+  /// \brief Whether this function is a Cilk spawning function.
+  bool isSpawning() const { return IsSpawning; }
+  void setSpawning() { IsSpawning = true; }
+#endif // INTEL_SPECIFIC_CILKPLUS
   /// \brief Indicates the function uses __try.
   bool usesSEHTry() const { return UsesSEHTry; }
   void setUsesSEHTry(bool UST) { UsesSEHTry = UST; }
@@ -1920,11 +1923,6 @@ public:
   ///    An implementation is allowed to omit a call to a replaceable global
   ///    allocation function. [...]
   bool isReplaceableGlobalAllocationFunction() const;
-
-  /// \brief Determine whether this function is a sized global deallocation
-  /// function in C++1y. If so, find and return the corresponding unsized
-  /// deallocation function.
-  FunctionDecl *getCorrespondingUnsizedGlobalDeallocationFunction() const;
 
   /// Compute the language linkage.
   LanguageLinkage getLanguageLinkage() const;

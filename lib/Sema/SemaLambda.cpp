@@ -787,7 +787,6 @@ VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc,
   NewVD->markUsed(Context);
   NewVD->setInit(Init);
   return NewVD;
-
 }
 
 FieldDecl *Sema::buildInitCaptureField(LambdaScopeInfo *LSI, VarDecl *Var) {
@@ -806,7 +805,8 @@ FieldDecl *Sema::buildInitCaptureField(LambdaScopeInfo *LSI, VarDecl *Var) {
 }
 
 void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
-                  Declarator &ParamInfo, Scope *CurScope) {
+                                        Declarator &ParamInfo,
+                                        Scope *CurScope) {
   // Determine if we're within a context where we know that the lambda will
   // be dependent, because there are template parameters in scope.
   bool KnownDependent = false;
@@ -1045,13 +1045,7 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       Var = R.getAsSingle<VarDecl>();
       if (Var && DiagnoseUseOfDecl(Var, C->Loc))
         continue;
-      if (R.empty()) {
-        // FIXME: Disable corrections that would add qualification?
-        CXXScopeSpec ScopeSpec;
-        DeclFilterCCC<VarDecl> Validator;
-        if (DiagnoseEmptyLookup(CurScope, ScopeSpec, R, Validator))
-          continue;
-      }
+    }
 
     // C++11 [expr.prim.lambda]p8:
     //   An identifier or this shall not appear more than once in a

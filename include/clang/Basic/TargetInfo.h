@@ -132,8 +132,7 @@ public:
     NoFloat = 255,
     Float = 0,
     Double,
-    LongDouble,
-    Float128
+    LongDouble
   };
 
   /// \brief The different kinds of __builtin_va_list types defined by

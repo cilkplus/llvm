@@ -3137,13 +3137,6 @@ public:
       return Opcode(unsigned(Opc) - BO_MulAssign + BO_Mul);
   }
 
-  static bool isAdditiveAssignOp(Opcode Opc) {
-    return Opc == BO_AddAssign || Opc == BO_SubAssign;
-  }
-  bool isAdditiveAssignOp() const {
-    return isAdditiveAssignOp(getOpcode());
-  }
-
   static bool isShiftAssignOp(Opcode Opc) {
     return Opc == BO_ShlAssign || Opc == BO_ShrAssign;
   }

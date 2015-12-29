@@ -5,9 +5,6 @@
 typedef void void_fun_t();
 typedef void __cdecl cdecl_fun_t();
 
-typedef void void_fun_t();
-typedef void __cdecl cdecl_fun_t();
-
 // Pointers to free functions
 void            free_func_default(); // expected-note 2 {{previous declaration is here}}
 void __cdecl    free_func_cdecl(); // expected-note 2 {{previous declaration is here}}

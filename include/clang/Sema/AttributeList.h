@@ -173,13 +173,6 @@ public:
     : GetterId(getterId), SetterId(setterId) {}
   };
 
-  struct IdentifierData {
-    IdentifierInfo *Id;
-    SourceLocation Loc;
-    IdentifierData(IdentifierInfo *id, const SourceLocation &loc)
-    : Id(id), Loc(loc) {}
-  };
-
 private:
   /// Type tag information is stored immediately following the arguments, if
   /// any, at the end of the object.  They are mutually exlusive with
@@ -236,8 +229,7 @@ private:
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
 
-  /// Constructor for attributes with identifier and source location arguments.
-
+  /// Constructor for availability attributes.
   AttributeList(IdentifierInfo *attrName, SourceRange attrRange,
                 IdentifierInfo *scopeName, SourceLocation scopeLoc,
                 IdentifierLoc *Parm, const AvailabilityChange &introduced,
@@ -312,8 +304,7 @@ private:
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
 
-  /// Constructor for microsoft __declspec(property) attribute and Cilk Plus
-  /// elemental linear attribute with a function parameter step size.
+  /// Constructor for microsoft __declspec(property) attribute.
   AttributeList(IdentifierInfo *attrName, SourceRange attrRange,
                 IdentifierInfo *scopeName, SourceLocation scopeLoc,
                 IdentifierInfo *getterId, IdentifierInfo *setterId,

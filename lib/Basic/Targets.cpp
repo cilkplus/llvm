@@ -3326,12 +3326,6 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
   if (HasCX16)
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16");
 
-  if (HasSHA)
-    Builder.defineMacro("__SHA__");
-
-  if (HasCX16)
-    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16");
-
   // Each case falls through to the previous one here.
   switch (SSELevel) {
   case AVX512F:
@@ -6591,6 +6585,12 @@ public:
 
     Builder.defineMacro("_MIPS_ARCH", "\"" + CPU + "\"");
     Builder.defineMacro("_MIPS_ARCH_" + StringRef(CPU).upper());
+
+    // These shouldn't be defined for MIPS-I but there's no need to check
+    // for that since MIPS-I isn't supported.
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
   }
 
   ArrayRef<Builtin::Info> getTargetBuiltins() const override {
@@ -6965,6 +6965,8 @@ public:
     }
     else
       llvm_unreachable("Invalid ABI for Mips64.");
+
+    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
   }
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override {
     static const TargetInfo::GCCRegAlias GCCRegAliases[] = {

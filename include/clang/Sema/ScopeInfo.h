@@ -618,7 +618,11 @@ public:
 };
 
 /// \brief Retains information about a captured region.
+#if INTEL_SPECIFIC_CILKPLUS
+class CapturedRegionScopeInfo : public CapturingScopeInfo {
+#else
 class CapturedRegionScopeInfo final : public CapturingScopeInfo {
+#endif // INTEL_SPECIFIC_CILKPLUS
 public:
   /// \brief The CapturedDecl for this statement.
   CapturedDecl *TheCapturedDecl;

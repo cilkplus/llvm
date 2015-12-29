@@ -1270,8 +1270,6 @@ bool CodeGenModule::ReturnTypeUsesFPRet(QualType ResultType) {
       return getTarget().useObjCFPRetForRealType(TargetInfo::Double);
     case BuiltinType::LongDouble:
       return getTarget().useObjCFPRetForRealType(TargetInfo::LongDouble);
-    case BuiltinType::Float128:
-      return getTarget().useObjCFPRetForRealType(TargetInfo::Float128);
     }
   }
 
@@ -3167,7 +3165,12 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                                  ReturnValueSlot ReturnValue,
                                  const CallArgList &CallArgs,
                                  CGCalleeInfo CalleeInfo,
-                                 llvm::Instruction **callOrInvoke) {
+                                 llvm::Instruction **callOrInvoke
+#if INTEL_SPECIFIC_CILKPLUS
+                                 ,
+                                 bool IsCilkSpawnCall
+#endif // INTEL_SPECIFIC_CILKPLUS
+                                ) {
   // FIXME: We no longer need the types from CallArgs; lift up and simplify.
 
   // Handle struct-return functions by passing a pointer to the
@@ -3499,7 +3502,12 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                              true);
   llvm::AttributeSet Attrs = llvm::AttributeSet::get(getLLVMContext(),
                                                      AttributeList);
-
+#if INTEL_SPECIFIC_CILKPLUS
+  // If this call is a Cilk spawn call, then we need to emit the prologue
+  // before emitting the real call.
+  if (IsCilkSpawnCall)
+    CGM.getCilkPlusRuntime().EmitCilkHelperPrologue(*this);
+#endif // INTEL_SPECIFIC_CILKPLUS
   bool CannotThrow;
   if (currentFunctionUsesSEHTry()) {
     // SEH cares about asynchronous exceptions, everything can "throw."

@@ -12,6 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
+#if INTEL_SPECIFIC_CILKPLUS
+#include "intel/CGCilkPlusRuntime.h"
+#endif // INTEL_SPECIFIC_CILKPLUS
 #include "CGBlocks.h"
 #include "CGCleanup.h"
 #include "CGCUDARuntime.h"
@@ -43,6 +46,9 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
               CGBuilderInserterTy(this)),
       CurFn(nullptr), ReturnValue(Address::invalid()),
       CapturedStmtInfo(nullptr),
+#if INTEL_SPECIFIC_CILKPLUS
+      CurCGCilkImplicitSyncInfo(nullptr),
+#endif // INTEL_SPECIFIC_CILKPLUS
       SanOpts(CGM.getLangOpts().Sanitize), IsSanitizerScope(false),
       CurFuncIsThunk(false), AutoreleaseResult(false), SawAsmBlock(false),
       IsOutlinedSEHHelper(false),
@@ -364,11 +370,6 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   llvm::Instruction *Ptr = AllocaInsertPt;
   AllocaInsertPt = nullptr;
   Ptr->eraseFromParent();
-  if (FirstprivateInsertPt) {
-    Ptr = FirstprivateInsertPt;
-    FirstprivateInsertPt = 0;
-    Ptr->eraseFromParent();
-  }
 
   // If someone took the address of a label but never did an indirect goto, we
   // made a zero entry PHI node, which is illegal, zap it now.
@@ -742,7 +743,6 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
   // folded.
   llvm::Value *Undef = llvm::UndefValue::get(Int32Ty);
   AllocaInsertPt = new llvm::BitCastInst(Undef, Int32Ty, "", EntryBB);
-  FirstprivateInsertPt = 0;
   if (Builder.isNamePreserving())
     AllocaInsertPt->setName("allocapt");
 
@@ -923,17 +923,6 @@ static void TryMarkNoThrow(llvm::Function *F) {
         return;
 
   F->setDoesNotThrow();
-}
-
-static void EmitSizedDeallocationFunction(CodeGenFunction &CGF,
-                                          const FunctionDecl *UnsizedDealloc) {
-  // This is a weak discardable definition of the sized deallocation function.
-  CGF.CurFn->setLinkage(llvm::Function::LinkOnceAnyLinkage);
-
-  // Call the unsized deallocation function and forward the first argument
-  // unchanged.
-  llvm::Constant *Unsized = CGF.CGM.GetAddrOfFunction(UnsizedDealloc);
-  CGF.Builder.CreateCall(Unsized, &*CGF.CurFn->arg_begin());
 }
 
 void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
@@ -1751,14 +1740,10 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
       break;
 
     case Type::Typedef:
-      type = cast<TypedefType>(ty)->desugar();
-      break;
     case Type::Decltype:
-      type = cast<DecltypeType>(ty)->desugar();
-      break;
     case Type::Auto:
-      type = cast<AutoType>(ty)->getDeducedType();
-      break;
+      // Stop walking: nothing to do.
+      return;
 
     case Type::TypeOfExpr:
       // Stop walking: emit typeof expression.
@@ -1769,7 +1754,7 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
       type = cast<AtomicType>(ty)->getValueType();
       break;
     }
-  } while (!type.isNull() && type->isVariablyModifiedType());
+  } while (type->isVariablyModifiedType());
 }
 
 Address CodeGenFunction::EmitVAListRef(const Expr* E) {

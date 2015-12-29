@@ -60,6 +60,7 @@ include "DiagnosticCategories.td"
 include "intel/DiagnosticIntelGroups.td"
 include "DiagnosticGroups.td"
 
+
 // All diagnostics emitted by the compiler are an indirect subclass of this.
 class Diagnostic<string text, DiagClass DC, Severity defaultmapping> {
   /// Component is specified by the file with a big let directive.

@@ -1243,7 +1243,6 @@ static void PrintFloatingLiteral(raw_ostream &OS, FloatingLiteral *Node,
   case BuiltinType::Double:     break; // no suffix.
   case BuiltinType::Float:      OS << 'F'; break;
   case BuiltinType::LongDouble: OS << 'L'; break;
-  case BuiltinType::Float128:   OS << 'Q'; break;
   }
 }
 
@@ -1376,6 +1375,75 @@ void StmtPrinter::VisitArraySubscriptExpr(ArraySubscriptExpr *Node) {
   PrintExpr(Node->getRHS());
   OS << "]";
 }
+
+#if INTEL_SPECIFIC_CILKPLUS
+void StmtPrinter::VisitCEANIndexExpr(CEANIndexExpr *Node) {
+  if (Node->getLowerBound() && Node->getLowerBound()->getLocStart().isValid())
+    PrintExpr(Node->getLowerBound());
+  OS << ":";
+  if (Node->getLength() && Node->getLength()->getLocStart().isValid())
+    PrintExpr(Node->getLength());
+  bool PrintStride =
+    Node->getStride() && Node->getStride()->getLocStart().isValid();
+  if (PrintStride) {
+    OS << ":";
+    PrintExpr(Node->getStride());
+  }
+}
+
+void StmtPrinter::VisitCEANBuiltinExpr(CEANBuiltinExpr *Node) {
+  switch (Node->getBuiltinKind()) {
+  case CEANBuiltinExpr::ReduceAdd:
+    OS << "__sec_reduce_add";
+    break;
+  case CEANBuiltinExpr::ReduceMul:
+    OS << "__sec_reduce_mul";
+    break;
+  case CEANBuiltinExpr::ReduceMax:
+    OS << "__sec_reduce_max";
+    break;
+  case CEANBuiltinExpr::ReduceMin:
+    OS << "__sec_reduce_min";
+    break;
+  case CEANBuiltinExpr::ReduceMaxIndex:
+    OS << "__sec_reduce_max_index";
+    break;
+  case CEANBuiltinExpr::ReduceMinIndex:
+    OS << "__sec_reduce_min_index";
+    break;
+  case CEANBuiltinExpr::ReduceAllZero:
+    OS << "__sec_reduce_max_all_zero";
+    break;
+  case CEANBuiltinExpr::ReduceAllNonZero:
+    OS << "__sec_reduce_max_all_nonzero";
+    break;
+  case CEANBuiltinExpr::ReduceAnyZero:
+    OS << "__sec_reduce_max_any_zero";
+    break;
+  case CEANBuiltinExpr::ReduceAnyNonZero:
+    OS << "__sec_reduce_max_any_nonzero";
+    break;
+  case CEANBuiltinExpr::Reduce:
+    OS << "__sec_reduce";
+    break;
+  case CEANBuiltinExpr::ReduceMutating:
+    OS << "__sec_reduce_mutating";
+    break;
+  case CEANBuiltinExpr::ImplicitIndex:
+    OS << "__sec_implicit_index";
+    break;
+  case CEANBuiltinExpr::Unknown:
+    return;
+  }
+  ArrayRef<Expr *> Args = Node->getArgs();
+  for (ArrayRef<Expr *>::iterator I = Args.begin(), B = I, E = Args.end();
+       I != E; ++I) {
+    OS << ((I == B) ? "(" : ",");
+    PrintExpr(*I);
+  }
+  OS << ")";
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
 
 void StmtPrinter::VisitOMPArraySectionExpr(OMPArraySectionExpr *Node) {
   PrintExpr(Node->getBase());
@@ -2410,10 +2478,6 @@ void StmtPrinter::VisitBlockExpr(BlockExpr *Node) {
     OS << ')';
   }
   OS << "{ }";
-}
-
-void StmtPrinter::VisitCilkSpawnExpr(CilkSpawnExpr *Node) {
-  llvm_unreachable("not implemented yet");
 }
 
 void StmtPrinter::VisitOpaqueValueExpr(OpaqueValueExpr *Node) { 

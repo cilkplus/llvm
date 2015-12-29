@@ -122,24 +122,3 @@ static void splats(int i, long l, __uint128_t t, float f, double d) {
   vd = l + vd;
   vd = vd + t;
 }
-
-typedef enum
-{
-    uchar_stride = 1,
-    uchar4_stride = 4,
-    ushort4_stride = 8,
-    short4_stride = 8,
-    uint4_stride = 16,
-    int4_stride = 16,
-    float4_stride = 16,
-} PixelByteStride;
-
-stride4 RDar15091442_get_stride4(int4 x, PixelByteStride pixelByteStride);
-stride4 RDar15091442_get_stride4(int4 x, PixelByteStride pixelByteStride)
-{
-    stride4 stride;
-    // This previously caused an assertion failure.
-    stride.lo = ((ulong2) x) * pixelByteStride; // no-warning
-    return stride;
-}
-

@@ -2524,13 +2524,6 @@ namespace {
       HandleMemberExpr(ME, true /*CheckReferenceOnly*/, false /*AddressOf*/);
     }
 
-    void VisitMemberExpr(MemberExpr *ME) {
-      // All uses of unbounded reference fields will warn.
-      HandleMemberExpr(ME, true /*CheckReferenceOnly*/);
-
-      Inherited::VisitMemberExpr(ME);
-    }
-
     void VisitImplicitCastExpr(ImplicitCastExpr *E) {
       if (E->getCastKind() == CK_LValueToRValue) {
         HandleValue(E->getSubExpr(), false /*AddressOf*/);
@@ -5037,13 +5030,6 @@ void Sema::CheckCompletedCXXClass(CXXRecordDecl *Record) {
     Diag(Record->getLocation(), diag::warn_cxx_ms_struct);
   }
 
-  // Check to see if we're trying to lay out a struct using the ms_struct
-  // attribute that is dynamic.
-  if (Record->isMsStruct(Context) && Record->isDynamicClass()) {
-    Diag(Record->getLocation(), diag::warn_pragma_ms_struct_failed);
-    Record->dropAttr<MsStructAttr>();
-  }
-
   // Declare inheriting constructors. We do this eagerly here because:
   // - The standard requires an eager diagnostic for conflicting inheriting
   //   constructors from different classes.
@@ -5225,21 +5211,6 @@ static FunctionProtoType::ExtProtoInfo getImplicitMethodEPI(Sema &S,
   // Build an exception specification pointing back at this member.
   EPI.ExceptionSpec.Type = EST_Unevaluated;
   EPI.ExceptionSpec.SourceDecl = MD;
-
-  // Set the calling convention to the default for C++ instance methods.
-  EPI.ExtInfo = EPI.ExtInfo.withCallingConv(
-      S.Context.getDefaultCallingConvention(/*IsVariadic=*/false,
-                                            /*IsCXXMethod=*/true));
-  return EPI;
-}
-
-static FunctionProtoType::ExtProtoInfo getImplicitMethodEPI(Sema &S,
-                                                            CXXMethodDecl *MD) {
-  FunctionProtoType::ExtProtoInfo EPI;
-
-  // Build an exception specification pointing back at this member.
-  EPI.ExceptionSpecType = EST_Unevaluated;
-  EPI.ExceptionSpecDecl = MD;
 
   // Set the calling convention to the default for C++ instance methods.
   EPI.ExtInfo = EPI.ExtInfo.withCallingConv(
@@ -8012,10 +7983,6 @@ public:
     if (!ND || isa<NamespaceDecl>(ND))
       return false;
 
-    if (RequireMember && !isa<FieldDecl>(ND) && !isa<CXXMethodDecl>(ND) &&
-        !isa<TypeDecl>(ND))
-      return false;
-
     // Completely unqualified names are invalid for a 'using' declaration.
     if (Candidate.WillReplaceSpecifier() && !Candidate.getCorrectionSpecifier())
       return false;
@@ -9711,137 +9678,6 @@ public:
   Expr *build(Sema &S, SourceLocation Loc) const override {
     return assertNotNull(S.CreateBuiltinArraySubscriptExpr(
         Base.build(S, Loc), Loc, Index.build(S, Loc), Loc).get());
-  }
-
-  SubscriptBuilder(const ExprBuilder &Base, const ExprBuilder &Index)
-      : Base(Base), Index(Index) {}
-};
-
-} // end anonymous namespace
-
-namespace {
-/// \brief An abstract base class for all helper classes used in building the
-//  copy/move operators. These classes serve as factory functions and help us
-//  avoid using the same Expr* in the AST twice.
-class ExprBuilder {
-  ExprBuilder(const ExprBuilder&) LLVM_DELETED_FUNCTION;
-  ExprBuilder &operator=(const ExprBuilder&) LLVM_DELETED_FUNCTION;
-
-protected:
-  static Expr *assertNotNull(Expr *E) {
-    assert(E && "Expression construction must not fail.");
-    return E;
-  }
-
-public:
-  ExprBuilder() {}
-  virtual ~ExprBuilder() {}
-
-  virtual Expr *build(Sema &S, SourceLocation Loc) const = 0;
-};
-
-class RefBuilder: public ExprBuilder {
-  VarDecl *Var;
-  QualType VarType;
-
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const LLVM_OVERRIDE {
-    return assertNotNull(S.BuildDeclRefExpr(Var, VarType, VK_LValue, Loc).take());
-  }
-
-  RefBuilder(VarDecl *Var, QualType VarType)
-      : Var(Var), VarType(VarType) {}
-};
-
-class ThisBuilder: public ExprBuilder {
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const LLVM_OVERRIDE {
-    return assertNotNull(S.ActOnCXXThis(Loc).takeAs<Expr>());
-  }
-};
-
-class CastBuilder: public ExprBuilder {
-  const ExprBuilder &Builder;
-  QualType Type;
-  ExprValueKind Kind;
-  const CXXCastPath &Path;
-
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const LLVM_OVERRIDE {
-    return assertNotNull(S.ImpCastExprToType(Builder.build(S, Loc), Type,
-                                             CK_UncheckedDerivedToBase, Kind,
-                                             &Path).take());
-  }
-
-  CastBuilder(const ExprBuilder &Builder, QualType Type, ExprValueKind Kind,
-              const CXXCastPath &Path)
-      : Builder(Builder), Type(Type), Kind(Kind), Path(Path) {}
-};
-
-class DerefBuilder: public ExprBuilder {
-  const ExprBuilder &Builder;
-
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const LLVM_OVERRIDE {
-    return assertNotNull(
-        S.CreateBuiltinUnaryOp(Loc, UO_Deref, Builder.build(S, Loc)).take());
-  }
-
-  DerefBuilder(const ExprBuilder &Builder) : Builder(Builder) {}
-};
-
-class MemberBuilder: public ExprBuilder {
-  const ExprBuilder &Builder;
-  QualType Type;
-  CXXScopeSpec SS;
-  bool IsArrow;
-  LookupResult &MemberLookup;
-
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const LLVM_OVERRIDE {
-    return assertNotNull(S.BuildMemberReferenceExpr(
-        Builder.build(S, Loc), Type, Loc, IsArrow, SS, SourceLocation(), 0,
-        MemberLookup, 0).take());
-  }
-
-  MemberBuilder(const ExprBuilder &Builder, QualType Type, bool IsArrow,
-                LookupResult &MemberLookup)
-      : Builder(Builder), Type(Type), IsArrow(IsArrow),
-        MemberLookup(MemberLookup) {}
-};
-
-class MoveCastBuilder: public ExprBuilder {
-  const ExprBuilder &Builder;
-
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const LLVM_OVERRIDE {
-    return assertNotNull(CastForMoving(S, Builder.build(S, Loc)));
-  }
-
-  MoveCastBuilder(const ExprBuilder &Builder) : Builder(Builder) {}
-};
-
-class LvalueConvBuilder: public ExprBuilder {
-  const ExprBuilder &Builder;
-
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const LLVM_OVERRIDE {
-    return assertNotNull(
-        S.DefaultLvalueConversion(Builder.build(S, Loc)).take());
-  }
-
-  LvalueConvBuilder(const ExprBuilder &Builder) : Builder(Builder) {}
-};
-
-class SubscriptBuilder: public ExprBuilder {
-  const ExprBuilder &Base;
-  const ExprBuilder &Index;
-
-public:
-  virtual Expr *build(Sema &S, SourceLocation Loc) const
-      LLVM_OVERRIDE {
-    return assertNotNull(S.CreateBuiltinArraySubscriptExpr(
-        Base.build(S, Loc), Loc, Index.build(S, Loc), Loc).take());
   }
 
   SubscriptBuilder(const ExprBuilder &Base, const ExprBuilder &Index)
@@ -11984,7 +11820,6 @@ bool Sema::CheckLiteralOperatorDeclaration(FunctionDecl *FnDecl) {
     // as the only parameters.
     if (Context.hasSameType(T, Context.UnsignedLongLongTy) ||
         Context.hasSameType(T, Context.LongDoubleTy) ||
-        Context.hasSameType(T, Context.Float128Ty) ||
         Context.hasSameType(T, Context.CharTy) ||
         Context.hasSameType(T, Context.WideCharTy) ||
         Context.hasSameType(T, Context.Char16Ty) ||

@@ -107,7 +107,6 @@ bool Sema::isSimpleTypeSpecifier(tok::TokenKind Kind) const {
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
-  case tok::kw__Quad:
   case tok::kw_wchar_t:
   case tok::kw_bool:
   case tok::kw___underlying_type:
@@ -1618,7 +1617,6 @@ void Sema::ActOnPopScope(SourceLocation Loc, Scope *S) {
     // Remove this name from our lexical scope.
     IdResolver.RemoveDecl(D);
   }
-  DiagnoseUnusedBackingIvarInAccessor(S);
 }
 
 /// \brief Look for an Objective-C class in the translation unit.
@@ -1757,15 +1755,6 @@ NamedDecl *Sema::LazilyCreateBuiltin(IdentifierInfo *II, unsigned ID,
         LinkageSpecDecl::Create(Context, Parent, Loc, Loc,
                                 LinkageSpecDecl::lang_c, false);
     CLinkageDecl->setImplicit();
-    Parent->addDecl(CLinkageDecl);
-    Parent = CLinkageDecl;
-  }
-
-  DeclContext *Parent = Context.getTranslationUnitDecl();
-  if (getLangOpts().CPlusPlus) {
-    LinkageSpecDecl *CLinkageDecl =
-        LinkageSpecDecl::Create(Context, Parent, Loc, Loc,
-                                LinkageSpecDecl::lang_c, false);
     Parent->addDecl(CLinkageDecl);
     Parent = CLinkageDecl;
   }
@@ -3811,16 +3800,6 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
 
   // Handle anonymous struct definitions.
   if (RecordDecl *Record = dyn_cast_or_null<RecordDecl>(Tag)) {
-//***INTEL: declspec bugfix
-    if (!DS.getAttributes().empty()) {
-      AttributeList* attrs = DS.getAttributes().getList();
-      while (attrs) {
-        if (attrs->isDeclspecAttribute())
-          ProcessDeclAttributeList(S, Record, attrs);
-        attrs = attrs->getNext();
-      }
-    }
-//***INTEL: declspec bugfix
     if (!Record->getDeclName() && Record->isCompleteDefinition() &&
         DS.getStorageClassSpec() != DeclSpec::SCS_typedef) {
       if (getLangOpts().CPlusPlus ||
@@ -8338,6 +8317,13 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
   bool MergeTypeWithPrevious = !getLangOpts().CPlusPlus &&
                                !Previous.isShadowed();
 
+#if INTEL_SPECIFIC_CILKPLUS
+  // Check that Cilk elemental function requirements are met
+  if (getLangOpts().CilkPlus && NewFD->hasAttr<CilkElementalAttr>() &&
+      !DiagnoseElementalAttributes(NewFD))
+    return false;
+#endif // INTEL_SPECIFIC_CILKPLUS
+
   bool Redeclaration = false;
   NamedDecl *OldDecl = nullptr;
 
@@ -10251,18 +10237,6 @@ Sema::FinalizeDeclaration(Decl *ThisDecl) {
     }
   }
 
-  if (!VD->isInvalidDecl() &&
-      VD->isThisDeclarationADefinition() == VarDecl::TentativeDefinition) {
-    if (const VarDecl *Def = VD->getDefinition()) {
-      if (Def->hasAttr<AliasAttr>()) {
-        Diag(VD->getLocation(), diag::err_tentative_after_alias)
-            << VD->getDeclName();
-        Diag(Def->getLocation(), diag::note_previous_definition);
-        VD->setInvalidDecl();
-      }
-    }
-  }
-
   const DeclContext *DC = VD->getDeclContext();
   // If there's a #pragma GCC visibility in scope, and this isn't a class
   // member, set the visibility of this variable.
@@ -11356,6 +11330,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
 
   return dcl;
 }
+
 
 /// When we finish delayed parsing of an attribute, we must attach it to the
 /// relevant Decl.

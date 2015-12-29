@@ -21,16 +21,13 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "clang/AST/ASTContext.h"
 #include "clang/Parse/Parser.h"
 #include "RAIIObjectsForParser.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/Basic/PrettyStackTrace.h"
 #include "clang/Sema/DeclSpec.h"
-#include "clang/Sema/Lookup.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
-#include "clang/Sema/Sema.h"
 #include "clang/Sema/TypoCorrection.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -286,10 +283,14 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     if (OpToken.is(tok::comma) && isNotExpressionStart()) {
       PP.EnterToken(Tok);
       Tok = OpToken;
+#if INTEL_SPECIFIC_CILKPLUS
       if (LHS.isUsable()) {
-        if (Actions.CheckCEANExpr(getCurScope(), LHS.get()))
+        if (Actions.CheckCEANExpr(getCurScope(), LHS.get())){
+          (void)Actions.CorrectDelayedTyposInExpr(LHS);
           return ExprError();
+        }
       }
+#endif // INTEL_SPECIFIC_CILKPLUS
       return LHS;
     }
 
@@ -300,14 +301,6 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
       // because that tickles a lexer bug.
       PP.EnterToken(Tok);
       Tok = OpToken;
-#if INTEL_SPECIFIC_CILKPLUS
-      if (LHS.isUsable()) {
-        if (Actions.CheckCEANExpr(getCurScope(), LHS.get())){
-          (void)Actions.CorrectDelayedTyposInExpr(LHS);
-          return ExprError();
-        }
-      }
-#endif // INTEL_SPECIFIC_CILKPLUS
       return LHS;
     }
 
@@ -1099,7 +1092,7 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
   // unary-expression: '__builtin_omp_required_simd_align' '(' type-name ')'
   case tok::kw___builtin_omp_required_simd_align:
     return ParseUnaryExprOrTypeTraitExpression();
-  case tok::kw_sizeof: {   // unary-expression: 'sizeof' unary-expression
+  case tok::kw_sizeof:     // unary-expression: 'sizeof' unary-expression
                            // unary-expression: 'sizeof' '(' type-name ')'
 #if INTEL_SPECIFIC_CILKPLUS
   {
@@ -1108,6 +1101,8 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
     Actions.ActOnEndCEANExpr(ExprRes.get());
     return ExprRes;
   }
+#else
+    return ParseUnaryExprOrTypeTraitExpression();
 #endif                     // INTEL_SPECIFIC_CILKPLUS
   case tok::ampamp: {      // unary-expression: '&&' identifier
     SourceLocation AmpAmpLoc = ConsumeToken();
@@ -1183,7 +1178,6 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
-  case tok::kw__Quad:
   case tok::kw_void:
   case tok::kw_typename:
   case tok::kw_typeof:
@@ -1461,6 +1455,49 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
       Loc = T.getOpenLocation();
       ExprResult Idx, Length;
       SourceLocation ColonLoc;
+#if INTEL_SPECIFIC_CILKPLUS
+      if (!Actions.IsOpenMPCEANAllowed()) {
+        ExprResult CEANLength, CEANStride;
+        bool IsCEAN = false;
+        SourceLocation ColonLoc1, ColonLoc2;
+        {
+          ColonProtectionRAIIObject CPRAII(*this);
+          if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
+            Diag(Tok, diag::warn_cxx98_compat_generalized_initializer_lists);
+            Idx = ParseBraceInitializer();
+          } else if (Tok.is(tok::colon)) {
+            // '[' ':'
+            IsCEAN = true;
+            ColonLoc1 = ConsumeToken();
+            if (Tok.isNot(tok::r_square)) {
+              CEANLength = ParseExpression();
+            }
+          } else {
+            Idx = ParseExpression();
+            if (Tok.is(tok::colon)) {
+              // '[' <expr> ':'
+              IsCEAN = true;
+              ColonLoc1 = ConsumeToken();
+              // <length>
+              if (Tok.isNot(tok::colon) && Tok.isNot(tok::r_square)) {
+                CEANLength = ParseExpression();
+              }
+              // ':' <stride>
+              if (Tok.is(tok::colon)) {
+                ColonLoc2 = ConsumeToken();
+                CEANStride = ParseExpression();
+              }
+            }
+          }
+        }
+        if (IsCEAN && !Idx.isInvalid() && !CEANLength.isInvalid() &&
+            !CEANStride.isInvalid()) {
+          Idx = Actions.ActOnCEANIndexExpr(getCurScope(), LHS.get(), Idx.get(),
+                                           ColonLoc1, CEANLength.get(),
+                                           ColonLoc2, CEANStride.get());
+        }
+      } else {
+#endif // INTEL_SPECIFIC_CILKPLUS
       if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
         Diag(Tok, diag::warn_cxx98_compat_generalized_initializer_lists);
         Idx = ParseBraceInitializer();
@@ -2219,34 +2256,6 @@ ExprResult Parser::ParseBuiltinPrimaryExpression() {
     }
     
     Res = Actions.ActOnConvertVectorExpr(Expr.get(), DestTy.get(), StartLoc, 
-                                         ConsumeParen());
-    break;
-  }
-  case tok::kw___builtin_convertvector: {
-    // The first argument is an expression to be converted, followed by a comma.
-    ExprResult Expr(ParseAssignmentExpression());
-    if (Expr.isInvalid()) {
-      SkipUntil(tok::r_paren, StopAtSemi);
-      return ExprError();
-    }
-    
-    if (ExpectAndConsume(tok::comma, diag::err_expected_comma, "", 
-                         tok::r_paren))
-      return ExprError();
-    
-    // Second argument is the type to bitcast to.
-    TypeResult DestTy = ParseTypeName();
-    if (DestTy.isInvalid())
-      return ExprError();
-    
-    // Attempt to consume the r-paren.
-    if (Tok.isNot(tok::r_paren)) {
-      Diag(Tok, diag::err_expected_rparen);
-      SkipUntil(tok::r_paren, StopAtSemi);
-      return ExprError();
-    }
-    
-    Res = Actions.ActOnConvertVectorExpr(Expr.take(), DestTy.get(), StartLoc, 
                                          ConsumeParen());
     break;
   }

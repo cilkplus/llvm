@@ -130,8 +130,6 @@ CXSourceLocation clang_getLocation(CXTranslationUnit TU,
     return clang_getNullLocation();
   if (line == 0 || column == 0)
     return clang_getNullLocation();
-  if (line == 0 || column == 0)
-    return clang_getNullLocation();
   
   LogRef Log = Logger::make(LLVM_FUNCTION_NAME);
   ASTUnit *CXXUnit = cxtu::getASTUnit(TU);

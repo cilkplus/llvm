@@ -145,15 +145,6 @@ public:
     return CGF.EmitPseudoObjectRValue(E).getComplexVal();
   }
 
-  ComplexPairTy VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
-    CodeGenFunction::LocalVarsDeclGuard Guard(CGF);
-    CGF.EmitCEANBuiltinExprBody(E);
-    if (E->getBuiltinKind() != CEANBuiltinExpr::ReduceMutating)
-      return E->getReturnExpr()->isRValue() ? Visit(E->getReturnExpr()) :
-                                              EmitLoadOfLValue(E->getReturnExpr());
-    return ComplexPairTy();
-  }
-
 #if INTEL_SPECIFC_CILKPLUS
   ComplexPairTy VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
     CodeGenFunction::LocalVarsDeclGuard Guard(CGF);

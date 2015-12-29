@@ -611,7 +611,6 @@ bool PrintfSpecifier::fixType(QualType QT, const LangOptions &LangOpt,
   case BuiltinType::UInt128:
   case BuiltinType::Int128:
   case BuiltinType::Half:
-  case BuiltinType::Float128:
     // Various types which are non-trivial to correct.
     return false;
 

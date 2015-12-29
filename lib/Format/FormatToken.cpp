@@ -266,11 +266,6 @@ void CommaSeparatedList::precomputeFormattingInfos(const FormatToken *Token) {
     if (Format.TotalWidth > Style.ColumnLimit)
       continue;
 
-    // If this braced list has nested braced list, we format it either with one
-    // element per line or with all elements on one line.
-    if (HasNestedBracedList && Columns > 1 && Format.LineCount > 1)
-      continue;
-
     Formats.push_back(Format);
   }
 }

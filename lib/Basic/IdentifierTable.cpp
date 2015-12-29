@@ -112,8 +112,19 @@ namespace {
     KEYOBJC2    = 0x20000,
     KEYZVECTOR  = 0x40000,
     KEYCOROUTINES = 0x80000,
+#if INTEL_SPECIFIC_CILKPLUS
+    KEYCILKPLUS = 0x100000,
+    KEYFLOAT128 = 0x200000,
+    KEYRESTRICT = 0x400000,
+    KEYMSASM = 0x8000000,
+    KEYBASES = 0x10000000,
+    KEYNOINT128 = 0x20000000,
+    KEYALL = (0xffffffff & ~KEYNOMS18 & // INTEL_CUSTOMIZATION 0xfffffff
+              ~KEYNOOPENCL) // KEYNOMS18 and KEYNOOPENCL are used to exclude.
+#else
     KEYALL = (0xfffff & ~KEYNOMS18 &
               ~KEYNOOPENCL) // KEYNOMS18 and KEYNOOPENCL are used to exclude.
+#endif // INTEL_SPECIFIC_CILKPLUS
   };
 
   /// \brief How a keyword is treated in the selected standard.

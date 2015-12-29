@@ -220,82 +220,6 @@ Parser::TPResult Parser::TryConsumeDeclarationSpecifier() {
   return TPResult::Ambiguous;
 }
 
-/// Try to consume a token sequence that we've already identified as
-/// (potentially) starting a decl-specifier.
-Parser::TPResult Parser::TryConsumeDeclarationSpecifier() {
-  switch (Tok.getKind()) {
-  case tok::kw__Atomic:
-    if (NextToken().isNot(tok::l_paren)) {
-      ConsumeToken();
-      break;
-    }
-    // Fall through.
-  case tok::kw_typeof:
-  case tok::kw___attribute:
-  case tok::kw___underlying_type: {
-    ConsumeToken();
-    if (Tok.isNot(tok::l_paren))
-      return TPResult::Error();
-    ConsumeParen();
-    if (!SkipUntil(tok::r_paren))
-      return TPResult::Error();
-    break;
-  }
-
-  case tok::kw_class:
-  case tok::kw_struct:
-  case tok::kw_union:
-  case tok::kw___interface:
-  case tok::kw_enum:
-    // elaborated-type-specifier:
-    //     class-key attribute-specifier-seq[opt]
-    //         nested-name-specifier[opt] identifier
-    //     class-key nested-name-specifier[opt] template[opt] simple-template-id
-    //     enum nested-name-specifier[opt] identifier
-    //
-    // FIXME: We don't support class-specifiers nor enum-specifiers here.
-    ConsumeToken();
-
-    // Skip attributes.
-    while (Tok.is(tok::l_square) || Tok.is(tok::kw___attribute) ||
-           Tok.is(tok::kw___declspec) || Tok.is(tok::kw_alignas)) {
-      if (Tok.is(tok::l_square)) {
-        ConsumeBracket();
-        if (!SkipUntil(tok::r_square))
-          return TPResult::Error();
-      } else {
-        ConsumeToken();
-        if (Tok.isNot(tok::l_paren))
-          return TPResult::Error();
-        ConsumeParen();
-        if (!SkipUntil(tok::r_paren))
-          return TPResult::Error();
-      }
-    }
-
-    if (TryAnnotateCXXScopeToken())
-      return TPResult::Error();
-    if (Tok.is(tok::annot_cxxscope))
-      ConsumeToken();
-    if (Tok.isNot(tok::identifier) && Tok.isNot(tok::annot_template_id))
-      return TPResult::Error();
-    ConsumeToken();
-    break;
-
-  case tok::annot_cxxscope:
-    ConsumeToken();
-    // Fall through.
-  default:
-    ConsumeToken();
-
-    if (getLangOpts().ObjC1 && Tok.is(tok::less))
-      return TryParseProtocolQualifiers();
-    break;
-  }
-
-  return TPResult::Ambiguous();
-}
-
 /// simple-declaration:
 ///   decl-specifier-seq init-declarator-list[opt] ';'
 ///
@@ -1027,7 +951,6 @@ Parser::isExpressionOrTypeSpecifierSimple(tok::TokenKind Kind) {
   case tok::kw_float:
   case tok::kw_int:
   case tok::kw_long:
-  case tok::kw__Quad:
   case tok::kw___int64:
   case tok::kw___int128:
   case tok::kw_restrict:
@@ -1501,7 +1424,6 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
-  case tok::kw__Quad:
   case tok::kw_void:
   case tok::annot_decltype:
     if (NextToken().is(tok::l_paren))
@@ -1596,56 +1518,6 @@ bool Parser::isCXXDeclarationSpecifierAType() {
   case tok::kw_void:
   case tok::kw___unknown_anytype:
   case tok::kw___auto_type:
-    return true;
-
-  case tok::kw_auto:
-    return getLangOpts().CPlusPlus11;
-
-  case tok::kw__Atomic:
-    // "_Atomic foo"
-    return NextToken().is(tok::l_paren);
-
-  default:
-    return false;
-  }
-}
-
-bool Parser::isCXXDeclarationSpecifierAType() {
-  switch (Tok.getKind()) {
-    // typename-specifier
-  case tok::annot_decltype:
-  case tok::annot_template_id:
-  case tok::annot_typename:
-  case tok::kw_typeof:
-  case tok::kw___underlying_type:
-    return true;
-
-    // elaborated-type-specifier
-  case tok::kw_class:
-  case tok::kw_struct:
-  case tok::kw_union:
-  case tok::kw___interface:
-  case tok::kw_enum:
-    return true;
-
-    // simple-type-specifier
-  case tok::kw_char:
-  case tok::kw_wchar_t:
-  case tok::kw_char16_t:
-  case tok::kw_char32_t:
-  case tok::kw_bool:
-  case tok::kw_short:
-  case tok::kw_int:
-  case tok::kw_long:
-  case tok::kw___int64:
-  case tok::kw___int128:
-  case tok::kw_signed:
-  case tok::kw_unsigned:
-  case tok::kw_half:
-  case tok::kw_float:
-  case tok::kw_double:
-  case tok::kw_void:
-  case tok::kw___unknown_anytype:
     return true;
 
   case tok::kw_auto:
@@ -1858,20 +1730,6 @@ Parser::TryParseParameterDeclarationClause(bool *InvalidAsDeclaration,
     if (VersusTemplateArgument)
       return Tok.isOneOf(tok::equal, tok::r_paren) ? TPResult::True
                                                    : TPResult::False;
-
-    // If we're disambiguating a template argument in a default argument in
-    // a class definition versus a parameter declaration, an '=' here
-    // disambiguates the parse one way or the other.
-    // If this is a parameter, it must have a default argument because
-    //   (a) the previous parameter did, and
-    //   (b) this must be the first declaration of the function, so we can't
-    //       inherit any default arguments from elsewhere.
-    // If we see an ')', then we've reached the end of a
-    // parameter-declaration-clause, and the last param is missing its default
-    // argument.
-    if (VersusTemplateArgument)
-      return (Tok.is(tok::equal) || Tok.is(tok::r_paren)) ? TPResult::True()
-                                                          : TPResult::False();
 
     if (Tok.is(tok::equal)) {
       // '=' assignment-expression

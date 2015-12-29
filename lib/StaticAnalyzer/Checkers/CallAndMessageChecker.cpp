@@ -558,7 +558,6 @@ void CallAndMessageChecker::HandleNilReceiver(CheckerContext &C,
            (Ctx.FloatTy == CanRetTy ||
             Ctx.DoubleTy == CanRetTy ||
             Ctx.LongDoubleTy == CanRetTy ||
-            Ctx.Float128Ty == CanRetTy ||
             Ctx.LongLongTy == CanRetTy ||
             Ctx.UnsignedLongLongTy == CanRetTy)))) {
       if (ExplodedNode *N = C.generateErrorNode(state, &Tag))

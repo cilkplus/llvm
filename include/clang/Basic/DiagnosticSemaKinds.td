@@ -906,7 +906,7 @@ def warn_auto_synthesizing_protocol_property :Warning<
   "auto property synthesis will not synthesize property %0"
   " declared in protocol %1">,
   InGroup<DiagGroup<"objc-protocol-property-synthesis">>;
-def warn_no_autosynthesis_shared_ivar_property : Warning<
+def warn_no_autosynthesis_shared_ivar_property : Warning <
   "auto property synthesis will not synthesize property "
   "%0 because it cannot share an ivar with another synthesized property">,
   InGroup<ObjCNoPropertyAutoSynthesis>;
@@ -924,7 +924,7 @@ def warn_autosynthesis_property_ivar_match :Warning<
   "autosynthesized property %0 will use %select{|synthesized}1 instance variable "
   "%2, not existing instance variable %3">,
   InGroup<DiagGroup<"objc-autosynthesis-property-ivar-name-match">>;
-def warn_missing_explicit_synthesis : Warning<
+def warn_missing_explicit_synthesis : Warning <
   "auto property synthesis is synthesizing property not explicitly synthesized">,
   InGroup<DiagGroup<"objc-missing-property-synthesis">>, DefaultIgnore;
 def warn_property_getter_owning_mismatch : Warning<
@@ -995,11 +995,11 @@ def warn_arc_repeated_use_of_weak : Warning <
   "but may be unpredictably set to nil; assign to a strong variable to keep "
   "the object alive">,
   InGroup<ARCRepeatedUseOfWeak>, DefaultIgnore;
-def warn_implicitly_retains_self : Warning<
+def warn_implicitly_retains_self : Warning <
   "block implicitly retains 'self'; explicitly mention 'self' to indicate "
   "this is intended behavior">,
   InGroup<DiagGroup<"implicit-retain-self">>, DefaultIgnore;
-def warn_arc_possible_repeated_use_of_weak : Warning<
+def warn_arc_possible_repeated_use_of_weak : Warning <
   "weak %select{variable|property|implicit property|instance variable}0 %1 may "
   "be accessed multiple times in this %select{function|method|block|lambda}2 "
   "and may be unpredictably set to nil; assign to a strong variable to keep "
@@ -1920,7 +1920,7 @@ def err_range_on_array_parameter : Error<
 def err_for_range_dereference : Error<
   "invalid range expression of type %0; did you mean to dereference it "
   "with '*'?">;
-def note_for_range_invalid_iterator : Note<
+def note_for_range_invalid_iterator : Note <
   "in implicit call to 'operator%select{!=|*|++}0' for iterator of type %1">;
 def note_for_range_begin_end : Note<
   "selected '%select{begin|end}0' %select{function|template }1%2 with iterator type %3">;
@@ -4108,7 +4108,7 @@ def note_cannot_inherit : Note<
 def warn_not_enough_argument : Warning<
   "not enough variable arguments in %0 declaration to fit a sentinel">,
   InGroup<Sentinel>;
-def warn_missing_sentinel : Warning<
+def warn_missing_sentinel : Warning <
   "missing sentinel in %select{function call|method dispatch|block call}0">,
   InGroup<Sentinel>;
 def note_sentinel_here : Note<
@@ -4216,7 +4216,7 @@ def err_extern_c_global_conflict : Error<
   "conflicts with declaration %select{in global scope|with C language linkage}0">;
 def note_extern_c_global_conflict : Note<
   "declared %select{in global scope|with C language linkage}0 here">;
-def warn_weak_import : Warning<
+def warn_weak_import : Warning <
   "an already-declared variable is made a weak_import declaration %0">;
 def ext_static_non_static : Extension<
   "redeclaring non-static %0 as static is a Microsoft extension">,
@@ -5286,7 +5286,7 @@ def ext_typecheck_comparison_of_distinct_pointers : ExtWarn<
   InGroup<CompareDistinctPointerType>;
 def ext_typecheck_cond_incompatible_operands : ExtWarn<
   "incompatible operand types (%0 and %1)">;
-def err_cond_voidptr_arc : Error<
+def err_cond_voidptr_arc : Error <
   "operands to conditional of types%diff{ $ and $|}0,1 are incompatible "
   "in ARC mode">;
 def err_typecheck_comparison_of_distinct_pointers : Error<
@@ -6633,11 +6633,11 @@ def err_invalid_conversion_between_vector_and_scalar : Error<
 def err_only_constructors_take_base_inits : Error<
   "only constructors take base initializers">;
 
-def err_multiple_mem_initialization : Error<
+def err_multiple_mem_initialization : Error <
   "multiple initializations given for non-static member %0">;
-def err_multiple_mem_union_initialization : Error<
+def err_multiple_mem_union_initialization : Error <
   "initializing multiple members of union">;
-def err_multiple_base_initialization : Error<
+def err_multiple_base_initialization : Error <
   "multiple initializations given for base %0">;
 
 def err_mem_init_not_member_or_class : Error<
@@ -6990,7 +6990,7 @@ def warn_format_argument_needs_cast : Warning<
   "%select{values of type|enum values with underlying type}2 '%0' should not "
   "be used as format arguments; add an explicit cast to %1 instead">,
   InGroup<Format>;
-def warn_printf_positional_arg_exceeds_data_args : Warning<
+def warn_printf_positional_arg_exceeds_data_args : Warning <
   "data argument position '%0' exceeds the number of data arguments (%1)">,
   InGroup<Format>;
 def warn_format_zero_positional_specifier : Warning<
@@ -7951,16 +7951,6 @@ def err_omp_firstprivate_distribute_in_teams_reduction : Error<
   "reduction variable in '#pragma omp teams' cannot be firstprivate in '#pragma omp distribute'">;
 def err_omp_depend_clause_thread_simd : Error<
   "'depend' clauses cannot be mixed with '%0' clause">;
-def err_omp_depend_sink_wrong_expr : Error<
-  "expected expression form x[+-d], where x is the loop iteration variable and d is a constant non-negative integer">;
-def err_omp_depend_sink_expected_loop_iteration : Error<
-  "expected %0 loop iteration variable">;
-def err_omp_depend_sink_unexpected_expr : Error<
-  "unexpected expression: number of expressions is larger than the number of associated loops">;
-def err_omp_depend_sink_expected_plus_minus : Error<
-  "expected '+' or '-' operation">;
-def err_omp_depend_sink_source_not_allowed : Error<
-  "'depend(%select{source|sink:vec}0)' clause%select{|s}0 cannot be mixed with 'depend(%select{sink:vec|source}0)' clause%select{s|}0">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {

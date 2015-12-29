@@ -531,6 +531,93 @@ void ASTStmtWriter::VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
   Code = serialization::EXPR_ARRAY_SUBSCRIPT;
 }
 
+#if INTEL_SPECIFIC_CILKPLUS
+//===----------------------------------------------------------------------===//
+// Cilk Plus Expressions and Statements.
+//===----------------------------------------------------------------------===//
+void ASTStmtWriter::VisitCEANIndexExpr(CEANIndexExpr *E) {
+  VisitExpr(E);
+  Writer.AddStmt(E->getLowerBound());
+  Writer.AddSourceLocation(E->getColonLoc1(), Record);
+  Writer.AddStmt(E->getLength());
+  Writer.AddSourceLocation(E->getColonLoc2(), Record);
+  Writer.AddStmt(E->getStride());
+  Writer.AddStmt(E->getIndexExpr());
+  Record.push_back(E->getRank());
+  Code = serialization::EXPR_CEAN_INDEX;
+}
+
+void ASTStmtWriter::VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getRank());
+  Record.push_back(E->getArgsSize());
+  Record.push_back(E->getBuiltinKind());
+  Writer.AddSourceLocation(E->getLocStart(), Record);
+  Writer.AddSourceLocation(E->getLocEnd(), Record);
+  ArrayRef<Expr *> Args = E->getArgs();
+  for (ArrayRef<Expr *>::const_iterator I = Args.begin(), E = Args.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  Args = E->getLengths();
+  for (ArrayRef<Expr *>::const_iterator I = Args.begin(), E = Args.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  ArrayRef<Stmt *> Vars = E->getVars();
+  for (ArrayRef<Stmt *>::const_iterator I = Vars.begin(), E = Vars.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  Vars = E->getIncrements();
+  for (ArrayRef<Stmt *>::const_iterator I = Vars.begin(), E = Vars.end();
+       I != E; ++I)
+    Writer.AddStmt(*I);
+  Writer.AddStmt(E->getInit());
+  Writer.AddStmt(E->getBody());
+  Writer.AddStmt(E->getReturnExpr());
+  Code = serialization::EXPR_CEAN_BUILTIN;
+}
+
+void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
+  VisitStmt(S);
+  Writer.AddSourceLocation(S->getSyncLoc(), Record);
+  Code = serialization::STMT_CILKSYNC;
+}
+
+void ASTStmtWriter::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
+  Code = serialization::STMT_CILK_FOR_GRAINSIZE;
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitCilkForStmt(CilkForStmt *S) {
+  Code = serialization::STMT_CILK_FOR;
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitSIMDForStmt(SIMDForStmt *S) {
+  Code = serialization::STMT_SIMD_FOR;
+  llvm_unreachable("not implemented yet");
+}
+
+void ASTStmtWriter::VisitCilkRankedStmt(CilkRankedStmt *S) {
+  VisitStmt(S);
+  Record.push_back(S->getRank());
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getLengths()[i]);
+  }
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getVars()[i]);
+  }
+  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
+    Writer.AddStmt(S->getIncrements()[i]);
+  }
+  Writer.AddStmt(S->getAssociatedStmt());
+  Writer.AddStmt(S->getInits());
+}
+#endif // INTEL_SPECIFIC_CILKPLUS
+
 void ASTStmtWriter::VisitOMPArraySectionExpr(OMPArraySectionExpr *E) {
   VisitExpr(E);
   Writer.AddStmt(E->getBase());
@@ -851,10 +938,6 @@ void ASTStmtWriter::VisitBlockExpr(BlockExpr *E) {
   VisitExpr(E);
   Writer.AddDeclRef(E->getBlockDecl(), Record);
   Code = serialization::EXPR_BLOCK;
-}
-
-void ASTStmtWriter::VisitCilkSpawnExpr(CilkSpawnExpr *E) {
-  llvm_unreachable("not implemented yet");
 }
 
 void ASTStmtWriter::VisitGenericSelectionExpr(GenericSelectionExpr *E) {
@@ -1678,46 +1761,6 @@ void ASTStmtWriter::VisitAsTypeExpr(AsTypeExpr *E) {
   Writer.AddSourceLocation(E->getRParenLoc(), Record);
   Writer.AddStmt(E->getSrcExpr());
   Code = serialization::EXPR_ASTYPE;
-}
-
-//===----------------------------------------------------------------------===//
-// Cilk Plus Expressions and Statements.
-//===----------------------------------------------------------------------===//
-void ASTStmtWriter::VisitCilkSyncStmt(CilkSyncStmt *S) {
-  VisitStmt(S);
-  Writer.AddSourceLocation(S->getSyncLoc(), Record);
-  Code = serialization::STMT_CILKSYNC;
-}
-
-void ASTStmtWriter::VisitCilkForGrainsizeStmt(CilkForGrainsizeStmt *S) {
-  Code = serialization::STMT_CILK_FOR_GRAINSIZE;
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtWriter::VisitCilkForStmt(CilkForStmt *S) {
-  Code = serialization::STMT_CILK_FOR;
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtWriter::VisitSIMDForStmt(SIMDForStmt *S) {
-  Code = serialization::STMT_SIMD_FOR;
-  llvm_unreachable("not implemented yet");
-}
-
-void ASTStmtWriter::VisitCilkRankedStmt(CilkRankedStmt *S) {
-  VisitStmt(S);
-  Record.push_back(S->getRank());
-  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
-    Writer.AddStmt(S->getLengths()[i]);
-  }
-  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
-    Writer.AddStmt(S->getVars()[i]);
-  }
-  for (unsigned i = 0, N = S->getRank(); i < N; ++i) {
-    Writer.AddStmt(S->getIncrements()[i]);
-  }
-  Writer.AddStmt(S->getAssociatedStmt());
-  Writer.AddStmt(S->getInits());
 }
 
 //===----------------------------------------------------------------------===//

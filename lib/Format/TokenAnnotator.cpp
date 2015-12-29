@@ -1187,11 +1187,6 @@ private:
                                                     tok::kw_decltype))
       return TT_PointerOrReference;
 
-    if (PrevToken->is(tok::r_paren) && PrevToken->MatchingParen &&
-        PrevToken->MatchingParen->Previous &&
-        PrevToken->MatchingParen->Previous->is(tok::kw_typeof))
-      return TT_PointerOrReference;
-
     if (PrevToken->Tok.isLiteral() ||
         PrevToken->isOneOf(tok::r_paren, tok::r_square, tok::kw_true,
                            tok::kw_false, tok::r_brace) ||
@@ -1874,9 +1869,6 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
             (Left.MatchingParen && Left.MatchingParen->is(TT_CastRParen)))
                ? Style.SpacesInCStyleCastParentheses
                : Style.SpacesInParentheses;
-  if (Style.SpacesInAngles &&
-      ((Left.Type == TT_TemplateOpener) != (Right.Type == TT_TemplateCloser)))
-    return true;
   if (Right.isOneOf(tok::semi, tok::comma))
     return false;
   if (Right.is(tok::less) &&
@@ -1987,8 +1979,6 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
     // A.<B>DoSomething();
     return false;
   if (Left.is(TT_TemplateCloser) && Right.is(tok::l_square))
-    return false;
-  if (Right.is(tok::hash) && Left.is(tok::identifier) && Left.TokenText == "L")
     return false;
   return true;
 }
@@ -2236,39 +2226,6 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
       (Line.Last->is(tok::l_brace) || Style.BreakAfterJavaFieldAnnotations))
     return true;
 
-  return false;
-}
-
-bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
-                                     const FormatToken &Right) {
-  if (Right.is(tok::comment)) {
-    return Right.NewlinesBefore > 0;
-  } else if (Right.Previous->isTrailingComment() ||
-             (Right.is(tok::string_literal) &&
-              Right.Previous->is(tok::string_literal))) {
-    return true;
-  } else if (Right.Previous->IsUnterminatedLiteral) {
-    return true;
-  } else if (Right.is(tok::lessless) && Right.Next &&
-             Right.Previous->is(tok::string_literal) &&
-             Right.Next->is(tok::string_literal)) {
-    return true;
-  } else if (Right.Previous->ClosesTemplateDeclaration &&
-             Right.Previous->MatchingParen &&
-             Right.Previous->MatchingParen->BindingStrength == 1 &&
-             Style.AlwaysBreakTemplateDeclarations) {
-    // FIXME: Fix horrible hack of using BindingStrength to find top-level <>.
-    return true;
-  } else if (Right.Type == TT_CtorInitializerComma &&
-             Style.BreakConstructorInitializersBeforeComma &&
-             !Style.ConstructorInitializerAllOnOneLineOrOnePerLine) {
-    return true;
-  } else if (Right.Previous->BlockKind == BK_Block &&
-             Right.Previous->isNot(tok::r_brace) && Right.isNot(tok::r_brace)) {
-    return true;
-  } else if (Right.is(tok::l_brace) && (Right.BlockKind == BK_Block)) {
-    return Style.BreakBeforeBraces == FormatStyle::BS_Allman;
-  }
   return false;
 }
 

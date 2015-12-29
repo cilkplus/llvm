@@ -2037,13 +2037,6 @@ Stmt *BlockExpr::getBody() {
   return TheBlock->getBody();
 }
 
-SourceLocation CilkSpawnExpr::getLocStart() const {
-  return TheSpawn->getSpawnStmt()->getLocStart();
-}
-
-SourceLocation CilkSpawnExpr::getLocEnd() const {
-  return TheSpawn->getSpawnStmt()->getLocEnd();
-}
 
 //===----------------------------------------------------------------------===//
 // Generic Expression Routines
@@ -2398,15 +2391,6 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
   case ExprWithCleanupsClass:
     return (cast<ExprWithCleanups>(this)
             ->getSubExpr()->isUnusedResultAWarning(WarnE, Loc, R1, R2, Ctx));
-  case CilkSpawnExprClass: {
-    const CilkSpawnExpr *SpawnE = cast<CilkSpawnExpr>(this);
-    const Stmt *SpawnS = SpawnE->getSpawnDecl()->getSpawnStmt();
-    if (isa<Expr>(SpawnS)) {
-      const Expr *E = cast<Expr>(SpawnS);
-      return E->isUnusedResultAWarning(WarnE, Loc, R1, R2, Ctx);
-    }
-    return false;
-  }
   }
 }
 
@@ -2665,68 +2649,6 @@ Expr *Expr::IgnoreParenNoopCasts(ASTContext &Ctx) {
     
     return E;
   }
-}
-
-Expr *Expr::IgnoreImpCastsAsWritten() {
-  Expr *E = this;
-  while (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E))
-    E = ICE->getSubExprAsWritten();
-  return E;
-}
-
-Expr *Expr::getSubExprAsWritten() {
-  Expr *E = this;
-  while (true) {
-    if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E))
-      E = ICE->getSubExprAsWritten();
-    else if (MaterializeTemporaryExpr *MTE
-                                        = dyn_cast<MaterializeTemporaryExpr>(E))
-      E = MTE->GetTemporaryExpr();
-    else if (CXXBindTemporaryExpr *BTE = dyn_cast<CXXBindTemporaryExpr>(E))
-      E = BTE->getSubExpr();
-    else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
-      E = EWC->getSubExpr();
-    else
-      break;
-  }
-
-  return E;
-}
-
-Expr *Expr::IgnoreImplicitForCilkSpawn() {
-  Expr *E = this;
-  while (E) {
-    if (ImplicitCastExpr *CE = dyn_cast<ImplicitCastExpr>(E))
-      E = CE->getSubExprAsWritten();
-    else if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
-      E = EWC->getSubExpr();
-    else if (MaterializeTemporaryExpr *MTE
-        = dyn_cast<MaterializeTemporaryExpr>(E))
-      E = MTE->GetTemporaryExpr();
-    else if (CXXBindTemporaryExpr *BTE = dyn_cast<CXXBindTemporaryExpr>(E))
-      E = BTE->getSubExpr();
-    else if (CXXConstructExpr *CE = dyn_cast<CXXConstructExpr>(E)) {
-      // CXXTempoaryObjectExpr represents a functional cast with != 1 arguments
-      // so handle it the same way as CXXFunctionalCastExpr
-      if (isa<CXXTemporaryObjectExpr>(CE))
-        break;
-      if (CE->getNumArgs() >= 1)
-        E = CE->getArg(0);
-      else
-        break;
-    } else
-      break;
-  }
-
-  return E;
-}
-
-bool Expr::isCilkSpawn() const {
-  const Expr *E = IgnoreImplicitForCilkSpawn();
-  if (const CallExpr *CE = dyn_cast_or_null<CallExpr>(E))
-    return CE->isCilkSpawnCall();
-
-  return false;
 }
 
 bool Expr::isDefaultArgument() const {
@@ -3142,6 +3064,11 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case CXXNewExprClass:
   case CXXDeleteExprClass:
   case ExprWithCleanupsClass:
+#if INTEL_SPECIFIC_CILKPLUS
+  case CilkSpawnExprClass:
+  case CEANIndexExprClass:
+  case CEANBuiltinExprClass:
+#endif // INTEL_SPECIFIC_CILKPLUS
   case CoawaitExprClass:
   case CoyieldExprClass:
     // These always have a side-effect.

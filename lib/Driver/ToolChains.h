@@ -77,14 +77,12 @@ public:
   /// Driver, and has logic for fuzzing that where appropriate.
   class GCCInstallationDetector {
     bool IsValid;
-    const Driver &D;
     llvm::Triple GCCTriple;
     const Driver &D;
 
     // FIXME: These might be better as path objects.
     std::string GCCInstallPath;
     std::string GCCParentLibPath;
-    std::string GCCMIPSABIDirSuffix;
 
     /// The primary multilib appropriate for the given flags.
     Multilib SelectedMultilib;

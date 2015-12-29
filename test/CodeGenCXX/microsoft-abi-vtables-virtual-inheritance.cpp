@@ -47,9 +47,6 @@ struct D: virtual A {
   // MANGLING-DAG: @"\01??_7D@@6B0@@"
   // MANGLING-DAG: @"\01??_7D@@6BA@@@"
 
-  // MANGLING-DAG: @"\01??_7D@@6B0@@"
-  // MANGLING-DAG: @"\01??_7D@@6BA@@@"
-
   virtual void f();
   virtual void h();
 };
@@ -94,10 +91,6 @@ struct X: virtual A, virtual B {
 
   // CHECK-LABEL: VFTable indices for 'Test2::X' (1 entry).
   // CHECK-NEXT: 0 | void Test2::X::h()
-
-  // MANGLING-DAG: @"\01??_7X@Test2@@6B01@@"
-  // MANGLING-DAG: @"\01??_7X@Test2@@6BA@@@"
-  // MANGLING-DAG: @"\01??_7X@Test2@@6BB@@@"
 
   // MANGLING-DAG: @"\01??_7X@Test2@@6B01@@"
   // MANGLING-DAG: @"\01??_7X@Test2@@6BA@@@"
@@ -177,9 +170,6 @@ struct Y : virtual X {
 
   // CHECK-LABEL: VFTable indices for 'Test5::Y' (1 entry).
   // CHECK-NEXT: 0 | void Test5::Y::h()
-
-  // MANGLING-DAG: @"\01??_7Y@Test5@@6B01@@"
-  // MANGLING-DAG: @"\01??_7Y@Test5@@6BX@1@@"
 
   // MANGLING-DAG: @"\01??_7Y@Test5@@6B01@@"
   // MANGLING-DAG: @"\01??_7Y@Test5@@6BX@1@@"
@@ -312,9 +302,6 @@ struct Y : virtual X {
   // MANGLING-DAG: @"\01??_7Y@Test9@@6B01@@"
   // MANGLING-DAG: @"\01??_7Y@Test9@@6BX@1@@"
 
-  // MANGLING-DAG: @"\01??_7Y@Test9@@6B01@@"
-  // MANGLING-DAG: @"\01??_7Y@Test9@@6BX@1@@"
-
   virtual void h();
 };
 
@@ -423,16 +410,6 @@ struct T : Z, D, virtual A, virtual B {
 
   // MANGLING-DAG: @"\01??_7T@Test9@@6B@"
   // MANGLING-DAG: @"\01??_7T@Test9@@6BY@1@@"
-
-  // MANGLING-DAG: @"\01??_7T@Test9@@6BA@@@"
-  // MANGLING-DAG: @"\01??_7T@Test9@@6BD@@@"
-  // MANGLING-DAG: @"\01??_7T@Test9@@6BX@1@@"
-
-  // FIXME: these two are wrong:
-  // INCORRECT MANGLING-DAG: @"\01??_7T@Test9@@6BB@@@"
-  // MANGLING-DAG-SHOULD-BE: @"\01??_7T@Test9@@6B@"
-  // INCORRECT MANGLING-DAG: @"\01??_7T@Test9@@6BY@1@Z@1@@"
-  // MANGLING-DAG-SHOULD-BE: @"\01??_7T@Test9@@6BY@1@@"
 
   virtual void f();
   virtual void g();
@@ -614,87 +591,6 @@ struct R : virtual Q, X {
 
 R r;
 void use(R *obj) { delete obj; }
-}
-
-namespace vdtors {
-struct X {
-  virtual ~X();
-  virtual void zzz();
-};
-
-struct Y : virtual X {
-  // VDTORS-Y: VFTable for 'vdtors::X' in 'vdtors::Y' (2 entries).
-  // VDTORS-Y-NEXT: 0 | vdtors::Y::~Y() [scalar deleting]
-  // VDTORS-Y-NEXT: 1 | void vdtors::X::zzz()
-
-  // VDTORS-Y-NOT: Thunks for 'vdtors::Y::~Y()'
-  virtual ~Y();
-};
-
-Y y;
-
-struct Z {
-  virtual void z();
-};
-
-struct W : Z, X {
-  // Implicit virtual dtor.
-};
-
-struct U : virtual W {
-  // VDTORS-U: VFTable for 'vdtors::Z' in 'vdtors::W' in 'vdtors::U' (1 entries).
-  // VDTORS-U-NEXT: 0 | void vdtors::Z::z()
-
-  // VDTORS-U: VFTable for 'vdtors::X' in 'vdtors::W' in 'vdtors::U' (2 entries).
-  // VDTORS-U-NEXT: 0 | vdtors::U::~U() [scalar deleting]
-  // VDTORS-U-NEXT:     [this adjustment: -4 non-virtual]
-  // VDTORS-U-NEXT: 1 | void vdtors::X::zzz()
-
-  // VDTORS-U: Thunks for 'vdtors::W::~W()' (1 entry).
-  // VDTORS-U-NEXT: 0 | [this adjustment: -4 non-virtual]
-
-  // VDTORS-U: VFTable indices for 'vdtors::U' (1 entries).
-  // VDTORS-U-NEXT: -- accessible via vbtable index 1, vfptr at offset 4 --
-  // VDTORS-U-NEXT: 0 | vdtors::U::~U() [scalar deleting]
-  virtual ~U();
-};
-
-U u;
-
-struct V : virtual W {
-  // VDTORS-V: VFTable for 'vdtors::Z' in 'vdtors::W' in 'vdtors::V' (1 entries).
-  // VDTORS-V-NEXT: 0 | void vdtors::Z::z()
-
-  // VDTORS-V: VFTable for 'vdtors::X' in 'vdtors::W' in 'vdtors::V' (2 entries).
-  // VDTORS-V-NEXT: 0 | vdtors::V::~V() [scalar deleting]
-  // VDTORS-V-NEXT:     [this adjustment: -4 non-virtual]
-  // VDTORS-V-NEXT: 1 | void vdtors::X::zzz()
-
-  // VDTORS-V: Thunks for 'vdtors::W::~W()' (1 entry).
-  // VDTORS-V-NEXT: 0 | [this adjustment: -4 non-virtual]
-
-  // VDTORS-V: VFTable indices for 'vdtors::V' (1 entries).
-  // VDTORS-V-NEXT: -- accessible via vbtable index 1, vfptr at offset 4 --
-  // VDTORS-V-NEXT: 0 | vdtors::V::~V() [scalar deleting]
-};
-
-V v;
-
-struct T : virtual X {
-  virtual ~T();
-};
-
-struct P : T, Y {
-  // VDTORS-P: VFTable for 'vdtors::X' in 'vdtors::T' in 'vdtors::P' (2 entries).
-  // VDTORS-P-NEXT: 0 | vdtors::P::~P() [scalar deleting]
-  // VDTORS-P-NEXT: 1 | void vdtors::X::zzz()
-
-  // VDTORS-P-NOT: Thunks for 'vdtors::P::~P()'
-  virtual ~P();
-};
-
-P p;
-
 }
 
 namespace return_adjustment {

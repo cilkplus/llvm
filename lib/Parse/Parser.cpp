@@ -85,9 +85,6 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
   // destructor.
   initializePragmaHandlers();
 
-  SIMDHandler.reset(new PragmaSIMDHandler());
-  PP.AddPragmaHandler(SIMDHandler.get());
-
   CommentSemaHandler.reset(new ActionCommentHandler(actions));
   PP.addCommentHandler(CommentSemaHandler.get());
 
@@ -679,9 +676,6 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
   case tok::annot_pragma_ms_pragma:
     HandlePragmaMSPragma();
     return DeclGroupPtrTy();
-  case tok::annot_pragma_simd:
-    HandlePragmaSIMD();
-    return DeclGroupPtrTy();
   case tok::semi:
     // Either a C++11 empty-declaration or attribute-declaration.
     SingleDecl = Actions.ActOnEmptyDeclaration(getCurScope(),
@@ -956,26 +950,6 @@ Parser::ParseDeclarationOrFunctionDefinition(ParsedAttributesWithRange &attrs,
       
     return ParseDeclOrFunctionDefInternal(attrs, PDS, AS);
   }
-}
-
-
-static inline bool isFunctionDeclaratorRequiringReturnTypeDeduction(
-    const Declarator &D) {
-  if (!D.isFunctionDeclarator() || !D.getDeclSpec().containsPlaceholderType()) 
-    return false;
-  for (unsigned I = 0, E = D.getNumTypeObjects(); I != E; ++I) {
-    unsigned chunkIndex = E - I - 1;
-    const DeclaratorChunk &DeclType = D.getTypeObject(chunkIndex);
-    if (DeclType.Kind == DeclaratorChunk::Function) {
-      const DeclaratorChunk::FunctionTypeInfo &FTI = DeclType.Fun;
-      if (!FTI.hasTrailingReturnType()) 
-        return true;
-      QualType TrailingRetType = FTI.getTrailingReturnType().get();
-      return TrailingRetType->getCanonicalTypeInternal()
-        ->getContainedAutoType();
-    }
-  } 
-  return false;
 }
 
 /// ParseFunctionDefinition - We parsed and verified that the specified

@@ -43,41 +43,6 @@ namespace pr19713 {
 #define HEADER
 #include "warn-unused-filescoped.cpp"
 
-#ifdef HEADER
-
-static void headerstatic() {}  // expected-warning{{unused}}
-static inline void headerstaticinline() {}
-
-namespace {
-  void headeranon() {}  // expected-warning{{unused}}
-  inline void headerinlineanon() {}
-}
-
-namespace test7
-{
-  template<typename T>
-  static inline void foo(T) { }
-
-  // This should not emit an unused-function warning since it inherits
-  // the static storage type from the base template.
-  template<>
-  inline void foo(int) {  }
-
-  // Partial specialization
-  template<typename T, typename U>
-  static inline void bar(T, U) { }
-
-  template<typename U>
-  inline void bar(int, U) { }
-
-  template<>
-  inline void bar(int, int) { }
-};
-
-#else
-#define HEADER
-#include "warn-unused-filescoped.cpp"
-
 static void f1(); // expected-warning{{unused}}
 
 namespace {

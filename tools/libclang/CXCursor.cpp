@@ -109,9 +109,6 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   CXCursorKind K = CXCursor_NotImplemented;
   
   switch (S->getStmtClass()) {
-//AVT: maybe later we'll support it
-//***INTEL: pragma support
-//#include "../../intel/tools/CXCursor.cpp"
   case Stmt::NoStmtClass:
     break;
   

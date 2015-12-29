@@ -14,7 +14,7 @@
 #include "clang/Frontend/Utils.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/LangOptions.h"
-#include "clang/Config/config.h" // C_INCLUDE_DIRS, CXX_INCLUDE_DIRS
+#include "clang/Config/config.h" // C_INCLUDE_DIRS
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -473,19 +473,6 @@ void InitHeaderSearch::AddDefaultIncludePaths(const LangOptions &Lang,
         }
       }
       AddPath("/usr/include/c++/v1", CXXSystem, false);
-//AVT: it's better to use proper configure
-#ifdef CXX_INCLUDE_DIRS
-      // Add dirs specified via 'configure --with-cxx-include-dirs'.
-      StringRef CxxIncludeDirs(CXX_INCLUDE_DIRS);
-      if (CxxIncludeDirs != "") {
-        SmallVector<StringRef, 5> dirs;
-        CxxIncludeDirs.split(dirs, ":");
-        for (SmallVectorImpl<StringRef>::iterator i = dirs.begin();
-             i != dirs.end();
-             ++i)
-          AddUnmappedPath((*i).str(), CXXSystem, false);
-      }
-#endif
     } else {
       AddDefaultCPlusPlusIncludePaths(triple, HSOpts);
     }

@@ -31,7 +31,6 @@
 #include "clang/Lex/Lexer.h" // TODO: Extract static functions to fix layering.
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
-#include "clang/Sema/Scope.h"
 #include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/STLExtras.h"
@@ -2822,37 +2821,6 @@ ExprResult Sema::SemaConvertVectorExpr(Expr *E, TypeSourceInfo *TInfo,
       ConvertVectorExpr(E, TInfo, DstTy, VK, OK, BuiltinLoc, RParenLoc);
 }
 
-/// SemaConvertVectorExpr - Handle __builtin_convertvector
-ExprResult Sema::SemaConvertVectorExpr(Expr *E, TypeSourceInfo *TInfo,
-                                       SourceLocation BuiltinLoc,
-                                       SourceLocation RParenLoc) {
-  ExprValueKind VK = VK_RValue;
-  ExprObjectKind OK = OK_Ordinary;
-  QualType DstTy = TInfo->getType();
-  QualType SrcTy = E->getType();
-
-  if (!SrcTy->isVectorType() && !SrcTy->isDependentType())
-    return ExprError(Diag(BuiltinLoc,
-                          diag::err_convertvector_non_vector)
-                     << E->getSourceRange());
-  if (!DstTy->isVectorType() && !DstTy->isDependentType())
-    return ExprError(Diag(BuiltinLoc,
-                          diag::err_convertvector_non_vector_type));
-
-  if (!SrcTy->isDependentType() && !DstTy->isDependentType()) {
-    unsigned SrcElts = SrcTy->getAs<VectorType>()->getNumElements();
-    unsigned DstElts = DstTy->getAs<VectorType>()->getNumElements();
-    if (SrcElts != DstElts)
-      return ExprError(Diag(BuiltinLoc,
-                            diag::err_convertvector_incompatible_vector)
-                       << E->getSourceRange());
-  }
-
-  return Owned(new (Context) ConvertVectorExpr(E, TInfo, DstTy, VK, OK,
-               BuiltinLoc, RParenLoc));
-
-}
-
 /// SemaBuiltinPrefetch - Handle __builtin_prefetch.
 // This is declared to take (const void*, ...) and can take two
 // optional constant int args.
@@ -3269,27 +3237,6 @@ checkFormatStringExpr(Sema &S, const Expr *E, ArrayRef<const Expr *> Args,
 
     return SLCT_NotALiteral;
   }
-      
-  case Stmt::ObjCMessageExprClass: {
-    const ObjCMessageExpr *ME = cast<ObjCMessageExpr>(E);
-    if (const ObjCMethodDecl *MDecl = ME->getMethodDecl()) {
-      if (const NamedDecl *ND = dyn_cast<NamedDecl>(MDecl)) {
-        if (const FormatArgAttr *FA = ND->getAttr<FormatArgAttr>()) {
-          unsigned ArgIndex = FA->getFormatIdx();
-          if (ArgIndex <= ME->getNumArgs()) {
-            const Expr *Arg = ME->getArg(ArgIndex-1);
-            return checkFormatStringExpr(S, Arg, Args,
-                                         HasVAListArg, format_idx,
-                                         firstDataArg, Type, CallType,
-                                         InFunctionCall, CheckedVarArgs);
-          }
-        }
-      }
-    }
-
-    return SLCT_NotALiteral;
-  }
-      
   case Stmt::ObjCStringLiteralClass:
   case Stmt::StringLiteralClass: {
     const StringLiteral *StrE = nullptr;
@@ -9461,7 +9408,7 @@ void Sema::DiagnoseEmptyLoopBody(const Stmt *S,
   assert(!CurrentInstantiationScope); // Ensured by caller
 
   SourceLocation StmtLoc;
-  const Stmt *Body = 0;
+  const Stmt *Body;
   unsigned DiagID;
   if (const ForStmt *FS = dyn_cast<ForStmt>(S)) {
     StmtLoc = FS->getRParenLoc();

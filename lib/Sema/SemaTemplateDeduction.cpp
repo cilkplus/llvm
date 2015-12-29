@@ -3540,50 +3540,6 @@ QualType Sema::adjustCCAndNoReturn(QualType ArgFunctionType,
   return QualType(ArgFunctionTypeP, 0);
 }
 
-QualType Sema::adjustCCAndNoReturn(QualType ArgFunctionType,
-                                   QualType FunctionType) {
-  if (ArgFunctionType.isNull())
-    return ArgFunctionType;
-
-  const FunctionProtoType *FunctionTypeP =
-      FunctionType->castAs<FunctionProtoType>();
-  CallingConv CC = FunctionTypeP->getCallConv();
-  bool NoReturn = FunctionTypeP->getNoReturnAttr();
-  const FunctionProtoType *ArgFunctionTypeP =
-      ArgFunctionType->getAs<FunctionProtoType>();
-  if (ArgFunctionTypeP->getCallConv() == CC &&
-      ArgFunctionTypeP->getNoReturnAttr() == NoReturn)
-    return ArgFunctionType;
-
-  FunctionType::ExtInfo EI = ArgFunctionTypeP->getExtInfo().withCallingConv(CC);
-  EI = EI.withNoReturn(NoReturn);
-  ArgFunctionTypeP =
-      cast<FunctionProtoType>(Context.adjustFunctionType(ArgFunctionTypeP, EI));
-  return QualType(ArgFunctionTypeP, 0);
-}
-
-QualType Sema::adjustCCAndNoReturn(QualType ArgFunctionType,
-                                   QualType FunctionType) {
-  if (ArgFunctionType.isNull())
-    return ArgFunctionType;
-
-  const FunctionProtoType *FunctionTypeP =
-      FunctionType->castAs<FunctionProtoType>();
-  CallingConv CC = FunctionTypeP->getCallConv();
-  bool NoReturn = FunctionTypeP->getNoReturnAttr();
-  const FunctionProtoType *ArgFunctionTypeP =
-      ArgFunctionType->getAs<FunctionProtoType>();
-  if (ArgFunctionTypeP->getCallConv() == CC &&
-      ArgFunctionTypeP->getNoReturnAttr() == NoReturn)
-    return ArgFunctionType;
-
-  FunctionType::ExtInfo EI = ArgFunctionTypeP->getExtInfo().withCallingConv(CC);
-  EI = EI.withNoReturn(NoReturn);
-  ArgFunctionTypeP =
-      cast<FunctionProtoType>(Context.adjustFunctionType(ArgFunctionTypeP, EI));
-  return QualType(ArgFunctionTypeP, 0);
-}
-
 /// \brief Deduce template arguments when taking the address of a function
 /// template (C++ [temp.deduct.funcaddr]) or matching a specialization to
 /// a template.

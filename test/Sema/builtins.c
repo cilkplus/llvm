@@ -248,9 +248,3 @@ char * Test20(char *p, const char *in, unsigned n)
 
     return buf;
 }
-
-void ms_builtins() {
-  __assume(1);
-  __noop(1);
-  __debugbreak();
-}

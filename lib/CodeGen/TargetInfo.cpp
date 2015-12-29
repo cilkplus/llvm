@@ -2282,17 +2282,6 @@ void X86_64ABIInfo::classify(QualType Ty, uint64_t OffsetBase,
 
     postMerge(Size, Lo, Hi);
     assert((Hi != SSEUp || Lo == SSE) && "Invalid SSEUp array classification.");
-    if ((Hi == SSE && Lo == SSE) && (Size == 128 || (HasAVX && Size == 256))) {
-      // Arguments of 256-bits are split into four eightbyte chunks. The
-      // least significant one belongs to class SSE and all the others to class
-      // SSEUP. The original Lo and Hi design considers that types can't be
-      // greater than 128-bits, so a 64-bit split in Hi and Lo makes sense.
-      // This design isn't correct for 256-bits, but since there're no cases
-      // where the upper parts would need to be inspected, avoid adding
-      // complexity and just consider Hi to match the 64-256 part.
-      Lo = SSE;
-      Hi = SSEUp;
-    }
     return;
   }
 
@@ -2412,17 +2401,6 @@ void X86_64ABIInfo::classify(QualType Ty, uint64_t OffsetBase,
     }
 
     postMerge(Size, Lo, Hi);
-    if ((Hi == SSE && Lo == SSE) && (Size == 128 || (HasAVX && Size == 256))) {
-      // Arguments of 256-bits are split into four eightbyte chunks. The
-      // least significant one belongs to class SSE and all the others to class
-      // SSEUP. The original Lo and Hi design considers that types can't be
-      // greater than 128-bits, so a 64-bit split in Hi and Lo makes sense.
-      // This design isn't correct for 256-bits, but since there're no cases
-      // where the upper parts would need to be inspected, avoid adding
-      // complexity and just consider Hi to match the 64-256 part.
-      Lo = SSE;
-      Hi = SSEUp;
-    }
   }
 }
 
@@ -4217,10 +4195,10 @@ private:
 public:
   AArch64ABIInfo(CodeGenTypes &CGT, ABIKind Kind) : ABIInfo(CGT), Kind(Kind) {}
 
+private:
   ABIKind getABIKind() const { return Kind; }
   bool isDarwinPCS() const { return Kind == DarwinPCS; }
 
-private:
   ABIArgInfo classifyReturnType(QualType RetTy) const;
   ABIArgInfo classifyArgumentType(QualType RetTy) const;
   bool isHomogeneousAggregateBaseType(QualType Ty) const override;

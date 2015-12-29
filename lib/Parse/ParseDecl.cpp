@@ -207,55 +207,6 @@ static StringRef normalizeAttrName(StringRef Name) {
   return Name;
 }
 
-/*
-#if INTEL_SPECIFIC_CILKPLUS
-/// \brief Build full attribute name based in its Syntax, Scope and ID
-static void fillAttrFullName(const IdentifierInfo &II,
-                             AttributeList::Syntax Syntax,
-                             IdentifierInfo *ScopeName, std::string &Result) {
-  std::string Variety, Scope;
-  switch (Syntax) {
-  case AttributeList::Syntax::AS_GNU:
-    Variety = "GNU";
-    break;
-  case AttributeList::Syntax::AS_CXX11:
-    Variety = "CXX11";
-    if (ScopeName)
-      Scope = ScopeName->getName();
-    break;
-  case AttributeList::Syntax::AS_Declspec:
-    Variety = "Declspec";
-    break;
-  case AttributeList::Syntax::AS_Keyword:
-    // FIXME:  add AS_ContextSensitiveKeyword
-    Variety = "Keyword";
-    break;
-#if INTEL_SPECIFIC_CILKPLUS
-  case AttributeList::Syntax::AS_CilkKeyword:
-    Variety = "CilkKeyword";
-    break;
-#endif // INTEL_SPECIFIC_CILKPLUS
-  default:
-    Variety = "GNU";
-  }
-  Result = Variety + "::" + (Scope.length() > 0 ? Scope + "::" : "") +
-           normalizeAttrName(II.getName()).str();
-}
-
-/// \brief Determine whether the given attribute has an identifier argument.
-static bool attributeHasIdentifierArg(const IdentifierInfo &II,
-                                      AttributeList::Syntax Syntax,
-                                      IdentifierInfo *ScopeName) {
-  std::string FullName;
-  fillAttrFullName(II, Syntax, ScopeName, FullName);
-#define CLANG_ATTR_IDENTIFIER_ARG_LIST
-  return llvm::StringSwitch<bool>(FullName)
-#include "clang/Parse/AttrParserStringSwitches.inc"
-      .Default(false);
-#undef CLANG_ATTR_IDENTIFIER_ARG_LIST
-}
-#else
-*/
 /// \brief Determine whether the given attribute has an identifier argument.
 static bool attributeHasIdentifierArg(const IdentifierInfo &II) {
 #define CLANG_ATTR_IDENTIFIER_ARG_LIST
@@ -264,7 +215,6 @@ static bool attributeHasIdentifierArg(const IdentifierInfo &II) {
            .Default(false);
 #undef CLANG_ATTR_IDENTIFIER_ARG_LIST
 }
-//#endif // INTEL_SPECIFIC_CILKPLUS
 
 /// \brief Determine whether the given attribute parses a type argument.
 static bool attributeIsTypeArgAttr(const IdentifierInfo &II) {
@@ -333,12 +283,7 @@ unsigned Parser::ParseAttributeArgsCommon(
   ArgsVector ArgExprs;
   if (Tok.is(tok::identifier)) {
     // If this attribute wants an 'identifier' argument, make it so.
-//#if INTEL_SPECIFIC_CILKPLUS
-//    bool IsIdentifierArg =
-//        attributeHasIdentifierArg(*AttrName, Syntax, ScopeName);
-//#else
     bool IsIdentifierArg = attributeHasIdentifierArg(*AttrName);
-//#endif // INTEL_SPECIFIC_CILKPLUS
     AttributeList::Kind AttrKind =
         AttributeList::getKind(AttrName, ScopeName, Syntax);
 
@@ -1341,7 +1286,6 @@ void Parser::ParseLexedAttribute(LateParsedAttribute &LA,
     ConsumeAnyToken();
 }
 
-
 void Parser::ParseTypeTagForDatatypeAttribute(IdentifierInfo &AttrName,
                                               SourceLocation AttrNameLoc,
                                               ParsedAttributes &Attrs,
@@ -1839,9 +1783,6 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
 
         Decl *TheDecl =
           ParseFunctionDefinition(D, ParsedTemplateInfo(), &LateParsedAttrs);
-//AVT: maybe we'll support it later
-//***INTEL: pragma support
-//#include "../../intel/lib/ParseDecl_ParseDeclGroup.cpp"
         return Actions.ConvertDeclToDeclGroup(TheDecl);
       }
 
@@ -3389,10 +3330,6 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
       isInvalid = DS.SetTypeSpecType(DeclSpec::TST_double, Loc, PrevSpec,
                                      DiagID, Policy);
       break;
-    case tok::kw__Quad:
-      isInvalid = DS.SetTypeSpecType(DeclSpec::TST_float128, Loc, PrevSpec,
-                                     DiagID);
-      break;
     case tok::kw_wchar_t:
       isInvalid = DS.SetTypeSpecType(DeclSpec::TST_wchar, Loc, PrevSpec,
                                      DiagID, Policy);
@@ -4371,7 +4308,6 @@ bool Parser::isKnownToBeTypeSpecifier(const Token &Tok) const {
   case tok::kw_float:
   case tok::kw_double:
   case tok::kw_bool:
-  case tok::kw__Quad:
   case tok::kw__Bool:
   case tok::kw__Decimal32:
   case tok::kw__Decimal64:
@@ -4443,7 +4379,6 @@ bool Parser::isTypeSpecifierQualifier() {
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
-  case tok::kw__Quad:
   case tok::kw_bool:
   case tok::kw__Bool:
   case tok::kw__Decimal32:
@@ -4593,7 +4528,6 @@ bool Parser::isDeclarationSpecifier(bool DisambiguatingWithExpression) {
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
-  case tok::kw__Quad:
   case tok::kw_bool:
   case tok::kw__Bool:
   case tok::kw__Decimal32:

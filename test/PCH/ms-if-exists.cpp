@@ -28,4 +28,3 @@ template void f(HasFoo); // expected-note{{in instantiation of function template
                          // expected-error@14{{no viable conversion from 'HasFoo' to 'int *'}}
 template void f(HasBar);
 #endif
-

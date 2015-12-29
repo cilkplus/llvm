@@ -116,12 +116,6 @@ public:
     return Visit(E->getReplacement());
   }
 
-  void VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
-    CodeGenFunction::LocalVarsDeclGuard Guard(CGF);
-    CGF.EmitCEANBuiltinExprBody(E);
-    if (E->getBuiltinKind() != CEANBuiltinExpr::ReduceMutating)
-      Visit(E->getReturnExpr());
-  }
 #if INTEL_SPECIFIC_CILKPLUS
   void VisitCEANBuiltinExpr(CEANBuiltinExpr *E) {
     CodeGenFunction::LocalVarsDeclGuard Guard(CGF);
@@ -218,9 +212,6 @@ public:
   void VisitAtomicExpr(AtomicExpr *E) {
     RValue Res = CGF.EmitAtomicExpr(E);
     EmitFinalDestCopy(E->getType(), Res);
-  }
-  void VisitCilkSpawnExpr(CilkSpawnExpr *E) {
-    CGF.EmitCilkSpawnExpr(E);
   }
 };
 }  // end anonymous namespace.

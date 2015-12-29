@@ -216,9 +216,6 @@ struct FormatStyle {
   /// \brief The way to wrap binary operators.
   BinaryOperatorStyle BreakBeforeBinaryOperators;
 
-  /// \brief If \c true, ternary operators will be placed after line breaks.
-  bool BreakBeforeTernaryOperators;
-
   /// \brief Different ways to attach braces to their surrounding context.
   enum BraceBreakingStyle {
     /// Always attach braces to surrounding context.
@@ -589,12 +586,6 @@ struct FormatStyle {
   /// \brief The way to use tab characters in the resulting file.
   UseTabStyle UseTab;
 
-  /// \brief If \c false, spaces will be removed before assignment operators.
-  bool SpaceBeforeAssignmentOperators;
-
-  /// \brief Indent width for line continuations.
-  unsigned ContinuationIndentWidth;
-
   bool operator==(const FormatStyle &R) const {
     return AccessModifierOffset == R.AccessModifierOffset &&
            AlignAfterOpenBracket == R.AlignAfterOpenBracket &&
@@ -787,30 +778,6 @@ extern const char *StyleOptionHelpDescription;
 /// determined, the default is LLVM Style (see getLLVMStyle()).
 FormatStyle getStyle(StringRef StyleName, StringRef FileName,
                      StringRef FallbackStyle);
-
-/// \brief Description to be used for help text for a llvm::cl option for
-/// specifying format style. The description is closely related to the operation
-/// of getStyle().
-extern const char *StyleOptionHelpDescription;
-
-/// \brief Construct a FormatStyle based on \c StyleName.
-///
-/// \c StyleName can take several forms:
-/// \li "{<key>: <value>, ...}" - Set specic style parameters.
-/// \li "<style name>" - One of the style names supported by
-/// getPredefinedStyle().
-/// \li "file" - Load style configuration from a file called '.clang-format'
-/// located in one of the parent directories of \c FileName or the current
-/// directory if \c FileName is empty.
-///
-/// \param[in] StyleName Style name to interpret according to the description
-/// above.
-/// \param[in] FileName Path to start search for .clang-format if \c StyleName
-/// == "file".
-///
-/// \returns FormatStyle as specified by \c StyleName. If no style could be
-/// determined, the default is LLVM Style (see getLLVMStyle()).
-FormatStyle getStyle(StringRef StyleName, StringRef FileName);
 
 } // end namespace format
 } // end namespace clang

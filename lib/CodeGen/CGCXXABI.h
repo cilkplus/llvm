@@ -386,29 +386,6 @@ public:
   virtual llvm::GlobalVariable *getAddrOfVTable(const CXXRecordDecl *RD,
                                                 CharUnits VPtrOffset) = 0;
 
-  /// Emits the VTable definitions required for the given record type.
-  virtual void emitVTableDefinitions(CodeGenVTables &CGVT,
-                                     const CXXRecordDecl *RD) = 0;
-
-  /// Get the address point of the vtable for the given base subobject while
-  /// building a constructor or a destructor. On return, NeedsVirtualOffset
-  /// tells if a virtual base adjustment is needed in order to get the offset
-  /// of the base subobject.
-  virtual llvm::Value *getVTableAddressPointInStructor(
-      CodeGenFunction &CGF, const CXXRecordDecl *RD, BaseSubobject Base,
-      const CXXRecordDecl *NearestVBase, bool &NeedsVirtualOffset) = 0;
-
-  /// Get the address point of the vtable for the given base subobject while
-  /// building a constexpr.
-  virtual llvm::Constant *
-  getVTableAddressPointForConstExpr(BaseSubobject Base,
-                                    const CXXRecordDecl *VTableClass) = 0;
-
-  /// Get the address of the vtable for the given record decl which should be
-  /// used for the vptr at the given offset in RD.
-  virtual llvm::GlobalVariable *getAddrOfVTable(const CXXRecordDecl *RD,
-                                                CharUnits VPtrOffset) = 0;
-
   /// Build a virtual function pointer in the ABI-specific way.
   virtual llvm::Value *getVirtualFunctionPointer(CodeGenFunction &CGF,
                                                  GlobalDecl GD,
@@ -421,10 +398,6 @@ public:
   EmitVirtualDestructorCall(CodeGenFunction &CGF, const CXXDestructorDecl *Dtor,
                             CXXDtorType DtorType, Address This,
                             const CXXMemberCallExpr *CE) = 0;
-
-  virtual void adjustCallArgsForDestructorThunk(CodeGenFunction &CGF,
-                                                GlobalDecl GD,
-                                                CallArgList &CallArgs) {}
 
   virtual void adjustCallArgsForDestructorThunk(CodeGenFunction &CGF,
                                                 GlobalDecl GD,
@@ -460,10 +433,6 @@ public:
 
   /// Gets the deleted virtual member call name.
   virtual StringRef GetDeletedVirtualCallName() = 0;
-
-  /// \brief Returns true iff static data members that are initialized in the
-  /// class definition should have linkonce linkage.
-  virtual bool isInlineInitializedStaticDataMemberLinkOnce() { return false; }
 
   /**************************** Array cookies ******************************/
 
