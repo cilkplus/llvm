@@ -2752,8 +2752,6 @@ SDValue X86TargetLowering::LowerFormalArguments(
         else
           ArgValue = DAG.getNode(ISD::TRUNCATE, dl, VA.getValVT(), ArgValue);
       }
-      // Mark this register used for parameter passing.
-      FuncInfo->addUsedRegister(VA.getLocReg());
     } else {
       assert(VA.isMemLoc());
       ArgValue = LowerMemArgument(Chain, CallConv, Ins, dl, DAG, VA, MFI, i);

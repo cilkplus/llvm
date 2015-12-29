@@ -81,8 +81,8 @@ X86RegisterInfo::X86RegisterInfo(const Triple &TT)
 
 bool
 X86RegisterInfo::trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
-  // Only enable when post-RA scheduling is enabled and this is needed.
-  return TM.getSubtargetImpl()->postRAScheduler();
+  // ExeDepsFixer and PostRAScheduler require liveness.
+  return true;
 }
 
 int
@@ -224,22 +224,6 @@ X86RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   case X86::VR64RegClassID:
     return 4;
   }
-}
-/// isMarkedAsNotPreservedRegister - Returns true if Reg is marked as not
-/// preserved even if Reg is a callee saved register.
-bool X86RegisterInfo::isMarkedAsNotPreservedRegister(const MachineFunction &MF,
-                                                     unsigned Reg) const {
-  const X86MachineFunctionInfo *FI = MF.getInfo<X86MachineFunctionInfo>();
-  if (!FI)
-    return false;
-
-  // If Reg or any its aliasing register is used as passing parameters or
-  // returning arguments, then Reg is marked as not preserved.
-  for (MCRegAliasIterator AI(Reg, this, true); AI.isValid(); ++AI)
-    if (FI->isUsedRegister(*AI))
-      return true;
-
-  return false;
 }
 
 const MCPhysReg *

@@ -190,16 +190,7 @@ bool LPPassManager::runOnFunction(Function &F) {
         PassManagerPrettyStackEntry X(P, *CurrentLoop->getHeader());
         TimeRegion PassTimer(getPassTimer(P));
 
-        MDNode *LoopID = P->getPreserveLoopMetadata()
-                       ? CurrentLoop->getLoopID() : 0;
-
-        bool LoopChanged = false;
-        LoopChanged = P->runOnLoop(CurrentLoop, *this);
-
-        if (LoopChanged && LoopID)
-          CurrentLoop->setLoopID(LoopID);
-
-        Changed |= LoopChanged;
+        Changed |= P->runOnLoop(CurrentLoop, *this);
       }
 
       if (Changed)

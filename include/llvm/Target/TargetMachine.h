@@ -153,9 +153,6 @@ public:
   /// This is the only time the DataLayout in the TargetMachine is used.
   unsigned getPointerSize() const { return DL.getPointerSize(); }
 
-  /// Create a DataLayout.
-  const DataLayout createDataLayout() const { return DL; }
-
   /// \brief Reset the target options based on the function's attributes.
   // FIXME: Remove TargetOptions that affect per-function code generation
   // from TargetMachine.

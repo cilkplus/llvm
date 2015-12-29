@@ -180,12 +180,6 @@ def : Pat<(SPcmpicc i64:$a, i64:$b), (CMPrr $a, $b)>;
 def : Pat<(SPcmpicc i64:$a, (i64 simm13:$b)), (CMPri $a, (as_i32imm $b))>;
 def : Pat<(ctpop i64:$src), (POPCrr $src)>;
 
-// "LEA" form of add
-def LEAX_ADDri : F3_2<2, 0b000000,
-                     (outs I64Regs:$dst), (ins MEMri:$addr),
-                     "add ${addr:arith}, $dst",
-                     [(set iPTR:$dst, ADDRri:$addr)]>;
-
 } // Predicates = [Is64Bit]
 
 

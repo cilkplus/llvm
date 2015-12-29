@@ -115,11 +115,6 @@ public:
 
   void adjustStackMapLiveOutMask(uint32_t *Mask) const override;
 
-  /// isMarkedAsNotPreservedRegister - Returns true if Reg is marked as not
-  /// preserved even if Reg is a callee saved register.
-  virtual bool isMarkedAsNotPreservedRegister(const MachineFunction &MF,
-                                              unsigned Reg) const;
-
   bool hasBasePointer(const MachineFunction &MF) const;
 
   bool canRealignStack(const MachineFunction &MF) const override;
@@ -138,10 +133,6 @@ public:
   unsigned getBaseRegister() const { return BasePtr; }
   // FIXME: Move to FrameInfok
   unsigned getSlotSize() const { return SlotSize; }
-
-  // Exception handling queries.
-  unsigned getEHExceptionRegister() const;
-  unsigned getEHHandlerRegister() const;
 };
 
 /// Returns the sub or super register of a specific X86 register.

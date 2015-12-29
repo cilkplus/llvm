@@ -902,12 +902,3 @@ void llvm::UpgradeMDStringConstant(std::string &String) {
     String.replace(0, OldPrefix.size(), "llvm.loop.vectorize.");
   }
 }
-
-/// Check the debug info version number, if it is out-dated, drop the debug
-/// info. Return true if module is modified.
-bool llvm::UpgradeDebugInfo(Module &M) {
-  if (getDebugMetadataVersionFromModule(M) == DEBUG_METADATA_VERSION)
-    return false;
-
-  return StripDebugInfo(M);
-}

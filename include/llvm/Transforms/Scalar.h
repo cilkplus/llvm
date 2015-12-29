@@ -26,7 +26,6 @@ class FunctionPass;
 class ModulePass;
 class Pass;
 class GetElementPtrInst;
-class ModulePass;
 class PassInfo;
 class TerminatorInst;
 class TargetLowering;
@@ -50,18 +49,6 @@ FunctionPass *createAlignmentFromAssumptionsPass();
 // SCCP - Sparse conditional constant propagation.
 //
 FunctionPass *createSCCPPass();
-
-//===----------------------------------------------------------------------===//
-//
-// ElideCilkSync - Remove unnecessary Cilk sync calls.
-//
-FunctionPass *createElideCilkSyncPass();
-
-//===----------------------------------------------------------------------===//
-//
-// CilkStackFrameLateInit - Do late stack-frame initialization.
-//
-Pass *createCilkStackFrameLateInitPass();
 
 //===----------------------------------------------------------------------===//
 //

@@ -1059,8 +1059,6 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
     }
   }
 
-  // Try to distinguish something like &A[i][1] against &A[42][0].
-  // Grab the least significant bit set in any of the scales.
   if (!GEP1VariableIndices.empty()) {
     uint64_t Modulo = 0;
     bool AllPositive = true;
