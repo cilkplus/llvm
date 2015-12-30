@@ -110,7 +110,7 @@ protected:
 public:
   /// \brief What kind of scope we are describing.
   ///
-  ScopeKind Kind : 3;
+  ScopeKind Kind : 4; // AVT: signed/unsigned bit-fields on Windows
 
   /// \brief Whether this function contains a VLA, \@try, try, C++
   /// initializer, or anything else that can't be jumped past.
