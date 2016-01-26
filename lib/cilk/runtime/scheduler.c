@@ -2,7 +2,7 @@
  *
  *************************************************************************
  *
- *  Copyright (C) 2007-2014, Intel Corporation
+ *  Copyright (C) 2007-2015, Intel Corporation
  *  All rights reserved.
  *  
  *  Redistribution and use in source and binary forms, with or without
@@ -31,6 +31,20 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
+ *  
+ *  *********************************************************************
+ *  
+ *  PLEASE NOTE: This file is a downstream copy of a file mainitained in
+ *  a repository at cilkplus.org. Changes made to this file that are not
+ *  submitted through the contribution process detailed at
+ *  http://www.cilkplus.org/submit-cilk-contribution will be lost the next
+ *  time that a new version is released. Changes only submitted to the
+ *  GNU compiler collection or posted to the git repository at
+ *  https://bitbucket.org/intelcilkplusruntime/itnel-cilk-runtime.git are
+ *  not tracked.
+ *  
+ *  We welcome your contributions to this open source project. Thank you
+ *  for your assistance in helping us improve Cilk Plus.
  *
  **************************************************************************/
 
@@ -1775,7 +1789,15 @@ static full_frame* check_for_work(__cilkrts_worker *w)
         if (NULL == ff) {
             // Punish the worker for failing to steal.
             // No quantum for you!
-            __cilkrts_yield();
+            if (w->l->steal_failure_count > 30000) {
+                // Punish more if the worker has been doing unsuccessful steals
+                // for a long time. After return from the idle state, it will
+                // be given a grace period to react quickly.
+                __cilkrts_idle();
+                w->l->steal_failure_count -= 300;
+            } else {
+                __cilkrts_yield();
+            }
             w->l->steal_failure_count++;
         } else {
             // Reset steal_failure_count since there is obviously still work to

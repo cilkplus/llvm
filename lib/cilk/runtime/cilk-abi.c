@@ -2,7 +2,7 @@
  *
  *************************************************************************
  *
- *  Copyright (C) 2010-2014, Intel Corporation
+ *  Copyright (C) 2010-2015, Intel Corporation
  *  All rights reserved.
  *  
  *  Redistribution and use in source and binary forms, with or without
@@ -31,6 +31,20 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
+ *  
+ *  *********************************************************************
+ *  
+ *  PLEASE NOTE: This file is a downstream copy of a file mainitained in
+ *  a repository at cilkplus.org. Changes made to this file that are not
+ *  submitted through the contribution process detailed at
+ *  http://www.cilkplus.org/submit-cilk-contribution will be lost the next
+ *  time that a new version is released. Changes only submitted to the
+ *  GNU compiler collection or posted to the git repository at
+ *  https://bitbucket.org/intelcilkplusruntime/itnel-cilk-runtime.git are
+ *  not tracked.
+ *  
+ *  We welcome your contributions to this open source project. Thank you
+ *  for your assistance in helping us improve Cilk Plus.
  *
  **************************************************************************/
 
@@ -291,6 +305,45 @@ CILK_ABI_VOID __cilkrts_sync(__cilkrts_stack_frame *sf)
 #endif
 
     __cilkrts_c_sync(w, sf);
+}
+
+/**
+ * Suspends the runtime by notifying the workers that they should not try to
+ * steal. This function is supposed to be called from a non-parallel region
+ * (i.e., after cilk_sync in the top-level spawning function). Otherwise,
+ * which workers are sleeping or busy is unpredictable in general.
+ * The runtime can be resumed by calling __cilkrts_resume().
+ */
+CILK_ABI_VOID __cilkrts_suspend(void)
+{
+    global_state_t *g = cilkg_get_global_state();
+    if (NULL == g || g->P < 2)
+        return;
+    __cilkrts_worker *w = __cilkrts_get_tls_worker();
+    // Do nothing if worker/frame is not available
+    if (NULL == w || NULL == w->current_stack_frame)
+        return;
+    // Do nothing if this was called within a parallel region.
+    __cilkrts_stack_frame *sf = w->current_stack_frame;
+    if (0 == (sf->flags & CILK_FRAME_LAST) || (sf->flags & CILK_FRAME_UNSYNCHED))
+        return;
+    __cilkrts_worker *root = g->workers[0];
+    root->l->steal_failure_count = g->max_steal_failures + 1;
+    CILK_ASSERT(root->l->signal_node);
+    signal_node_msg(root->l->signal_node, 0);
+}
+
+/**
+ * Resumes the runtime by notifying the workers that they can steal.
+ */
+CILK_ABI_VOID __cilkrts_resume(void)
+{
+    global_state_t *g = cilkg_get_global_state();
+    if (NULL == g || g->P < 2)
+        return;
+    __cilkrts_worker *root = g->workers[0];
+    CILK_ASSERT(root->l->signal_node);
+    signal_node_msg(root->l->signal_node, 1);
 }
 
 /*

@@ -1,12 +1,8 @@
-/* symbol_test.c                  -*-C-*-
+/*  reducer_max.h                  -*- C++ -*-
  *
- *************************************************************************
- *
- *  @copyright
- *  Copyright (C) 2009-2011, Intel Corporation
+ *  Copyright (C) 2009-2015, Intel Corporation
  *  All rights reserved.
  *  
- *  @copyright
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -21,7 +17,6 @@
  *      contributors may be used to endorse or promote products derived
  *      from this software without specific prior written permission.
  *  
- *  @copyright
  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -34,29 +29,29 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
- **************************************************************************/
-
-/* simple program to verify that there are no undefined symbols in the runtime.
- * If the runtime uses any symbols that are not defined, compiling this program
- * will cause a linker error.
+ *  
+ *  *********************************************************************
+ *  
+ *  PLEASE NOTE: This file is a downstream copy of a file mainitained in
+ *  a repository at cilkplus.org. Changes made to this file that are not
+ *  submitted through the contribution process detailed at
+ *  http://www.cilkplus.org/submit-cilk-contribution will be lost the next
+ *  time that a new version is released. Changes only submitted to the
+ *  GNU compiler collection or posted to the git repository at
+ *  https://bitbucket.org/intelcilkplusruntime/itnel-cilk-runtime.git are
+ *  not tracked.
+ *  
+ *  We welcome your contributions to this open source project. Thank you
+ *  for your assistance in helping us improve Cilk Plus.
  */
 
-extern void* __cilkrts_global_state;
-void *volatile p;
+/** @file reducer_max.h
+ *
+ *  @brief Defines classes for doing parallel maximum reductions.
+ *
+ *  @ingroup ReducersMinMax
+ *
+ *  @see ReducersMinMax
+ */
 
-void foo () { }
-int main ()
-{
-    int i;
-    long long j;
-
-    _Cilk_spawn foo();
-    _Cilk_for (i = 0; i < 2; ++i)
-        foo();
-    _Cilk_for (j = 0; j < 2; ++j)
-        foo();
-    p = __cilkrts_global_state;
-    return 0;
-}
-
-/* End symbol_test.c */
+#include "reducer_min_max.h"

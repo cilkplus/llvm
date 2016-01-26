@@ -2,7 +2,7 @@
  *
  *************************************************************************
  *
- *  Copyright (C) 2009-2014, Intel Corporation
+ *  Copyright (C) 2009-2015, Intel Corporation
  *  All rights reserved.
  *  
  *  Redistribution and use in source and binary forms, with or without
@@ -31,6 +31,20 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
+ *  
+ *  *********************************************************************
+ *  
+ *  PLEASE NOTE: This file is a downstream copy of a file mainitained in
+ *  a repository at cilkplus.org. Changes made to this file that are not
+ *  submitted through the contribution process detailed at
+ *  http://www.cilkplus.org/submit-cilk-contribution will be lost the next
+ *  time that a new version is released. Changes only submitted to the
+ *  GNU compiler collection or posted to the git repository at
+ *  https://bitbucket.org/intelcilkplusruntime/itnel-cilk-runtime.git are
+ *  not tracked.
+ *  
+ *  We welcome your contributions to this open source project. Thank you
+ *  for your assistance in helping us improve Cilk Plus.
  **************************************************************************/
 
 /**
@@ -46,6 +60,7 @@
 #include "rts-common.h"
 #include "cilk/common.h"
 #include "cilk-tbb-interop.h"
+#include "cilk_str_mem.h"
 
 #ifdef __cplusplus
 #   include <cstddef>
@@ -153,6 +168,7 @@ COMMON_SYSDEP int __cilkrts_xchg(volatile int *ptr, int x);
 
 COMMON_SYSDEP void __cilkrts_sleep(void); ///< Sleep briefly 
 COMMON_SYSDEP void __cilkrts_yield(void); ///< Yield quantum 
+COMMON_SYSDEP void __cilkrts_idle(void);  ///< Idle
 
 /**
  * @brief Gets environment variable 'varname' and copy its value into 'value'.

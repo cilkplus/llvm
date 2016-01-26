@@ -3,7 +3,7 @@
  *
  *************************************************************************
  *
- *  Copyright (C) 2010-2014, Intel Corporation
+ *  Copyright (C) 2010-2015, Intel Corporation
  *  All rights reserved.
  *  
  *  Redistribution and use in source and binary forms, with or without
@@ -32,16 +32,23 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
+ *  
+ *  *********************************************************************
+ *  
+ *  PLEASE NOTE: This file is a downstream copy of a file mainitained in
+ *  a repository at cilkplus.org. Changes made to this file that are not
+ *  submitted through the contribution process detailed at
+ *  http://www.cilkplus.org/submit-cilk-contribution will be lost the next
+ *  time that a new version is released. Changes only submitted to the
+ *  GNU compiler collection or posted to the git repository at
+ *  https://bitbucket.org/intelcilkplusruntime/itnel-cilk-runtime.git are
+ *  not tracked.
+ *  
+ *  We welcome your contributions to this open source project. Thank you
+ *  for your assistance in helping us improve Cilk Plus.
  *
  **************************************************************************
  */
-
-#ifdef __linux__
-    // define _GNU_SOURCE before *any* #include.
-    // Even <stdint.h> will break later #includes if this macro is not
-    // already defined when it is #included.
-#   define _GNU_SOURCE
-#endif
 
 #include "sysdep.h"
 #include "os.h"
@@ -531,64 +538,51 @@ void __cilkrts_make_unrunnable_sysdep(__cilkrts_worker *w,
     }
 }
 
-/*
- * __cilkrts_sysdep_is_worker_thread_id
- *
- * Returns true if the thread ID specified matches the thread ID we saved
- * for a worker.
- */
-
-int __cilkrts_sysdep_is_worker_thread_id(global_state_t *g,
-                                         int i,
-                                         void *thread_id)
-{
-#if defined( __linux__) || defined(__VXWORKS__)
-    pthread_t tid = *(pthread_t *)thread_id;
-    if (i < 0 || i > g->total_workers)
-        return 0;
-    return g->sysdep->threads[i] == tid;
-#else
-    // Needs to be implemented
-    return 0;
-#endif
-}
-
-
-
-
 /*************************************************************
   Version information:
 *************************************************************/
 
+#ifndef _WRS_KERNEL
 #include <dlfcn.h>
+#endif
 #include "internal/cilk_version.h"
 #include <stdio.h>
+#ifndef _WRS_KERNEL
 #include <sys/utsname.h>
+#endif
 
 #ifdef __VXWORKS__
 #include <version.h>
-# endif
+#endif
 
 /* (Non-static) dummy function is used by get_runtime_path() to find the path
  * to the .so containing the Cilk runtime.
  */
 void dummy_function() { }
 
-/* return a string with the path to the Cilk runtime, or "unknown" if the path
+/*
+ * Return a string with the path to the Cilk runtime, or "unknown" if the path
  * cannot be determined.
  */
 static const char *get_runtime_path ()
 {
-#ifdef __CYGWIN__
-    // Cygwin doesn't support dladdr, which sucks
-    return "unknown";
-#else
+    // dladdr is a glibc extension. If it's available, use it to find the path
+    // for libcilkrts.so
+#ifdef _GNU_SOURCE
     Dl_info info;
-    if (0 == dladdr(dummy_function, &info)) return "unknown";
-    return info.dli_fname;
+    if (0 != dladdr(dummy_function, &info))
+        return info.dli_fname;
 #endif
+
+    // If dladdr isn't available, or dladdr failed, we can't know the path for
+    // the shared object
+    return "unknown";
 }
 
+#ifdef _WRS_KERNEL
+#include <version.h>
+#include <sysLib.h>
+#endif
 /* if the environment variable, CILK_VERSION, is defined, writes the version
  * information to the specified file.
  * g is the global state that was just created, and n is the number of workers
@@ -600,7 +594,9 @@ static void write_version_file (global_state_t *g, int n)
     char buf[256];        // print buffer.
     time_t t;
     FILE *fp;
+#ifndef _WRS_KERNEL
     struct utsname sys_info;
+#endif
     int err;              // error code from system calls.
 
     // if CILK_VERSION is not set, or if the file cannot be opened, fail
@@ -671,15 +667,22 @@ static void write_version_file (global_state_t *g, int n)
     // System OS: Linux, release 2.6.28-19-generic
     // System architecture: x86_64
 
-    err = uname(&sys_info);
     fprintf(fp, "\nSystem information\n");
     fprintf(fp, "==================\n");
     fprintf(fp, "Cilk runtime path: %s\n", get_runtime_path());
+#ifndef _WRS_KERNEL
+    err = uname(&sys_info);
     fprintf(fp, "System OS: %s, release %s\n",
             err < 0 ? "unknown" : sys_info.sysname,
             err < 0 ? "?" : sys_info.release);
     fprintf(fp, "System architecture: %s\n",
             err < 0 ? "unknown" : sys_info.machine);
+#else
+    fprintf(fp, "System OS: %s, release %s\n",
+            "VxWorks", RUNTIME_NAME RUNTIME_VERSION);
+    fprintf(fp, "System architecture: %s\n",
+            sysModel());
+#endif
 
     // Print thread info.  E.g.,
     // Thread information
@@ -752,10 +755,12 @@ void __cilkrts_establish_c_stack(void)
 static __attribute__((noinline))
 void internal_enforce_global_visibility()
 {
+#ifndef __VXWORKS__
     void* handle = dlopen( get_runtime_path(), RTLD_GLOBAL|RTLD_LAZY );
 
     /* For proper reference counting, close the handle immediately. */
     if( handle) dlclose(handle);
+#endif
 }
 
 /*

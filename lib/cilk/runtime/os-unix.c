@@ -2,7 +2,7 @@
  *
  *************************************************************************
  *
- *  Copyright (C) 2009-2014, Intel Corporation
+ *  Copyright (C) 2009-2015, Intel Corporation
  *  All rights reserved.
  *  
  *  Redistribution and use in source and binary forms, with or without
@@ -31,14 +31,21 @@
  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  *  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
+ *  
+ *  *********************************************************************
+ *  
+ *  PLEASE NOTE: This file is a downstream copy of a file mainitained in
+ *  a repository at cilkplus.org. Changes made to this file that are not
+ *  submitted through the contribution process detailed at
+ *  http://www.cilkplus.org/submit-cilk-contribution will be lost the next
+ *  time that a new version is released. Changes only submitted to the
+ *  GNU compiler collection or posted to the git repository at
+ *  https://bitbucket.org/intelcilkplusruntime/itnel-cilk-runtime.git are
+ *  not tracked.
+ *  
+ *  We welcome your contributions to this open source project. Thank you
+ *  for your assistance in helping us improve Cilk Plus.
  **************************************************************************/
-
-#ifdef __linux__
-    // define _GNU_SOURCE before *any* #include.
-    // Even <stdint.h> will break later #includes if this macro is not
-    // already defined when it is #included.
-#   define _GNU_SOURCE
-#endif
 
 #include "os.h"
 #include "bug.h"
@@ -48,22 +55,27 @@
 #if defined __linux__
 #   include <sys/sysinfo.h>
 #   include <sys/syscall.h>
+
 #elif defined __APPLE__
 #   include <sys/sysctl.h>
     // Uses sysconf(_SC_NPROCESSORS_ONLN) in verbose output
-#elif defined  __FreeBSD__
-// No additional include files
-#elif defined __OpenBSD__
-// No additional include files
-#elif defined __CYGWIN__
-// Cygwin on Windows - no additional include files
+
 #elif defined  __VXWORKS__
 #   include <vxWorks.h>   
 #   include <vxCpuLib.h>   
-#   include <taskLib.h>   
+#   include <taskLib.h>
+   
 // Solaris
 #elif defined __sun__ && defined __svr4__
 #   include <sched.h>
+
+// OSes we know about which don't require any additional files
+#elif defined __CYGWIN__ || \
+      defined __DragonFly__ || \
+      defined __FreeBSD__ || \
+      defined __GNU__
+// No additional include files
+
 #else
 #   error "Unsupported OS"
 #endif
@@ -381,34 +393,49 @@ static int linux_get_affinity_count ()
 
 COMMON_SYSDEP int __cilkrts_hardware_cpu_count(void)
 {
-#if defined __ANDROID__ || (defined(__sun__) && defined(__svr4__))
-    return sysconf (_SC_NPROCESSORS_ONLN);
+#if defined __ANDROID__  || \
+    defined __CYGWIN__   || \
+    defined __DragonFly__  || \
+    defined __FreeBSD__  || \
+    (defined(__sun__) && defined(__svr4__))
+    return (int)sysconf(_SC_NPROCESSORS_ONLN);
 #elif defined __MIC__
     /// HACK: Usually, the 3rd and 4th hyperthreads are not beneficial
     /// on KNC.  Also, ignore the last core.
-    int P = sysconf (_SC_NPROCESSORS_ONLN);
-    return P/2 - 2;
+    int count = (int)sysconf (_SC_NPROCESSORS_ONLN);
+    return count/2 - 2;
 #elif defined __linux__
     return linux_get_affinity_count();
 #elif defined __APPLE__
-    int count = 0;
-    int cmd[2] = { CTL_HW, HW_NCPU };
+    int count;
     size_t len = sizeof count;
-    int status = sysctl(cmd, 2, &count, &len, 0, 0);
-    assert(status >= 0);
-    assert((unsigned)count == count);
+    int status = sysctlbyname("hw.logicalcpu", &count, &len, 0, 0);
+    assert(0 == status);
 
     return count;
-#elif defined  __FreeBSD__ || defined __OpenBSD__ || defined __CYGWIN__
-    int ncores = sysconf(_SC_NPROCESSORS_ONLN);
-
-    return ncores;
-    // Just get the number of processors
-//    return sysconf(_SC_NPROCESSORS_ONLN);
 #elif defined  __VXWORKS__
-    return __builtin_popcount( vxCpuEnabledGet() );
+    return __builtin_popcount(vxCpuEnabledGet());
 #else
-#error "Unknown architecture"
+#error "Unsupported architecture"
+#endif
+}
+
+COMMON_SYSDEP void __cilkrts_idle(void)
+{
+    // This is another version of __cilkrts_yield() to be used when
+    // silencing workers that are not stealing work.
+#if defined(__ANDROID__)  || \
+    defined(__FreeBSD__)  || \
+    defined(__VXWORKS__)  || \
+    (defined(__sun__) && defined(__svr4__))
+    sched_yield();
+#elif defined(__MIC__)
+    _mm_delay_32(1024);
+#elif defined(__linux__) || \
+      defined(__APPLE__)
+    usleep(10000);
+#else
+# error "Unsupported architecture"
 #endif
 }
 
@@ -423,8 +450,12 @@ COMMON_SYSDEP void __cilkrts_sleep(void)
 
 COMMON_SYSDEP void __cilkrts_yield(void)
 {
-#if __APPLE__ || __FreeBSD__ || __VXWORKS__
-    // On MacOS, call sched_yield to yield quantum.  I'm not sure why we
+#if defined(__ANDROID__)  || \
+    defined(__APPLE__)    || \
+    defined(__FreeBSD__)  || \
+    defined(__VXWORKS__)  || \
+    (defined(__sun__) && defined(__svr4__))
+    // Call sched_yield to yield quantum.  I'm not sure why we
     // don't do this on Linux also.
     sched_yield();
 #elif defined(__MIC__)
@@ -434,14 +465,12 @@ COMMON_SYSDEP void __cilkrts_yield(void)
     // giving up the processor and latency starting up when work becomes
     // available
     _mm_delay_32(1024);
-#elif defined(__ANDROID__) || (defined(__sun__) && defined(__svr4__))
-    // On Android and Solaris, call sched_yield to yield quantum.  I'm not
-    // sure why we don't do this on Linux also.
-    sched_yield();
-#else
+#elif defined(__linux__)
     // On Linux, call pthread_yield (which in turn will call sched_yield)
     // to yield quantum.
     pthread_yield();
+#else
+# error "Unsupported architecture"
 #endif
 }
 
@@ -454,11 +483,10 @@ COMMON_SYSDEP __STDNS size_t cilkos_getenv(char* value, __STDNS size_t vallen,
     const char* envstr = getenv(varname);
     if (envstr)
     {
-        size_t len = strlen(envstr);
+        size_t len = cilk_strlen(envstr);
         if (len > vallen - 1)
             return len + 1;
-
-        strcpy(value, envstr);
+        cilk_strcpy_s(value, vallen, envstr);
         return len;
     }
     else
@@ -499,11 +527,25 @@ COMMON_SYSDEP void cilkos_warning(const char *fmt, ...)
     fflush(stderr);
 }
 
+#ifdef __VXWORKS__
+#ifdef _WRS_KERNEL
+void cilkStart()
+{
+    __cilkrts_init_tls_variables();
+}
+#else
+_WRS_CONSTRUCTOR(cilkInit, 100)
+{
+    __cilkrts_init_tls_variables();
+}
+#endif
+#else
 static void __attribute__((constructor)) init_once()
 {
     /*__cilkrts_debugger_notification_internal(CILK_DB_RUNTIME_LOADED);*/
     __cilkrts_init_tls_variables();
 }
+#endif
 
 
 #define PAGE 4096
