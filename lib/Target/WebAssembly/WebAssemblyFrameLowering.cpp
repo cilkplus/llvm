@@ -84,6 +84,7 @@ static void adjustStackPointer(unsigned StackSize,
   BuildMI(MBB, InsertPt, DL, TII->get(WebAssembly::LOAD_I32), SPReg)
       .addImm(0)
       .addReg(SPReg)
+      .addImm(2) // p2align
       .addMemOperand(LoadMMO);
   // Add/Subtract the frame size
   unsigned OffsetReg = MRI.createVirtualRegister(&WebAssembly::I32RegClass);
@@ -102,6 +103,7 @@ static void adjustStackPointer(unsigned StackSize,
   BuildMI(MBB, InsertPt, DL, TII->get(WebAssembly::STORE_I32), WebAssembly::SP32)
       .addImm(0)
       .addReg(OffsetReg)
+      .addImm(2) // p2align
       .addReg(WebAssembly::SP32)
       .addMemOperand(MMO);
 }
@@ -109,8 +111,7 @@ static void adjustStackPointer(unsigned StackSize,
 void WebAssemblyFrameLowering::eliminateCallFramePseudoInstr(
     MachineFunction &MF, MachineBasicBlock &MBB,
     MachineBasicBlock::iterator I) const {
-  const auto *TII =
-      static_cast<const WebAssemblyInstrInfo*>(MF.getSubtarget().getInstrInfo());
+  const auto *TII = MF.getSubtarget<WebAssemblySubtarget>().getInstrInfo();
   DebugLoc DL = I->getDebugLoc();
   unsigned Opc = I->getOpcode();
   bool IsDestroy = Opc == TII->getCallFrameDestroyOpcode();
@@ -132,7 +133,7 @@ void WebAssemblyFrameLowering::emitPrologue(MachineFunction &MF,
   if (!StackSize && (!MFI->adjustsStack() || MFI->getMaxCallFrameSize() == 0))
     return;
 
-  const auto *TII = MF.getSubtarget().getInstrInfo();
+  const auto *TII = MF.getSubtarget<WebAssemblySubtarget>().getInstrInfo();
 
   auto InsertPt = MBB.begin();
   DebugLoc DL;
@@ -145,7 +146,7 @@ void WebAssemblyFrameLowering::emitEpilogue(MachineFunction &MF,
   uint64_t StackSize = MF.getFrameInfo()->getStackSize();
   if (!StackSize)
     return;
-  const auto *TII = MF.getSubtarget().getInstrInfo();
+  const auto *TII = MF.getSubtarget<WebAssemblySubtarget>().getInstrInfo();
   auto &MRI = MF.getRegInfo();
   unsigned OffsetReg = MRI.createVirtualRegister(&WebAssembly::I32RegClass);
   auto InsertPt = MBB.getFirstTerminator();
@@ -159,6 +160,7 @@ void WebAssemblyFrameLowering::emitEpilogue(MachineFunction &MF,
   BuildMI(MBB, InsertPt, DL, TII->get(WebAssembly::CONST_I32), OffsetReg)
       .addImm(StackSize);
   auto *SPSymbol = MF.createExternalSymbolName("__stack_pointer");
+  // TODO: Fold this add into the const offset field of the store.
   BuildMI(MBB, InsertPt, DL, TII->get(WebAssembly::ADD_I32), WebAssembly::SP32)
       .addReg(WebAssembly::SP32)
       .addReg(OffsetReg);
@@ -170,6 +172,7 @@ void WebAssemblyFrameLowering::emitEpilogue(MachineFunction &MF,
   BuildMI(MBB, InsertPt, DL, TII->get(WebAssembly::STORE_I32), WebAssembly::SP32)
       .addImm(0)
       .addReg(OffsetReg)
+      .addImm(2) // p2align
       .addReg(WebAssembly::SP32)
       .addMemOperand(MMO);
 }

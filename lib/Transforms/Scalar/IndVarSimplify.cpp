@@ -133,6 +133,7 @@ private:
 
   bool canLoopBeDeleted(Loop *L, SmallVector<RewritePhi, 8> &RewritePhiSet);
   void rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter);
+  void rewriteFirstIterationLoopExitValues(Loop *L);
 
   Value *linearFunctionTestReplace(Loop *L, const SCEV *BackedgeTakenCount,
                                    PHINode *IndVar, SCEVExpander &Rewriter);
@@ -504,10 +505,9 @@ struct RewritePhi {
   unsigned Ith;  // Ith incoming value.
   Value *Val;    // Exit value after expansion.
   bool HighCost; // High Cost when expansion.
-  bool SafePhi;  // LCSSASafePhiForRAUW.
 
-  RewritePhi(PHINode *P, unsigned I, Value *V, bool H, bool S)
-      : PN(P), Ith(I), Val(V), HighCost(H), SafePhi(S) {}
+  RewritePhi(PHINode *P, unsigned I, Value *V, bool H)
+      : PN(P), Ith(I), Val(V), HighCost(H) {}
 };
 }
 
@@ -559,21 +559,6 @@ void IndVarSimplify::rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
     if (!PN) continue;
 
     unsigned NumPreds = PN->getNumIncomingValues();
-
-    // We would like to be able to RAUW single-incoming value PHI nodes. We
-    // have to be certain this is safe even when this is an LCSSA PHI node.
-    // While the computed exit value is no longer varying in *this* loop, the
-    // exit block may be an exit block for an outer containing loop as well,
-    // the exit value may be varying in the outer loop, and thus it may still
-    // require an LCSSA PHI node. The safe case is when this is
-    // single-predecessor PHI node (LCSSA) and the exit block containing it is
-    // part of the enclosing loop, or this is the outer most loop of the nest.
-    // In either case the exit value could (at most) be varying in the same
-    // loop body as the phi node itself. Thus if it is in turn used outside of
-    // an enclosing loop it will only be via a separate LCSSA node.
-    bool LCSSASafePhiForRAUW =
-        NumPreds == 1 &&
-        (!L->getParentLoop() || L->getParentLoop() == LI->getLoopFor(ExitBB));
 
     // Iterate over all of the PHI nodes.
     BasicBlock::iterator BBI = ExitBB->begin();
@@ -669,8 +654,7 @@ void IndVarSimplify::rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
         }
 
         // Collect all the candidate PHINodes to be rewritten.
-        RewritePhiSet.push_back(
-            RewritePhi(PN, i, ExitVal, HighCost, LCSSASafePhiForRAUW));
+        RewritePhiSet.emplace_back(PN, i, ExitVal, HighCost);
       }
     }
   }
@@ -699,9 +683,9 @@ void IndVarSimplify::rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
     if (isInstructionTriviallyDead(Inst, TLI))
       DeadInsts.push_back(Inst);
 
-    // If we determined that this PHI is safe to replace even if an LCSSA
-    // PHI, do so.
-    if (Phi.SafePhi) {
+    // Replace PN with ExitVal if that is legal and does not break LCSSA.
+    if (PN->getNumIncomingValues() == 1 &&
+        LI->replacementPreservesLCSSAForm(PN, ExitVal)) {
       PN->replaceAllUsesWith(ExitVal);
       PN->eraseFromParent();
     }
@@ -710,6 +694,80 @@ void IndVarSimplify::rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
   // The insertion point instruction may have been deleted; clear it out
   // so that the rewriter doesn't trip over it later.
   Rewriter.clearInsertPoint();
+}
+
+//===---------------------------------------------------------------------===//
+// rewriteFirstIterationLoopExitValues: Rewrite loop exit values if we know
+// they will exit at the first iteration.
+//===---------------------------------------------------------------------===//
+
+/// Check to see if this loop has loop invariant conditions which lead to loop
+/// exits. If so, we know that if the exit path is taken, it is at the first
+/// loop iteration. This lets us predict exit values of PHI nodes that live in
+/// loop header.
+void IndVarSimplify::rewriteFirstIterationLoopExitValues(Loop *L) {
+  // Verify the input to the pass is already in LCSSA form.
+  assert(L->isLCSSAForm(*DT));
+
+  SmallVector<BasicBlock *, 8> ExitBlocks;
+  L->getUniqueExitBlocks(ExitBlocks);
+  auto *LoopHeader = L->getHeader();
+  assert(LoopHeader && "Invalid loop");
+
+  for (auto *ExitBB : ExitBlocks) {
+    BasicBlock::iterator BBI = ExitBB->begin();
+    // If there are no more PHI nodes in this exit block, then no more
+    // values defined inside the loop are used on this path.
+    while (auto *PN = dyn_cast<PHINode>(BBI++)) {
+      for (unsigned IncomingValIdx = 0, E = PN->getNumIncomingValues();
+          IncomingValIdx != E; ++IncomingValIdx) {
+        auto *IncomingBB = PN->getIncomingBlock(IncomingValIdx);
+
+        // We currently only support loop exits from loop header. If the
+        // incoming block is not loop header, we need to recursively check
+        // all conditions starting from loop header are loop invariants.
+        // Additional support might be added in the future.
+        if (IncomingBB != LoopHeader)
+          continue;
+
+        // Get condition that leads to the exit path.
+        auto *TermInst = IncomingBB->getTerminator();
+
+        Value *Cond = nullptr;
+        if (auto *BI = dyn_cast<BranchInst>(TermInst)) {
+          // Must be a conditional branch, otherwise the block
+          // should not be in the loop.
+          Cond = BI->getCondition();
+        } else if (auto *SI = dyn_cast<SwitchInst>(TermInst))
+          Cond = SI->getCondition();
+        else
+          continue;
+
+        if (!L->isLoopInvariant(Cond))
+          continue;
+
+        auto *ExitVal =
+            dyn_cast<PHINode>(PN->getIncomingValue(IncomingValIdx));
+
+        // Only deal with PHIs.
+        if (!ExitVal)
+          continue;
+
+        // If ExitVal is a PHI on the loop header, then we know its
+        // value along this exit because the exit can only be taken
+        // on the first iteration.
+        auto *LoopPreheader = L->getLoopPreheader();
+        assert(LoopPreheader && "Invalid loop");
+        int PreheaderIdx = ExitVal->getBasicBlockIndex(LoopPreheader);
+        if (PreheaderIdx != -1) {
+          assert(ExitVal->getParent() == LoopHeader &&
+                 "ExitVal must be in loop header");
+          PN->setIncomingValue(IncomingValIdx,
+              ExitVal->getIncomingValue(PreheaderIdx));
+        }
+      }
+    }
+  }
 }
 
 /// Check whether it is possible to delete the loop after rewriting exit
@@ -1355,8 +1413,7 @@ void WidenIV::pushNarrowIVUsers(Instruction *NarrowDef, Instruction *WideDef) {
     if (!Widened.insert(NarrowUser).second)
       continue;
 
-    NarrowIVUsers.push_back(
-        NarrowIVDefUse(NarrowDef, NarrowUser, WideDef, NeverNegative));
+    NarrowIVUsers.emplace_back(NarrowDef, NarrowUser, WideDef, NeverNegative);
   }
 }
 
@@ -2171,6 +2228,11 @@ bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   // Loop-invariant instructions in the preheader that aren't used in the
   // loop may be sunk below the loop to reduce register pressure.
   sinkUnusedInvariants(L);
+
+  // rewriteFirstIterationLoopExitValues does not rely on the computation of
+  // trip count and therefore can further simplify exit values in addition to
+  // rewriteLoopExitValues.
+  rewriteFirstIterationLoopExitValues(L);
 
   // Clean up dead instructions.
   Changed |= DeleteDeadPHIs(L->getHeader(), TLI);

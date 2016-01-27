@@ -52,6 +52,7 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeSILoadStoreOptimizerPass(*PR);
   initializeAMDGPUAnnotateKernelFeaturesPass(*PR);
   initializeAMDGPUAnnotateUniformValuesPass(*PR);
+  initializeSIAnnotateControlFlowPass(*PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -66,8 +67,12 @@ static ScheduleDAGInstrs *createR600MachineScheduler(MachineSchedContext *C) {
 }
 
 static MachineSchedRegistry
-SchedCustomRegistry("r600", "Run R600's custom scheduler",
-                    createR600MachineScheduler);
+R600SchedRegistry("r600", "Run R600's custom scheduler",
+                   createR600MachineScheduler);
+
+static MachineSchedRegistry
+SISchedRegistry("si", "Run SI's custom scheduler",
+                createSIMachineScheduler);
 
 static std::string computeDataLayout(const Triple &TT) {
   std::string Ret = "e-p:32:32";
@@ -83,14 +88,28 @@ static std::string computeDataLayout(const Triple &TT) {
   return Ret;
 }
 
+LLVM_READNONE
+static StringRef getGPUOrDefault(const Triple &TT, StringRef GPU) {
+  if (!GPU.empty())
+    return GPU;
+
+  // HSA only supports CI+, so change the default GPU to a CI for HSA.
+  if (TT.getArch() == Triple::amdgcn)
+    return (TT.getOS() == Triple::AMDHSA) ? "kaveri" : "tahiti";
+
+  return "";
+}
+
 AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, const Triple &TT,
                                          StringRef CPU, StringRef FS,
                                          TargetOptions Options, Reloc::Model RM,
                                          CodeModel::Model CM,
                                          CodeGenOpt::Level OptLevel)
-    : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options, RM, CM,
+    : LLVMTargetMachine(T, computeDataLayout(TT), TT,
+                        getGPUOrDefault(TT, CPU), FS, Options, RM, CM,
                         OptLevel),
-      TLOF(createTLOF(getTargetTriple())), Subtarget(TT, CPU, FS, *this),
+      TLOF(createTLOF(getTargetTriple())),
+      Subtarget(TT, getTargetCPU(), FS, *this),
       IntrinsicInfo() {
   setRequiresStructuredCFG(true);
   initAsmInfo();
@@ -143,6 +162,8 @@ public:
     const AMDGPUSubtarget &ST = *getAMDGPUTargetMachine().getSubtargetImpl();
     if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS)
       return createR600MachineScheduler(C);
+    else if (ST.enableSIScheduler())
+      return createSIMachineScheduler(C);
     return nullptr;
   }
 
