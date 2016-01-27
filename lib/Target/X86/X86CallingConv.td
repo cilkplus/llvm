@@ -592,6 +592,23 @@ def CC_X86_32_C : CallingConv<[
   CCDelegateTo<CC_X86_32_Common>
 ]>;
 
+def CC_X86_32_MCU : CallingConv<[
+  // Handles byval parameters.  Note that, like FastCC, we can't rely on
+  // the delegation to CC_X86_32_Common because that happens after code that
+  // puts arguments in registers.
+  CCIfByVal<CCPassByVal<4, 4>>,
+
+  // Promote i1/i8/i16 arguments to i32.
+  CCIfType<[i1, i8, i16], CCPromoteToType<i32>>,
+
+  // If the call is not a vararg call, some arguments may be passed
+  // in integer registers.
+  CCIfNotVarArg<CCIfType<[i32], CCCustom<"CC_X86_32_MCUInReg">>>,
+
+  // Otherwise, same as everything else.
+  CCDelegateTo<CC_X86_32_Common>
+]>;
+
 def CC_X86_32_FastCall : CallingConv<[
   // Promote i1/i8/i16 arguments to i32.
   CCIfType<[i1, i8, i16], CCPromoteToType<i32>>,
@@ -753,6 +770,7 @@ def CC_X86_64_Intr : CallingConv<[
 
 // This is the root argument convention for the X86-32 backend.
 def CC_X86_32 : CallingConv<[
+  CCIfSubtarget<"isTargetMCU()", CCDelegateTo<CC_X86_32_MCU>>,
   CCIfCC<"CallingConv::X86_FastCall", CCDelegateTo<CC_X86_32_FastCall>>,
   CCIfCC<"CallingConv::X86_VectorCall", CCDelegateTo<CC_X86_32_VectorCall>>,
   CCIfCC<"CallingConv::X86_ThisCall", CCDelegateTo<CC_X86_32_ThisCall>>,
@@ -812,6 +830,12 @@ def CSR_Win64 : CalleeSavedRegs<(add RBX, RBP, RDI, RSI, R12, R13, R14, R15,
 // GPRs are preserved.
 def CSR_64_TLS_Darwin : CalleeSavedRegs<(add CSR_64, RCX, RDX, RSI,
                                              R8, R9, R10, R11)>;
+
+// CSRs that are handled by prologue, epilogue.
+def CSR_64_CXX_TLS_Darwin_PE : CalleeSavedRegs<(add RBP)>;
+
+// CSRs that are handled explicitly via copies.
+def CSR_64_CXX_TLS_Darwin_ViaCopy : CalleeSavedRegs<(sub CSR_64_TLS_Darwin, RBP)>;
 
 // All GPRs - except r11
 def CSR_64_RT_MostRegs : CalleeSavedRegs<(add CSR_64, RAX, RCX, RDX, RSI, RDI,

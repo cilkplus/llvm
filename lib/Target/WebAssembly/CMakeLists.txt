@@ -10,7 +10,6 @@ tablegen(LLVM WebAssemblyGenSubtargetInfo.inc -gen-subtarget)
 add_public_tablegen_target(WebAssemblyCommonTableGen)
 
 add_llvm_target(WebAssemblyCodeGen
-  Relooper.cpp
   WebAssemblyArgumentMove.cpp
   WebAssemblyAsmPrinter.cpp
   WebAssemblyCFGStackify.cpp
@@ -30,6 +29,7 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyRegNumbering.cpp
   WebAssemblyRegStackify.cpp
   WebAssemblySelectionDAGInfo.cpp
+  WebAssemblySetP2AlignOperands.cpp
   WebAssemblyStoreResults.cpp
   WebAssemblySubtarget.cpp
   WebAssemblyTargetMachine.cpp
@@ -39,6 +39,7 @@ add_llvm_target(WebAssemblyCodeGen
 
 add_dependencies(LLVMWebAssemblyCodeGen intrinsics_gen)
 
+add_subdirectory(Disassembler)
 add_subdirectory(InstPrinter)
-add_subdirectory(TargetInfo)
 add_subdirectory(MCTargetDesc)
+add_subdirectory(TargetInfo)

@@ -285,6 +285,20 @@ bool WebAssemblyTargetLowering::isLegalAddressingMode(const DataLayout &DL,
   return true;
 }
 
+bool WebAssemblyTargetLowering::allowsMisalignedMemoryAccesses(
+    EVT /*VT*/, unsigned /*AddrSpace*/, unsigned /*Align*/,
+    bool *Fast) const {
+  // WebAssembly supports unaligned accesses, though it should be declared
+  // with the p2align attribute on loads and stores which do so, and there
+  // may be a performance impact. We tell LLVM they're "fast" because
+  // for the kinds of things that LLVM uses this for (merging adjacent stores
+  // of constants, etc.), WebAssembly implementations will either want the
+  // unaligned access or they'll split anyway.
+  if (Fast)
+    *Fast = true;
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // WebAssembly Lowering private implementation.
 //===----------------------------------------------------------------------===//
@@ -573,7 +587,8 @@ SDValue WebAssemblyTargetLowering::LowerGlobalAddress(SDValue Op,
   SDLoc DL(Op);
   const auto *GA = cast<GlobalAddressSDNode>(Op);
   EVT VT = Op.getValueType();
-  assert(GA->getTargetFlags() == 0 && "WebAssembly doesn't set target flags");
+  assert(GA->getTargetFlags() == 0 &&
+         "Unexpected target flags on generic GlobalAddressSDNode");
   if (GA->getAddressSpace() != 0)
     fail(DL, DAG, "WebAssembly only expects the 0 address space");
   return DAG.getNode(
@@ -587,9 +602,16 @@ WebAssemblyTargetLowering::LowerExternalSymbol(SDValue Op,
   SDLoc DL(Op);
   const auto *ES = cast<ExternalSymbolSDNode>(Op);
   EVT VT = Op.getValueType();
-  assert(ES->getTargetFlags() == 0 && "WebAssembly doesn't set target flags");
+  assert(ES->getTargetFlags() == 0 &&
+         "Unexpected target flags on generic ExternalSymbolSDNode");
+  // Set the TargetFlags to 0x1 which indicates that this is a "function"
+  // symbol rather than a data symbol. We do this unconditionally even though
+  // we don't know anything about the symbol other than its name, because all
+  // external symbols used in target-independent SelectionDAG code are for
+  // functions.
   return DAG.getNode(WebAssemblyISD::Wrapper, DL, VT,
-                     DAG.getTargetExternalSymbol(ES->getSymbol(), VT));
+                     DAG.getTargetExternalSymbol(ES->getSymbol(), VT,
+                                                 /*TargetFlags=*/0x1));
 }
 
 SDValue WebAssemblyTargetLowering::LowerJumpTable(SDValue Op,

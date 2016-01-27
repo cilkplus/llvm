@@ -224,7 +224,9 @@ LLVMContext &Function::getContext() const {
   return getType()->getContext();
 }
 
-FunctionType *Function::getFunctionType() const { return Ty; }
+FunctionType *Function::getFunctionType() const {
+  return cast<FunctionType>(getValueType());
+}
 
 bool Function::isVarArg() const {
   return getFunctionType()->isVarArg();
@@ -249,8 +251,7 @@ void Function::eraseFromParent() {
 Function::Function(FunctionType *Ty, LinkageTypes Linkage, const Twine &name,
                    Module *ParentModule)
     : GlobalObject(Ty, Value::FunctionVal,
-                   OperandTraits<Function>::op_begin(this), 0, Linkage, name),
-      Ty(Ty) {
+                   OperandTraits<Function>::op_begin(this), 0, Linkage, name) {
   assert(FunctionType::isValidReturnType(getReturnType()) &&
          "invalid return type");
   setGlobalObjectSubClassData(0);
@@ -366,47 +367,21 @@ void Function::addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes) {
   setAttributes(PAL);
 }
 
-// Maintain the GC name for each function in an on-the-side table. This saves
-// allocating an additional word in Function for programs which do not use GC
-// (i.e., most programs) at the cost of increased overhead for clients which do
-// use GC.
-static DenseMap<const Function*,PooledStringPtr> *GCNames;
-static StringPool *GCNamePool;
-static ManagedStatic<sys::SmartRWMutex<true> > GCLock;
-
-bool Function::hasGC() const {
-  sys::SmartScopedReader<true> Reader(*GCLock);
-  return GCNames && GCNames->count(this);
-}
-
-const char *Function::getGC() const {
+const std::string &Function::getGC() const {
   assert(hasGC() && "Function has no collector");
-  sys::SmartScopedReader<true> Reader(*GCLock);
-  return *(*GCNames)[this];
+  return getContext().getGC(*this);
 }
 
-void Function::setGC(const char *Str) {
-  sys::SmartScopedWriter<true> Writer(*GCLock);
-  if (!GCNamePool)
-    GCNamePool = new StringPool();
-  if (!GCNames)
-    GCNames = new DenseMap<const Function*,PooledStringPtr>();
-  (*GCNames)[this] = GCNamePool->intern(Str);
+void Function::setGC(const std::string Str) {
+  setValueSubclassDataBit(14, !Str.empty());
+  getContext().setGC(*this, std::move(Str));
 }
 
 void Function::clearGC() {
-  sys::SmartScopedWriter<true> Writer(*GCLock);
-  if (GCNames) {
-    GCNames->erase(this);
-    if (GCNames->empty()) {
-      delete GCNames;
-      GCNames = nullptr;
-      if (GCNamePool->empty()) {
-        delete GCNamePool;
-        GCNamePool = nullptr;
-      }
-    }
-  }
+  if (!hasGC())
+    return;
+  getContext().deleteGC(*this);
+  setValueSubclassDataBit(14, false);
 }
 
 /// Copy all additional attributes (those not needed to create a Function) from
@@ -431,17 +406,30 @@ void Function::copyAttributesFrom(const GlobalValue *Src) {
     setPrologueData(SrcF->getPrologueData());
 }
 
+/// Table of string intrinsic names indexed by enum value.
+static const char * const IntrinsicNameTable[] = {
+  "not_intrinsic",
+#define GET_INTRINSIC_NAME_TABLE
+#include "llvm/IR/Intrinsics.gen"
+#undef GET_INTRINSIC_NAME_TABLE
+};
+
 /// \brief This does the actual lookup of an intrinsic ID which
 /// matches the given function name.
 static Intrinsic::ID lookupIntrinsicID(const ValueName *ValName) {
-  unsigned Len = ValName->getKeyLength();
-  const char *Name = ValName->getKeyData();
+  StringRef Name = ValName->getKey();
 
-#define GET_FUNCTION_RECOGNIZER
-#include "llvm/IR/Intrinsics.gen"
-#undef GET_FUNCTION_RECOGNIZER
+  ArrayRef<const char *> NameTable(&IntrinsicNameTable[1],
+                                   std::end(IntrinsicNameTable));
+  int Idx = Intrinsic::lookupLLVMIntrinsicByName(NameTable, Name);
+  Intrinsic::ID ID = static_cast<Intrinsic::ID>(Idx + 1);
+  if (ID == Intrinsic::not_intrinsic)
+    return ID;
 
-  return Intrinsic::not_intrinsic;
+  // If the intrinsic is not overloaded, require an exact match. If it is
+  // overloaded, require a prefix match.
+  bool IsPrefixMatch = Name.size() > strlen(NameTable[Idx]);
+  return IsPrefixMatch == isOverloaded(ID) ? ID : Intrinsic::not_intrinsic;
 }
 
 void Function::recalculateIntrinsicID() {
@@ -496,15 +484,9 @@ static std::string getMangledTypeStr(Type* Ty) {
 
 std::string Intrinsic::getName(ID id, ArrayRef<Type*> Tys) {
   assert(id < num_intrinsics && "Invalid intrinsic ID!");
-  static const char * const Table[] = {
-    "not_intrinsic",
-#define GET_INTRINSIC_NAME_TABLE
-#include "llvm/IR/Intrinsics.gen"
-#undef GET_INTRINSIC_NAME_TABLE
-  };
   if (Tys.empty())
-    return Table[id];
-  std::string Result(Table[id]);
+    return IntrinsicNameTable[id];
+  std::string Result(IntrinsicNameTable[id]);
   for (unsigned i = 0; i < Tys.size(); ++i) {
     Result += "." + getMangledTypeStr(Tys[i]);
   }
@@ -942,8 +924,7 @@ Constant *Function::getPersonalityFn() const {
 }
 
 void Function::setPersonalityFn(Constant *Fn) {
-  if (Fn)
-    setHungoffOperand<0>(Fn);
+  setHungoffOperand<0>(Fn);
   setValueSubclassDataBit(3, Fn != nullptr);
 }
 
@@ -953,8 +934,7 @@ Constant *Function::getPrefixData() const {
 }
 
 void Function::setPrefixData(Constant *PrefixData) {
-  if (PrefixData)
-    setHungoffOperand<1>(PrefixData);
+  setHungoffOperand<1>(PrefixData);
   setValueSubclassDataBit(1, PrefixData != nullptr);
 }
 
@@ -964,8 +944,7 @@ Constant *Function::getPrologueData() const {
 }
 
 void Function::setPrologueData(Constant *PrologueData) {
-  if (PrologueData)
-    setHungoffOperand<2>(PrologueData);
+  setHungoffOperand<2>(PrologueData);
   setValueSubclassDataBit(2, PrologueData != nullptr);
 }
 
@@ -986,9 +965,13 @@ void Function::allocHungoffUselist() {
 
 template <int Idx>
 void Function::setHungoffOperand(Constant *C) {
-  assert(C && "Cannot set hungoff operand to nullptr");
-  allocHungoffUselist();
-  Op<Idx>().set(C);
+  if (C) {
+    allocHungoffUselist();
+    Op<Idx>().set(C);
+  } else if (getNumOperands()) {
+    Op<Idx>().set(
+        ConstantPointerNull::get(Type::getInt1PtrTy(getContext(), 0)));
+  }
 }
 
 void Function::setValueSubclassDataBit(unsigned Bit, bool On) {

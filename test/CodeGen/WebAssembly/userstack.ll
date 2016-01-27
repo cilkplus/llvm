@@ -2,7 +2,7 @@
 ; RUN: llc < %s -asm-verbose=false -fast-isel | FileCheck %s
 
 
-target datalayout = "e-p:32:32-i64:64-n32:64-S128"
+target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32-unknown-unknown"
 
 ; CHECK-LABEL: alloca32:
@@ -47,8 +47,56 @@ define void @alloca3264() {
 }
 
 ; CHECK-LABEL: allocarray:
-; CHECK: .local i32, i32, i32, i32, i32, i32{{$}}
+; CHECK: .local i32, i32, i32, i32, i32{{$}}
 define void @allocarray() {
+ ; CHECK-NEXT: i32.const [[L1:.+]]=, __stack_pointer
+ ; CHECK-NEXT: i32.load [[L1]]=, 0([[L1]])
+ ; CHECK-NEXT: i32.const [[L2:.+]]=, 32{{$}}
+ ; CHECK-NEXT: i32.sub [[SP:.+]]=, [[L1]], [[L2]]
+ ; CHECK-NEXT: i32.const [[L2]]=, __stack_pointer{{$}}
+ ; CHECK-NEXT: i32.store [[SP]]=, 0([[L2]]), [[SP]]
+ %r = alloca [5 x i32]
+
+ ; CHECK-NEXT: i32.const $push[[L4:.+]]=, 12
+ ; CHECK-NEXT: i32.const [[L5:.+]]=, 12
+ ; CHECK-NEXT: i32.add [[L5]]=, [[SP]], [[L5]]
+ ; CHECK-NEXT: i32.add $push[[L6:.+]]=, [[L5]], $pop[[L4]]
+ ; CHECK-NEXT: i32.const $push[[L9:.+]]=, 1{{$}}
+ ; CHECK-NEXT: i32.store $push[[L10:.+]]=, 12([[SP]]), $pop[[L9]]{{$}}
+ ; CHECK-NEXT: i32.store $discard=, 0($pop3), $pop[[L10]]{{$}}
+ %p = getelementptr [5 x i32], [5 x i32]* %r, i32 0, i32 0
+ store i32 1, i32* %p
+ %p2 = getelementptr [5 x i32], [5 x i32]* %r, i32 0, i32 3
+ store i32 1, i32* %p2
+
+ ; CHECK-NEXT: i32.const [[L7:.+]]=, 32
+ ; CHECK-NEXT: i32.add [[SP]]=, [[SP]], [[L7]]
+ ; CHECK-NEXT: i32.const [[L8:.+]]=, __stack_pointer
+ ; CHECK-NEXT: i32.store [[SP]]=, 0([[L8]]), [[SP]]
+ ret void
+}
+
+declare void @ext_func(i64* %ptr)
+; CHECK-LABEL: non_mem_use
+define void @non_mem_use() {
+ ; CHECK: i32.const [[L2:.+]]=, 16
+ ; CHECK-NEXT: i32.sub [[SP:.+]]=, {{.+}}, [[L2]]
+ %r = alloca i64
+ %r2 = alloca i64
+ ; %r is at SP+8
+ ; CHECK: i32.const [[OFF:.+]]=, 8
+ ; CHECK-NEXT: i32.add [[ARG1:.+]]=, [[SP]], [[OFF]]
+ ; CHECK-NEXT: call ext_func@FUNCTION, [[ARG1]]
+ call void @ext_func(i64* %r)
+ ; %r2 is at SP+0, no add needed
+ ; CHECK-NEXT: call ext_func@FUNCTION, [[SP]]
+ call void @ext_func(i64* %r2)
+ ret void
+}
+
+; CHECK-LABEL: allocarray_inbounds:
+; CHECK: .local i32, i32, i32, i32{{$}}
+define void @allocarray_inbounds() {
  ; CHECK: i32.const [[L1:.+]]=, __stack_pointer
  ; CHECK-NEXT: i32.load [[L1]]=, 0([[L1]])
  ; CHECK-NEXT: i32.const [[L2:.+]]=, 32
@@ -56,14 +104,11 @@ define void @allocarray() {
  %r = alloca [5 x i32]
  ; CHECK: i32.const $push[[L3:.+]]=, 1
  ; CHECK: i32.store {{.*}}=, 12([[SP]]), $pop[[L3]]
- %p = getelementptr [5 x i32], [5 x i32]* %r, i32 0, i32 0
+ %p = getelementptr inbounds [5 x i32], [5 x i32]* %r, i32 0, i32 0
  store i32 1, i32* %p
- ; CHECK: i32.const $push[[L4:.+]]=, 4
- ; CHECK: i32.const [[L5:.+]]=, 12
- ; CHECK: i32.add [[L5]]=, [[SP]], [[L5]]
- ; CHECK: i32.add $push[[L6:.+]]=, [[L5]], $pop[[L4]]
- ; CHECK: i32.store {{.*}}=, 0($pop[[L6]]), ${{.+}}
- %p2 = getelementptr [5 x i32], [5 x i32]* %r, i32 0, i32 1
+ ; This store should have both the GEP and the FI folded into it.
+ ; CHECK-NEXT: i32.store {{.*}}=, 24([[SP]]), $pop
+ %p2 = getelementptr inbounds [5 x i32], [5 x i32]* %r, i32 0, i32 3
  store i32 1, i32* %p2
  ; CHECK: i32.const [[L7:.+]]=, 32
  ; CHECK-NEXT: i32.add [[SP]]=, [[SP]], [[L7]]
@@ -72,6 +117,7 @@ define void @allocarray() {
  ret void
 }
 
+; CHECK-LABEL: dynamic_alloca:
 define void @dynamic_alloca(i32 %alloc) {
  ; TODO: Support frame pointers
  ;%r = alloca i32, i32 %alloc

@@ -15,6 +15,7 @@ add_llvm_library(LLVMMC
   MCELFObjectTargetWriter.cpp
   MCELFStreamer.cpp
   MCExpr.cpp
+  MCFragment.cpp
   MCInst.cpp
   MCInstPrinter.cpp
   MCInstrAnalysis.cpp
@@ -37,7 +38,6 @@ add_llvm_library(LLVMMC
   MCSubtargetInfo.cpp
   MCSymbol.cpp
   MCSymbolELF.cpp
-  MCSymbolizer.cpp
   MCTargetOptions.cpp
   MCValue.cpp
   MCWin64EH.cpp
