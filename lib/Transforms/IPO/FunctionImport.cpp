@@ -41,14 +41,15 @@ static std::unique_ptr<Module> loadFile(const std::string &FileName,
                                         LLVMContext &Context) {
   SMDiagnostic Err;
   DEBUG(dbgs() << "Loading '" << FileName << "'\n");
-  std::unique_ptr<Module> Result = getLazyIRFileModule(FileName, Err, Context);
+  // Metadata isn't loaded until functions are imported, to minimize
+  // the memory overhead.
+  std::unique_ptr<Module> Result =
+      getLazyIRFileModule(FileName, Err, Context,
+                          /* ShouldLazyLoadMetadata = */ true);
   if (!Result) {
     Err.print("function-import", errs());
     return nullptr;
   }
-
-  Result->materializeMetadata();
-  UpgradeDebugInfo(*Result);
 
   return Result;
 }
@@ -132,6 +133,8 @@ static void findExternalCalls(const Module &DestModule, Function &F,
         // Ignore functions already present in the destination module
         auto *SrcGV = DestModule.getNamedValue(ImportedName);
         if (SrcGV) {
+          if (GlobalAlias *SGA = dyn_cast<GlobalAlias>(SrcGV))
+            SrcGV = SGA->getBaseObject();
           assert(isa<Function>(SrcGV) && "Name collision during import");
           if (!cast<Function>(SrcGV)->isDeclaration()) {
             DEBUG(dbgs() << DestModule.getModuleIdentifier() << ": Ignoring "
@@ -292,9 +295,6 @@ bool FunctionImporter::importFunctions(Module &DestModule) {
                 ModuleToFunctionsToImportMap, Index, ModuleLoaderCache);
   assert(Worklist.empty() && "Worklist hasn't been flushed in GetImportList");
 
-  StringMap<std::unique_ptr<DenseMap<unsigned, MDNode *>>>
-      ModuleToTempMDValsMap;
-
   // Do the actual import of functions now, one Module at a time
   for (auto &FunctionsToImportPerModule : ModuleToFunctionsToImportMap) {
     // Get the module for the import
@@ -304,30 +304,17 @@ bool FunctionImporter::importFunctions(Module &DestModule) {
     assert(&DestModule.getContext() == &SrcModule->getContext() &&
            "Context mismatch");
 
-    // Save the mapping of value ids to temporary metadata created when
-    // importing this function. If we have already imported from this module,
-    // add new temporary metadata to the existing mapping.
-    auto &TempMDVals = ModuleToTempMDValsMap[SrcModule->getModuleIdentifier()];
-    if (!TempMDVals)
-      TempMDVals = llvm::make_unique<DenseMap<unsigned, MDNode *>>();
+    // If modules were created with lazy metadata loading, materialize it
+    // now, before linking it (otherwise this will be a noop).
+    SrcModule->materializeMetadata();
+    UpgradeDebugInfo(*SrcModule);
 
     // Link in the specified functions.
     if (TheLinker.linkInModule(std::move(SrcModule), Linker::Flags::None,
-                               &Index, &FunctionsToImport, TempMDVals.get()))
+                               &Index, &FunctionsToImport))
       report_fatal_error("Function Import: link error");
 
     ImportedCount += FunctionsToImport.size();
-  }
-
-  // Now link in metadata for all modules from which we imported functions.
-  for (StringMapEntry<std::unique_ptr<DenseMap<unsigned, MDNode *>>> &SME :
-       ModuleToTempMDValsMap) {
-    // Load the specified source module.
-    auto &SrcModule = ModuleLoaderCache(SME.getKey());
-
-    // Link in all necessary metadata from this module.
-    if (TheLinker.linkInMetadata(SrcModule, SME.getValue().get()))
-      return false;
   }
 
   DEBUG(dbgs() << "Imported " << ImportedCount << " functions for Module "
@@ -371,6 +358,7 @@ getFunctionIndexForFile(StringRef Path, std::string &Error,
   return (*ObjOrErr)->takeIndex();
 }
 
+namespace {
 /// Pass that performs cross-module function import provided a summary file.
 class FunctionImportPass : public ModulePass {
   /// Optional function summary index to use for importing, otherwise
@@ -407,16 +395,22 @@ public:
       Index = IndexPtr.get();
     }
 
+    // First we need to promote to global scope and rename any local values that
+    // are potentially exported to other modules.
+    if (renameModuleForThinLTO(M, Index)) {
+      errs() << "Error renaming module\n";
+      return false;
+    }
+
     // Perform the import now.
     auto ModuleLoader = [&M](StringRef Identifier) {
       return loadFile(Identifier, M.getContext());
     };
     FunctionImporter Importer(*Index, ModuleLoader);
     return Importer.importFunctions(M);
-
-    return false;
   }
 };
+} // anonymous namespace
 
 char FunctionImportPass::ID = 0;
 INITIALIZE_PASS_BEGIN(FunctionImportPass, "function-import",

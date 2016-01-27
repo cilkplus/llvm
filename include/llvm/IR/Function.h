@@ -56,7 +56,6 @@ private:
   mutable ArgumentListType ArgumentList;  ///< The formal arguments
   ValueSymbolTable *SymTab;               ///< Symbol table of args/instructions
   AttributeSet AttributeSets;             ///< Parameter attributes
-  FunctionType *Ty;
 
   /*
    * Value::SubclassData
@@ -66,7 +65,8 @@ private:
    * bit 2      : HasPrologueData
    * bit 3      : HasPersonalityFn
    * bits 4-13  : CallingConvention
-   * bits 14-15 : [reserved]
+   * bits 14    : HasGC
+   * bits 15 : [reserved]
    */
 
   /// Bits from GlobalObject::GlobalObjectSubclassData.
@@ -220,9 +220,11 @@ public:
 
   /// hasGC/getGC/setGC/clearGC - The name of the garbage collection algorithm
   ///                             to use during code generation.
-  bool hasGC() const;
-  const char *getGC() const;
-  void setGC(const char *Str);
+  bool hasGC() const {
+    return getSubclassDataFromValue() & (1<<14);
+  }
+  const std::string &getGC() const;
+  void setGC(const std::string Str);
   void clearGC();
 
   /// @brief adds the attribute to the list of attributes.
@@ -260,8 +262,7 @@ public:
 
   /// @brief Determine if the function does not access memory.
   bool doesNotAccessMemory() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::ReadNone);
+    return hasFnAttribute(Attribute::ReadNone);
   }
   void setDoesNotAccessMemory() {
     addFnAttr(Attribute::ReadNone);
@@ -269,9 +270,7 @@ public:
 
   /// @brief Determine if the function does not access or only reads memory.
   bool onlyReadsMemory() const {
-    return doesNotAccessMemory() ||
-      AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                 Attribute::ReadOnly);
+    return doesNotAccessMemory() || hasFnAttribute(Attribute::ReadOnly);
   }
   void setOnlyReadsMemory() {
     addFnAttr(Attribute::ReadOnly);
@@ -280,16 +279,14 @@ public:
   /// @brief Determine if the call can access memmory only using pointers based
   /// on its arguments.
   bool onlyAccessesArgMemory() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::ArgMemOnly);
+    return hasFnAttribute(Attribute::ArgMemOnly);
   }
   void setOnlyAccessesArgMemory() { addFnAttr(Attribute::ArgMemOnly); }
 
   /// @brief Determine if the function may only access memory that is 
   ///  inaccessible from the IR.
   bool onlyAccessesInaccessibleMemory() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::InaccessibleMemOnly);
+    return hasFnAttribute(Attribute::InaccessibleMemOnly);
   }
   void setOnlyAccessesInaccessibleMemory() {
     addFnAttr(Attribute::InaccessibleMemOnly);
@@ -298,8 +295,7 @@ public:
   /// @brief Determine if the function may only access memory that is
   //  either inaccessible from the IR or pointed to by its arguments.
   bool onlyAccessesInaccessibleMemOrArgMem() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::InaccessibleMemOrArgMemOnly);
+    return hasFnAttribute(Attribute::InaccessibleMemOrArgMemOnly);
   }
   void setOnlyAccessesInaccessibleMemOrArgMem() {
     addFnAttr(Attribute::InaccessibleMemOrArgMemOnly);
@@ -307,8 +303,7 @@ public:
 
   /// @brief Determine if the function cannot return.
   bool doesNotReturn() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoReturn);
+    return hasFnAttribute(Attribute::NoReturn);
   }
   void setDoesNotReturn() {
     addFnAttr(Attribute::NoReturn);

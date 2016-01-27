@@ -344,7 +344,6 @@ static void diagnosticHandler(const DiagnosticInfo &DI) {
   case DS_Error:
     message(LDPL_FATAL, "LLVM gold plugin has failed to create LTO module: %s",
             ErrStorage.c_str());
-    llvm_unreachable("Fatal doesn't return.");
   case DS_Warning:
     Level = LDPL_WARNING;
     break;
@@ -756,7 +755,7 @@ static void saveBCFile(StringRef Path, Module &M) {
   raw_fd_ostream OS(Path, EC, sys::fs::OpenFlags::F_None);
   if (EC)
     message(LDPL_FATAL, "Failed to write the output file.");
-  WriteBitcodeToFile(&M, OS, /* ShouldPreserveUseListOrder */ true);
+  WriteBitcodeToFile(&M, OS, /* ShouldPreserveUseListOrder */ false);
 }
 
 static void codegen(std::unique_ptr<Module> M) {

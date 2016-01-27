@@ -78,6 +78,8 @@ Here's the short story for getting up and running quickly with LLVM:
 
    The usual build uses `CMake <CMake.html>`_. If you would rather use
    autotools, see `Building LLVM with autotools <BuildingLLVMWithAutotools.html>`_.
+   Although the build is known to work with CMake >= 2.8.8, we recommend CMake
+   >= v3.2, especially if you're generating Ninja build files.
 
    * ``cd where you want to build llvm``
    * ``mkdir build``
@@ -625,6 +627,8 @@ Then, your .git/config should have [imap] sections.
         folder = "[Gmail]/&Tgtm+DBN-"
   ; example for Traditional Chinese
         folder = "[Gmail]/&g0l6Pw-"
+
+.. _developers-work-with-git-svn:
 
 For developers to work with git-svn
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

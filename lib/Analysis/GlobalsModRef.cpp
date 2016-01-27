@@ -310,7 +310,7 @@ void GlobalsAAResult::AnalyzeGlobals(Module &M) {
         ++NumNonAddrTakenGlobalVars;
 
         // If this global holds a pointer type, see if it is an indirect global.
-        if (GV.getType()->getElementType()->isPointerTy() &&
+        if (GV.getValueType()->isPointerTy() &&
             AnalyzeIndirectGlobalMemory(&GV))
           ++NumIndirectGlobalVars;
       }
@@ -353,37 +353,13 @@ bool GlobalsAAResult::AnalyzeUsesOfPointer(Value *V,
     } else if (auto CS = CallSite(I)) {
       // Make sure that this is just the function being called, not that it is
       // passing into the function.
-      if (!CS.isCallee(&U)) {
+      if (CS.isDataOperand(&U)) {
         // Detect calls to free.
-        if (isFreeCall(I, &TLI)) {
+        if (CS.isArgOperand(&U) && isFreeCall(I, &TLI)) {
           if (Writers)
             Writers->insert(CS->getParent()->getParent());
-        } else if (CS.doesNotCapture(CS.getArgumentNo(&U))) {
-          Function *ParentF = CS->getParent()->getParent();
-          // A nocapture argument may be read from or written to, but does not
-          // escape unless the call can somehow recurse.
-          //
-          // nocapture "indicates that the callee does not make any copies of
-          // the pointer that outlive itself". Therefore if we directly or
-          // indirectly recurse, we must treat the pointer as escaping.
-          if (FunctionToSCCMap[ParentF] ==
-              FunctionToSCCMap[CS.getCalledFunction()])
-            return true;
-          if (Readers)
-            Readers->insert(ParentF);
-          if (Writers)
-            Writers->insert(ParentF);
         } else {
           return true; // Argument of an unknown call.
-        }
-        // If the Callee is not ReadNone, it may read the global,
-        // and if it is not ReadOnly, it may also write to it.
-        Function *CalleeF = CS.getCalledFunction();
-        if (!CalleeF->doesNotAccessMemory()) {
-          if (Readers)
-            Readers->insert(CalleeF);
-          if (Writers && !CalleeF->onlyReadsMemory())
-            Writers->insert(CalleeF);
         }
       }
     } else if (ICmpInst *ICI = dyn_cast<ICmpInst>(I)) {
@@ -516,7 +492,7 @@ void GlobalsAAResult::AnalyzeCallGraph(CallGraph &CG, Module &M) {
 
       if (F->isDeclaration()) {
         // Try to get mod/ref behaviour from function attributes.
-        if (F->doesNotAccessMemory() || F->onlyAccessesInaccessibleMemory()) {
+        if (F->doesNotAccessMemory()) {
           // Can't do better than that!
         } else if (F->onlyReadsMemory()) {
           FI.addModRefInfo(MRI_Ref);
@@ -524,12 +500,6 @@ void GlobalsAAResult::AnalyzeCallGraph(CallGraph &CG, Module &M) {
             // This function might call back into the module and read a global -
             // consider every global as possibly being read by this function.
             FI.setMayReadAnyGlobal();
-        } else if (F->onlyAccessesArgMemory() || 
-                   F->onlyAccessesInaccessibleMemOrArgMem()) {
-          // This function may only access (read/write) memory pointed to by its
-          // arguments. If this pointer is to a global, this escaping use of the
-          // pointer is captured in AnalyzeUsesOfPointer().
-          FI.addModRefInfo(MRI_ModRef);
         } else {
           FI.addModRefInfo(MRI_ModRef);
           // Can't say anything useful unless it's an intrinsic - they don't
@@ -893,7 +863,11 @@ ModRefInfo GlobalsAAResult::getModRefInfoForArgument(ImmutableCallSite CS,
     GetUnderlyingObjects(A, Objects, DL);
     
     // All objects must be identified.
-    if (!std::all_of(Objects.begin(), Objects.end(), isIdentifiedObject))
+    if (!std::all_of(Objects.begin(), Objects.end(), isIdentifiedObject) &&
+        // Try ::alias to see if all objects are known not to alias GV.
+        !std::all_of(Objects.begin(), Objects.end(), [&](Value *V) {
+          return this->alias(MemoryLocation(V), MemoryLocation(GV)) == NoAlias;
+          }))
       return ConservativeResult;
 
     if (std::find(Objects.begin(), Objects.end(), GV) != Objects.end())

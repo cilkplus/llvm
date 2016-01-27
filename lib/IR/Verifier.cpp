@@ -45,6 +45,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/Verifier.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -145,6 +146,11 @@ private:
     OS << *C;
   }
 
+  template <typename T> void Write(ArrayRef<T> Vs) {
+    for (const T &V : Vs)
+      Write(V);
+  }
+
   template <typename T1, typename... Ts>
   void WriteTs(const T1 &V1, const Ts &... Vs) {
     Write(V1);
@@ -204,8 +210,18 @@ class Verifier : public InstVisitor<Verifier>, VerifierSupport {
   /// given function and the largest index passed to llvm.localrecover.
   DenseMap<Function *, std::pair<unsigned, unsigned>> FrameEscapeInfo;
 
+  // Maps catchswitches and cleanuppads that unwind to siblings to the
+  // terminators that indicate the unwind, used to detect cycles therein.
+  MapVector<Instruction *, TerminatorInst *> SiblingFuncletInfo;
+
   /// Cache of constants visited in search of ConstantExprs.
   SmallPtrSet<const Constant *, 32> ConstantExprVisited;
+
+  // Verify that this GlobalValue is only used in this module.
+  // This map is used to avoid visiting uses twice. We can arrive at a user
+  // twice, if they have multiple operands. In particular for very large
+  // constant expressions, we can arrive at a particular user many times.
+  SmallPtrSet<const Value *, 32> GlobalValueVisited;
 
   void checkAtomicMemAccessSize(const Module *M, Type *Ty,
                                 const Instruction *I);
@@ -245,9 +261,11 @@ public:
     Broken = false;
     // FIXME: We strip const here because the inst visitor strips const.
     visit(const_cast<Function &>(F));
+    verifySiblingFuncletUnwinds();
     InstsInThisBlock.clear();
     LandingPadResultTy = nullptr;
     SawFrameEscape = false;
+    SiblingFuncletInfo.clear();
 
     return !Broken;
   }
@@ -403,6 +421,7 @@ private:
   void visitCatchPadInst(CatchPadInst &CPI);
   void visitCatchReturnInst(CatchReturnInst &CatchReturn);
   void visitCleanupPadInst(CleanupPadInst &CPI);
+  void visitFuncletPadInst(FuncletPadInst &FPI);
   void visitCatchSwitchInst(CatchSwitchInst &CatchSwitch);
   void visitCleanupReturnInst(CleanupReturnInst &CRI);
 
@@ -428,6 +447,7 @@ private:
   void visitConstantExpr(const ConstantExpr *CE);
   void VerifyStatepoint(ImmutableCallSite CS);
   void verifyFrameRecoverIndices();
+  void verifySiblingFuncletUnwinds();
 
   // Module-level debug info verification...
   void verifyTypeRefs();
@@ -448,6 +468,18 @@ void Verifier::visit(Instruction &I) {
   InstVisitor<Verifier>::visit(I);
 }
 
+// Helper to recursively iterate over indirect users. By
+// returning false, the callback can ask to stop recursing
+// further.
+static void forEachUser(const Value *User,
+                        SmallPtrSet<const Value *, 32> &Visited,
+                        llvm::function_ref<bool(const Value *)> Callback) {
+  if (!Visited.insert(User).second)
+    return;
+  for (const Value *TheNextUser : User->materialized_users())
+    if (Callback(TheNextUser))
+      forEachUser(TheNextUser, Visited, Callback);
+}
 
 void Verifier::visitGlobalValue(const GlobalValue &GV) {
   Assert(!GV.isDeclaration() || GV.hasExternalLinkage() ||
@@ -467,11 +499,30 @@ void Verifier::visitGlobalValue(const GlobalValue &GV) {
 
   if (GV.isDeclarationForLinker())
     Assert(!GV.hasComdat(), "Declaration may not be in a Comdat!", &GV);
+
+  forEachUser(&GV, GlobalValueVisited, [&](const Value *V) -> bool {
+    if (const Instruction *I = dyn_cast<Instruction>(V)) {
+      if (!I->getParent() || !I->getParent()->getParent())
+        CheckFailed("Global is referenced by parentless instruction!", &GV,
+                    M, I);
+      else if (I->getParent()->getParent()->getParent() != M)
+        CheckFailed("Global is referenced in a different module!", &GV,
+                    M, I, I->getParent()->getParent(),
+                    I->getParent()->getParent()->getParent());
+      return false;
+    } else if (const Function *F = dyn_cast<Function>(V)) {
+      if (F->getParent() != M)
+        CheckFailed("Global is used by function in a different module", &GV,
+                    M, F, F->getParent());
+      return false;
+    }
+    return true;
+  });
 }
 
 void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
   if (GV.hasInitializer()) {
-    Assert(GV.getInitializer()->getType() == GV.getType()->getElementType(),
+    Assert(GV.getInitializer()->getType() == GV.getValueType(),
            "Global variable initializer type does not match global "
            "variable type!",
            &GV);
@@ -984,6 +1035,9 @@ void Verifier::visitDIMacro(const DIMacro &N) {
          N.getMacinfoType() == dwarf::DW_MACINFO_undef,
          "invalid macinfo type", &N);
   Assert(!N.getName().empty(), "anonymous macro", &N);
+  if (!N.getValue().empty()) {
+    assert(N.getValue().data()[0] != ' ' && "Macro value has a space prefix");
+  }
 }
 
 void Verifier::visitDIMacroFile(const DIMacroFile &N) {
@@ -1044,6 +1098,7 @@ void Verifier::visitDIGlobalVariable(const DIGlobalVariable &N) {
     Assert(isa<ConstantAsMetadata>(V) &&
                !isa<Function>(cast<ConstantAsMetadata>(V)->getValue()),
            "invalid global varaible ref", &N, V);
+    visitConstantExprsRecursively(cast<ConstantAsMetadata>(V)->getValue());
   }
   if (auto *Member = N.getRawStaticDataMemberDeclaration()) {
     Assert(isa<DIDerivedType>(Member), "invalid static data member declaration",
@@ -1508,13 +1563,19 @@ void Verifier::visitConstantExprsRecursively(const Constant *EntryC) {
     if (const auto *CE = dyn_cast<ConstantExpr>(C))
       visitConstantExpr(CE);
 
+    if (const auto *GV = dyn_cast<GlobalValue>(C)) {
+      // Global Values get visited separately, but we do need to make sure
+      // that the global value is in the correct module
+      Assert(GV->getParent() == M, "Referencing global in another module!",
+             EntryC, M, GV, GV->getParent());
+      continue;
+    }
+
     // Visit all sub-expressions.
     for (const Use &U : C->operands()) {
       const auto *OpC = dyn_cast<Constant>(U);
       if (!OpC)
         continue;
-      if (isa<GlobalValue>(OpC))
-        continue; // Global values get visited separately.
       if (!ConstantExprVisited.insert(OpC).second)
         continue;
       Stack.push_back(OpC);
@@ -1657,14 +1718,14 @@ void Verifier::VerifyStatepoint(ImmutableCallSite CS) {
     const CallInst *Call = dyn_cast<const CallInst>(U);
     Assert(Call, "illegal use of statepoint token", &CI, U);
     if (!Call) continue;
-    Assert(isGCRelocate(Call) || isGCResult(Call),
+    Assert(isa<GCRelocateInst>(Call) || isGCResult(Call),
            "gc.result or gc.relocate are the only value uses"
            "of a gc.statepoint",
            &CI, U);
     if (isGCResult(Call)) {
       Assert(Call->getArgOperand(0) == &CI,
              "gc.result connected to wrong gc.statepoint", &CI, Call);
-    } else if (isGCRelocate(Call)) {
+    } else if (isa<GCRelocateInst>(Call)) {
       Assert(Call->getArgOperand(0) == &CI,
              "gc.relocate connected to wrong gc.statepoint", &CI, Call);
     }
@@ -1690,6 +1751,59 @@ void Verifier::verifyFrameRecoverIndices() {
            "number of arguments passed ot llvm.localescape in the parent "
            "function",
            F);
+  }
+}
+
+static Instruction *getSuccPad(TerminatorInst *Terminator) {
+  BasicBlock *UnwindDest;
+  if (auto *II = dyn_cast<InvokeInst>(Terminator))
+    UnwindDest = II->getUnwindDest();
+  else if (auto *CSI = dyn_cast<CatchSwitchInst>(Terminator))
+    UnwindDest = CSI->getUnwindDest();
+  else
+    UnwindDest = cast<CleanupReturnInst>(Terminator)->getUnwindDest();
+  return UnwindDest->getFirstNonPHI();
+}
+
+void Verifier::verifySiblingFuncletUnwinds() {
+  SmallPtrSet<Instruction *, 8> Visited;
+  SmallPtrSet<Instruction *, 8> Active;
+  for (const auto &Pair : SiblingFuncletInfo) {
+    Instruction *PredPad = Pair.first;
+    if (Visited.count(PredPad))
+      continue;
+    Active.insert(PredPad);
+    TerminatorInst *Terminator = Pair.second;
+    do {
+      Instruction *SuccPad = getSuccPad(Terminator);
+      if (Active.count(SuccPad)) {
+        // Found a cycle; report error
+        Instruction *CyclePad = SuccPad;
+        SmallVector<Instruction *, 8> CycleNodes;
+        do {
+          CycleNodes.push_back(CyclePad);
+          TerminatorInst *CycleTerminator = SiblingFuncletInfo[CyclePad];
+          if (CycleTerminator != CyclePad)
+            CycleNodes.push_back(CycleTerminator);
+          CyclePad = getSuccPad(CycleTerminator);
+        } while (CyclePad != SuccPad);
+        Assert(false, "EH pads can't handle each other's exceptions",
+               ArrayRef<Instruction *>(CycleNodes));
+      }
+      // Don't re-walk a node we've already checked
+      if (!Visited.insert(SuccPad).second)
+        break;
+      // Walk to this successor if it has a map entry.
+      PredPad = SuccPad;
+      auto TermI = SiblingFuncletInfo.find(PredPad);
+      if (TermI == SiblingFuncletInfo.end())
+        break;
+      Terminator = TermI->second;
+      Active.insert(PredPad);
+    } while (true);
+    // Each node only has one successor, so we've walked all the active
+    // nodes' successors.
+    Active.clear();
   }
 }
 
@@ -2399,17 +2513,21 @@ void Verifier::VerifyCallSite(CallSite CS) {
     if (Intrinsic::ID ID = (Intrinsic::ID)F->getIntrinsicID())
       visitIntrinsicCallSite(ID, CS);
 
-  // Verify that a callsite has at most one "deopt" and one "funclet" operand
-  // bundle.
-  bool FoundDeoptBundle = false, FoundFuncletBundle = false;
+  // Verify that a callsite has at most one "deopt", at most one "funclet" and
+  // at most one "gc-transition" operand bundle.
+  bool FoundDeoptBundle = false, FoundFuncletBundle = false,
+       FoundGCTransitionBundle = false;
   for (unsigned i = 0, e = CS.getNumOperandBundles(); i < e; ++i) {
     OperandBundleUse BU = CS.getOperandBundleAt(i);
     uint32_t Tag = BU.getTagID();
     if (Tag == LLVMContext::OB_deopt) {
       Assert(!FoundDeoptBundle, "Multiple deopt operand bundles", I);
       FoundDeoptBundle = true;
-    }
-    if (Tag == LLVMContext::OB_funclet) {
+    } else if (Tag == LLVMContext::OB_gc_transition) {
+      Assert(!FoundGCTransitionBundle, "Multiple gc-transition operand bundles",
+             I);
+      FoundGCTransitionBundle = true;
+    } else if (Tag == LLVMContext::OB_funclet) {
       Assert(!FoundFuncletBundle, "Multiple funclet operand bundles", I);
       FoundFuncletBundle = true;
       Assert(BU.Inputs.size() == 1,
@@ -2892,6 +3010,13 @@ void Verifier::visitInsertValueInst(InsertValueInst &IVI) {
   visitInstruction(IVI);
 }
 
+static Value *getParentPad(Value *EHPad) {
+  if (auto *FPI = dyn_cast<FuncletPadInst>(EHPad))
+    return FPI->getParentPad();
+
+  return cast<CatchSwitchInst>(EHPad)->getParentPad();
+}
+
 void Verifier::visitEHPadPredecessors(Instruction &I) {
   assert(I.isEHPad());
 
@@ -2919,16 +3044,45 @@ void Verifier::visitEHPadPredecessors(Instruction &I) {
              "Block containg CatchPadInst must be jumped to "
              "only by its catchswitch.",
              CPI);
+    Assert(BB != CPI->getCatchSwitch()->getUnwindDest(),
+           "Catchswitch cannot unwind to one of its catchpads",
+           CPI->getCatchSwitch(), CPI);
     return;
   }
 
+  // Verify that each pred has a legal terminator with a legal to/from EH
+  // pad relationship.
+  Instruction *ToPad = &I;
+  Value *ToPadParent = getParentPad(ToPad);
   for (BasicBlock *PredBB : predecessors(BB)) {
     TerminatorInst *TI = PredBB->getTerminator();
+    Value *FromPad;
     if (auto *II = dyn_cast<InvokeInst>(TI)) {
       Assert(II->getUnwindDest() == BB && II->getNormalDest() != BB,
-             "EH pad must be jumped to via an unwind edge", &I, II);
-    } else if (!isa<CleanupReturnInst>(TI) && !isa<CatchSwitchInst>(TI)) {
-      Assert(false, "EH pad must be jumped to via an unwind edge", &I, TI);
+             "EH pad must be jumped to via an unwind edge", ToPad, II);
+      if (auto Bundle = II->getOperandBundle(LLVMContext::OB_funclet))
+        FromPad = Bundle->Inputs[0];
+      else
+        FromPad = ConstantTokenNone::get(II->getContext());
+    } else if (auto *CRI = dyn_cast<CleanupReturnInst>(TI)) {
+      FromPad = CRI->getCleanupPad();
+      Assert(FromPad != ToPadParent, "A cleanupret must exit its cleanup", CRI);
+    } else if (auto *CSI = dyn_cast<CatchSwitchInst>(TI)) {
+      FromPad = CSI;
+    } else {
+      Assert(false, "EH pad must be jumped to via an unwind edge", ToPad, TI);
+    }
+
+    // The edge may exit from zero or more nested pads.
+    for (;; FromPad = getParentPad(FromPad)) {
+      Assert(FromPad != ToPad,
+             "EH pad cannot handle exceptions raised within it", FromPad, TI);
+      if (FromPad == ToPadParent) {
+        // This is a legal unwind edge.
+        break;
+      }
+      Assert(!isa<ConstantTokenNone>(FromPad),
+             "A single unwind edge may only enter one EH pad", TI);
     }
   }
 }
@@ -2992,7 +3146,7 @@ void Verifier::visitCatchPadInst(CatchPadInst &CPI) {
   Assert(BB->getFirstNonPHI() == &CPI,
          "CatchPadInst not the first non-PHI instruction in the block.", &CPI);
 
-  visitInstruction(CPI);
+  visitFuncletPadInst(CPI);
 }
 
 void Verifier::visitCatchReturnInst(CatchReturnInst &CatchReturn) {
@@ -3019,37 +3173,163 @@ void Verifier::visitCleanupPadInst(CleanupPadInst &CPI) {
          &CPI);
 
   auto *ParentPad = CPI.getParentPad();
-  Assert(isa<CatchSwitchInst>(ParentPad) || isa<ConstantTokenNone>(ParentPad) ||
-             isa<CleanupPadInst>(ParentPad) || isa<CatchPadInst>(ParentPad),
+  Assert(isa<ConstantTokenNone>(ParentPad) || isa<FuncletPadInst>(ParentPad),
          "CleanupPadInst has an invalid parent.", &CPI);
 
-  User *FirstUser = nullptr;
-  BasicBlock *FirstUnwindDest = nullptr;
-  for (User *U : CPI.users()) {
-    BasicBlock *UnwindDest;
-    if (CleanupReturnInst *CRI = dyn_cast<CleanupReturnInst>(U)) {
-      UnwindDest = CRI->getUnwindDest();
-    } else if (isa<CleanupPadInst>(U) || isa<CatchSwitchInst>(U)) {
-      continue;
-    } else if (CallSite(U)) {
-      continue;
-    } else {
-      Assert(false, "bogus cleanuppad use", &CPI);
-    }
+  visitFuncletPadInst(CPI);
+}
 
-    if (!FirstUser) {
-      FirstUser = U;
-      FirstUnwindDest = UnwindDest;
-    } else {
-      Assert(
-          UnwindDest == FirstUnwindDest,
-          "cleanupret instructions from the same cleanuppad must have the same "
-          "unwind destination",
-          FirstUser, U);
+void Verifier::visitFuncletPadInst(FuncletPadInst &FPI) {
+  User *FirstUser = nullptr;
+  Value *FirstUnwindPad = nullptr;
+  SmallVector<FuncletPadInst *, 8> Worklist({&FPI});
+  while (!Worklist.empty()) {
+    FuncletPadInst *CurrentPad = Worklist.pop_back_val();
+    Value *UnresolvedAncestorPad = nullptr;
+    for (User *U : CurrentPad->users()) {
+      BasicBlock *UnwindDest;
+      if (auto *CRI = dyn_cast<CleanupReturnInst>(U)) {
+        UnwindDest = CRI->getUnwindDest();
+      } else if (auto *CSI = dyn_cast<CatchSwitchInst>(U)) {
+        // We allow catchswitch unwind to caller to nest
+        // within an outer pad that unwinds somewhere else,
+        // because catchswitch doesn't have a nounwind variant.
+        // See e.g. SimplifyCFGOpt::SimplifyUnreachable.
+        if (CSI->unwindsToCaller())
+          continue;
+        UnwindDest = CSI->getUnwindDest();
+      } else if (auto *II = dyn_cast<InvokeInst>(U)) {
+        UnwindDest = II->getUnwindDest();
+      } else if (isa<CallInst>(U)) {
+        // Calls which don't unwind may be found inside funclet
+        // pads that unwind somewhere else.  We don't *require*
+        // such calls to be annotated nounwind.
+        continue;
+      } else if (auto *CPI = dyn_cast<CleanupPadInst>(U)) {
+        // The unwind dest for a cleanup can only be found by
+        // recursive search.  Add it to the worklist, and we'll
+        // search for its first use that determines where it unwinds.
+        Worklist.push_back(CPI);
+        continue;
+      } else {
+        Assert(isa<CatchReturnInst>(U), "Bogus funclet pad use", U);
+        continue;
+      }
+
+      Value *UnwindPad;
+      bool ExitsFPI;
+      if (UnwindDest) {
+        UnwindPad = UnwindDest->getFirstNonPHI();
+        Value *UnwindParent = getParentPad(UnwindPad);
+        // Ignore unwind edges that don't exit CurrentPad.
+        if (UnwindParent == CurrentPad)
+          continue;
+        // Determine whether the original funclet pad is exited,
+        // and if we are scanning nested pads determine how many
+        // of them are exited so we can stop searching their
+        // children.
+        Value *ExitedPad = CurrentPad;
+        ExitsFPI = false;
+        do {
+          if (ExitedPad == &FPI) {
+            ExitsFPI = true;
+            // Now we can resolve any ancestors of CurrentPad up to
+            // FPI, but not including FPI since we need to make sure
+            // to check all direct users of FPI for consistency.
+            UnresolvedAncestorPad = &FPI;
+            break;
+          }
+          Value *ExitedParent = getParentPad(ExitedPad);
+          if (ExitedParent == UnwindParent) {
+            // ExitedPad is the ancestor-most pad which this unwind
+            // edge exits, so we can resolve up to it, meaning that
+            // ExitedParent is the first ancestor still unresolved.
+            UnresolvedAncestorPad = ExitedParent;
+            break;
+          }
+          ExitedPad = ExitedParent;
+        } while (!isa<ConstantTokenNone>(ExitedPad));
+      } else {
+        // Unwinding to caller exits all pads.
+        UnwindPad = ConstantTokenNone::get(FPI.getContext());
+        ExitsFPI = true;
+        UnresolvedAncestorPad = &FPI;
+      }
+
+      if (ExitsFPI) {
+        // This unwind edge exits FPI.  Make sure it agrees with other
+        // such edges.
+        if (FirstUser) {
+          Assert(UnwindPad == FirstUnwindPad, "Unwind edges out of a funclet "
+                                              "pad must have the same unwind "
+                                              "dest",
+                 &FPI, U, FirstUser);
+        } else {
+          FirstUser = U;
+          FirstUnwindPad = UnwindPad;
+          // Record cleanup sibling unwinds for verifySiblingFuncletUnwinds
+          if (isa<CleanupPadInst>(&FPI) && !isa<ConstantTokenNone>(UnwindPad) &&
+              getParentPad(UnwindPad) == getParentPad(&FPI))
+            SiblingFuncletInfo[&FPI] = cast<TerminatorInst>(U);
+        }
+      }
+      // Make sure we visit all uses of FPI, but for nested pads stop as
+      // soon as we know where they unwind to.
+      if (CurrentPad != &FPI)
+        break;
+    }
+    if (UnresolvedAncestorPad) {
+      if (CurrentPad == UnresolvedAncestorPad) {
+        // When CurrentPad is FPI itself, we don't mark it as resolved even if
+        // we've found an unwind edge that exits it, because we need to verify
+        // all direct uses of FPI.
+        assert(CurrentPad == &FPI);
+        continue;
+      }
+      // Pop off the worklist any nested pads that we've found an unwind
+      // destination for.  The pads on the worklist are the uncles,
+      // great-uncles, etc. of CurrentPad.  We've found an unwind destination
+      // for all ancestors of CurrentPad up to but not including
+      // UnresolvedAncestorPad.
+      Value *ResolvedPad = CurrentPad;
+      while (!Worklist.empty()) {
+        Value *UnclePad = Worklist.back();
+        Value *AncestorPad = getParentPad(UnclePad);
+        // Walk ResolvedPad up the ancestor list until we either find the
+        // uncle's parent or the last resolved ancestor.
+        while (ResolvedPad != AncestorPad) {
+          Value *ResolvedParent = getParentPad(ResolvedPad);
+          if (ResolvedParent == UnresolvedAncestorPad) {
+            break;
+          }
+          ResolvedPad = ResolvedParent;
+        }
+        // If the resolved ancestor search didn't find the uncle's parent,
+        // then the uncle is not yet resolved.
+        if (ResolvedPad != AncestorPad)
+          break;
+        // This uncle is resolved, so pop it from the worklist.
+        Worklist.pop_back();
+      }
     }
   }
 
-  visitInstruction(CPI);
+  if (FirstUnwindPad) {
+    if (auto *CatchSwitch = dyn_cast<CatchSwitchInst>(FPI.getParentPad())) {
+      BasicBlock *SwitchUnwindDest = CatchSwitch->getUnwindDest();
+      Value *SwitchUnwindPad;
+      if (SwitchUnwindDest)
+        SwitchUnwindPad = SwitchUnwindDest->getFirstNonPHI();
+      else
+        SwitchUnwindPad = ConstantTokenNone::get(FPI.getContext());
+      Assert(SwitchUnwindPad == FirstUnwindPad,
+             "Unwind edges out of a catch must have the same unwind dest as "
+             "the parent catchswitch",
+             &FPI, FirstUser, CatchSwitch);
+    }
+  }
+
+  visitInstruction(FPI);
 }
 
 void Verifier::visitCatchSwitchInst(CatchSwitchInst &CatchSwitch) {
@@ -3068,18 +3348,29 @@ void Verifier::visitCatchSwitchInst(CatchSwitchInst &CatchSwitch) {
          "CatchSwitchInst not the first non-PHI instruction in the block.",
          &CatchSwitch);
 
+  auto *ParentPad = CatchSwitch.getParentPad();
+  Assert(isa<ConstantTokenNone>(ParentPad) || isa<FuncletPadInst>(ParentPad),
+         "CatchSwitchInst has an invalid parent.", ParentPad);
+
   if (BasicBlock *UnwindDest = CatchSwitch.getUnwindDest()) {
     Instruction *I = UnwindDest->getFirstNonPHI();
     Assert(I->isEHPad() && !isa<LandingPadInst>(I),
            "CatchSwitchInst must unwind to an EH block which is not a "
            "landingpad.",
            &CatchSwitch);
+
+    // Record catchswitch sibling unwinds for verifySiblingFuncletUnwinds
+    if (getParentPad(I) == ParentPad)
+      SiblingFuncletInfo[&CatchSwitch] = &CatchSwitch;
   }
 
-  auto *ParentPad = CatchSwitch.getParentPad();
-  Assert(isa<CatchSwitchInst>(ParentPad) || isa<ConstantTokenNone>(ParentPad) ||
-             isa<CleanupPadInst>(ParentPad) || isa<CatchPadInst>(ParentPad),
-         "CatchSwitchInst has an invalid parent.", ParentPad);
+  Assert(CatchSwitch.getNumHandlers() != 0,
+         "CatchSwitchInst cannot have empty handler list", &CatchSwitch);
+
+  for (BasicBlock *Handler : CatchSwitch.handlers()) {
+    Assert(isa<CatchPadInst>(Handler->getFirstNonPHI()),
+           "CatchSwitchInst handlers must be catchpads", &CatchSwitch, Handler);
+  }
 
   visitTerminatorInst(CatchSwitch);
 }
@@ -3622,9 +3913,6 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
 
     VerifyStatepoint(CS);
     break;
-  case Intrinsic::experimental_gc_result_int:
-  case Intrinsic::experimental_gc_result_float:
-  case Intrinsic::experimental_gc_result_ptr:
   case Intrinsic::experimental_gc_result: {
     Assert(CS.getParent()->getParent()->hasGC(),
            "Enclosing function does not use GC.", CS);
@@ -3649,22 +3937,22 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
   case Intrinsic::experimental_gc_relocate: {
     Assert(CS.getNumArgOperands() == 3, "wrong number of arguments", CS);
 
+    Assert(isa<PointerType>(CS.getType()->getScalarType()),
+           "gc.relocate must return a pointer or a vector of pointers", CS);
+
     // Check that this relocate is correctly tied to the statepoint
 
     // This is case for relocate on the unwinding path of an invoke statepoint
-    if (ExtractValueInst *ExtractValue =
-          dyn_cast<ExtractValueInst>(CS.getArgOperand(0))) {
-      Assert(isa<LandingPadInst>(ExtractValue->getAggregateOperand()),
-             "gc relocate on unwind path incorrectly linked to the statepoint",
-             CS);
+    if (LandingPadInst *LandingPad =
+          dyn_cast<LandingPadInst>(CS.getArgOperand(0))) {
 
       const BasicBlock *InvokeBB =
-        ExtractValue->getParent()->getUniquePredecessor();
+          LandingPad->getParent()->getUniquePredecessor();
 
       // Landingpad relocates should have only one predecessor with invoke
       // statepoint terminator
       Assert(InvokeBB, "safepoints should have unique landingpads",
-             ExtractValue->getParent());
+             LandingPad->getParent());
       Assert(InvokeBB->getTerminator(), "safepoint block should be well formed",
              InvokeBB);
       Assert(isStatepoint(InvokeBB->getTerminator()),
@@ -3681,8 +3969,8 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
 
     // Verify rest of the relocate arguments
 
-    GCRelocateOperands Ops(CS);
-    ImmutableCallSite StatepointCS(Ops.getStatepoint());
+    ImmutableCallSite StatepointCS(
+        cast<GCRelocateInst>(*CS.getInstruction()).getStatepoint());
 
     // Both the base and derived must be piped through the safepoint
     Value* Base = CS.getArgOperand(1);
@@ -3734,17 +4022,20 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
            "'gc parameters' section of the statepoint call",
            CS);
 
-    // Relocated value must be a pointer type, but gc_relocate does not need to return the
-    // same pointer type as the relocated pointer. It can be casted to the correct type later
-    // if it's desired. However, they must have the same address space.
-    GCRelocateOperands Operands(CS);
-    Assert(Operands.getDerivedPtr()->getType()->isPointerTy(),
+    // Relocated value must be either a pointer type or vector-of-pointer type,
+    // but gc_relocate does not need to return the same pointer type as the
+    // relocated pointer. It can be casted to the correct type later if it's
+    // desired. However, they must have the same address space and 'vectorness'
+    GCRelocateInst &Relocate = cast<GCRelocateInst>(*CS.getInstruction());
+    Assert(Relocate.getDerivedPtr()->getType()->getScalarType()->isPointerTy(),
            "gc.relocate: relocated value must be a gc pointer", CS);
 
-    // gc_relocate return type must be a pointer type, and is verified earlier in
-    // VerifyIntrinsicType().
-    Assert(cast<PointerType>(CS.getType())->getAddressSpace() ==
-           cast<PointerType>(Operands.getDerivedPtr()->getType())->getAddressSpace(),
+    auto ResultType = CS.getType();
+    auto DerivedType = Relocate.getDerivedPtr()->getType();
+    Assert(ResultType->isVectorTy() == DerivedType->isVectorTy(),
+           "gc.relocate: vector relocates to vector and pointer to pointer", CS);
+    Assert(ResultType->getPointerAddressSpace() ==
+           DerivedType->getPointerAddressSpace(),
            "gc.relocate: relocating a pointer shouldn't change its address space", CS);
     break;
   }

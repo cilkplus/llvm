@@ -1,4 +1,4 @@
-; RUN: opt -mtriple=x86_x64-pc-windows-msvc -S -winehprepare -disable-demotion -disable-cleanups < %s | FileCheck %s
+; RUN: opt -mtriple=x86_64-pc-windows-msvc -S -winehprepare -disable-demotion -disable-cleanups < %s | FileCheck %s
 
 declare i32 @__CxxFrameHandler3(...)
 
@@ -33,7 +33,7 @@ right:
 
 shared:
   %x = call i32 @g()
-  invoke void @f() [ "funclet"(token %0) ]
+  invoke void @f()
           to label %shared.cont unwind label %inner
 
 shared.cont:
@@ -72,7 +72,7 @@ right:
 
 shared:
   %x = call i32 @g()
-  invoke void @f() [ "funclet"(token %0) ]
+  invoke void @f()
           to label %shared.cont unwind label %inner
 
 shared.cont:

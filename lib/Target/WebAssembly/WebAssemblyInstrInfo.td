@@ -66,7 +66,23 @@ def WebAssemblywrapper  : SDNode<"WebAssemblyISD::Wrapper",
 // WebAssembly-specific Operands.
 //===----------------------------------------------------------------------===//
 
+let OperandNamespace = "WebAssembly" in {
+
+let OperandType = "OPERAND_BASIC_BLOCK" in
 def bb_op : Operand<OtherVT>;
+
+let OperandType = "OPERAND_FPIMM" in {
+def f32imm_op : Operand<f32>;
+def f64imm_op : Operand<f64>;
+} // OperandType = "OPERAND_FPIMM"
+
+let OperandType = "OPERAND_P2ALIGN" in {
+def P2Align : Operand<i32> {
+  let PrintMethod = "printWebAssemblyP2AlignOperand";
+}
+} // OperandType = "OPERAND_P2ALIGN"
+
+} // OperandNamespace = "WebAssembly"
 
 //===----------------------------------------------------------------------===//
 // WebAssembly Instruction Format Definitions.
@@ -113,38 +129,27 @@ defm : LOCAL<I64>;
 defm : LOCAL<F32>;
 defm : LOCAL<F64>;
 
-let isMoveImm = 1 in {
+let isMoveImm = 1, isAsCheapAsAMove = 1, isReMaterializable = 1 in {
 def CONST_I32 : I<(outs I32:$res), (ins i32imm:$imm),
                   [(set I32:$res, imm:$imm)],
                   "i32.const\t$res, $imm">;
 def CONST_I64 : I<(outs I64:$res), (ins i64imm:$imm),
                   [(set I64:$res, imm:$imm)],
                   "i64.const\t$res, $imm">;
-def CONST_F32 : I<(outs F32:$res), (ins f32imm:$imm),
+def CONST_F32 : I<(outs F32:$res), (ins f32imm_op:$imm),
                   [(set F32:$res, fpimm:$imm)],
                   "f32.const\t$res, $imm">;
-def CONST_F64 : I<(outs F64:$res), (ins f64imm:$imm),
+def CONST_F64 : I<(outs F64:$res), (ins f64imm_op:$imm),
                   [(set F64:$res, fpimm:$imm)],
                   "f64.const\t$res, $imm">;
-} // isMoveImm = 1
+} // isMoveImm = 1, isAsCheapAsAMove = 1, isReMaterializable = 1
 
 } // Defs = [ARGUMENTS]
 
-def : Pat<(i32 (WebAssemblywrapper tglobaladdr:$dst)),
-          (CONST_I32 tglobaladdr:$dst)>;
-def : Pat<(i32 (WebAssemblywrapper texternalsym:$dst)),
-          (CONST_I32 texternalsym:$dst)>;
-def : Pat<(i32 (WebAssemblywrapper tjumptable:$dst)),
-          (CONST_I32 tjumptable:$dst)>;
-
-let Defs = [ARGUMENTS] in {
-
-// Function signature and local variable declaration "instructions".
-def PARAM  : I<(outs), (ins variable_ops), [], ".param  \t">;
-def RESULT : I<(outs), (ins variable_ops), [], ".result \t">;
-def LOCAL  : I<(outs), (ins variable_ops), [], ".local  \t">;
-
-} // Defs = [ARGUMENTS]
+def : Pat<(i32 (WebAssemblywrapper tglobaladdr:$addr)),
+          (CONST_I32 tglobaladdr:$addr)>;
+def : Pat<(i32 (WebAssemblywrapper texternalsym:$addr)),
+          (CONST_I32 texternalsym:$addr)>;
 
 //===----------------------------------------------------------------------===//
 // Additional sets of instructions.
