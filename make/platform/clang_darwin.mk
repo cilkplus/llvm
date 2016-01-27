@@ -206,6 +206,8 @@ CCKEXT_PROFILE_FUNCTIONS := \
 	InstrProfilingBuffer \
 	InstrProfilingPlatformDarwin
 
+FUNCTIONS.cilk_osx := $(CilkrtsFunctions)
+
 CCKEXT_COMMON_FUNCTIONS := \
 	$(CCKEXT_PROFILE_FUNCTIONS) \
 	absvdi2 \
@@ -463,6 +465,9 @@ FUNCTIONS.cc_kext.x86_64h := \
 KERNEL_USE.cc_kext := 1
 KERNEL_USE.cc_kext_ios := 1
 
+Headers.cilk_osx := $(CilkHeaders)
+
 VISIBILITY_HIDDEN := 1
+VISIBILITY_HIDDEN.cilk_osx := 0
 
 SHARED_LIBRARY_SUFFIX := dylib

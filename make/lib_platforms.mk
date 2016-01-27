@@ -4,7 +4,7 @@
 
 # The simple variables configurations can define.
 PlainConfigVariables := Configs Description
-PerConfigVariables := UniversalArchs Arch $(AvailableOptions)
+PerConfigVariables := UniversalArchs Arch Headers $(AvailableOptions)
 RequiredConfigVariables := Configs Description
 
 ###
@@ -36,6 +36,7 @@ $$(foreach var,$(PerConfigVariables),\
 # Get the platform variables.
 include make/options.mk
 include $(1)
+Headers :=
 
 # Check for undefined required variables.
 $$(foreach var,$(RequiredConfigVariables),\

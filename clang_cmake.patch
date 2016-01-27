@@ -1,0 +1,12 @@
+diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
+index 4bc6f7a..7b6897d 100644
+--- a/lib/CMakeLists.txt
++++ b/lib/CMakeLists.txt
+@@ -1,5 +1,7 @@
+ # First, add the subdirectories which contain feature-based runtime libraries
+ # and several convenience helper libraries.
++add_subdirectory(cilk)
++link_directories ("cilk")
+ 
+ include(AddCompilerRT)
+ include(SanitizerUtils)
