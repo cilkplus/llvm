@@ -1,4 +1,3 @@
-
 //==--- DiagnosticSemaKinds.td - libsema diagnostics ----------------------===//
 //
 //                     The LLVM Compiler Infrastructure
@@ -255,6 +254,13 @@ def err_bad_variable_name : Error<
 def err_bad_parameter_name : Error<
   "%0 cannot be the name of a parameter">;
 def err_parameter_name_omitted : Error<"parameter name omitted">;
+def err_anyx86_interrupt_attribute : Error<
+  "%select{x86|x86-64}0 'interrupt' attribute only applies to functions that "
+  "have %select{a 'void' return type|"
+  "only a pointer parameter optionally followed by an integer parameter|"
+  "a pointer as the first parameter|a %2 type as the second parameter}1">;
+def err_anyx86_interrupt_called : Error<
+  "interrupt service routine cannot be called directly">;
 def warn_mips_interrupt_attribute : Warning<
    "MIPS 'interrupt' attribute only applies to functions that have "
    "%select{no parameters|a 'void' return type}0">,
@@ -2400,6 +2406,8 @@ def warn_attribute_dll_instantiated_base_class : Warning<
   "propagating dll attribute to %select{already instantiated|explicitly specialized}0 "
   "base class template without dll attribute is not supported">,
   InGroup<DiagGroup<"unsupported-dll-base-class-template">>, DefaultIgnore;
+def err_attribute_dll_ambiguous_default_ctor : Error<
+  "'__declspec(dllexport)' cannot be applied to more than one default constructor in %0">;
 def err_attribute_weakref_not_static : Error<
   "weakref declaration must have internal linkage">;
 def err_attribute_weakref_not_global_context : Error<
@@ -2433,7 +2441,8 @@ def warn_attribute_wrong_decl_type : Warning<
   "Objective-C instance methods|init methods of interface or class extension declarations|"
   "variables, functions and classes|Objective-C protocols|"
   "functions and global variables|structs, unions, and typedefs|structs and typedefs|"
-  "interface or protocol declarations|kernel functions|non-K&R-style functions}1">,
+  "interface or protocol declarations|kernel functions|non-K&R-style functions|"
+  "variables, fields and typedefs}1">,
   InGroup<IgnoredAttributes>;
 def err_attribute_wrong_decl_type : Error<warn_attribute_wrong_decl_type.Text>;
 def warn_type_attribute_wrong_type : Warning<
@@ -2843,8 +2852,6 @@ def warn_vector_mode_deprecated : Warning<
   InGroup<DeprecatedAttributes>;
 def err_complex_mode_vector_type : Error<
   "type of machine mode does not support base vector types">;
-def err_attr_wrong_decl : Error<
-  "%0 attribute invalid on this declaration, requires typedef or value">;
 def warn_attribute_nonnull_no_pointers : Warning<
   "'nonnull' attribute applied to function with no pointer arguments">,
   InGroup<IgnoredAttributes>;
@@ -3112,6 +3119,10 @@ def note_addrof_ovl_candidate_disabled_by_enable_if_attr : Note<
 def note_ovl_candidate_failed_overload_resolution : Note<
     "candidate template ignored: couldn't resolve reference to overloaded "
     "function %0">;
+def note_ovl_candidate_deduced_mismatch : Note<
+    "candidate template ignored: deduced type "
+    "%diff{$ of %ordinal0 parameter does not match adjusted type $ of argument"
+    "|of %ordinal0 parameter does not match adjusted type of argument}1,2%3">;
 def note_ovl_candidate_non_deduced_mismatch : Note<
     "candidate template ignored: could not match %diff{$ against $|types}0,1">;
 // This note is needed because the above note would sometimes print two
@@ -5797,12 +5808,14 @@ def warn_non_virtual_dtor : Warning<
   "%0 has virtual functions but non-virtual destructor">,
   InGroup<NonVirtualDtor>, DefaultIgnore;
 def warn_delete_non_virtual_dtor : Warning<
-  "delete called on non-final %0 that has virtual functions "
-  "but non-virtual destructor">,
+  "%select{delete|destructor}0 called on non-final %1 that has "
+  "virtual functions but non-virtual destructor">,
   InGroup<DeleteNonVirtualDtor>, DefaultIgnore;
+def note_delete_non_virtual : Note<
+  "qualify call to silence this warning">;
 def warn_delete_abstract_non_virtual_dtor : Warning<
-  "delete called on %0 that is abstract but has non-virtual destructor">,
-  InGroup<DeleteNonVirtualDtor>;
+  "%select{delete|destructor}0 called on %1 that is abstract but has "
+  "non-virtual destructor">, InGroup<DeleteNonVirtualDtor>;
 def warn_overloaded_virtual : Warning<
   "%q0 hides overloaded virtual %select{function|functions}1">,
   InGroup<OverloadedVirtual>, DefaultIgnore;
@@ -6390,6 +6403,8 @@ def err_deleted_function_use : Error<"attempt to use a deleted function">;
 
 def err_kern_type_not_void_return : Error<
   "kernel function type %0 must have void return type">;
+def err_kern_is_nonstatic_method : Error<
+  "kernel function %0 must be a free function or static member function">;
 def err_config_scalar_return : Error<
   "CUDA special function 'cudaConfigureCall' must have scalar return type">;
 def err_kern_call_not_global_function : Error<
@@ -6402,6 +6417,17 @@ def err_ref_bad_target : Error<
 def warn_host_calls_from_host_device : Warning<
   "calling __host__ function %0 from __host__ __device__ function %1 can lead to runtime errors">,
   InGroup<CudaCompat>;
+def warn_kern_is_method : Extension<
+  "kernel function %0 is a member function; this may not be accepted by nvcc">,
+  InGroup<CudaCompat>;
+def warn_kern_is_inline : Warning<
+  "ignored 'inline' attribute on kernel function %0">,
+  InGroup<CudaCompat>;
+def err_variadic_device_fn : Error<
+  "CUDA device code does not support variadic functions">;
+def err_va_arg_in_device : Error<
+  "CUDA device code does not support va_arg">;
+def err_alias_not_supported_on_nvptx : Error<"CUDA does not support aliases">;
 
 def warn_non_pod_vararg_with_format_string : Warning<
   "cannot pass %select{non-POD|non-trivial}0 object of type %1 to variadic "
@@ -7637,6 +7663,10 @@ def err_wrong_sampler_addressspace: Error<
   "sampler type cannot be used with the __local and __global address space qualifiers">;
 def err_opencl_global_invalid_addr_space : Error<
   "program scope variable must reside in %0 address space">;
+def err_missing_actual_pipe_type : Error<
+  "missing actual type specifier for pipe">;
+def err_reference_pipe_type : Error <
+  "pipes packet types cannot be of reference type">;
 def err_opencl_no_main : Error<"%select{function|kernel}0 cannot be called 'main'">;
 def err_opencl_kernel_attr :
   Error<"attribute %0 can only be applied to a kernel function">;
@@ -7649,6 +7679,16 @@ def err_atomic_init_constant : Error<
   " in the declaration statement in the program scope">;
 def err_opencl_implicit_vector_conversion : Error<
   "implicit conversions between vector types (%0 and %1) are not permitted">;
+
+// OpenCL v2.0 s6.13.6 -- Builtin Pipe Functions
+def err_opencl_builtin_pipe_first_arg : Error<
+  "first argument to %0 must be a pipe type">;
+def err_opencl_builtin_pipe_arg_num : Error<
+    "invalid number of arguments to function: %0">;
+def err_opencl_builtin_pipe_invalid_arg : Error<
+  "invalid argument type to function %0 (expecting %1)">;
+def err_opencl_builtin_pipe_invalid_access_modifier : Error<
+  "invalid pipe access modifier (expecting %0)">;
 
 // OpenCL Section 6.8.g
 def err_opencl_unknown_type_specifier : Error<
@@ -7683,10 +7723,28 @@ def err_omp_reduction_incomplete_type : Error<
   "a reduction list item with incomplete type %0">;
 def err_omp_unexpected_clause_value : Error<
   "expected %0 in OpenMP clause '%1'">;
-def err_omp_expected_var_name : Error<
-  "expected variable name">;
-def err_omp_expected_var_name_or_array_item : Error<
-  "expected variable name, array element or array section">;
+def err_omp_expected_var_name_member_expr : Error<
+  "expected variable name%select{| or data member of current class}0">;
+def err_omp_expected_var_name_member_expr_or_array_item : Error<
+  "expected variable name%select{|, data member of current class}0, array element or array section">;
+def err_omp_expected_named_var_member_or_array_expression: Error<
+  "expected expression containing only member accesses and/or array sections based on named variables">;
+def err_omp_bit_fields_forbidden_in_map_clause : Error<
+  "bit fields cannot be used to specify storage in a map clause">;
+def err_omp_array_section_in_rightmost_expression : Error<
+  "array section can only be associated with the rightmost variable in a map clause expression">;
+def err_omp_union_type_not_allowed : Error<
+  "mapped storage cannot be derived from a union">;
+def err_omp_expected_access_to_data_field : Error<
+  "expected access to data field">;
+def err_omp_multiple_array_items_in_map_clause : Error<
+  "multiple array elements associated with the same variable are not allowed in map clauses of the same construct">;
+def err_omp_pointer_mapped_along_with_derived_section : Error<
+  "pointer cannot be mapped along with a section derived from itself">;
+def err_omp_original_storage_is_shared_and_does_not_contain : Error<
+  "original storage of expression in data environment is shared but data environment do not fully contain mapped expression storage">;
+def err_omp_same_pointer_derreferenced : Error<
+  "same pointer derreferenced in multiple different ways in map clause expressions">;
 def note_omp_task_predetermined_firstprivate_here : Note<
   "predetermined as a firstprivate in a task construct here">;
 def err_omp_threadprivate_incomplete_type : Error<
@@ -7789,8 +7847,6 @@ def warn_omp_loop_64_bit_var : Warning<
   InGroup<OpenMPLoopForm>;
 def err_omp_unknown_reduction_identifier : Error<
   "incorrect reduction identifier, expected one of '+', '-', '*', '&', '|', '^', '&&', '||', 'min' or 'max'">;
-def err_omp_reduction_type_array : Error<
-  "a reduction list item with array type %0">;
 def err_omp_reduction_ref_type_arg : Error<
   "argument of OpenMP clause 'reduction' must reference the same object in all threads">;
 def err_omp_clause_not_arithmetic_type_arg : Error<
@@ -7921,6 +7977,10 @@ def err_omp_map_shared_storage : Error<
   "variable already marked as mapped in current construct">;
 def err_omp_not_mappable_type : Error<
   "type %0 is not mappable to target">;
+def err_omp_invalid_map_type_for_directive : Error<
+  "%select{map type '%1' is not allowed|map type must be specified}0 for '#pragma omp %2'">;
+def err_omp_no_map_for_directive : Error<
+  "expected at least one map clause for '#pragma omp %0'">;
 def note_omp_polymorphic_in_target : Note<
   "mappable type cannot be polymorphic">;
 def note_omp_static_member_in_target : Note<
@@ -7951,6 +8011,26 @@ def err_omp_firstprivate_distribute_in_teams_reduction : Error<
   "reduction variable in '#pragma omp teams' cannot be firstprivate in '#pragma omp distribute'">;
 def err_omp_depend_clause_thread_simd : Error<
   "'depend' clauses cannot be mixed with '%0' clause">;
+def err_omp_depend_sink_wrong_expr : Error<
+  "expected expression form x[+-d], where x is the loop iteration variable and d is a constant non-negative integer">;
+def err_omp_depend_sink_expected_loop_iteration : Error<
+  "expected %0 loop iteration variable">;
+def err_omp_depend_sink_unexpected_expr : Error<
+  "unexpected expression: number of expressions is larger than the number of associated loops">;
+def err_omp_depend_sink_expected_plus_minus : Error<
+  "expected '+' or '-' operation">;
+def err_omp_depend_sink_source_not_allowed : Error<
+  "'depend(%select{source|sink:vec}0)' clause%select{|s}0 cannot be mixed with 'depend(%select{sink:vec|source}0)' clause%select{s|}0">;
+def err_omp_linear_ordered : Error<
+  "'linear' clause cannot be specified along with 'ordered' clause with a parameter">;
+def err_omp_unexpected_schedule_modifier : Error<
+  "modifier '%0' cannot be used along with modifier '%1'">;
+def err_omp_schedule_nonmonotonic_static : Error<
+  "'nonmonotonic' modifier can only be specified with 'dynamic' or 'guided' schedule kind">;
+def err_omp_schedule_nonmonotonic_ordered : Error<
+  "'schedule' clause with 'nonmonotonic' modifier cannot be specified if an 'ordered' clause is specified">;
+def err_omp_ordered_simd : Error<
+  "'ordered' clause with a parameter can not be specified in '#pragma omp %0' directive">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {

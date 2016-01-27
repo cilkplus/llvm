@@ -395,7 +395,7 @@ public:
   /// due to transformation.
   ///
   /// \returns true if an error occurred, false otherwise.
-  bool TransformExprs(Expr **Inputs, unsigned NumInputs, bool IsCall,
+  bool TransformExprs(Expr *const *Inputs, unsigned NumInputs, bool IsCall,
                       SmallVectorImpl<Expr *> &Outputs,
                       bool *ArgChanged = nullptr);
 
@@ -1053,6 +1053,9 @@ public:
   /// Subclasses may override this routine to provide different behavior.
   QualType RebuildAtomicType(QualType ValueType, SourceLocation KWLoc);
 
+  /// \brief Build a new pipe type given its value type.
+  QualType RebuildPipeType(QualType ValueType, SourceLocation KWLoc);
+
   /// \brief Build a new template name given a nested name specifier, a flag
   /// indicating whether the "template" keyword was provided, and the template
   /// that the template name refers to.
@@ -1485,15 +1488,14 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *RebuildOMPScheduleClause(OpenMPScheduleClauseKind Kind,
-                                      Expr *ChunkSize,
-                                      SourceLocation StartLoc,
-                                      SourceLocation LParenLoc,
-                                      SourceLocation KindLoc,
-                                      SourceLocation CommaLoc,
-                                      SourceLocation EndLoc) {
+  OMPClause *RebuildOMPScheduleClause(
+      OpenMPScheduleClauseModifier M1, OpenMPScheduleClauseModifier M2,
+      OpenMPScheduleClauseKind Kind, Expr *ChunkSize, SourceLocation StartLoc,
+      SourceLocation LParenLoc, SourceLocation M1Loc, SourceLocation M2Loc,
+      SourceLocation KindLoc, SourceLocation CommaLoc, SourceLocation EndLoc) {
     return getSema().ActOnOpenMPScheduleClause(
-        Kind, ChunkSize, StartLoc, LParenLoc, KindLoc, CommaLoc, EndLoc);
+        M1, M2, Kind, ChunkSize, StartLoc, LParenLoc, M1Loc, M2Loc, KindLoc,
+        CommaLoc, EndLoc);
   }
 
   /// \brief Build a new OpenMP 'ordered' clause.
@@ -1663,14 +1665,15 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *RebuildOMPMapClause(
-      OpenMPMapClauseKind MapTypeModifier, OpenMPMapClauseKind MapType,
-      SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
-      SourceLocation StartLoc, SourceLocation LParenLoc,
-      SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPMapClause(MapTypeModifier, MapType, MapLoc,
-                                          ColonLoc, VarList,StartLoc,
-                                          LParenLoc, EndLoc);
+  OMPClause *
+  RebuildOMPMapClause(OpenMPMapClauseKind MapTypeModifier,
+                      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
+                      SourceLocation MapLoc, SourceLocation ColonLoc,
+                      ArrayRef<Expr *> VarList, SourceLocation StartLoc,
+                      SourceLocation LParenLoc, SourceLocation EndLoc) {
+    return getSema().ActOnOpenMPMapClause(MapTypeModifier, MapType,
+                                          IsMapTypeImplicit, MapLoc, ColonLoc,
+                                          VarList, StartLoc, LParenLoc, EndLoc);
   }
 
   /// \brief Build a new OpenMP 'num_teams' clause.
@@ -1737,6 +1740,19 @@ public:
                                   SourceLocation LParenLoc,
                                   SourceLocation EndLoc) {
     return getSema().ActOnOpenMPHintClause(Hint, StartLoc, LParenLoc, EndLoc);
+  }
+
+  /// \brief Build a new OpenMP 'dist_schedule' clause.
+  ///
+  /// By default, performs semantic analysis to build the new OpenMP clause.
+  /// Subclasses may override this routine to provide different behavior.
+  OMPClause *
+  RebuildOMPDistScheduleClause(OpenMPDistScheduleClauseKind Kind,
+                               Expr *ChunkSize, SourceLocation StartLoc,
+                               SourceLocation LParenLoc, SourceLocation KindLoc,
+                               SourceLocation CommaLoc, SourceLocation EndLoc) {
+    return getSema().ActOnOpenMPDistScheduleClause(
+        Kind, ChunkSize, StartLoc, LParenLoc, KindLoc, CommaLoc, EndLoc);
   }
 
   /// \brief Rebuild the operand to an Objective-C \@synchronized statement.
@@ -2838,9 +2854,8 @@ public:
   /// By default, performs semantic analysis to build the new expression.
   /// Subclasses may override this routine to provide different behavior.
   ExprResult RebuildObjCDictionaryLiteral(SourceRange Range,
-                                          ObjCDictionaryElement *Elements,
-                                          unsigned NumElements) {
-    return getSema().BuildObjCDictionaryLiteral(Range, Elements, NumElements);
+                              MutableArrayRef<ObjCDictionaryElement> Elements) {
+    return getSema().BuildObjCDictionaryLiteral(Range, Elements);
   }
 
   /// \brief Build a new Objective-C \@encode expression.
@@ -3290,7 +3305,7 @@ ExprResult TreeTransform<Derived>::TransformInitializer(Expr *Init,
 }
 
 template<typename Derived>
-bool TreeTransform<Derived>::TransformExprs(Expr **Inputs,
+bool TreeTransform<Derived>::TransformExprs(Expr *const *Inputs,
                                             unsigned NumInputs,
                                             bool IsCall,
                                       SmallVectorImpl<Expr *> &Outputs,
@@ -3671,7 +3686,7 @@ void TreeTransform<Derived>::InventTemplateArgumentLoc(
   case TemplateArgument::Template:
   case TemplateArgument::TemplateExpansion: {
     NestedNameSpecifierLocBuilder Builder;
-    TemplateName Template = Arg.getAsTemplate();
+    TemplateName Template = Arg.getAsTemplateOrTemplatePattern();
     if (DependentTemplateName *DTN = Template.getAsDependentTemplateName())
       Builder.MakeTrivial(SemaRef.Context, DTN->getQualifier(), Loc);
     else if (QualifiedTemplateName *QTN = Template.getAsQualifiedTemplateName())
@@ -5415,6 +5430,26 @@ QualType TreeTransform<Derived>::TransformAtomicType(TypeLocBuilder &TLB,
   return Result;
 }
 
+template <typename Derived>
+QualType TreeTransform<Derived>::TransformPipeType(TypeLocBuilder &TLB,
+                                                   PipeTypeLoc TL) {
+  QualType ValueType = getDerived().TransformType(TLB, TL.getValueLoc());
+  if (ValueType.isNull())
+    return QualType();
+
+  QualType Result = TL.getType();
+  if (getDerived().AlwaysRebuild() || ValueType != TL.getValueLoc().getType()) {
+    Result = getDerived().RebuildPipeType(ValueType, TL.getKWLoc());
+    if (Result.isNull())
+      return QualType();
+  }
+
+  PipeTypeLoc NewTL = TLB.push<PipeTypeLoc>(Result);
+  NewTL.setKWLoc(TL.getKWLoc());
+
+  return Result;
+}
+
   /// \brief Simple iterator that traverses the template arguments in a
   /// container that provides a \c getArgLoc() member function.
   ///
@@ -6348,7 +6383,7 @@ TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
     }
   }
 
-  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
+  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get(), S->getIfLoc()));
 #if INTEL_SPECIFIC_CILKPLUS
   getSema().ActOnEndCEANExpr(FullCond.get());
 #endif // INTEL_SPECIFIC_CILKPLUS
@@ -6446,7 +6481,8 @@ TreeTransform<Derived>::TransformWhileStmt(WhileStmt *S) {
     }
   }
 
-  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
+  Sema::FullExprArg FullCond(
+      getSema().MakeFullExpr(Cond.get(), S->getWhileLoc()));
   if (!S->getConditionVariable() && S->getCond() && !FullCond.get())
     return StmtError();
 
@@ -6525,7 +6561,8 @@ TreeTransform<Derived>::TransformForStmt(ForStmt *S) {
     }
   }
 
-  Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
+  Sema::FullExprArg FullCond(
+      getSema().MakeFullExpr(Cond.get(), S->getForLoc()));
   if (!S->getConditionVariable() && S->getCond() && !FullCond.get())
     return StmtError();
 
@@ -7571,6 +7608,39 @@ StmtResult TreeTransform<Derived>::TransformOMPTargetDataDirective(
 }
 
 template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPTargetEnterDataDirective(
+    OMPTargetEnterDataDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_target_enter_data, DirName,
+                                             nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPTargetExitDataDirective(
+    OMPTargetExitDataDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_target_exit_data, DirName,
+                                             nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPTargetParallelDirective(
+    OMPTargetParallelDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_target_parallel, DirName,
+                                             nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformOMPTeamsDirective(OMPTeamsDirective *D) {
   DeclarationNameInfo DirName;
@@ -7721,7 +7791,9 @@ TreeTransform<Derived>::TransformOMPScheduleClause(OMPScheduleClause *C) {
   if (E.isInvalid())
     return nullptr;
   return getDerived().RebuildOMPScheduleClause(
+      C->getFirstScheduleModifier(), C->getSecondScheduleModifier(),
       C->getScheduleKind(), E.get(), C->getLocStart(), C->getLParenLoc(),
+      C->getFirstScheduleModifierLoc(), C->getSecondScheduleModifierLoc(),
       C->getScheduleKindLoc(), C->getCommaLoc(), C->getLocEnd());
 }
 
@@ -8016,9 +8088,9 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
     Vars.push_back(EVar.get());
   }
   return getDerived().RebuildOMPMapClause(
-      C->getMapTypeModifier(), C->getMapType(), C->getMapLoc(),
-      C->getColonLoc(), Vars, C->getLocStart(), C->getLParenLoc(),
-      C->getLocEnd());
+      C->getMapTypeModifier(), C->getMapType(), C->isImplicitMapType(),
+      C->getMapLoc(), C->getColonLoc(), Vars, C->getLocStart(),
+      C->getLParenLoc(), C->getLocEnd());
 }
 
 template <typename Derived>
@@ -8078,6 +8150,23 @@ OMPClause *TreeTransform<Derived>::TransformOMPHintClause(OMPHintClause *C) {
     return nullptr;
   return getDerived().RebuildOMPHintClause(E.get(), C->getLocStart(),
                                            C->getLParenLoc(), C->getLocEnd());
+}
+
+template <typename Derived>
+OMPClause *TreeTransform<Derived>::TransformOMPDistScheduleClause(
+    OMPDistScheduleClause *C) {
+  ExprResult E = getDerived().TransformExpr(C->getChunkSize());
+  if (E.isInvalid())
+    return nullptr;
+  return getDerived().RebuildOMPDistScheduleClause(
+      C->getDistScheduleKind(), E.get(), C->getLocStart(), C->getLParenLoc(),
+      C->getDistScheduleKindLoc(), C->getCommaLoc(), C->getLocEnd());
+}
+
+template <typename Derived>
+OMPClause *
+TreeTransform<Derived>::TransformOMPDefaultmapClause(OMPDefaultmapClause *C) {
+  return C;
 }
 
 //===----------------------------------------------------------------------===//
@@ -8279,16 +8368,15 @@ TreeTransform<Derived>::TransformOffsetOfExpr(OffsetOfExpr *E) {
   // template code that we don't care.
   bool ExprChanged = false;
   typedef Sema::OffsetOfComponent Component;
-  typedef OffsetOfExpr::OffsetOfNode Node;
   SmallVector<Component, 4> Components;
   for (unsigned I = 0, N = E->getNumComponents(); I != N; ++I) {
-    const Node &ON = E->getComponent(I);
+    const OffsetOfNode &ON = E->getComponent(I);
     Component Comp;
     Comp.isBrackets = true;
     Comp.LocStart = ON.getSourceRange().getBegin();
     Comp.LocEnd = ON.getSourceRange().getEnd();
     switch (ON.getKind()) {
-    case Node::Array: {
+    case OffsetOfNode::Array: {
       Expr *FromIndex = E->getIndexExpr(ON.getArrayExprIndex());
       ExprResult Index = getDerived().TransformExpr(FromIndex);
       if (Index.isInvalid())
@@ -8300,8 +8388,8 @@ TreeTransform<Derived>::TransformOffsetOfExpr(OffsetOfExpr *E) {
       break;
     }
 
-    case Node::Field:
-    case Node::Identifier:
+    case OffsetOfNode::Field:
+    case OffsetOfNode::Identifier:
       Comp.isBrackets = false;
       Comp.U.IdentInfo = ON.getFieldName();
       if (!Comp.U.IdentInfo)
@@ -8309,7 +8397,7 @@ TreeTransform<Derived>::TransformOffsetOfExpr(OffsetOfExpr *E) {
 
       break;
 
-    case Node::Base:
+    case OffsetOfNode::Base:
       // Will be recomputed during the rebuild.
       continue;
     }
@@ -11106,8 +11194,7 @@ TreeTransform<Derived>::TransformObjCDictionaryLiteral(
     return SemaRef.MaybeBindToTemporary(E);
 
   return getDerived().RebuildObjCDictionaryLiteral(E->getSourceRange(),
-                                                   Elements.data(),
-                                                   Elements.size());
+                                                   Elements);
 }
 
 template<typename Derived>
@@ -11740,6 +11827,12 @@ template<typename Derived>
 QualType TreeTransform<Derived>::RebuildAtomicType(QualType ValueType,
                                                    SourceLocation KWLoc) {
   return SemaRef.BuildAtomicType(ValueType, KWLoc);
+}
+
+template<typename Derived>
+QualType TreeTransform<Derived>::RebuildPipeType(QualType ValueType,
+                                                   SourceLocation KWLoc) {
+  return SemaRef.BuildPipeType(ValueType, KWLoc);
 }
 
 template<typename Derived>

@@ -84,3 +84,4 @@ set_target_properties(check-clang PROPERTIES FOLDER "Clang tests")
 add_custom_target(clang-test)
 add_dependencies(clang-test check-clang)
 set_target_properties(clang-test PROPERTIES FOLDER "Clang tests")
+

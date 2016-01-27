@@ -831,14 +831,15 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
 
   // A scalar can be splatted to an extended vector of the same element type
   if (DstType->isExtVectorType() && !SrcType->isVectorType()) {
-    // Cast the scalar to element type
-    QualType EltTy = DstType->getAs<ExtVectorType>()->getElementType();
-    llvm::Value *Elt = EmitScalarConversion(
-        Src, SrcType, EltTy, Loc, CGF.getContext().getLangOpts().OpenCL);
+    // Sema should add casts to make sure that the source expression's type is
+    // the same as the vector's element type (sans qualifiers)
+    assert(DstType->castAs<ExtVectorType>()->getElementType().getTypePtr() ==
+               SrcType.getTypePtr() &&
+           "Splatted expr doesn't match with vector element type?");
 
     // Splat the element across to all elements
     unsigned NumElements = cast<llvm::VectorType>(DstTy)->getNumElements();
-    return Builder.CreateVectorSplat(NumElements, Elt, "splat");
+    return Builder.CreateVectorSplat(NumElements, Src, "splat");
   }
 
   // Allow bitcast from vector to integer/fp of the same size.
@@ -1561,15 +1562,7 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
   }
   case CK_VectorSplat: {
     llvm::Type *DstTy = ConvertType(DestTy);
-    // Need an IgnoreImpCasts here as by default a boolean will be promoted to
-    // an int, which will not perform the sign extension, so if we know we are
-    // going to cast to a vector we have to strip the implicit cast off.
-    Value *Elt = Visit(const_cast<Expr*>(E->IgnoreImpCasts()));
-    Elt = EmitScalarConversion(Elt, E->IgnoreImpCasts()->getType(),
-                               DestTy->getAs<VectorType>()->getElementType(),
-                               CE->getExprLoc(), 
-                               CGF.getContext().getLangOpts().OpenCL);
-
+    Value *Elt = Visit(const_cast<Expr*>(E));
     // Splat the element across to all elements
     unsigned NumElements = cast<llvm::VectorType>(DstTy)->getNumElements();
     return Builder.CreateVectorSplat(NumElements, Elt, "splat");
@@ -1581,6 +1574,10 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
   case CK_FloatingCast:
     return EmitScalarConversion(Visit(E), E->getType(), DestTy,
                                 CE->getExprLoc());
+  case CK_BooleanToSignedIntegral:
+    return EmitScalarConversion(Visit(E), E->getType(), DestTy,
+                                CE->getExprLoc(),
+                                /*TreatBooleanAsSigned=*/true);
   case CK_IntegralToBoolean:
     return EmitIntToBoolConversion(Visit(E));
   case CK_PointerToBoolean:
@@ -1944,10 +1941,10 @@ Value *ScalarExprEmitter::VisitOffsetOfExpr(OffsetOfExpr *E) {
   llvm::Value* Result = llvm::Constant::getNullValue(ResultType);
   QualType CurrentType = E->getTypeSourceInfo()->getType();
   for (unsigned i = 0; i != n; ++i) {
-    OffsetOfExpr::OffsetOfNode ON = E->getComponent(i);
+    OffsetOfNode ON = E->getComponent(i);
     llvm::Value *Offset = nullptr;
     switch (ON.getKind()) {
-    case OffsetOfExpr::OffsetOfNode::Array: {
+    case OffsetOfNode::Array: {
       // Compute the index
       Expr *IdxExpr = E->getIndexExpr(ON.getArrayExprIndex());
       llvm::Value* Idx = CGF.EmitScalarExpr(IdxExpr);
@@ -1967,7 +1964,7 @@ Value *ScalarExprEmitter::VisitOffsetOfExpr(OffsetOfExpr *E) {
       break;
     }
 
-    case OffsetOfExpr::OffsetOfNode::Field: {
+    case OffsetOfNode::Field: {
       FieldDecl *MemberDecl = ON.getField();
       RecordDecl *RD = CurrentType->getAs<RecordType>()->getDecl();
       const ASTRecordLayout &RL = CGF.getContext().getASTRecordLayout(RD);
@@ -1993,10 +1990,10 @@ Value *ScalarExprEmitter::VisitOffsetOfExpr(OffsetOfExpr *E) {
       break;
     }
 
-    case OffsetOfExpr::OffsetOfNode::Identifier:
+    case OffsetOfNode::Identifier:
       llvm_unreachable("dependent __builtin_offsetof");
 
-    case OffsetOfExpr::OffsetOfNode::Base: {
+    case OffsetOfNode::Base: {
       if (ON.getBase()->isVirtual()) {
         CGF.ErrorUnsupported(E, "virtual base in offsetof");
         continue;

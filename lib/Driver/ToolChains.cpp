@@ -413,6 +413,13 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
     AddLinkSanitizerLibArgs(Args, CmdArgs, "ubsan");
   if (Sanitize.needsTsanRt())
     AddLinkSanitizerLibArgs(Args, CmdArgs, "tsan");
+  if (Sanitize.needsStatsRt()) {
+    StringRef OS = isTargetMacOS() ? "osx" : "iossim";
+    AddLinkRuntimeLib(Args, CmdArgs,
+                      (Twine("libclang_rt.stats_client_") + OS + ".a").str(),
+                      /*AlwaysLink=*/true);
+    AddLinkSanitizerLibArgs(Args, CmdArgs, "stats");
+  }
 
   // Otherwise link libSystem, then the dynamic runtime library, and finally any
   // target specific static runtime library.
@@ -526,7 +533,7 @@ void Darwin::AddDeploymentTarget(DerivedArgList &Args) const {
     // no environment variable defined, see if we can set the default based
     // on -isysroot.
     if (OSXTarget.empty() && iOSTarget.empty() && WatchOSTarget.empty() &&
-        Args.hasArg(options::OPT_isysroot)) {
+        TvOSTarget.empty() && Args.hasArg(options::OPT_isysroot)) {
       if (const Arg *A = Args.getLastArg(options::OPT_isysroot)) {
         StringRef isysroot = A->getValue();
         // Assume SDK has path: SOME_PATH/SDKs/PlatformXX.YY.sdk
@@ -1652,13 +1659,14 @@ void Generic_GCC::CudaInstallationDetector::init(
       continue;
 
     CudaInstallPath = CudaPath;
+    CudaBinPath = CudaPath + "/bin";
     CudaIncludePath = CudaInstallPath + "/include";
     CudaLibDevicePath = CudaInstallPath + "/nvvm/libdevice";
     CudaLibPath =
         CudaInstallPath + (TargetTriple.isArch64Bit() ? "/lib64" : "/lib");
 
     if (!(D.getVFS().exists(CudaIncludePath) &&
-          D.getVFS().exists(CudaLibPath) &&
+          D.getVFS().exists(CudaBinPath) && D.getVFS().exists(CudaLibPath) &&
           D.getVFS().exists(CudaLibDevicePath)))
       continue;
 
@@ -2611,7 +2619,8 @@ void HexagonToolChain::getHexagonLibraryPaths(const ArgList &Args,
   // Other standard paths
   //----------------------------------------------------------------------------
   std::vector<std::string> RootDirs;
-  std::copy(D.PrefixDirs.begin(), D.PrefixDirs.end(), RootDirs.begin());
+  std::copy(D.PrefixDirs.begin(), D.PrefixDirs.end(),
+            std::back_inserter(RootDirs));
 
   std::string TargetDir = getHexagonTargetDir(D.getInstalledDir(),
                                               D.PrefixDirs);
@@ -2715,13 +2724,8 @@ const StringRef HexagonToolChain::GetDefaultCPU() {
 
 const StringRef HexagonToolChain::GetTargetCPUVersion(const ArgList &Args) {
   Arg *CpuArg = nullptr;
-
-  for (auto &A : Args) {
-    if (A->getOption().matches(options::OPT_mcpu_EQ)) {
-      CpuArg = A;
-      A->claim();
-    }
-  }
+  if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ, options::OPT_march_EQ))
+    CpuArg = A;
 
   StringRef CPU = CpuArg ? CpuArg->getValue() : GetDefaultCPU();
   if (CPU.startswith("hexagon"))
@@ -4175,10 +4179,7 @@ DragonFly::DragonFly(const Driver &D, const llvm::Triple &Triple,
 
   getFilePaths().push_back(getDriver().Dir + "/../lib");
   getFilePaths().push_back("/usr/lib");
-  if (D.getVFS().exists("/usr/lib/gcc47"))
-    getFilePaths().push_back("/usr/lib/gcc47");
-  else
-    getFilePaths().push_back("/usr/lib/gcc44");
+  getFilePaths().push_back("/usr/lib/gcc50");
 }
 
 Tool *DragonFly::buildAssembler() const {
@@ -4189,13 +4190,16 @@ Tool *DragonFly::buildLinker() const {
   return new tools::dragonfly::Linker(*this);
 }
 
-/// Stub for CUDA toolchain. At the moment we don't have assembler or
-/// linker and need toolchain mainly to propagate device-side options
-/// to CC1.
+/// CUDA toolchain.  Our assembler is ptxas, and our "linker" is fatbinary,
+/// which isn't properly a linker but nonetheless performs the step of stitching
+/// together object files from the assembler into a single blob.
 
 CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ArgList &Args)
-    : Linux(D, Triple, Args) {}
+    : Linux(D, Triple, Args) {
+  if (CudaInstallation.isValid())
+    getProgramPaths().push_back(CudaInstallation.getBinPath());
+}
 
 void
 CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
@@ -4229,7 +4233,7 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   for (Arg *A : Args) {
     if (A->getOption().matches(options::OPT_Xarch__)) {
       // Skip this argument unless the architecture matches BoundArch
-      if (A->getValue(0) != StringRef(BoundArch))
+      if (!BoundArch || A->getValue(0) != StringRef(BoundArch))
         continue;
 
       unsigned Index = Args.getBaseArgs().MakeIndex(A->getValue(1));
@@ -4260,8 +4264,17 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
     DAL->append(A);
   }
 
-  DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), BoundArch);
+  if (BoundArch)
+    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), BoundArch);
   return DAL;
+}
+
+Tool *CudaToolChain::buildAssembler() const {
+  return new tools::NVPTX::Assembler(*this);
+}
+
+Tool *CudaToolChain::buildLinker() const {
+  return new tools::NVPTX::Linker(*this);
 }
 
 /// XCore tool chain
@@ -4454,6 +4467,29 @@ void WebAssembly::addClangTargetOptions(const ArgList &DriverArgs,
   if (DriverArgs.hasFlag(options::OPT_fuse_init_array,
                          options::OPT_fno_use_init_array, true))
     CC1Args.push_back("-fuse-init-array");
+}
+
+ToolChain::RuntimeLibType WebAssembly::GetDefaultRuntimeLibType() const {
+  return ToolChain::RLT_CompilerRT;
+}
+
+ToolChain::CXXStdlibType WebAssembly::GetCXXStdlibType(const ArgList &Args) const {
+  return ToolChain::CST_Libcxx;
+}
+
+void WebAssembly::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
+                                            ArgStringList &CC1Args) const {
+  if (!DriverArgs.hasArg(options::OPT_nostdinc))
+    addSystemInclude(DriverArgs, CC1Args, getDriver().SysRoot + "/include");
+}
+
+void WebAssembly::AddClangCXXStdlibIncludeArgs(
+      const llvm::opt::ArgList &DriverArgs,
+      llvm::opt::ArgStringList &CC1Args) const {
+  if (!DriverArgs.hasArg(options::OPT_nostdlibinc) &&
+      !DriverArgs.hasArg(options::OPT_nostdincxx))
+    addSystemInclude(DriverArgs, CC1Args,
+                     getDriver().SysRoot + "/include/c++/v1");
 }
 
 Tool *WebAssembly::buildLinker() const {

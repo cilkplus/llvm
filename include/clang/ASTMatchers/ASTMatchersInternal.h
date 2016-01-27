@@ -420,7 +420,7 @@ public:
   template <typename From>
   Matcher(const Matcher<From> &Other,
           typename std::enable_if<std::is_base_of<From, T>::value &&
-                                  !std::is_same<From, T>::value>::type * = 0)
+                               !std::is_same<From, T>::value>::type * = nullptr)
       : Implementation(restrictMatcher(Other.Implementation)) {
     assert(Implementation.getSupportedKind().isSame(
         ast_type_traits::ASTNodeKind::getFromNodeKind<T>()));
@@ -433,7 +433,7 @@ public:
   Matcher(const Matcher<TypeT> &Other,
           typename std::enable_if<
             std::is_same<T, QualType>::value &&
-            std::is_same<TypeT, Type>::value>::type* = 0)
+            std::is_same<TypeT, Type>::value>::type* = nullptr)
       : Implementation(new TypeToQualType<TypeT>(Other)) {}
 
   /// \brief Convert \c this into a \c Matcher<T> by applying dyn_cast<> to the
@@ -558,22 +558,32 @@ bool matchesFirstInPointerRange(const MatcherT &Matcher, IteratorT Start,
   return false;
 }
 
-/// \brief Metafunction to determine if type T has a member called getDecl.
+// Metafunction to determine if type T has a member called
+// getDecl.
+#if defined(_MSC_VER) && !defined(__clang__)
+// For MSVC, we use a weird nonstandard __if_exists statement, as it
+// is not standards-conformant enough to properly compile the standard
+// code below. (At least up through MSVC 2015 require this workaround)
 template <typename T> struct has_getDecl {
-  struct Default { int getDecl; };
-  struct Derived : T, Default { };
-
-  template<typename C, C> struct CheckT;
-
-  // If T::getDecl exists, an ambiguity arises and CheckT will
-  // not be instantiable. This makes f(...) the only available
-  // overload.
-  template<typename C>
-  static char (&f(CheckT<int Default::*, &C::getDecl>*))[1];
-  template<typename C> static char (&f(...))[2];
-
-  static bool const value = sizeof(f<Derived>(nullptr)) == 2;
+  __if_exists(T::getDecl) {
+    enum { value = 1 };
+  }
+  __if_not_exists(T::getDecl) {
+    enum { value = 0 };
+  }
 };
+#else
+// There is a default template inheriting from "false_type". Then, a
+// partial specialization inherits from "true_type". However, this
+// specialization will only exist when the call to getDecl() isn't an
+// error -- it vanishes by SFINAE when the member doesn't exist.
+template <typename> struct type_sink_to_void { typedef void type; };
+template <typename T, typename = void> struct has_getDecl : std::false_type {};
+template <typename T>
+struct has_getDecl<
+    T, typename type_sink_to_void<decltype(std::declval<T>().getDecl())>::type>
+    : std::true_type {};
+#endif
 
 /// \brief Matches overloaded operators with a specific name.
 ///
@@ -1574,8 +1584,20 @@ struct NotEqualsBoundNodePredicate {
   ast_type_traits::DynTypedNode Node;
 };
 
+template <typename Ty>
+struct GetBodyMatcher {
+  static const Stmt *get(const Ty &Node) {
+    return Node.getBody();
+  }
+};
+
+template <>
+inline const Stmt *GetBodyMatcher<FunctionDecl>::get(const FunctionDecl &Node) {
+  return Node.doesThisDeclarationHaveABody() ? Node.getBody() : nullptr;
+}
+
 } // end namespace internal
 } // end namespace ast_matchers
 } // end namespace clang
 
-#endif
+#endif // LLVM_CLANG_ASTMATCHERS_ASTMATCHERSINTERNAL_H

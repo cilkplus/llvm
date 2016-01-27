@@ -223,7 +223,24 @@ protected:
 
 public:
   DarwinTargetInfo(const llvm::Triple &Triple) : OSTargetInfo<Target>(Triple) {
-    this->TLSSupported = Triple.isMacOSX() && !Triple.isMacOSXVersionLT(10, 7);
+    // By default, no TLS, and we whitelist permitted architecture/OS
+    // combinations.
+    this->TLSSupported = false;
+
+    if (Triple.isMacOSX())
+      this->TLSSupported = !Triple.isMacOSXVersionLT(10, 7);
+    else if (Triple.isiOS()) {
+      // 64-bit iOS supported it from 8 onwards, 32-bit from 9 onwards.
+      if (Triple.getArch() == llvm::Triple::x86_64 ||
+          Triple.getArch() == llvm::Triple::aarch64)
+        this->TLSSupported = !Triple.isOSVersionLT(8);
+      else if (Triple.getArch() == llvm::Triple::x86 ||
+               Triple.getArch() == llvm::Triple::arm ||
+               Triple.getArch() == llvm::Triple::thumb)
+        this->TLSSupported = !Triple.isOSVersionLT(9);
+    } else if (Triple.isWatchOS())
+      this->TLSSupported = !Triple.isOSVersionLT(2);
+
     this->MCountName = "\01mcount";
   }
 
@@ -2095,6 +2112,7 @@ class X86TargetInfo : public TargetInfo {
   bool HasXSAVEOPT = false;
   bool HasXSAVEC = false;
   bool HasXSAVES = false;
+  bool HasPKU = false;
 
   /// \brief Enumeration of all of the X86 CPUs supported by Clang.
   ///
@@ -2596,6 +2614,7 @@ bool X86TargetInfo::initFeatureMap(
     setFeatureEnabledImpl(Features, "avx512vl", true);
     setFeatureEnabledImpl(Features, "xsavec", true);
     setFeatureEnabledImpl(Features, "xsaves", true);
+    setFeatureEnabledImpl(Features, "pku", true);
     // FALLTHROUGH
   case CK_Broadwell:
     setFeatureEnabledImpl(Features, "rdseed", true);
@@ -3021,6 +3040,8 @@ bool X86TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasXSAVEC = true;
     } else if (Feature == "+xsaves") {
       HasXSAVES = true;
+    } else if (Feature == "+pku") {
+      HasPKU = true;
     }
 
     X86SSEEnum Level = llvm::StringSwitch<X86SSEEnum>(Feature)
@@ -3322,7 +3343,8 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__XSAVEC__");
   if (HasXSAVES)
     Builder.defineMacro("__XSAVES__");
-
+  if (HasPKU)
+    Builder.defineMacro("__PKU__");
   if (HasCX16)
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16");
 
@@ -3440,6 +3462,7 @@ bool X86TargetInfo::hasFeature(StringRef Feature) const {
       .Case("xsavec", HasXSAVEC)
       .Case("xsaves", HasXSAVES)
       .Case("xsaveopt", HasXSAVEOPT)
+      .Case("pku", HasPKU)
       .Default(false);
 }
 
@@ -3876,6 +3899,7 @@ public:
   MCUX86_32TargetInfo(const llvm::Triple &Triple) : X86_32TargetInfo(Triple) {
     LongDoubleWidth = 64;
     LongDoubleFormat = &llvm::APFloat::IEEEdouble;
+    UserLabelPrefix = "";
   }
 
   CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
@@ -4700,7 +4724,7 @@ public:
 
     // ACLE 6.4.1 ARM/Thumb instruction set architecture
     // __ARM_ARCH is defined as an integer value indicating the current ARM ISA
-    Builder.defineMacro("__ARM_ARCH", llvm::utostr(ArchVersion));
+    Builder.defineMacro("__ARM_ARCH", Twine(ArchVersion));
 
     if (ArchVersion >= 8) {
       // ACLE 6.5.7 Crypto Extension
@@ -5310,7 +5334,8 @@ public:
   bool setCPU(const std::string &Name) override {
     bool CPUKnown = llvm::StringSwitch<bool>(Name)
                         .Case("generic", true)
-                        .Cases("cortex-a53", "cortex-a57", "cortex-a72", "cortex-a35", true)
+                        .Cases("cortex-a53", "cortex-a57", "cortex-a72",
+                               "cortex-a35", "exynos-m1", true)
                         .Case("cyclone", true)
                         .Default(false);
     return CPUKnown;
@@ -7274,7 +7299,7 @@ public:
   explicit WebAssembly32TargetInfo(const llvm::Triple &T)
       : WebAssemblyTargetInfo(T) {
     MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 32;
-    DataLayoutString = "e-p:32:32-i64:64-n32:64-S128";
+    DataLayoutString = "e-m:e-p:32:32-i64:64-n32:64-S128";
   }
 
 protected:
@@ -7292,7 +7317,7 @@ public:
     LongAlign = LongWidth = 64;
     PointerAlign = PointerWidth = 64;
     MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
-    DataLayoutString = "e-p:64:64-i64:64-n32:64-S128";
+    DataLayoutString = "e-m:e-p:64:64-i64:64-n32:64-S128";
   }
 
 protected:
