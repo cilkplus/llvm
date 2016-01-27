@@ -1,0 +1,81 @@
+<!--    Copyright (C) 2009-2015, Intel Corporation
+        All rights reserved.
+        
+        Redistribution and use in source and binary forms, with or without
+        modification, are permitted provided that the following conditions
+        are met:
+        
+          * Redistributions of source code must retain the above copyright
+            notice, this list of conditions and the following disclaimer.
+          * Redistributions in binary form must reproduce the above copyright
+            notice, this list of conditions and the following disclaimer in
+            the documentation and/or other materials provided with the
+            distribution.
+          * Neither the name of Intel Corporation nor the names of its
+            contributors may be used to endorse or promote products derived
+            from this software without specific prior written permission.
+        
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+        "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+        LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+        A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+        HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+        INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+        BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+        OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+        AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+        LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+        WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+        POSSIBILITY OF SUCH DAMAGE.
+        
+        *********************************************************************
+        
+        PLEASE NOTE: This file is a downstream copy of a file mainitained in
+        a repository at cilkplus.org. Changes made to this file that are not
+        submitted through the contribution process detailed at
+        http://www.cilkplus.org/submit-cilk-contribution will be lost the next
+        time that a new version is released. Changes only submitted to the
+        GNU compiler collection or posted to the git repository at
+        https://bitbucket.org/intelcilkplusruntime/itnel-cilk-runtime.git are
+        not tracked.
+        
+        We welcome your contributions to this open source project. Thank you
+        for your assistance in helping us improve Cilk Plus.  -->
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" >
+<head>
+    <title>Building the Intel(R) Cilk(TM) Plus Include Directory Documentation</title>
+</head>
+<body>
+<h1>Building the Intel Cilk Plus API and Reducer Documentation</h1>
+<p>
+The Intel&reg; Cilk&trade; Plus API and reducer include files are annotated to allow 
+you to build documentation using 
+<a href="http://www.stack.nl/~dimitri/doxygen/index.html" target="_blank">Doxygen</a>; an 
+open-source program to generate documentation from source code.  Doxygen is
+available at <a href="http://www.stack.nl/~dimitri/doxygen/download.html" target="_blank">http://www.stack.nl/~dimitri/doxygen/download.html</a>, 
+and as part of many Linux distributions. The Cilk Plus documentation was 
+developed with Doxygen release 1.8.6.  Using an earlier version of Doxygen may result in warnings.
+</p>
+<p>
+To build the HTML version of the Cilk Plus documentation, change to the 
+<tt>include/cilk</tt> directory and execute the command:
+</p>
+<pre>
+    doxygen cilkplus.doxyfile
+</pre>
+<p>
+The documentation will be created in <tt>include/cilk/html</tt>. 
+To read it, open <tt><a href="file:html/index.html">include/cilk/html/index.html</a></tt> in a web browser.
+</p>
+<p>
+Doxygen can be configured to generate documentation in a number of formats, 
+including LATEX, RTF and compressed HTML. We have only tested the HTML format.
+Refer to the 
+<a href="http://www.stack.nl/~dimitri/doxygen/manual/index.html" target="_blank">Doxygen manual</a> 
+if you want to generate documentation in an alternative format.
+</p>
+</body>
+</html>
