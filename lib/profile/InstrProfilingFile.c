@@ -17,6 +17,10 @@
 
 #define UNCONST(ptr) ((void *)(uintptr_t)(ptr))
 
+#ifdef _MSC_VER
+#define snprintf _snprintf
+#endif
+
 /* Return 1 if there is an error, otherwise return  0.  */
 static uint32_t fileWriter(ProfDataIOVec *IOVecs, uint32_t NumIOVecs,
                            void **WriterCtx) {
@@ -30,13 +34,24 @@ static uint32_t fileWriter(ProfDataIOVec *IOVecs, uint32_t NumIOVecs,
   return 0;
 }
 
+COMPILER_RT_VISIBILITY ProfBufferIO *
+llvmCreateBufferIOInternal(void *File, uint32_t BufferSz) {
+  CallocHook = calloc;
+  FreeHook = free;
+  return llvmCreateBufferIO(fileWriter, File, BufferSz);
+}
+
 static int writeFile(FILE *File) {
-  uint8_t *ValueDataBegin = NULL;
-  const uint64_t ValueDataSize =
-      __llvm_profile_gather_value_data(&ValueDataBegin);
-  int r = llvmWriteProfData(fileWriter, File, ValueDataBegin, ValueDataSize);
-  free(ValueDataBegin);
-  return r;
+  const char *BufferSzStr = 0;
+  uint64_t ValueDataSize = 0;
+  struct ValueProfData **ValueDataArray =
+      __llvm_profile_gather_value_data(&ValueDataSize);
+  FreeHook = &free;
+  CallocHook = &calloc;
+  BufferSzStr = getenv("LLVM_VP_BUFFER_SIZE");
+  if (BufferSzStr && BufferSzStr[0])
+    VPBufferSize = atoi(BufferSzStr);
+  return llvmWriteProfData(fileWriter, File, ValueDataArray, ValueDataSize);
 }
 
 static int writeFileWithName(const char *OutputName) {
@@ -196,6 +211,15 @@ int __llvm_profile_write_file(void) {
   /* Check the filename. */
   if (!__llvm_profile_CurrentFilename) {
     PROF_ERR("LLVM Profile: Failed to write file : %s\n", "Filename not set");
+    return -1;
+  }
+
+  /* Check if there is llvm/runtime version mismatch.  */
+  if (GET_VERSION(__llvm_profile_get_version()) != INSTR_PROF_RAW_VERSION) {
+    PROF_ERR("LLVM Profile: runtime and instrumentation version mismatch : "
+             "expected %d, but get %d\n",
+             INSTR_PROF_RAW_VERSION,
+             (int)GET_VERSION(__llvm_profile_get_version()));
     return -1;
   }
 
