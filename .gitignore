@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #==============================================================================#
 # This file specifies intentionally untracked files that git should ignore.
 # See: http://www.kernel.org/pub/software/scm/git/docs/gitignore.html
@@ -33,3 +34,10 @@ tools/extra
 # Sphinx build products
 docs/_build
 docs/analyzer/_build
+=======
+*~
+darwin_fat
+clang_darwin
+multi_arch
+*.sw?
+>>>>>>> 4120db756e31773df5389fd0fef18d4c6453204c
