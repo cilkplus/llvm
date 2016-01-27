@@ -12,7 +12,27 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(CompilerRT C CXX ASM)
   set(COMPILER_RT_STANDALONE_BUILD TRUE)
 else()
-  set(COMPILER_RT_STANDALONE_BUILD FALSE)
+  set(cmake_3_2_USES_TERMINAL USES_TERMINAL)
+endif()
+
+if(NOT DEFINED LLVM_VERSION_MAJOR)
+  set(LLVM_VERSION_MAJOR 3)
+endif()
+if(NOT DEFINED LLVM_VERSION_MINOR)
+  set(LLVM_VERSION_MINOR 9)
+endif()
+if(NOT DEFINED LLVM_VERSION_PATCH)
+  set(LLVM_VERSION_PATCH 0)
+endif()
+if(NOT DEFINED LLVM_VERSION_SUFFIX)
+  set(LLVM_VERSION_SUFFIX svn)
+endif()
+
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+  set(cmake_3_0_PROJ_VERSION
+    VERSION ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH})
+  set(cmake_3_0_LANGUAGES LANGUAGES)
 endif()
 
 # The CompilerRT build system requires CMake version 2.8.8 or higher in order
@@ -40,32 +60,13 @@ else()
   endif()
 endif()
 
-# Top level target used to build all compiler-rt libraries.
-add_custom_target(compiler-rt ALL)
+set(LLVM_BUILD_GLOBAL_ISEL OFF CACHE BOOL "Experimental: Build GlobalISel")
 
-option(COMPILER_RT_BUILD_BUILTINS "Build builtins" ON)
-mark_as_advanced(COMPILER_RT_BUILD_BUILTINS)
-option(COMPILER_RT_BUILD_SANITIZERS "Build sanitizers" ON)
-mark_as_advanced(COMPILER_RT_BUILD_SANITIZERS)
-
-if (NOT COMPILER_RT_STANDALONE_BUILD)
-  # Compute the Clang version from the LLVM version.
-  # FIXME: We should be able to reuse CLANG_VERSION variable calculated
-  #        in Clang cmake files, instead of copying the rules here.
-  string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" CLANG_VERSION
-         ${PACKAGE_VERSION})
-  # Setup the paths where compiler-rt runtimes and headers should be stored.
-  set(COMPILER_RT_OUTPUT_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR}/clang/${CLANG_VERSION})
-  set(COMPILER_RT_EXEC_OUTPUT_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
-  set(COMPILER_RT_INSTALL_PATH lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION})
-  option(COMPILER_RT_INCLUDE_TESTS "Generate and build compiler-rt unit tests."
-         ${LLVM_INCLUDE_TESTS})
- option(COMPILER_RT_ENABLE_WERROR "Fail and stop if warning is triggered"
-        ${LLVM_ENABLE_WERROR})
-  # Use just-built Clang to compile/link tests on all platforms, except for
-  # Windows where we need to use clang-cl instead.
-  if(NOT MSVC)
-    set(COMPILER_RT_TEST_COMPILER ${LLVM_RUNTIME_OUTPUT_INTDIR}/clang)
+set(LLVM_PARALLEL_LINK_JOBS "" CACHE STRING
+  "Define the maximum number of concurrent link jobs.")
+if(LLVM_PARALLEL_LINK_JOBS)
+  if(CMAKE_VERSION VERSION_LESS 3.0 OR NOT CMAKE_MAKE_PROGRAM MATCHES "ninja")
+    message(WARNING "Job pooling is only available with Ninja generators and CMake 3.0 and later.")
   else()
     set(COMPILER_RT_TEST_COMPILER ${LLVM_RUNTIME_OUTPUT_INTDIR}/clang.exe)
   endif()

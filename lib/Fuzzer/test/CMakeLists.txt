@@ -13,12 +13,15 @@ set(DFSanTests
   )
 
 set(Tests
+  BufferOverflowOnInput
   CallerCalleeTest
   CounterTest
   FourIndependentBranchesTest
   FullCoverageSetTest
+  InitializeTest
   MemcmpTest
   NullDerefTest
+  RepeatedMemcmp
   SimpleCmpTest
   SimpleDictionaryTest
   SimpleHashTest
@@ -26,6 +29,7 @@ set(Tests
   StrcmpTest
   StrncmpTest
   SwitchTest
+  ThreadedTest
   TimeoutTest
   )
 

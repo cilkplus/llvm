@@ -33,6 +33,7 @@ class AttributeSetImpl;
 class AttributeSetNode;
 class Constant;
 template<typename T> struct DenseMapInfo;
+class Function;
 class LLVMContext;
 class Type;
 
@@ -115,11 +116,11 @@ public:
   bool hasAttribute(StringRef Val) const;
 
   /// \brief Return the attribute's kind as an enum (Attribute::AttrKind). This
-  /// requires the attribute to be an enum or alignment attribute.
+  /// requires the attribute to be an enum or integer attribute.
   Attribute::AttrKind getKindAsEnum() const;
 
   /// \brief Return the attribute's value as an integer. This requires that the
-  /// attribute be an alignment attribute.
+  /// attribute be an integer attribute.
   uint64_t getValueAsInt() const;
 
   /// \brief Return the attribute's kind as a string. This requires the
@@ -531,6 +532,13 @@ namespace AttributeFuncs {
 
 /// \brief Which attributes cannot be applied to a type.
 AttrBuilder typeIncompatible(Type *Ty);
+
+/// \returns Return true if the two functions have compatible target-independent
+/// attributes for inlining purposes.
+bool areInlineCompatible(const Function &Caller, const Function &Callee);
+
+/// \brief Merge caller's and callee's attributes.
+void mergeAttributesForInlining(Function &Caller, const Function &Callee);
 
 } // end AttributeFuncs namespace
 

@@ -91,21 +91,23 @@ isOnlyCopiedFromConstantGlobal(Value *V, MemTransferInst *&TheCopy,
         if (CS.isCallee(&U))
           continue;
 
+        unsigned DataOpNo = CS.getDataOperandNo(&U);
+        bool IsArgOperand = CS.isArgOperand(&U);
+
         // Inalloca arguments are clobbered by the call.
-        unsigned ArgNo = CS.getArgumentNo(&U);
-        if (CS.isInAllocaArgument(ArgNo))
+        if (IsArgOperand && CS.isInAllocaArgument(DataOpNo))
           return false;
 
         // If this is a readonly/readnone call site, then we know it is just a
         // load (but one that potentially returns the value itself), so we can
         // ignore it if we know that the value isn't captured.
         if (CS.onlyReadsMemory() &&
-            (CS.getInstruction()->use_empty() || CS.doesNotCapture(ArgNo)))
+            (CS.getInstruction()->use_empty() || CS.doesNotCapture(DataOpNo)))
           continue;
 
         // If this is being passed as a byval argument, the caller is making a
         // copy, so it is only a read of the alloca.
-        if (CS.isByValArgument(ArgNo))
+        if (IsArgOperand && CS.isByValArgument(DataOpNo))
           continue;
       }
 
@@ -635,7 +637,7 @@ static bool isObjectSizeLessThanOrEq(Value *V, uint64_t MaxSize,
       if (!GV->hasDefinitiveInitializer() || !GV->isConstant())
         return false;
 
-      uint64_t InitSize = DL.getTypeAllocSize(GV->getType()->getElementType());
+      uint64_t InitSize = DL.getTypeAllocSize(GV->getValueType());
       if (InitSize > MaxSize)
         return false;
       continue;
@@ -692,10 +694,8 @@ static bool canReplaceGEPIdxWithZero(InstCombiner &IC, GetElementPtrInst *GEPI,
     return false;
 
   SmallVector<Value *, 4> Ops(GEPI->idx_begin(), GEPI->idx_begin() + Idx);
-  Type *AllocTy = GetElementPtrInst::getIndexedType(
-      cast<PointerType>(GEPI->getOperand(0)->getType()->getScalarType())
-          ->getElementType(),
-      Ops);
+  Type *AllocTy =
+    GetElementPtrInst::getIndexedType(GEPI->getSourceElementType(), Ops);
   if (!AllocTy || !AllocTy->isSized())
     return false;
   const DataLayout &DL = IC.getDataLayout();
@@ -791,7 +791,7 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
   BasicBlock::iterator BBI(LI);
   AAMDNodes AATags;
   if (Value *AvailableVal =
-      FindAvailableLoadedValue(Op, LI.getParent(), BBI,
+      FindAvailableLoadedValue(&LI, LI.getParent(), BBI,
                                DefMaxInstsToScan, AA, &AATags)) {
     if (LoadInst *NLI = dyn_cast<LoadInst>(AvailableVal)) {
       unsigned KnownIDs[] = {
@@ -850,8 +850,8 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
     if (SelectInst *SI = dyn_cast<SelectInst>(Op)) {
       // load (select (Cond, &V1, &V2))  --> select(Cond, load &V1, load &V2).
       unsigned Align = LI.getAlignment();
-      if (isSafeToLoadUnconditionally(SI->getOperand(1), SI, Align) &&
-          isSafeToLoadUnconditionally(SI->getOperand(2), SI, Align)) {
+      if (isSafeToLoadUnconditionally(SI->getOperand(1), Align, SI) &&
+          isSafeToLoadUnconditionally(SI->getOperand(2), Align, SI)) {
         LoadInst *V1 = Builder->CreateLoad(SI->getOperand(1),
                                            SI->getOperand(1)->getName()+".val");
         LoadInst *V2 = Builder->CreateLoad(SI->getOperand(2),

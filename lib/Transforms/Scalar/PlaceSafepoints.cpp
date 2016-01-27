@@ -108,6 +108,11 @@ static cl::opt<int> CountedLoopTripWidth("spp-counted-loop-trip-width",
 static cl::opt<bool> SplitBackedge("spp-split-backedge", cl::Hidden,
                                    cl::init(false));
 
+// If true, don't wrap calls (the ones present in the IR, and the ones
+// introduced due to polls) in gc.statepoint.
+static cl::opt<bool> NoStatepoints("spp-no-statepoints", cl::Hidden,
+                                   cl::init(false));
+
 // Print tracing output
 static cl::opt<bool> TraceLSP("spp-trace", cl::Hidden, cl::init(false));
 
@@ -499,7 +504,7 @@ static bool isGCSafepointPoll(Function &F) {
 static bool shouldRewriteFunction(Function &F) {
   // TODO: This should check the GCStrategy
   if (F.hasGC()) {
-    const char *FunctionGCName = F.getGC();
+    const auto &FunctionGCName = F.getGC();
     const StringRef StatepointExampleName("statepoint-example");
     const StringRef CoreCLRName("coreclr");
     return (StatepointExampleName == FunctionGCName) ||
@@ -661,6 +666,15 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
     ParsePointNeeded.insert(ParsePointNeeded.end(), RuntimeCalls.begin(),
                             RuntimeCalls.end());
   }
+
+  // If we've been asked to not wrap the calls with gc.statepoint, then we're
+  // done.  In the near future, this option will be "constant folded" to true,
+  // and the code below that deals with insert gc.statepoint calls will be
+  // removed.  Wrapping potentially safepointing calls in gc.statepoint will
+  // then become the responsibility of the RewriteStatepointsForGC pass.
+  if (NoStatepoints)
+    return modified;
+
   PollsNeeded.clear(); // make sure we don't accidentally use
   // The dominator tree has been invalidated by the inlining performed in the
   // above loop.  TODO: Teach the inliner how to update the dom tree?
@@ -762,7 +776,8 @@ InsertSafepointPoll(Instruction *InsertBefore,
   // path call - where we need to insert a safepoint (parsepoint).
 
   auto *F = M->getFunction(GCSafepointPollName);
-  assert(F->getType()->getElementType() ==
+  assert(F && "gc.safepoint_poll function is missing");
+  assert(F->getValueType() ==
          FunctionType::get(Type::getVoidTy(M->getContext()), false) &&
          "gc.safepoint_poll declared with wrong type");
   assert(!F->empty() && "gc.safepoint_poll must be a non-empty function");

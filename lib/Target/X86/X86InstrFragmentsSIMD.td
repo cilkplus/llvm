@@ -225,6 +225,9 @@ def X86vshli   : SDNode<"X86ISD::VSHLI", SDTIntShiftOp>;
 def X86vsrli   : SDNode<"X86ISD::VSRLI", SDTIntShiftOp>;
 def X86vsrai   : SDNode<"X86ISD::VSRAI", SDTIntShiftOp>;
 
+def X86vrotli  : SDNode<"X86ISD::VROTLI", SDTIntShiftOp>;
+def X86vrotri  : SDNode<"X86ISD::VROTRI", SDTIntShiftOp>;
+
 def X86vprot   : SDNode<"X86ISD::VPROT",
                         SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                                              SDTCisSameAs<0,2>]>>;
@@ -306,6 +309,10 @@ def SDTShuff3OpI : SDTypeProfile<1, 3, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                                  SDTCisSameAs<0,2>, SDTCisVT<3, i8>]>;
 def SDTFPBinOpImmRound: SDTypeProfile<1, 4, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                              SDTCisSameAs<0,2>, SDTCisInt<3>, SDTCisInt<4>]>;
+def SDTFPTernaryOpImmRound: SDTypeProfile<1, 5, [SDTCisVec<0>, SDTCisSameAs<0,1>,
+                             SDTCisSameAs<0,2>, SDTCisVec<3>, SDTCisInt<4>, SDTCisInt<5>]>;
+def SDTFPTernaryOpImmRounds: SDTypeProfile<1, 5, [SDTCisSameAs<0,1>,
+                             SDTCisSameAs<0,2>,SDTCisInt<3>, SDTCisInt<4>, SDTCisInt<5>]>;
 def SDTFPUnaryOpImmRound: SDTypeProfile<1, 3, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                               SDTCisInt<2>, SDTCisInt<3>]>;
 
@@ -402,7 +409,8 @@ def X86vpternlog  : SDNode<"X86ISD::VPTERNLOG", SDTTernlog>;
 
 def X86VPerm2x128 : SDNode<"X86ISD::VPERM2X128", SDTShuff3OpI>;
 
-def X86VFixupimm   : SDNode<"X86ISD::VFIXUPIMM", SDTFPBinOpImmRound>;
+def X86VFixupimm   : SDNode<"X86ISD::VFIXUPIMM", SDTFPTernaryOpImmRound>;
+def X86VFixupimmScalar   : SDNode<"X86ISD::VFIXUPIMMS", SDTFPTernaryOpImmRounds>;
 def X86VRange      : SDNode<"X86ISD::VRANGE",    SDTFPBinOpImmRound>;
 def X86VReduce     : SDNode<"X86ISD::VREDUCE",   SDTFPUnaryOpImmRound>;
 def X86VRndScale   : SDNode<"X86ISD::VRNDSCALE", SDTFPUnaryOpImmRound>;
@@ -462,6 +470,9 @@ def X86FmsubRnd     : SDNode<"X86ISD::FMSUB_RND",     SDTFmaRound>;
 def X86FnmsubRnd    : SDNode<"X86ISD::FNMSUB_RND",    SDTFmaRound>;
 def X86FmaddsubRnd  : SDNode<"X86ISD::FMADDSUB_RND",  SDTFmaRound>;
 def X86FmsubaddRnd  : SDNode<"X86ISD::FMSUBADD_RND",  SDTFmaRound>;
+
+def x86vpmadd52l     : SDNode<"X86ISD::VPMADD52L",     SDTFma>;
+def x86vpmadd52h     : SDNode<"X86ISD::VPMADD52H",     SDTFma>;
 
 def X86rsqrt28   : SDNode<"X86ISD::RSQRT28",  STDFp1SrcRm>;
 def X86rcp28     : SDNode<"X86ISD::RCP28",    STDFp1SrcRm>;
@@ -580,6 +591,8 @@ def X86vfproundRnd: SDNode<"X86ISD::VFPROUND",
                                              SDTCVecEltisVT<1, f64>,
                                              SDTCisOpSmallerThanOp<0, 1>,
                                              SDTCisVT<2, i32>]>>;
+
+def X86cvt2mask   : SDNode<"X86ISD::CVT2MASK", SDTIntTruncOp>;
 
 //===----------------------------------------------------------------------===//
 // SSE Complex Patterns

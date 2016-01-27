@@ -93,8 +93,8 @@ private:
   /// Replace instrprof_increment with an increment of the appropriate value.
   void lowerIncrement(InstrProfIncrementInst *Inc);
 
-  /// Set up the section and uses for coverage data and its references.
-  void lowerCoverageData(GlobalVariable *CoverageData);
+  /// Force emitting of name vars for unused functions.
+  void lowerCoverageData(GlobalVariable *CoverageNamesVar);
 
   /// Get the region counters for an increment, creating them if necessary.
   ///
@@ -137,11 +137,20 @@ bool InstrProfiling::runOnModule(Module &M) {
   // We did not know how many value sites there would be inside
   // the instrumented function. This is counting the number of instrumented
   // target value sites to enter it as field in the profile data variable.
-  for (Function &F : M)
+  for (Function &F : M) {
+    InstrProfIncrementInst *FirstProfIncInst = nullptr;
     for (BasicBlock &BB : F)
-      for (auto I = BB.begin(), E = BB.end(); I != E;)
-        if (auto *Ind = dyn_cast<InstrProfValueProfileInst>(I++))
+      for (auto I = BB.begin(), E = BB.end(); I != E; I++)
+        if (auto *Ind = dyn_cast<InstrProfValueProfileInst>(I))
           computeNumValueSiteCounts(Ind);
+        else if (FirstProfIncInst == nullptr)
+          FirstProfIncInst = dyn_cast<InstrProfIncrementInst>(I);
+
+    // Value profiling intrinsic lowering requires per-function profile data
+    // variable to be created first.
+    if (FirstProfIncInst != nullptr)
+      static_cast<void>(getOrCreateRegionCounters(FirstProfIncInst));
+  }
 
   for (Function &F : M)
     for (BasicBlock &BB : F)
@@ -156,9 +165,9 @@ bool InstrProfiling::runOnModule(Module &M) {
         }
       }
 
-  if (GlobalVariable *Coverage =
-          M.getNamedGlobal(getCoverageMappingVarName())) {
-    lowerCoverageData(Coverage);
+  if (GlobalVariable *CoverageNamesVar =
+          M.getNamedGlobal(getCoverageUnusedNamesVarName())) {
+    lowerCoverageData(CoverageNamesVar);
     MadeChange = true;
   }
 
@@ -233,29 +242,15 @@ void InstrProfiling::lowerIncrement(InstrProfIncrementInst *Inc) {
   Inc->eraseFromParent();
 }
 
-void InstrProfiling::lowerCoverageData(GlobalVariable *CoverageData) {
-  CoverageData->setSection(getCoverageSection());
-  CoverageData->setAlignment(8);
+void InstrProfiling::lowerCoverageData(GlobalVariable *CoverageNamesVar) {
 
-  Constant *Init = CoverageData->getInitializer();
-  // We're expecting { i32, i32, i32, i32, [n x { i8*, i32, i32 }], [m x i8] }
-  // for some C. If not, the frontend's given us something broken.
-  assert(Init->getNumOperands() == 6 && "bad number of fields in coverage map");
-  assert(isa<ConstantArray>(Init->getAggregateElement(4)) &&
-         "invalid function list in coverage map");
-  ConstantArray *Records = cast<ConstantArray>(Init->getAggregateElement(4));
-  for (unsigned I = 0, E = Records->getNumOperands(); I < E; ++I) {
-    Constant *Record = Records->getOperand(I);
-    Value *V = const_cast<Value *>(Record->getOperand(0))->stripPointerCasts();
-
+  ConstantArray *Names =
+      cast<ConstantArray>(CoverageNamesVar->getInitializer());
+  for (unsigned I = 0, E = Names->getNumOperands(); I < E; ++I) {
+    Constant *NC = Names->getOperand(I);
+    Value *V = NC->stripPointerCasts();
     assert(isa<GlobalVariable>(V) && "Missing reference to function name");
     GlobalVariable *Name = cast<GlobalVariable>(V);
-
-    // If we have region counters for this name, we've already handled it.
-    auto It = ProfileDataMap.find(Name);
-    if (It != ProfileDataMap.end())
-      if (It->second.RegionCounters)
-        continue;
 
     // Move the name variable to the right section.
     Name->setSection(getNameSection());

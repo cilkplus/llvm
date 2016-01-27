@@ -28,11 +28,11 @@
 #include "llvm/MC/MCParser/MCAsmParser.h"
 #include "llvm/MC/MCParser/MCAsmParserUtils.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
+#include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -2484,6 +2484,9 @@ bool AsmParser::parseDirectiveReloc(SMLoc DirectiveLoc) {
   int64_t OffsetValue;
   if (!Offset->evaluateAsAbsolute(OffsetValue))
     return Error(OffsetLoc, "expression is not a constant value");
+
+  if (OffsetValue < 0)
+    return Error(OffsetLoc, "expression is negative");
 
   if (Lexer.isNot(AsmToken::Comma))
     return TokError("expected comma");

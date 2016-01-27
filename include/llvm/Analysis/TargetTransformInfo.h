@@ -416,6 +416,9 @@ public:
   /// \return The width of the largest scalar or vector register type.
   unsigned getRegisterBitWidth(bool Vector) const;
 
+  /// \return The size of a cache line in bytes.
+  unsigned getCacheLineSize() const;
+
   /// \return The maximum interleave factor that any transform should try to
   /// perform for this target. This number depends on the level of parallelism
   /// and the number of execution units in the CPU.
@@ -458,6 +461,16 @@ public:
   int getMaskedMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
                             unsigned AddressSpace) const;
 
+  /// \return The cost of Gather or Scatter operation
+  /// \p Opcode - is a type of memory access Load or Store
+  /// \p DataTy - a vector type of the data to be loaded or stored
+  /// \p Ptr - pointer [or vector of pointers] - address[es] in memory
+  /// \p VariableMask - true when the memory access is predicated with a mask
+  ///                   that is not a compile-time constant
+  /// \p Alignment - alignment of single element
+  int getGatherScatterOpCost(unsigned Opcode, Type *DataTy, Value *Ptr,
+                             bool VariableMask, unsigned Alignment) const;
+
   /// \return The cost of the interleaved memory operation.
   /// \p Opcode is the memory operation code
   /// \p VecTy is the vector type of the interleaved access.
@@ -485,9 +498,13 @@ public:
   ///  ((v0+v2), (v1+v3), undef, undef)
   int getReductionCost(unsigned Opcode, Type *Ty, bool IsPairwiseForm) const;
 
-  /// \returns The cost of Intrinsic instructions.
+  /// \returns The cost of Intrinsic instructions. Types analysis only.
   int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
                             ArrayRef<Type *> Tys) const;
+
+  /// \returns The cost of Intrinsic instructions. Analyses the real arguments.
+  int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                            ArrayRef<Value *> Args) const;
 
   /// \returns The cost of Call instructions.
   int getCallInstrCost(Function *F, Type *RetTy, ArrayRef<Type *> Tys) const;
@@ -595,6 +612,7 @@ public:
                             Type *Ty) = 0;
   virtual unsigned getNumberOfRegisters(bool Vector) = 0;
   virtual unsigned getRegisterBitWidth(bool Vector) = 0;
+  virtual unsigned getCacheLineSize() = 0;
   virtual unsigned getMaxInterleaveFactor(unsigned VF) = 0;
   virtual unsigned
   getArithmeticInstrCost(unsigned Opcode, Type *Ty, OperandValueKind Opd1Info,
@@ -614,6 +632,9 @@ public:
   virtual int getMaskedMemoryOpCost(unsigned Opcode, Type *Src,
                                     unsigned Alignment,
                                     unsigned AddressSpace) = 0;
+  virtual int getGatherScatterOpCost(unsigned Opcode, Type *DataTy,
+                                     Value *Ptr, bool VariableMask,
+                                     unsigned Alignment) = 0;
   virtual int getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
                                          unsigned Factor,
                                          ArrayRef<unsigned> Indices,
@@ -623,6 +644,8 @@ public:
                                bool IsPairwiseForm) = 0;
   virtual int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
                                     ArrayRef<Type *> Tys) = 0;
+  virtual int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                                    ArrayRef<Value *> Args) = 0;
   virtual int getCallInstrCost(Function *F, Type *RetTy,
                                ArrayRef<Type *> Tys) = 0;
   virtual unsigned getNumberOfParts(Type *Tp) = 0;
@@ -756,6 +779,9 @@ public:
   unsigned getRegisterBitWidth(bool Vector) override {
     return Impl.getRegisterBitWidth(Vector);
   }
+  unsigned getCacheLineSize() override {
+    return Impl.getCacheLineSize();
+  }
   unsigned getMaxInterleaveFactor(unsigned VF) override {
     return Impl.getMaxInterleaveFactor(VF);
   }
@@ -791,6 +817,12 @@ public:
                             unsigned AddressSpace) override {
     return Impl.getMaskedMemoryOpCost(Opcode, Src, Alignment, AddressSpace);
   }
+  int getGatherScatterOpCost(unsigned Opcode, Type *DataTy,
+                             Value *Ptr, bool VariableMask,
+                             unsigned Alignment) override {
+    return Impl.getGatherScatterOpCost(Opcode, DataTy, Ptr, VariableMask,
+                                       Alignment);
+  }
   int getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy, unsigned Factor,
                                  ArrayRef<unsigned> Indices, unsigned Alignment,
                                  unsigned AddressSpace) override {
@@ -804,6 +836,10 @@ public:
   int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
                             ArrayRef<Type *> Tys) override {
     return Impl.getIntrinsicInstrCost(ID, RetTy, Tys);
+  }
+  int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                            ArrayRef<Value *> Args) override {
+    return Impl.getIntrinsicInstrCost(ID, RetTy, Args);
   }
   int getCallInstrCost(Function *F, Type *RetTy,
                        ArrayRef<Type *> Tys) override {

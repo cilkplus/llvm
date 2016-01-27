@@ -424,7 +424,7 @@ static void ReadNullSepFileToArray(const char *path, char ***arr,
 }
 #endif
 
-static void GetArgsAndEnv(char*** argv, char*** envp) {
+static void GetArgsAndEnv(char ***argv, char ***envp) {
 #if !SANITIZER_GO
   if (&__libc_stack_end) {
 #endif
@@ -439,6 +439,12 @@ static void GetArgsAndEnv(char*** argv, char*** envp) {
     ReadNullSepFileToArray("/proc/self/environ", envp, kMaxEnvp);
   }
 #endif
+}
+
+char **GetArgv() {
+  char **argv, **envp;
+  GetArgsAndEnv(&argv, &envp);
+  return argv;
 }
 
 void ReExec() {
@@ -704,7 +710,9 @@ bool ThreadLister::GetDirectoryEntries() {
 }
 
 uptr GetPageSize() {
-#if SANITIZER_LINUX && (defined(__x86_64__) || defined(__i386__))
+// Android post-M sysconf(_SC_PAGESIZE) crashes if called from .preinit_array.
+#if (SANITIZER_LINUX && (defined(__x86_64__) || defined(__i386__))) || \
+    SANITIZER_ANDROID
   return EXEC_PAGESIZE;
 #else
   return sysconf(_SC_PAGESIZE);  // EXEC_PAGESIZE may not be trustworthy.

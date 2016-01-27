@@ -27,16 +27,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include "WindowsMMap.h"
+#else
 #include <sys/mman.h>
 #include <sys/file.h>
+#endif
 
-#define I386_FREEBSD (defined(__FreeBSD__) && defined(__i386__))
+#if defined(__FreeBSD__) && defined(__i386__)
+#define I386_FREEBSD 1
+#else
+#define I386_FREEBSD 0
+#endif
 
 #if !defined(_MSC_VER) && !I386_FREEBSD
 #include <stdint.h>
 #endif
 
 #if defined(_MSC_VER)
+typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 #elif I386_FREEBSD

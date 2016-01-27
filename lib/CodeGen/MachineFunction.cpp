@@ -47,6 +47,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "codegen"
 
+static cl::opt<unsigned>
+    AlignAllFunctions("align-all-functions",
+                      cl::desc("Force the alignment of all functions."),
+                      cl::init(0), cl::Hidden);
+
 void MachineFunctionInitializer::anchor() {}
 
 //===----------------------------------------------------------------------===//
@@ -86,6 +91,9 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   if (!Fn->hasFnAttribute(Attribute::OptimizeForSize))
     Alignment = std::max(Alignment,
                          STI->getTargetLowering()->getPrefFunctionAlignment());
+
+  if (AlignAllFunctions)
+    Alignment = AlignAllFunctions;
 
   FunctionNumber = FunctionNum;
   JumpTableInfo = nullptr;
@@ -155,7 +163,7 @@ getOrCreateJumpTableInfo(unsigned EntryKind) {
 }
 
 /// Should we be emitting segmented stack stuff for the function
-bool MachineFunction::shouldSplitStack() {
+bool MachineFunction::shouldSplitStack() const {
   return getFunction()->hasFnAttribute("split-stack");
 }
 
@@ -887,17 +895,17 @@ static bool CanShareConstantPoolEntry(const Constant *A, const Constant *B,
   // the constant folding APIs to do this so that we get the benefit of
   // DataLayout.
   if (isa<PointerType>(A->getType()))
-    A = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant *>(A), DL);
+    A = ConstantFoldCastOperand(Instruction::PtrToInt,
+                                const_cast<Constant *>(A), IntTy, DL);
   else if (A->getType() != IntTy)
-    A = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant *>(A), DL);
+    A = ConstantFoldCastOperand(Instruction::BitCast, const_cast<Constant *>(A),
+                                IntTy, DL);
   if (isa<PointerType>(B->getType()))
-    B = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant *>(B), DL);
+    B = ConstantFoldCastOperand(Instruction::PtrToInt,
+                                const_cast<Constant *>(B), IntTy, DL);
   else if (B->getType() != IntTy)
-    B = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant *>(B), DL);
+    B = ConstantFoldCastOperand(Instruction::BitCast, const_cast<Constant *>(B),
+                                IntTy, DL);
 
   return A == B;
 }

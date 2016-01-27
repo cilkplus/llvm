@@ -1,6 +1,63 @@
 configure_lit_site_cfg(
-  ${CMAKE_CURRENT_SOURCE_DIR}/lit.common.configured.in
-  ${CMAKE_CURRENT_BINARY_DIR}/lit.common.configured)
+  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.site.cfg.in
+  ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg
+  )
+
+# Don't include check-llvm into check-all without LLVM_BUILD_TOOLS.
+if(NOT LLVM_BUILD_TOOLS)
+  set(EXCLUDE_FROM_ALL ON)
+endif()
+
+# Set the depends list as a variable so that it can grow conditionally.
+# NOTE: Sync the substitutions in test/lit.cfg when adding to this list.
+set(LLVM_TEST_DEPENDS
+          BugpointPasses
+          FileCheck
+          LLVMHello
+          UnitTests
+          bugpoint
+          count
+          llc
+          lli
+          lli-child-target
+          llvm-ar
+          llvm-as
+          llvm-bcanalyzer
+          llvm-c-test
+          llvm-config
+          llvm-cov
+          llvm-cxxdump
+          llvm-diff
+          llvm-dis
+          llvm-dsymutil
+          llvm-dwarfdump
+          llvm-dwp
+          llvm-extract
+          llvm-lib
+          llvm-link
+          llvm-lto
+          llvm-mc
+          llvm-mcmarkup
+          llvm-nm
+          llvm-objdump
+          llvm-pdbdump
+          llvm-profdata
+          llvm-ranlib
+          llvm-readobj
+          llvm-rtdyld
+          llvm-size
+          llvm-split
+          llvm-symbolizer
+          llvm-tblgen
+          not
+          obj2yaml
+          opt
+          sancov
+          sanstats
+          verify-uselistorder
+          yaml-bench
+          yaml2obj
+        )
 
 # BlocksRuntime and builtins testsuites are not yet ported to lit.
 # add_subdirectory(BlocksRuntime)

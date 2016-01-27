@@ -2,7 +2,7 @@
 
 ; Test varargs constructs.
 
-target datalayout = "e-p:32:32-i64:64-n32:64-S128"
+target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32-unknown-unknown"
 
 ; Test va_start.
@@ -103,18 +103,23 @@ entry:
 declare void @callee(...)
 
 ; CHECK-LABEL: caller_none:
-; CHECK-NEXT: call callee{{$}}
+; CHECK-NEXT: call callee@FUNCTION{{$}}
 ; CHECK-NEXT: return{{$}}
 define void @caller_none() {
   call void (...) @callee()
   ret void
 }
 
+; Test a varargs call with some actual arguments.
+; Note that the store of 2.0 is converted to an i64 store; this optimization
+; is not needed on WebAssembly, but there isn't currently a convenient hook for
+; disabling it.
+
 ; CHECK-LABEL: caller_some
+; CHECK: i32.store
+; CHECK: i64.store
 define void @caller_some() {
-  ; TODO: Fix interaction between register coalescer and reg stackifier,
-  ; or disable coalescer.
-  ;call void (...) @callee(i32 0, double 2.0)
+  call void (...) @callee(i32 0, double 2.0)
   ret void
 }
 
