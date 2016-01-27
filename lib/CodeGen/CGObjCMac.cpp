@@ -2881,7 +2881,7 @@ PushProtocolProperties(llvm::SmallPtrSet<const IdentifierInfo*,16> &PropertySet,
                        const ObjCCommonTypesHelper &ObjCTypes) {
   for (const auto *P : Proto->protocols()) 
     PushProtocolProperties(PropertySet, Properties, Container, P, ObjCTypes);
-  for (const auto *PD : Proto->properties()) {
+  for (const auto *PD : Proto->instance_properties()) {
     if (!PropertySet.insert(PD->getIdentifier()).second)
       continue;
     llvm::Constant *Prop[] = {
@@ -2918,11 +2918,11 @@ llvm::Constant *CGObjCCommonMac::EmitPropertyList(Twine Name,
   };
   if (const ObjCInterfaceDecl *OID = dyn_cast<ObjCInterfaceDecl>(OCD))
     for (const ObjCCategoryDecl *ClassExt : OID->known_extensions())
-      for (auto *PD : ClassExt->properties()) {
+      for (auto *PD : ClassExt->instance_properties()) {
         PropertySet.insert(PD->getIdentifier());
         AddProperty(PD);
       }
-  for (const auto *PD : OCD->properties()) {
+  for (const auto *PD : OCD->instance_properties()) {
     // Don't emit duplicate metadata for properties that were already in a
     // class extension.
     if (!PropertySet.insert(PD->getIdentifier()).second)
@@ -4770,11 +4770,7 @@ llvm::Constant *IvarLayoutBuilder::buildBitmap(CGObjCCommonMac &CGObjC,
     // This isn't a stable sort, but our algorithm should handle it fine.
     llvm::array_pod_sort(IvarsInfo.begin(), IvarsInfo.end());
   } else {
-#ifndef NDEBUG
-    for (unsigned i = 1; i != IvarsInfo.size(); ++i) {
-      assert(IvarsInfo[i - 1].Offset <= IvarsInfo[i].Offset);
-    }
-#endif
+    assert(std::is_sorted(IvarsInfo.begin(), IvarsInfo.end()));
   }
   assert(IvarsInfo.back().Offset < InstanceEnd);
 
@@ -4958,7 +4954,7 @@ CGObjCCommonMac::BuildIvarLayout(const ObjCImplementationDecl *OMD,
       baseOffset = CharUnits::Zero();
     }
 
-    baseOffset = baseOffset.RoundUpToAlignment(CGM.getPointerAlign());
+    baseOffset = baseOffset.alignTo(CGM.getPointerAlign());
   }
   else {
     CGM.getContext().DeepCollectObjCIvars(OI, true, ivars);
@@ -5363,6 +5359,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
   //   char *class_name;
   //   struct _objc_method_list *instance_method;
   //   struct _objc_method_list *class_method;
+  //   struct _objc_protocol_list *protocols;
   //   uint32_t size;  // sizeof(struct _objc_category)
   //   struct _objc_property_list *instance_properties;// category's @property
   // }

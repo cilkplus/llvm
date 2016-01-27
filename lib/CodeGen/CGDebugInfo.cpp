@@ -1536,8 +1536,9 @@ static bool shouldOmitDefinition(CodeGenOptions::DebugInfoKind DebugKind,
                                  const RecordDecl *RD,
                                  const LangOptions &LangOpts) {
   // Does the type exist in an imported clang module?
-  if (DebugTypeExtRefs && RD->isFromASTFile() && RD->getDefinition())
-      return true;
+  if (DebugTypeExtRefs && RD->isFromASTFile() && RD->getDefinition() &&
+      (RD->isExternallyVisible() || !RD->getName().empty()))
+    return true;
 
   if (DebugKind > CodeGenOptions::LimitedDebugInfo)
     return false;
@@ -1739,11 +1740,14 @@ CGDebugInfo::getOrCreateModuleRef(ExternalASTSource::ASTSourceDescriptor Mod,
 
   bool IsRootModule = M ? !M->Parent : true;
   if (CreateSkeletonCU && IsRootModule) {
+    // PCH files don't have a signature field in the control block,
+    // but LLVM detects skeleton CUs by looking for a non-zero DWO id.
+    uint64_t Signature = Mod.getSignature() ? Mod.getSignature() : ~1ULL;
     llvm::DIBuilder DIB(CGM.getModule());
     DIB.createCompileUnit(TheCU->getSourceLanguage(), Mod.getModuleName(),
                           Mod.getPath(), TheCU->getProducer(), true,
                           StringRef(), 0, Mod.getASTFile(),
-                          llvm::DIBuilder::FullDebug, Mod.getSignature());
+                          llvm::DIBuilder::FullDebug, Signature);
     DIB.finalize();
   }
   llvm::DIModule *Parent =
@@ -1818,11 +1822,11 @@ llvm::DIType *CGDebugInfo::CreateTypeDefinition(const ObjCInterfaceType *Ty,
   {
     llvm::SmallPtrSet<const IdentifierInfo*, 16> PropertySet;
     for (const ObjCCategoryDecl *ClassExt : ID->known_extensions())
-      for (auto *PD : ClassExt->properties()) {
+      for (auto *PD : ClassExt->instance_properties()) {
         PropertySet.insert(PD->getIdentifier());
         AddProperty(PD);
       }
-    for (const auto *PD : ID->properties()) {
+    for (const auto *PD : ID->instance_properties()) {
       // Don't emit duplicate metadata for properties that were already in a
       // class extension.
       if (!PropertySet.insert(PD->getIdentifier()).second)
@@ -2025,6 +2029,11 @@ llvm::DIType *CGDebugInfo::CreateType(const AtomicType *Ty, llvm::DIFile *U) {
   return getOrCreateType(Ty->getValueType(), U);
 }
 
+llvm::DIType* CGDebugInfo::CreateType(const PipeType *Ty,
+                                     llvm::DIFile *U) {
+  return getOrCreateType(Ty->getElementType(), U);
+}
+
 llvm::DIType *CGDebugInfo::CreateEnumType(const EnumType *Ty) {
   const EnumDecl *ED = Ty->getDecl();
 
@@ -2215,8 +2224,12 @@ llvm::DIModule *CGDebugInfo::getParentModuleOrNull(const Decl *D) {
     // option.
     FullSourceLoc Loc(D->getLocation(), CGM.getContext().getSourceManager());
     if (Module *M = ClangModuleMap->inferModuleFromLocation(Loc)) {
+      // This is a (sub-)module.
       auto Info = ExternalASTSource::ASTSourceDescriptor(*M);
       return getOrCreateModuleRef(Info, /*SkeletonCU=*/false);
+    } else {
+      // This the precompiled header being built.
+      return getOrCreateModuleRef(PCHDescriptor, /*SkeletonCU=*/false);
     }
   }
 
@@ -2283,6 +2296,9 @@ llvm::DIType *CGDebugInfo::CreateTypeNode(QualType Ty, llvm::DIFile *Unit) {
 
   case Type::Atomic:
     return CreateType(cast<AtomicType>(Ty), Unit);
+
+  case Type::Pipe:
+    return CreateType(cast<PipeType>(Ty), Unit);
 
   case Type::TemplateSpecialization:
     return CreateType(cast<TemplateSpecializationType>(Ty), Unit);
@@ -2888,8 +2904,7 @@ llvm::DIType *CGDebugInfo::EmitTypeForVarWithBlocksAttr(const VarDecl *VD,
                   CGM.getTarget().getPointerAlign(0))) {
     CharUnits FieldOffsetInBytes =
         CGM.getContext().toCharUnitsFromBits(FieldOffset);
-    CharUnits AlignedOffsetInBytes =
-        FieldOffsetInBytes.RoundUpToAlignment(Align);
+    CharUnits AlignedOffsetInBytes = FieldOffsetInBytes.alignTo(Align);
     CharUnits NumPaddingBytes = AlignedOffsetInBytes - FieldOffsetInBytes;
 
     if (NumPaddingBytes.isPositive()) {

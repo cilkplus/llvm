@@ -1496,7 +1496,8 @@ void ItaniumCXXABI::emitVTableDefinitions(CodeGenVTables &CGVT,
       DC->getParent()->isTranslationUnit())
     EmitFundamentalRTTIDescriptors();
 
-  CGM.EmitVTableBitSetEntries(VTable, VTLayout);
+  if (!VTable->isDeclarationForLinker())
+    CGM.EmitVTableBitSetEntries(VTable, VTLayout);
 }
 
 bool ItaniumCXXABI::isVirtualOffsetNeededForVTableField(
@@ -2178,17 +2179,29 @@ ItaniumCXXABI::getOrCreateThreadLocalWrapper(const VarDecl *VD,
     getMangleContext().mangleItaniumThreadLocalWrapper(VD, Out);
   }
 
+  // FIXME: If VD is a definition, we should regenerate the function attributes
+  // before returning.
   if (llvm::Value *V = CGM.getModule().getNamedValue(WrapperName))
     return cast<llvm::Function>(V);
 
-  llvm::Type *RetTy = Val->getType();
-  if (VD->getType()->isReferenceType())
-    RetTy = RetTy->getPointerElementType();
+  QualType RetQT = VD->getType();
+  if (RetQT->isReferenceType())
+    RetQT = RetQT.getNonReferenceType();
 
-  llvm::FunctionType *FnTy = llvm::FunctionType::get(RetTy, false);
+  const CGFunctionInfo &FI = CGM.getTypes().arrangeFreeFunctionDeclaration(
+      getContext().getPointerType(RetQT), FunctionArgList(),
+      FunctionType::ExtInfo(), false);
+
+  llvm::FunctionType *FnTy = CGM.getTypes().GetFunctionType(FI);
   llvm::Function *Wrapper =
       llvm::Function::Create(FnTy, getThreadLocalWrapperLinkage(VD, CGM),
                              WrapperName.str(), &CGM.getModule());
+
+  CGM.SetLLVMFunctionAttributes(nullptr, FI, Wrapper);
+
+  if (VD->hasDefinition())
+    CGM.SetLLVMFunctionAttributesForDefinition(nullptr, Wrapper);
+
   // Always resolve references to the wrapper at link time.
   if (!Wrapper->hasLocalLinkage() && !(isThreadWrapperReplaceable(VD, CGM) &&
       !llvm::GlobalVariable::isLinkOnceLinkage(Wrapper->getLinkage()) &&
@@ -2264,6 +2277,10 @@ void ItaniumCXXABI::EmitThreadLocalInitFuncs(
       Init = llvm::Function::Create(
           FnTy, llvm::GlobalVariable::ExternalWeakLinkage, InitFnName.str(),
           &CGM.getModule());
+      const CGFunctionInfo &FI = CGM.getTypes().arrangeFreeFunctionDeclaration(
+          CGM.getContext().VoidTy, FunctionArgList(), FunctionType::ExtInfo(),
+          false);
+      CGM.SetLLVMFunctionAttributes(nullptr, FI, cast<llvm::Function>(Init));
     }
 
     if (Init)
@@ -2715,6 +2732,9 @@ void ItaniumRTTIBuilder::BuildVTablePointer(const Type *Ty) {
   case Type::Auto:
     llvm_unreachable("Undeduced auto type shouldn't get here");
 
+  case Type::Pipe:
+    llvm_unreachable("Pipe types shouldn't get here");
+
   case Type::Builtin:
   // GCC treats vector and complex types as fundamental types.
   case Type::Vector:
@@ -2938,6 +2958,9 @@ llvm::Constant *ItaniumRTTIBuilder::BuildTypeInfo(QualType Ty, bool Force) {
 
   case Type::Auto:
     llvm_unreachable("Undeduced auto type shouldn't get here");
+
+  case Type::Pipe:
+    llvm_unreachable("Pipe type shouldn't get here");
 
   case Type::ConstantArray:
   case Type::IncompleteArray:

@@ -134,7 +134,7 @@ public:
   StringRef getOS() const { return Triple.getOSName(); }
 
   /// \brief Provide the default architecture name (as expected by -arch) for
-  /// this toolchain. Note t
+  /// this toolchain.
   StringRef getDefaultUniversalArchName() const;
 
   std::string getTripleString() const {
@@ -228,7 +228,7 @@ public:
   virtual bool IsIntegratedAssemblerDefault() const { return false; }
 
   /// \brief Check if the toolchain should use the integrated assembler.
-  bool useIntegratedAs() const;
+  virtual bool useIntegratedAs() const;
 
   /// IsMathErrnoDefault - Does this tool chain use -fmath-errno by default.
   virtual bool IsMathErrnoDefault() const { return true; }

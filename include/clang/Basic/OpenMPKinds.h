@@ -62,6 +62,15 @@ enum OpenMPScheduleClauseKind {
   OMPC_SCHEDULE_unknown
 };
 
+/// \brief OpenMP modifiers for 'schedule' clause.
+enum OpenMPScheduleClauseModifier {
+  OMPC_SCHEDULE_MODIFIER_unknown = OMPC_SCHEDULE_unknown,
+#define OPENMP_SCHEDULE_MODIFIER(Name) \
+  OMPC_SCHEDULE_MODIFIER_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_SCHEDULE_MODIFIER_last
+};
+
 /// \brief OpenMP attributes for 'depend' clause.
 enum OpenMPDependClauseKind {
 #define OPENMP_DEPEND_KIND(Name) \
@@ -84,6 +93,30 @@ enum OpenMPMapClauseKind {
   OMPC_MAP_##Name,
 #include "clang/Basic/OpenMPKinds.def"
   OMPC_MAP_unknown
+};
+
+/// \brief OpenMP attributes for 'dist_schedule' clause.
+enum OpenMPDistScheduleClauseKind {
+#define OPENMP_DIST_SCHEDULE_KIND(Name) OMPC_DIST_SCHEDULE_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_DIST_SCHEDULE_unknown
+};
+
+/// \brief OpenMP attributes for 'defaultmap' clause.
+enum OpenMPDefaultmapClauseKind {
+#define OPENMP_DEFAULTMAP_KIND(Name) \
+  OMPC_DEFAULTMAP_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_DEFAULTMAP_unknown
+};
+
+/// \brief OpenMP modifiers for 'defaultmap' clause.
+enum OpenMPDefaultmapClauseModifier {
+  OMPC_DEFAULTMAP_MODIFIER_unknown = OMPC_DEFAULTMAP_unknown,
+#define OPENMP_DEFAULTMAP_MODIFIER(Name) \
+  OMPC_DEFAULTMAP_MODIFIER_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_DEFAULTMAP_MODIFIER_last
 };
 
 OpenMPDirectiveKind getOpenMPDirectiveKind(llvm::StringRef Str);

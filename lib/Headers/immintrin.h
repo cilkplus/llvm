@@ -120,8 +120,9 @@ _mm256_cvtph_ps(__m128i __a)
 #include <avx512erintrin.h>
 #endif
 
-#ifdef __RDRND__
-static __inline__ int __attribute__((__always_inline__, __nodebug__))
+#include <pkuintrin.h>
+
+static __inline__ int __attribute__((__always_inline__, __nodebug__, __target__("rdrnd")))
 _rdrand16_step(unsigned short *__p)
 {
   return __builtin_ia32_rdrand16_step(__p);

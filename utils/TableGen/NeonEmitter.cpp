@@ -1995,7 +1995,7 @@ void NeonEmitter::createIntrinsic(Record *R,
 
   ClassKind CK = ClassNone;
   if (R->getSuperClasses().size() >= 2)
-    CK = ClassMap[R->getSuperClasses()[1]];
+    CK = ClassMap[R->getSuperClasses()[1].first];
 
   std::vector<std::pair<TypeSpec, TypeSpec>> NewTypeSpecs;
   for (auto TS : TypeSpecs) {
