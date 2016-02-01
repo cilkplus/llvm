@@ -23,6 +23,7 @@
 #include "sanitizer_common/sanitizer_stacktrace.h"
 #include "sanitizer_common/sanitizer_suppressions.h"
 #include "sanitizer_common/sanitizer_report_decorator.h"
+#include "sanitizer_common/sanitizer_tls_get_addr.h"
 
 #if CAN_SANITIZE_LEAKS
 namespace __lsan {
@@ -33,6 +34,14 @@ BlockingMutex global_mutex(LINKER_INITIALIZED);
 
 THREADLOCAL int disable_counter;
 bool DisabledInThisThread() { return disable_counter > 0; }
+void DisableInThisThread() { disable_counter++; }
+void EnableInThisThread() {
+  if (!disable_counter && common_flags()->detect_leaks) {
+    Report("Unmatched call to __lsan_enable().\n");
+    Die();
+  }
+  disable_counter--;
+}
 
 Flags lsan_flags;
 
@@ -185,9 +194,10 @@ static void ProcessThreads(SuspendedThreadsList const &suspended_threads,
     uptr os_id = static_cast<uptr>(suspended_threads.GetThreadID(i));
     LOG_THREADS("Processing thread %d.\n", os_id);
     uptr stack_begin, stack_end, tls_begin, tls_end, cache_begin, cache_end;
+    DTLS *dtls;
     bool thread_found = GetThreadRangesLocked(os_id, &stack_begin, &stack_end,
                                               &tls_begin, &tls_end,
-                                              &cache_begin, &cache_end);
+                                              &cache_begin, &cache_end, &dtls);
     if (!thread_found) {
       // If a thread can't be found in the thread registry, it's probably in the
       // process of destruction. Log this event and move on.
@@ -237,6 +247,17 @@ static void ProcessThreads(SuspendedThreadsList const &suspended_threads,
                                kReachable);
         if (tls_end > cache_end)
           ScanRangeForPointers(cache_end, tls_end, frontier, "TLS", kReachable);
+      }
+      if (dtls) {
+        for (uptr j = 0; j < dtls->dtv_size; ++j) {
+          uptr dtls_beg = dtls->dtv[j].beg;
+          uptr dtls_end = dtls_beg + dtls->dtv[j].size;
+          if (dtls_beg < dtls_end) {
+            LOG_THREADS("DTLS %zu at %p-%p.\n", j, dtls_beg, dtls_end);
+            ScanRangeForPointers(dtls_beg, dtls_end, frontier, "DTLS",
+                                 kReachable);
+          }
+        }
       }
     }
   }
@@ -682,18 +703,14 @@ void __lsan_unregister_root_region(const void *begin, uptr size) {
 SANITIZER_INTERFACE_ATTRIBUTE
 void __lsan_disable() {
 #if CAN_SANITIZE_LEAKS
-  __lsan::disable_counter++;
+  __lsan::DisableInThisThread();
 #endif
 }
 
 SANITIZER_INTERFACE_ATTRIBUTE
 void __lsan_enable() {
 #if CAN_SANITIZE_LEAKS
-  if (!__lsan::disable_counter && common_flags()->detect_leaks) {
-    Report("Unmatched call to __lsan_enable().\n");
-    Die();
-  }
-  __lsan::disable_counter--;
+  __lsan::EnableInThisThread();
 #endif
 }
 

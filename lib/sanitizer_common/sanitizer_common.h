@@ -93,6 +93,7 @@ void *MmapAlignedOrDie(uptr size, uptr alignment, const char *mem_type);
 // Disallow access to a memory range.  Use MmapNoAccess to allocate an
 // unaccessible memory.
 bool MprotectNoAccess(uptr addr, uptr size);
+bool MprotectReadOnly(uptr addr, uptr size);
 
 // Used to check if we can map shadow memory to a fixed location.
 bool MemoryRangeIsAvailable(uptr range_start, uptr range_end);
@@ -279,9 +280,25 @@ const char *GetPwd();
 char *FindPathToBinary(const char *name);
 bool IsPathSeparator(const char c);
 bool IsAbsolutePath(const char *path);
+// Starts a subprocess and returs its pid.
+// If *_fd parameters are not kInvalidFd their corresponding input/output
+// streams will be redirect to the file. The files will always be closed
+// in parent process even in case of an error.
+// The child process will close all fds after STDERR_FILENO
+// before passing control to a program.
+pid_t StartSubprocess(const char *filename, const char *const argv[],
+                      fd_t stdin_fd = kInvalidFd, fd_t stdout_fd = kInvalidFd,
+                      fd_t stderr_fd = kInvalidFd);
+// Checks if specified process is still running
+bool IsProcessRunning(pid_t pid);
+// Waits for the process to finish and returns its exit code.
+// Returns -1 in case of an error.
+int WaitForProcess(pid_t pid);
 
 u32 GetUid();
 void ReExec();
+char **GetArgv();
+void PrintCmdline();
 bool StackSizeIsUnlimited();
 void SetStackSizeLimitInBytes(uptr limit);
 bool AddressSpaceIsUnlimited();
@@ -522,6 +539,19 @@ class InternalMmapVectorNoCtor {
   void clear() { size_ = 0; }
   bool empty() const { return size() == 0; }
 
+  const T *begin() const {
+    return data();
+  }
+  T *begin() {
+    return data();
+  }
+  const T *end() const {
+    return data() + size();
+  }
+  T *end() {
+    return data() + size();
+  }
+
  private:
   void Resize(uptr new_capacity) {
     CHECK_GT(new_capacity, 0);
@@ -628,8 +658,7 @@ class LoadedModule {
         : next(nullptr), beg(beg), end(end), executable(executable) {}
   };
 
-  typedef IntrusiveList<AddressRange>::ConstIterator Iterator;
-  Iterator ranges() const { return Iterator(&ranges_); }
+  const IntrusiveList<AddressRange> &ranges() const { return ranges_; }
 
  private:
   char *full_name_;  // Owned.
@@ -665,17 +694,17 @@ INLINE void LogFullErrorReport(const char *buffer) {}
 
 #if SANITIZER_LINUX || SANITIZER_MAC
 void WriteOneLineToSyslog(const char *s);
+void LogMessageOnPrintf(const char *str);
 #else
 INLINE void WriteOneLineToSyslog(const char *s) {}
+INLINE void LogMessageOnPrintf(const char *str) {}
 #endif
 
 #if SANITIZER_LINUX
 // Initialize Android logging. Any writes before this are silently lost.
 void AndroidLogInit();
-bool ShouldLogAfterPrintf();
 #else
 INLINE void AndroidLogInit() {}
-INLINE bool ShouldLogAfterPrintf() { return false; }
 #endif
 
 #if SANITIZER_ANDROID
@@ -733,6 +762,23 @@ void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp);
 
 void DisableReexec();
 void MaybeReexec();
+
+template <typename Fn>
+class RunOnDestruction {
+ public:
+  explicit RunOnDestruction(Fn fn) : fn_(fn) {}
+  ~RunOnDestruction() { fn_(); }
+
+ private:
+  Fn fn_;
+};
+
+// A simple scope guard. Usage:
+// auto cleanup = at_scope_exit([]{ do_cleanup; });
+template <typename Fn>
+RunOnDestruction<Fn> at_scope_exit(Fn fn) {
+  return RunOnDestruction<Fn>(fn);
+}
 
 }  // namespace __sanitizer
 

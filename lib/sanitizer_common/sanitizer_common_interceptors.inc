@@ -143,6 +143,14 @@
 #define COMMON_INTERCEPTOR_RELEASE(ctx, u) {}
 #endif
 
+#ifndef COMMON_INTERCEPTOR_USER_CALLBACK_START
+#define COMMON_INTERCEPTOR_USER_CALLBACK_START() {}
+#endif
+
+#ifndef COMMON_INTERCEPTOR_USER_CALLBACK_END
+#define COMMON_INTERCEPTOR_USER_CALLBACK_END() {}
+#endif
+
 struct FileMetadata {
   // For open_memstream().
   char **addr;
@@ -214,13 +222,11 @@ static inline int CharCmpX(unsigned char c1, unsigned char c2) {
 }
 
 DECLARE_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_strcmp, uptr called_pc,
-                              const char *s1, const char *s2)
+                              const char *s1, const char *s2, int result)
 
 INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, strcmp, s1, s2);
-  CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_strcmp, GET_CALLER_PC(), s1,
-                             s2);
   unsigned char c1, c2;
   uptr i;
   for (i = 0;; i++) {
@@ -230,19 +236,21 @@ INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
   }
   COMMON_INTERCEPTOR_READ_STRING(ctx, s1, i + 1);
   COMMON_INTERCEPTOR_READ_STRING(ctx, s2, i + 1);
-  return CharCmpX(c1, c2);
+  int result = CharCmpX(c1, c2);
+  CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_strcmp, GET_CALLER_PC(), s1,
+                             s2, result);
+  return result;
 }
 
 DECLARE_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_strncmp, uptr called_pc,
-                              const char *s1, const char *s2, uptr n)
+                              const char *s1, const char *s2, uptr n,
+                              int result)
 
 INTERCEPTOR(int, strncmp, const char *s1, const char *s2, uptr size) {
   if (COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED)
     return internal_strncmp(s1, s2, size);
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, strncmp, s1, s2, size);
-  CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_strncmp, GET_CALLER_PC(), s1,
-                             s2, size);
   unsigned char c1 = 0, c2 = 0;
   uptr i;
   for (i = 0; i < size; i++) {
@@ -252,7 +260,10 @@ INTERCEPTOR(int, strncmp, const char *s1, const char *s2, uptr size) {
   }
   COMMON_INTERCEPTOR_READ_RANGE(ctx, s1, Min(i + 1, size));
   COMMON_INTERCEPTOR_READ_RANGE(ctx, s2, Min(i + 1, size));
-  return CharCmpX(c1, c2);
+  int result = CharCmpX(c1, c2);
+  CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_strncmp, GET_CALLER_PC(), s1,
+                             s2, size, result);
+  return result;
 }
 
 #define INIT_STRCMP COMMON_INTERCEPT_FUNCTION(strcmp)
@@ -400,15 +411,14 @@ INTERCEPTOR(char *, strpbrk, const char *s1, const char *s2) {
 #if SANITIZER_INTERCEPT_MEMCMP
 
 DECLARE_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_memcmp, uptr called_pc,
-                              const void *s1, const void *s2, uptr n)
+                              const void *s1, const void *s2, uptr n,
+                              int result)
 
 INTERCEPTOR(int, memcmp, const void *a1, const void *a2, uptr size) {
   if (COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED)
     return internal_memcmp(a1, a2, size);
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, memcmp, a1, a2, size);
-  CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_memcmp, GET_CALLER_PC(), a1,
-                             a2, size);
   if (common_flags()->intercept_memcmp) {
     if (common_flags()->strict_memcmp) {
       // Check the entire regions even if the first bytes of the buffers are
@@ -428,10 +438,16 @@ INTERCEPTOR(int, memcmp, const void *a1, const void *a2, uptr size) {
       }
       COMMON_INTERCEPTOR_READ_RANGE(ctx, s1, Min(i + 1, size));
       COMMON_INTERCEPTOR_READ_RANGE(ctx, s2, Min(i + 1, size));
-      return CharCmpX(c1, c2);
+      int r = CharCmpX(c1, c2);
+      CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_memcmp, GET_CALLER_PC(),
+                                 a1, a2, size, r);
+      return r;
     }
   }
-  return REAL(memcmp(a1, a2, size));
+  int result = REAL(memcmp(a1, a2, size));
+  CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_memcmp, GET_CALLER_PC(), a1,
+                             a2, size, result);
+  return result;
 }
 
 #define INIT_MEMCMP COMMON_INTERCEPT_FUNCTION(memcmp)
@@ -3296,7 +3312,9 @@ INTERCEPTOR(char **, backtrace_symbols, void **buffer, int size) {
 INTERCEPTOR(void, _exit, int status) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, _exit, status);
+  COMMON_INTERCEPTOR_USER_CALLBACK_START();
   int status1 = COMMON_INTERCEPTOR_ON_EXIT(ctx);
+  COMMON_INTERCEPTOR_USER_CALLBACK_END();
   if (status == 0) status = status1;
   REAL(_exit)(status);
 }

@@ -103,8 +103,6 @@ extern "C" int pthread_setspecific(unsigned key, const void *v);
 DECLARE_REAL(int, pthread_mutexattr_gettype, void *, void *)
 extern "C" int pthread_sigmask(int how, const __sanitizer_sigset_t *set,
                                __sanitizer_sigset_t *oldset);
-// REAL(sigfillset) defined in common interceptors.
-DECLARE_REAL(int, sigfillset, __sanitizer_sigset_t *set)
 DECLARE_REAL(int, fflush, __sanitizer_FILE *fp)
 DECLARE_REAL_AND_INTERCEPTOR(void *, malloc, uptr size)
 DECLARE_REAL_AND_INTERCEPTOR(void, free, void *ptr)
@@ -121,8 +119,13 @@ extern "C" int dirfd(void *dirp);
 extern "C" int mallopt(int param, int value);
 #endif
 extern __sanitizer_FILE *stdout, *stderr;
+#if !SANITIZER_FREEBSD && !SANITIZER_MAC
 const int PTHREAD_MUTEX_RECURSIVE = 1;
 const int PTHREAD_MUTEX_RECURSIVE_NP = 1;
+#else
+const int PTHREAD_MUTEX_RECURSIVE = 2;
+const int PTHREAD_MUTEX_RECURSIVE_NP = 2;
+#endif
 const int EINVAL = 22;
 const int EBUSY = 16;
 const int EOWNERDEAD = 130;
@@ -165,7 +168,7 @@ struct sigaction_t {
   u32 sa_flags;
   union {
     sighandler_t sa_handler;
-    sigactionhandler_t sa_sgiaction;
+    sigactionhandler_t sa_sigaction;
   };
   __sanitizer_sigset_t sa_mask;
   void (*sa_restorer)();
@@ -271,19 +274,24 @@ ScopedInterceptor::ScopedInterceptor(ThreadState *thr, const char *fname,
     : thr_(thr)
     , pc_(pc)
     , in_ignored_lib_(false) {
-  if (!thr_->ignore_interceptors) {
-    Initialize(thr);
+  Initialize(thr);
+  if (!thr_->is_inited)
+    return;
+  if (!thr_->ignore_interceptors)
     FuncEntry(thr, pc);
-  }
   DPrintf("#%d: intercept %s()\n", thr_->tid, fname);
   if (!thr_->in_ignored_lib && libignore()->IsIgnored(pc)) {
     in_ignored_lib_ = true;
     thr_->in_ignored_lib = true;
     ThreadIgnoreBegin(thr_, pc_);
   }
+  if (flags()->ignore_interceptors_accesses) ThreadIgnoreBegin(thr_, pc_);
 }
 
 ScopedInterceptor::~ScopedInterceptor() {
+  if (!thr_->is_inited)
+    return;
+  if (flags()->ignore_interceptors_accesses) ThreadIgnoreEnd(thr_, pc_);
   if (in_ignored_lib_) {
     thr_->in_ignored_lib = false;
     ThreadIgnoreEnd(thr_, pc_);
@@ -296,6 +304,7 @@ ScopedInterceptor::~ScopedInterceptor() {
 }
 
 void ScopedInterceptor::UserCallbackStart() {
+  if (flags()->ignore_interceptors_accesses) ThreadIgnoreEnd(thr_, pc_);
   if (in_ignored_lib_) {
     thr_->in_ignored_lib = false;
     ThreadIgnoreEnd(thr_, pc_);
@@ -307,6 +316,7 @@ void ScopedInterceptor::UserCallbackEnd() {
     thr_->in_ignored_lib = true;
     ThreadIgnoreBegin(thr_, pc_);
   }
+  if (flags()->ignore_interceptors_accesses) ThreadIgnoreBegin(thr_, pc_);
 }
 
 #define TSAN_INTERCEPT(func) INTERCEPT_FUNCTION(func)
@@ -1892,8 +1902,10 @@ TSAN_INTERCEPTOR(int, rmdir, char *path) {
 
 TSAN_INTERCEPTOR(int, closedir, void *dirp) {
   SCOPED_TSAN_INTERCEPTOR(closedir, dirp);
-  int fd = dirfd(dirp);
-  FdClose(thr, pc, fd);
+  if (dirp) {
+    int fd = dirfd(dirp);
+    FdClose(thr, pc, fd);
+  }
   return REAL(closedir)(dirp);
 }
 
@@ -1979,7 +1991,7 @@ void ProcessPendingSignals(ThreadState *thr) {
     return;
   atomic_store(&sctx->have_pending_signals, 0, memory_order_relaxed);
   atomic_fetch_add(&thr->in_signal_handler, 1, memory_order_relaxed);
-  CHECK_EQ(0, REAL(sigfillset)(&sctx->emptyset));
+  internal_sigfillset(&sctx->emptyset);
   CHECK_EQ(0, pthread_sigmask(SIG_SETMASK, &sctx->emptyset, &sctx->oldset));
   for (int sig = 0; sig < kSigCount; sig++) {
     SignalDesc *signal = &sctx->pending_signals[sig];
@@ -2083,7 +2095,7 @@ TSAN_INTERCEPTOR(int, sigaction, int sig, sigaction_t *act, sigaction_t *old) {
 #endif
   sigaction_t newact;
   internal_memcpy(&newact, act, sizeof(newact));
-  REAL(sigfillset)(&newact.sa_mask);
+  internal_sigfillset(&newact.sa_mask);
   if (act->sa_handler != SIG_IGN && act->sa_handler != SIG_DFL) {
     if (newact.sa_flags & SA_SIGINFO)
       newact.sa_sigaction = rtl_sigaction;
@@ -2303,6 +2315,11 @@ static void HandleRecvmsg(ThreadState *thr, uptr pc,
 // Since the interceptor only initializes memory for msan, the simplest solution
 // is to disable the interceptor in tsan (other sanitizers do not call
 // signal handlers from COMMON_INTERCEPTOR_ENTER).
+// As __tls_get_addr has been intercepted in the past, to avoid breaking
+// libtsan ABI, keep it around, but just call the real function.
+#if SANITIZER_INTERCEPT_TLS_GET_ADDR
+#define NEED_TLS_GET_ADDR
+#endif
 #undef SANITIZER_INTERCEPT_TLS_GET_ADDR
 
 #define COMMON_INTERCEPT_FUNCTION(name) INTERCEPT_FUNCTION(name)
@@ -2405,6 +2422,12 @@ static void HandleRecvmsg(ThreadState *thr, uptr pc,
   } else {                                                                     \
     *begin = *end = 0;                                                         \
   }
+
+#define COMMON_INTERCEPTOR_USER_CALLBACK_START() \
+  SCOPED_TSAN_INTERCEPTOR_USER_CALLBACK_START()
+
+#define COMMON_INTERCEPTOR_USER_CALLBACK_END() \
+  SCOPED_TSAN_INTERCEPTOR_USER_CALLBACK_END()
 
 #include "sanitizer_common/sanitizer_common_interceptors.inc"
 
@@ -2521,6 +2544,12 @@ static void syscall_post_fork(uptr pc, int pid) {
   syscall_post_fork(GET_CALLER_PC(), res)
 
 #include "sanitizer_common/sanitizer_common_syscalls.inc"
+
+#ifdef NEED_TLS_GET_ADDR
+TSAN_INTERCEPTOR(void *, __tls_get_addr, void *arg) {
+  return REAL(__tls_get_addr)(arg);
+}
+#endif
 
 namespace __tsan {
 
@@ -2704,6 +2733,10 @@ void InitializeInterceptors() {
   TSAN_INTERCEPT(on_exit);
   TSAN_INTERCEPT(__cxa_atexit);
   TSAN_INTERCEPT(_exit);
+
+#ifdef NEED_TLS_GET_ADDR
+  TSAN_INTERCEPT(__tls_get_addr);
+#endif
 
 #if !SANITIZER_MAC && !SANITIZER_ANDROID
   // Need to setup it, because interceptors check that the function is resolved.

@@ -68,6 +68,7 @@ extern "C" {
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <util.h>
 
@@ -197,6 +198,15 @@ uptr internal_rename(const char *oldpath, const char *newpath) {
 
 uptr internal_ftruncate(fd_t fd, uptr size) {
   return ftruncate(fd, size);
+}
+
+uptr internal_execve(const char *filename, char *const argv[],
+                     char *const envp[]) {
+  return execve(filename, argv, envp);
+}
+
+uptr internal_waitpid(int pid, int *status, int options) {
+  return waitpid(pid, status, options);
 }
 
 // ----------------- sanitizer_common.h
@@ -430,6 +440,12 @@ void WriteOneLineToSyslog(const char *s) {
   asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "%s", s);
 }
 
+void LogMessageOnPrintf(const char *str) {
+  // Log all printf output to CrashLog.
+  if (common_flags()->abort_on_error)
+    CRAppendCrashLogMessage(str);
+}
+
 void LogFullErrorReport(const char *buffer) {
   // Log with os_trace. This will make it into the crash log.
 #if SANITIZER_OS_TRACE
@@ -463,9 +479,7 @@ void LogFullErrorReport(const char *buffer) {
   if (common_flags()->log_to_syslog)
     WriteToSyslog(buffer);
 
-  // Log to CrashLog.
-  if (common_flags()->abort_on_error)
-    CRSetCrashLogMessage(buffer);
+  // The report is added to CrashLog as part of logging all of Printf output.
 }
 
 void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
@@ -660,6 +674,10 @@ void MaybeReexec() {
   // a separate function called after InitializeAllocator().
   if (new_env_pos == new_env + env_name_len + 1) new_env = NULL;
   LeakyResetEnv(kDyldInsertLibraries, new_env);
+}
+
+char **GetArgv() {
+  return *_NSGetArgv();
 }
 
 }  // namespace __sanitizer
