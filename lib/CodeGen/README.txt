@@ -45,4 +45,3 @@ On 176.gcc:expr.ll, it looks like over 12% of basic blocks are just
 direct branches!
 
 //===---------------------------------------------------------------------===//
-

@@ -25,10 +25,6 @@
 #error "Never use <bmiintrin.h> directly; include <x86intrin.h> instead."
 #endif
 
-#ifndef __BMI__
-# error "BMI instruction set not enabled"
-#endif /* __BMI__ */
-
 #ifndef __BMIINTRIN_H
 #define __BMIINTRIN_H
 
@@ -41,7 +37,7 @@
 #define _tzcnt_u32(a)     (__tzcnt_u32((a)))
 
 /* Define the default attributes for the functions in this file. */
-#define __DEFAULT_FN_ATTRS __attribute__((__always_inline__, __nodebug__))
+#define __DEFAULT_FN_ATTRS __attribute__((__always_inline__, __nodebug__, __target__("bmi")))
 
 /* Allow using the tzcnt intrinsics even for non-BMI targets. Since the TZCNT
    instruction behaves as BSF on non-BMI targets, there is code that expects

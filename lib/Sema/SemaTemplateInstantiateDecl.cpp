@@ -2767,7 +2767,7 @@ TemplateDeclInstantiator::SubstTemplateParams(TemplateParameterList *L) {
 
   TemplateParameterList *InstL
     = TemplateParameterList::Create(SemaRef.Context, L->getTemplateLoc(),
-                                    L->getLAngleLoc(), &Params.front(), N,
+                                    L->getLAngleLoc(), Params,
                                     L->getRAngleLoc());
   return InstL;
 }
@@ -4724,4 +4724,3 @@ void Sema::PerformDependentDiagnostics(const DeclContext *Pattern,
     }
   }
 }
-

@@ -15,4 +15,3 @@ tests.cindex.test_index.test_create ... ok
 
 OK
 --
-

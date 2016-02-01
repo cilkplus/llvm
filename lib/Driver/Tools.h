@@ -82,6 +82,8 @@ private:
                         llvm::opt::ArgStringList &CmdArgs) const;
   void AddHexagonTargetArgs(const llvm::opt::ArgList &Args,
                             llvm::opt::ArgStringList &CmdArgs) const;
+  void AddWebAssemblyTargetArgs(const llvm::opt::ArgList &Args,
+                                llvm::opt::ArgStringList &CmdArgs) const;
 
   enum RewriteKind { RK_None, RK_Fragile, RK_NonFragile };
 
@@ -149,6 +151,10 @@ public:
   Common(const char *Name, const char *ShortName, const ToolChain &TC)
       : GnuTool(Name, ShortName, TC) {}
 
+  // A gcc tool has an "integrated" assembler that it will call to produce an
+  // object. Let it use that assembler so that we don't have to deal with
+  // assembly syntax incompatibilities.
+  bool hasIntegratedAssembler() const override { return true; }
   void ConstructJob(Compilation &C, const JobAction &JA,
                     const InputInfo &Output, const InputInfoList &Inputs,
                     const llvm::opt::ArgList &TCArgs,
@@ -234,7 +240,7 @@ namespace amdgpu {
 
 class LLVM_LIBRARY_VISIBILITY Linker : public GnuTool {
 public:
-  Linker(const ToolChain &TC) : GnuTool("amdgpu::Linker", "lld", TC) {}
+  Linker(const ToolChain &TC) : GnuTool("amdgpu::Linker", "ld.lld", TC) {}
   bool isLinkJob() const override { return true; }
   bool hasIntegratedCPP() const override { return false; }
   void ConstructJob(Compilation &C, const JobAction &JA,
@@ -896,6 +902,41 @@ public:
                     const char *LinkingOutput) const override;
 };
 } // end namespace PS4cpu
+
+namespace NVPTX {
+
+// Run ptxas, the NVPTX assembler.
+class LLVM_LIBRARY_VISIBILITY Assembler : public Tool {
+ public:
+   Assembler(const ToolChain &TC)
+       : Tool("NVPTX::Assembler", "ptxas", TC, RF_Full, llvm::sys::WEM_UTF8,
+              "--options-file") {}
+
+   bool hasIntegratedCPP() const override { return false; }
+
+   void ConstructJob(Compilation &C, const JobAction &JA,
+                     const InputInfo &Output, const InputInfoList &Inputs,
+                     const llvm::opt::ArgList &TCArgs,
+                     const char *LinkingOutput) const override;
+};
+
+// Runs fatbinary, which combines GPU object files ("cubin" files) and/or PTX
+// assembly into a single output file.
+class LLVM_LIBRARY_VISIBILITY Linker : public Tool {
+ public:
+   Linker(const ToolChain &TC)
+       : Tool("NVPTX::Linker", "fatbinary", TC, RF_Full, llvm::sys::WEM_UTF8,
+              "--options-file") {}
+
+   bool hasIntegratedCPP() const override { return false; }
+
+   void ConstructJob(Compilation &C, const JobAction &JA,
+                     const InputInfo &Output, const InputInfoList &Inputs,
+                     const llvm::opt::ArgList &TCArgs,
+                     const char *LinkingOutput) const override;
+};
+
+}  // end namespace NVPTX
 
 } // end namespace tools
 } // end namespace driver

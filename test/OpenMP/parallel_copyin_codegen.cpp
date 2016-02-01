@@ -395,15 +395,6 @@ int main() {
 // TLS-CHECK: [[MASTER_VAL:%.+]] = load i32, i32* [[MASTER_REF]],
 // TLS-CHECK: store i32 [[MASTER_VAL]], i32* [[TMAIN_T_VAR]], align 128
 
-// TLS-CHECK: [[MASTER_FIELD:%.+]] = getelementptr inbounds {{.+}}
-// TLS-CHECK: [[MASTER_REF:%.+]] = load i32*, i32** [[MASTER_FIELD]]
-// TLS-CHECK: [[MASTER_LONG:%.+]] = ptrtoint i32* [[MASTER_REF]] to i{{[0-9]+}}
-// TLS-CHECK: icmp ne i{{[0-9]+}} [[MASTER_LONG]], ptrtoint (i{{[0-9]+}}* [[TMAIN_T_VAR]] to i{{[0-9]+}})
-// TLS-CHECK: br i1 %{{.+}}, label %[[NOT_MASTER:.+]], label %[[DONE:.+]]
-// TLS-CHECK: [[NOT_MASTER]]
-// TLS-CHECK: [[MASTER_VAL:%.+]] = load i32, i32* [[MASTER_REF]]
-// TLS-CHECK: store i32 [[MASTER_VAL]], i32* [[TMAIN_T_VAR]]
-
 // threadprivate_vec = vec;
 // CHECK: call {{.*}}i8* @__kmpc_threadprivate_cached({{.+}} [[TMAIN_VEC]]
 // CHECK: call {{.*}}void @llvm.memcpy{{.*}}(i8* %{{.+}}, i8* bitcast ([2 x i{{[0-9]+}}]* [[TMAIN_VEC]] to i8*),

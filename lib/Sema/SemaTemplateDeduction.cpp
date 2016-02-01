@@ -1652,6 +1652,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     case Type::Auto:
     case Type::DependentTemplateSpecialization:
     case Type::PackExpansion:
+    case Type::Pipe:
       // No template argument deduction for these types
       return Sema::TDK_Success;
   }
@@ -2954,8 +2955,12 @@ Sema::FinishTemplateArgumentDeduction(FunctionTemplateDecl *FunctionTemplate,
         continue;
       
       QualType DeducedA = Specialization->getParamDecl(ParamIdx)->getType();
-      if (CheckOriginalCallArgDeduction(*this, OriginalArg, DeducedA))
-        return Sema::TDK_SubstitutionFailure;
+      if (CheckOriginalCallArgDeduction(*this, OriginalArg, DeducedA)) {
+        Info.FirstArg = TemplateArgument(DeducedA);
+        Info.SecondArg = TemplateArgument(OriginalArg.OriginalArgType);
+        Info.CallArgIndex = OriginalArg.ArgIdx;
+        return TDK_DeducedMismatch;
+      }
     }
   }
   
@@ -3037,7 +3042,7 @@ ResolveOverloadForDeduction(Sema &S, TemplateParameterList *TemplateParams,
   // Gather the explicit template arguments, if any.
   TemplateArgumentListInfo ExplicitTemplateArgs;
   if (Ovl->hasExplicitTemplateArgs())
-    Ovl->getExplicitTemplateArgs().copyInto(ExplicitTemplateArgs);
+    Ovl->copyTemplateArgumentsInto(ExplicitTemplateArgs);
   QualType Match;
   for (UnresolvedSetIterator I = Ovl->decls_begin(),
          E = Ovl->decls_end(); I != E; ++I) {
@@ -3516,28 +3521,6 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
                                          NumExplicitlySpecified, Specialization,
                                          Info, &OriginalCallArgs,
                                          PartialOverloading);
-}
-
-QualType Sema::adjustCCAndNoReturn(QualType ArgFunctionType,
-                                   QualType FunctionType) {
-  if (ArgFunctionType.isNull())
-    return ArgFunctionType;
-
-  const FunctionProtoType *FunctionTypeP =
-      FunctionType->castAs<FunctionProtoType>();
-  CallingConv CC = FunctionTypeP->getCallConv();
-  bool NoReturn = FunctionTypeP->getNoReturnAttr();
-  const FunctionProtoType *ArgFunctionTypeP =
-      ArgFunctionType->getAs<FunctionProtoType>();
-  if (ArgFunctionTypeP->getCallConv() == CC &&
-      ArgFunctionTypeP->getNoReturnAttr() == NoReturn)
-    return ArgFunctionType;
-
-  FunctionType::ExtInfo EI = ArgFunctionTypeP->getExtInfo().withCallingConv(CC);
-  EI = EI.withNoReturn(NoReturn);
-  ArgFunctionTypeP =
-      cast<FunctionProtoType>(Context.adjustFunctionType(ArgFunctionTypeP, EI));
-  return QualType(ArgFunctionTypeP, 0);
 }
 
 QualType Sema::adjustCCAndNoReturn(QualType ArgFunctionType,
@@ -4067,7 +4050,7 @@ Sema::DeduceAutoType(TypeLoc Type, Expr *&Init, QualType &Result) {
   QualType TemplArg = QualType(TemplParam->getTypeForDecl(), 0);
   NamedDecl *TemplParamPtr = TemplParam;
   FixedSizeTemplateParameterListStorage<1> TemplateParamsSt(
-      Loc, Loc, &TemplParamPtr, Loc);
+      Loc, Loc, TemplParamPtr, Loc);
 
   QualType FuncParam = SubstituteAutoTransform(*this, TemplArg).Apply(Type);
   assert(!FuncParam.isNull() &&
@@ -4909,19 +4892,23 @@ MarkUsedTemplateParameters(ASTContext &Ctx, QualType T,
     break;
 
   case Type::DependentTemplateSpecialization: {
+    // C++14 [temp.deduct.type]p5:
+    //   The non-deduced contexts are:
+    //     -- The nested-name-specifier of a type that was specified using a
+    //        qualified-id
+    //
+    // C++14 [temp.deduct.type]p6:
+    //   When a type name is specified in a way that includes a non-deduced
+    //   context, all of the types that comprise that type name are also
+    //   non-deduced.
+    if (OnlyDeduced)
+      break;
+
     const DependentTemplateSpecializationType *Spec
       = cast<DependentTemplateSpecializationType>(T);
-    if (!OnlyDeduced)
-      MarkUsedTemplateParameters(Ctx, Spec->getQualifier(),
-                                 OnlyDeduced, Depth, Used);
 
-    // C++0x [temp.deduct.type]p9:
-    //   If the template argument list of P contains a pack expansion that is not
-    //   the last template argument, the entire template argument list is a
-    //   non-deduced context.
-    if (OnlyDeduced &&
-        hasPackExpansionBeforeEnd(Spec->getArgs(), Spec->getNumArgs()))
-      break;
+    MarkUsedTemplateParameters(Ctx, Spec->getQualifier(),
+                               OnlyDeduced, Depth, Used);
 
     for (unsigned I = 0, N = Spec->getNumArgs(); I != N; ++I)
       MarkUsedTemplateParameters(Ctx, Spec->getArg(I), OnlyDeduced, Depth,
@@ -4978,6 +4965,7 @@ MarkUsedTemplateParameters(ASTContext &Ctx, QualType T,
   case Type::ObjCObject:
   case Type::ObjCObjectPointer:
   case Type::UnresolvedUsing:
+  case Type::Pipe:
 #define TYPE(Class, Base)
 #define ABSTRACT_TYPE(Class, Base)
 #define DEPENDENT_TYPE(Class, Base)

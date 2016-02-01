@@ -344,4 +344,3 @@ inline Sema::TypoExprState &Sema::TypoExprState::operator=(
 } // end namespace clang
 
 #endif
-

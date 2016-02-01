@@ -32,6 +32,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Transforms/Utils/SanitizerStats.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -577,7 +578,7 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
 
   if (Checks.size() > 0) {
     llvm::Constant *StaticData[] = {
-      EmitCheckSourceLocation(Loc),
+     EmitCheckSourceLocation(Loc),
       EmitCheckTypeDescriptor(Ty),
       llvm::ConstantInt::get(SizeTy, AlignVal),
       llvm::ConstantInt::get(Int8Ty, TCK)
@@ -824,7 +825,8 @@ Address CodeGenFunction::EmitPointerWithAlignment(const Expr *E,
                          getNaturalPointeeTypeAlignment(E->getType(), Source));
         }
 
-        if (SanOpts.has(SanitizerKind::CFIUnrelatedCast)) {
+        if (SanOpts.has(SanitizerKind::CFIUnrelatedCast) &&
+            CE->getCastKind() == CK_BitCast) {
           if (auto PT = E->getType()->getAs<PointerType>())
             EmitVTablePtrCheckForCast(PT->getPointeeType(), Addr.getPointer(),
                                       /*MayBeNull=*/true,
@@ -2464,12 +2466,16 @@ void CodeGenFunction::EmitCheck(
   assert(JointCond);
 
   CheckRecoverableKind RecoverKind = getRecoverableKind(Checked[0].second);
-  assert(SanOpts.has(Checked[0].second));
+  // In cross-DSO CFI mode this code is used to generate __cfi_check_fail, which
+  // includes all checks, even those that are not in SanOpts.
+  assert(CGM.getCodeGenOpts().SanitizeCfiCrossDso ||
+         SanOpts.has(Checked[0].second));
 #ifndef NDEBUG
   for (int i = 1, n = Checked.size(); i < n; ++i) {
     assert(RecoverKind == getRecoverableKind(Checked[i].second) &&
            "All recoverable kinds in a single check must be same!");
-    assert(SanOpts.has(Checked[i].second));
+    assert(CGM.getCodeGenOpts().SanitizeCfiCrossDso ||
+           SanOpts.has(Checked[i].second));
   }
 #endif
 
@@ -2483,24 +2489,26 @@ void CodeGenFunction::EmitCheck(
   Branch->setMetadata(llvm::LLVMContext::MD_prof, Node);
   EmitBlock(Handlers);
 
-  // Emit handler arguments and create handler function type.
-  llvm::Constant *Info = llvm::ConstantStruct::getAnon(StaticArgs);
-  auto *InfoPtr =
-      new llvm::GlobalVariable(CGM.getModule(), Info->getType(), false,
-                               llvm::GlobalVariable::PrivateLinkage, Info);
-  InfoPtr->setUnnamedAddr(true);
-  CGM.getSanitizerMetadata()->disableSanitizerForGlobal(InfoPtr);
-
+  // Handler functions take an i8* pointing to the (handler-specific) static
+  // information block, followed by a sequence of intptr_t arguments
+  // representing operand values.
   SmallVector<llvm::Value *, 4> Args;
   SmallVector<llvm::Type *, 4> ArgTypes;
   Args.reserve(DynamicArgs.size() + 1);
   ArgTypes.reserve(DynamicArgs.size() + 1);
 
-  // Handler functions take an i8* pointing to the (handler-specific) static
-  // information block, followed by a sequence of intptr_t arguments
-  // representing operand values.
-  Args.push_back(Builder.CreateBitCast(InfoPtr, Int8PtrTy));
-  ArgTypes.push_back(Int8PtrTy);
+  // Emit handler arguments and create handler function type.
+  if (!StaticArgs.empty()) {
+    llvm::Constant *Info = llvm::ConstantStruct::getAnon(StaticArgs);
+    auto *InfoPtr =
+        new llvm::GlobalVariable(CGM.getModule(), Info->getType(), false,
+                                 llvm::GlobalVariable::PrivateLinkage, Info);
+    InfoPtr->setUnnamedAddr(true);
+    CGM.getSanitizerMetadata()->disableSanitizerForGlobal(InfoPtr);
+    Args.push_back(Builder.CreateBitCast(InfoPtr, Int8PtrTy));
+    ArgTypes.push_back(Int8PtrTy);
+  }
+
   for (size_t i = 0, n = DynamicArgs.size(); i != n; ++i) {
     Args.push_back(EmitCheckValue(DynamicArgs[i]));
     ArgTypes.push_back(IntPtrTy);
@@ -2532,10 +2540,9 @@ void CodeGenFunction::EmitCheck(
   EmitBlock(Cont);
 }
 
-void CodeGenFunction::EmitCfiSlowPathCheck(llvm::Value *Cond,
-                                           llvm::ConstantInt *TypeId,
-                                           llvm::Value *Ptr) {
-  auto &Ctx = getLLVMContext();
+void CodeGenFunction::EmitCfiSlowPathCheck(
+    SanitizerMask Kind, llvm::Value *Cond, llvm::ConstantInt *TypeId,
+    llvm::Value *Ptr, ArrayRef<llvm::Constant *> StaticArgs) {
   llvm::BasicBlock *Cont = createBasicBlock("cfi.cont");
 
   llvm::BasicBlock *CheckBB = createBasicBlock("cfi.slowpath");
@@ -2547,17 +2554,108 @@ void CodeGenFunction::EmitCfiSlowPathCheck(llvm::Value *Cond,
 
   EmitBlock(CheckBB);
 
-  llvm::Constant *SlowPathFn = CGM.getModule().getOrInsertFunction(
-      "__cfi_slowpath",
-      llvm::FunctionType::get(
-          llvm::Type::getVoidTy(Ctx),
-          {llvm::Type::getInt64Ty(Ctx),
-           llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(Ctx))},
-          false));
-  llvm::CallInst *CheckCall = Builder.CreateCall(SlowPathFn, {TypeId, Ptr});
+  bool WithDiag = !CGM.getCodeGenOpts().SanitizeTrap.has(Kind);
+
+  llvm::CallInst *CheckCall;
+  if (WithDiag) {
+    llvm::Constant *Info = llvm::ConstantStruct::getAnon(StaticArgs);
+    auto *InfoPtr =
+        new llvm::GlobalVariable(CGM.getModule(), Info->getType(), false,
+                                 llvm::GlobalVariable::PrivateLinkage, Info);
+    InfoPtr->setUnnamedAddr(true);
+    CGM.getSanitizerMetadata()->disableSanitizerForGlobal(InfoPtr);
+
+    llvm::Constant *SlowPathDiagFn = CGM.getModule().getOrInsertFunction(
+        "__cfi_slowpath_diag",
+        llvm::FunctionType::get(VoidTy, {Int64Ty, Int8PtrTy, Int8PtrTy},
+                                false));
+    CheckCall = Builder.CreateCall(
+        SlowPathDiagFn,
+        {TypeId, Ptr, Builder.CreateBitCast(InfoPtr, Int8PtrTy)});
+  } else {
+    llvm::Constant *SlowPathFn = CGM.getModule().getOrInsertFunction(
+        "__cfi_slowpath",
+        llvm::FunctionType::get(VoidTy, {Int64Ty, Int8PtrTy}, false));
+    CheckCall = Builder.CreateCall(SlowPathFn, {TypeId, Ptr});
+  }
+
   CheckCall->setDoesNotThrow();
 
   EmitBlock(Cont);
+}
+
+// This function is basically a switch over the CFI failure kind, which is
+// extracted from CFICheckFailData (1st function argument). Each case is either
+// llvm.trap or a call to one of the two runtime handlers, based on
+// -fsanitize-trap and -fsanitize-recover settings.  Default case (invalid
+// failure kind) traps, but this should really never happen.  CFICheckFailData
+// can be nullptr if the calling module has -fsanitize-trap behavior for this
+// check kind; in this case __cfi_check_fail traps as well.
+void CodeGenFunction::EmitCfiCheckFail() {
+  SanitizerScope SanScope(this);
+  FunctionArgList Args;
+  ImplicitParamDecl ArgData(getContext(), nullptr, SourceLocation(), nullptr,
+                            getContext().VoidPtrTy);
+  ImplicitParamDecl ArgAddr(getContext(), nullptr, SourceLocation(), nullptr,
+                            getContext().VoidPtrTy);
+  Args.push_back(&ArgData);
+  Args.push_back(&ArgAddr);
+
+  const CGFunctionInfo &FI = CGM.getTypes().arrangeFreeFunctionDeclaration(
+      getContext().VoidTy, Args, FunctionType::ExtInfo(), /*variadic=*/false);
+
+  llvm::Function *F = llvm::Function::Create(
+      llvm::FunctionType::get(VoidTy, {VoidPtrTy, VoidPtrTy}, false),
+      llvm::GlobalValue::WeakODRLinkage, "__cfi_check_fail", &CGM.getModule());
+  F->setVisibility(llvm::GlobalValue::HiddenVisibility);
+
+  StartFunction(GlobalDecl(), CGM.getContext().VoidTy, F, FI, Args,
+                SourceLocation());
+
+  llvm::Value *Data =
+      EmitLoadOfScalar(GetAddrOfLocalVar(&ArgData), /*Volatile=*/false,
+                       CGM.getContext().VoidPtrTy, ArgData.getLocation());
+  llvm::Value *Addr =
+      EmitLoadOfScalar(GetAddrOfLocalVar(&ArgAddr), /*Volatile=*/false,
+                       CGM.getContext().VoidPtrTy, ArgAddr.getLocation());
+
+  // Data == nullptr means the calling module has trap behaviour for this check.
+  llvm::Value *DataIsNotNullPtr =
+      Builder.CreateICmpNE(Data, llvm::ConstantPointerNull::get(Int8PtrTy));
+  EmitTrapCheck(DataIsNotNullPtr);
+
+  llvm::StructType *SourceLocationTy =
+      llvm::StructType::get(VoidPtrTy, Int32Ty, Int32Ty, nullptr);
+  llvm::StructType *CfiCheckFailDataTy =
+      llvm::StructType::get(Int8Ty, SourceLocationTy, VoidPtrTy, nullptr);
+
+  llvm::Value *V = Builder.CreateConstGEP2_32(
+      CfiCheckFailDataTy,
+      Builder.CreatePointerCast(Data, CfiCheckFailDataTy->getPointerTo(0)), 0,
+      0);
+  Address CheckKindAddr(V, getIntAlign());
+  llvm::Value *CheckKind = Builder.CreateLoad(CheckKindAddr);
+
+  const std::pair<int, SanitizerMask> CheckKinds[] = {
+      {CFITCK_VCall, SanitizerKind::CFIVCall},
+      {CFITCK_NVCall, SanitizerKind::CFINVCall},
+      {CFITCK_DerivedCast, SanitizerKind::CFIDerivedCast},
+      {CFITCK_UnrelatedCast, SanitizerKind::CFIUnrelatedCast},
+      {CFITCK_ICall, SanitizerKind::CFIICall}};
+
+  SmallVector<std::pair<llvm::Value *, SanitizerMask>, 5> Checks;
+  for (auto CheckKindMaskPair : CheckKinds) {
+    int Kind = CheckKindMaskPair.first;
+    SanitizerMask Mask = CheckKindMaskPair.second;
+    llvm::Value *Cond =
+        Builder.CreateICmpNE(CheckKind, llvm::ConstantInt::get(Int8Ty, Kind));
+    EmitCheck(std::make_pair(Cond, Mask), "cfi_check_fail", {}, {Data, Addr});
+  }
+
+  FinishFunction();
+  // The only reference to this function will be created during LTO link.
+  // Make sure it survives until then.
+  CGM.addUsedGlobal(F);
 }
 
 void CodeGenFunction::EmitTrapCheck(llvm::Value *Checked) {
@@ -3365,6 +3463,7 @@ LValue CodeGenFunction::EmitCastLValue(const CastExpr *E) {
   case CK_PointerToBoolean:
   case CK_VectorSplat:
   case CK_IntegralCast:
+  case CK_BooleanToSignedIntegral:
   case CK_IntegralToBoolean:
   case CK_IntegralToFloating:
   case CK_FloatingToIntegral:
@@ -3850,6 +3949,7 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, llvm::Value *Callee,
   if (SanOpts.has(SanitizerKind::CFIICall) &&
       (!TargetDecl || !isa<FunctionDecl>(TargetDecl))) {
     SanitizerScope SanScope(this);
+    EmitSanitizerStatReport(llvm::SanStat_CFI_ICall);
 
     llvm::Metadata *MD = CGM.CreateMetadataIdentifierForType(QualType(FnType, 0));
     llvm::Value *BitSetName = llvm::MetadataAsValue::get(getLLVMContext(), MD);
@@ -3860,15 +3960,17 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, llvm::Value *Callee,
                            {CastedCallee, BitSetName});
 
     auto TypeId = CGM.CreateCfiIdForTypeMetadata(MD);
+    llvm::Constant *StaticData[] = {
+        llvm::ConstantInt::get(Int8Ty, CFITCK_ICall),
+        EmitCheckSourceLocation(E->getLocStart()),
+        EmitCheckTypeDescriptor(QualType(FnType, 0)),
+    };
     if (CGM.getCodeGenOpts().SanitizeCfiCrossDso && TypeId) {
-      EmitCfiSlowPathCheck(BitSetTest, TypeId, CastedCallee);
+      EmitCfiSlowPathCheck(SanitizerKind::CFIICall, BitSetTest, TypeId,
+                           CastedCallee, StaticData);
     } else {
-      llvm::Constant *StaticData[] = {
-          EmitCheckSourceLocation(E->getLocStart()),
-          EmitCheckTypeDescriptor(QualType(FnType, 0)),
-      };
       EmitCheck(std::make_pair(BitSetTest, SanitizerKind::CFIICall),
-                "cfi_bad_icall", StaticData, CastedCallee);
+                "cfi_check_fail", StaticData, CastedCallee);
     }
   }
 

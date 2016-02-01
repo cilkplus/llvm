@@ -597,9 +597,7 @@ static bool CheckMatchedBrackets(const SmallVectorImpl<Token> &Tokens) {
       Brackets.pop_back();
     }
   }
-  if (!Brackets.empty())
-    return false;
-  return true;
+  return Brackets.empty();
 }
 
 /// GenerateNewArgTokens - Returns true if OldTokens can be converted to a new
@@ -725,6 +723,7 @@ MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
   // heap allocations in the common case.
   SmallVector<Token, 64> ArgTokens;
   bool ContainsCodeCompletionTok = false;
+  bool FoundElidedComma = false;
 
   SourceLocation TooManyArgsLoc;
 
@@ -767,6 +766,10 @@ MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
         // If we found the ) token, the macro arg list is done.
         if (NumParens-- == 0) {
           MacroEnd = Tok.getLocation();
+          if (!ArgTokens.empty() &&
+              ArgTokens.back().commaAfterElided()) {
+            FoundElidedComma = true;
+          }
           break;
         }
       } else if (Tok.is(tok::l_paren)) {
@@ -911,7 +914,7 @@ MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
       // then we have an empty "()" argument empty list.  This is fine, even if
       // the macro expects one argument (the argument is just empty).
       isVarargsElided = MI->isVariadic();
-    } else if (MI->isVariadic() &&
+    } else if ((FoundElidedComma || MI->isVariadic()) &&
                (NumActuals+1 == MinArgsExpected ||  // A(x, ...) -> A(X)
                 (NumActuals == 0 && MinArgsExpected == 2))) {// A(x,...) -> A()
       // Varargs where the named vararg parameter is missing: OK as extension.

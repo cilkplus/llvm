@@ -329,8 +329,8 @@ void Sema::LookupTemplateName(LookupResult &Found,
             Found.getLookupNameInfo(), Found.getLookupKind(), S, &SS,
             std::move(FilterCCC), CTK_ErrorRecovery, LookupCtx)) {
       Found.setLookupName(Corrected.getCorrection());
-      if (Corrected.getCorrectionDecl())
-        Found.addDecl(Corrected.getCorrectionDecl());
+      if (auto *ND = Corrected.getFoundDecl())
+        Found.addDecl(ND);
       FilterAcceptableTemplateNames(Found);
       if (!Found.empty()) {
         if (LookupCtx) {
@@ -583,7 +583,7 @@ Decl *Sema::ActOnTypeParameter(Scope *S, bool Typename,
   //   template-parameter that is not a template parameter pack.
   if (DefaultArg && IsParameterPack) {
     Diag(EqualLoc, diag::err_template_param_pack_default_arg);
-    DefaultArg = ParsedType();
+    DefaultArg = nullptr;
   }
 
   // Handle the default argument, if provided.
@@ -814,14 +814,15 @@ Sema::ActOnTemplateParameterList(unsigned Depth,
                                  SourceLocation ExportLoc,
                                  SourceLocation TemplateLoc,
                                  SourceLocation LAngleLoc,
-                                 Decl **Params, unsigned NumParams,
+                                 ArrayRef<Decl *> Params,
                                  SourceLocation RAngleLoc) {
   if (ExportLoc.isValid())
     Diag(ExportLoc, diag::warn_template_export_unsupported);
 
-  return TemplateParameterList::Create(Context, TemplateLoc, LAngleLoc,
-                                       (NamedDecl**)Params, NumParams,
-                                       RAngleLoc);
+  return TemplateParameterList::Create(
+      Context, TemplateLoc, LAngleLoc,
+      llvm::makeArrayRef((NamedDecl *const *)Params.data(), Params.size()),
+      RAngleLoc);
 }
 
 static void SetNestedNameSpecifier(TagDecl *T, const CXXScopeSpec &SS) {
@@ -1938,7 +1939,7 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
 
       // Fabricate an empty template parameter list for the invented header.
       return TemplateParameterList::Create(Context, SourceLocation(),
-                                           SourceLocation(), nullptr, 0,
+                                           SourceLocation(), None,
                                            SourceLocation());
     }
 
@@ -3280,7 +3281,6 @@ SubstDefaultTemplateArgument(Sema &SemaRef,
   for (unsigned i = 0, e = Param->getDepth(); i != e; ++i)
     TemplateArgLists.addOuterTemplateArguments(None);
 
-  Sema::ContextRAII SavedContext(SemaRef, Template->getDeclContext());
   EnterExpressionEvaluationContext ConstantEvaluated(SemaRef,
                                                      Sema::ConstantEvaluated);
   return SemaRef.SubstExpr(Param->getDefaultArgument(), TemplateArgLists);
@@ -4181,6 +4181,10 @@ bool UnnamedLocalNoLinkageFinder::VisitObjCObjectPointerType(
 
 bool UnnamedLocalNoLinkageFinder::VisitAtomicType(const AtomicType* T) {
   return Visit(T->getValueType());
+}
+
+bool UnnamedLocalNoLinkageFinder::VisitPipeType(const PipeType* T) {
+  return false;
 }
 
 bool UnnamedLocalNoLinkageFinder::VisitTagDecl(const TagDecl *Tag) {
@@ -5502,6 +5506,8 @@ Sema::BuildExpressionFromIntegralTemplateArgument(const TemplateArgument &Arg,
 
   Expr *E;
   if (T->isAnyCharacterType()) {
+    // This does not need to handle u8 character literals because those are
+    // of type char, and so can also be covered by an ASCII character literal.
     CharacterLiteral::CharacterKind Kind;
     if (T->isWideCharType())
       Kind = CharacterLiteral::Wide;

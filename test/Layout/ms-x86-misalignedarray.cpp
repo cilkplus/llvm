@@ -25,4 +25,3 @@ struct T3 { T2 a[1]; char c; };
 // CHECK-X64-NEXT:      |  nvsize=24, nvalign=8]
 
 int a[sizeof(T3)];
-

@@ -104,6 +104,7 @@ public:
 private:
 
   void ParseNumberStartingWithZero(SourceLocation TokLoc);
+  void ParseDecimalOrOctalCommon(SourceLocation TokLoc);
 
   static bool isDigitSeparator(char C) { return C == '\''; }
 
@@ -166,6 +167,7 @@ public:
   bool hadError() const { return HadError; }
   bool isAscii() const { return Kind == tok::char_constant; }
   bool isWide() const { return Kind == tok::wide_char_constant; }
+  bool isUTF8() const { return Kind == tok::utf8_char_constant; }
   bool isUTF16() const { return Kind == tok::utf16_char_constant; }
   bool isUTF32() const { return Kind == tok::utf32_char_constant; }
   bool isMultiChar() const { return IsMultiChar; }

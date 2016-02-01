@@ -108,6 +108,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(autoType);
   REGISTER_MATCHER(binaryOperator);
   REGISTER_MATCHER(blockPointerType);
+  REGISTER_MATCHER(booleanType);
   REGISTER_MATCHER(breakStmt);
   REGISTER_MATCHER(builtinType);
   REGISTER_MATCHER(callExpr);
@@ -173,6 +174,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(fieldDecl);
   REGISTER_MATCHER(floatLiteral);
   REGISTER_MATCHER(forEach);
+  REGISTER_MATCHER(forEachArgumentWithParam);
   REGISTER_MATCHER(forEachConstructorInitializer);
   REGISTER_MATCHER(forEachDescendant);
   REGISTER_MATCHER(forEachSwitchCase);
@@ -266,8 +268,10 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isClass);
   REGISTER_MATCHER(isConst);
   REGISTER_MATCHER(isConstQualified);
+  REGISTER_MATCHER(isCopyAssignmentOperator);
   REGISTER_MATCHER(isCopyConstructor);
   REGISTER_MATCHER(isDefaultConstructor);
+  REGISTER_MATCHER(isDefaulted);
   REGISTER_MATCHER(isDefinition);
   REGISTER_MATCHER(isDeleted);
   REGISTER_MATCHER(isExceptionVariable);
@@ -287,6 +291,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isInTemplateInstantiation);
   REGISTER_MATCHER(isListInitialization);
   REGISTER_MATCHER(isMemberInitializer);
+  REGISTER_MATCHER(isMoveAssignmentOperator);
   REGISTER_MATCHER(isMoveConstructor);
   REGISTER_MATCHER(isNoThrow);
   REGISTER_MATCHER(isOverride);
@@ -299,6 +304,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isUnion);
   REGISTER_MATCHER(isVariadic);
   REGISTER_MATCHER(isVirtual);
+  REGISTER_MATCHER(isVirtualAsWritten);
   REGISTER_MATCHER(isVolatileQualified);
   REGISTER_MATCHER(isWritten);
   REGISTER_MATCHER(labelStmt);
@@ -325,6 +331,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(on);
   REGISTER_MATCHER(onImplicitObjectArgument);
   REGISTER_MATCHER(parameterCountIs);
+  REGISTER_MATCHER(parenExpr);
   REGISTER_MATCHER(parenType);
   REGISTER_MATCHER(parmVarDecl);
   REGISTER_MATCHER(pointee);

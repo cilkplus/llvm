@@ -341,13 +341,13 @@ ObjCInterfaceDecl::FindPropertyVisibleInPrimaryClass(
 
 void ObjCInterfaceDecl::collectPropertiesToImplement(PropertyMap &PM,
                                                      PropertyDeclOrder &PO) const {
-  for (auto *Prop : properties()) {
+  for (auto *Prop : instance_properties()) {
     PM[Prop->getIdentifier()] = Prop;
     PO.push_back(Prop);
   }
   for (const auto *Ext : known_extensions()) {
     const ObjCCategoryDecl *ClassExt = Ext;
-    for (auto *Prop : ClassExt->properties()) {
+    for (auto *Prop : ClassExt->instance_properties()) {
       PM[Prop->getIdentifier()] = Prop;
       PO.push_back(Prop);
     }
@@ -771,6 +771,10 @@ void ObjCMethodDecl::setParamsAndSelLocs(ASTContext &C,
   NumParams = Params.size();
   if (Params.empty() && SelLocs.empty())
     return;
+
+  static_assert(llvm::AlignOf<ParmVarDecl *>::Alignment >=
+                    llvm::AlignOf<SourceLocation>::Alignment,
+                "Alignment not sufficient for SourceLocation");
 
   unsigned Size = sizeof(ParmVarDecl *) * NumParams +
                   sizeof(SourceLocation) * SelLocs.size();
@@ -1214,7 +1218,7 @@ ObjCMethodDecl::findPropertyDecl(bool CheckOverrides) const {
     auto findMatchingProperty =
       [&](const ObjCContainerDecl *Container) -> const ObjCPropertyDecl * {
 
-      for (const auto *I : Container->properties()) {
+      for (const auto *I : Container->instance_properties()) {
         Selector NextSel = IsGetter ? I->getGetterName()
                                     : I->getSetterName();
         if (NextSel == Sel)
@@ -1326,13 +1330,9 @@ ObjCTypeParamList *ObjCTypeParamList::create(
                      SourceLocation lAngleLoc,
                      ArrayRef<ObjCTypeParamDecl *> typeParams,
                      SourceLocation rAngleLoc) {
-  unsigned size = sizeof(ObjCTypeParamList)
-                + sizeof(ObjCTypeParamDecl *) * typeParams.size();
-  static_assert(llvm::AlignOf<ObjCTypeParamList>::Alignment >=
-                    llvm::AlignOf<ObjCTypeParamDecl *>::Alignment,
-                "type parameter list needs greater alignment");
-  unsigned align = llvm::alignOf<ObjCTypeParamList>();
-  void *mem = ctx.Allocate(size, align);
+  void *mem =
+      ctx.Allocate(totalSizeToAlloc<ObjCTypeParamDecl *>(typeParams.size()),
+                   llvm::alignOf<ObjCTypeParamList>());
   return new (mem) ObjCTypeParamList(lAngleLoc, typeParams, rAngleLoc);
 }
 
@@ -1820,7 +1820,7 @@ void ObjCProtocolDecl::collectPropertiesToImplement(PropertyMap &PM,
                                                     PropertyDeclOrder &PO) const {
   
   if (const ObjCProtocolDecl *PDecl = getDefinition()) {
-    for (auto *Prop : PDecl->properties()) {
+    for (auto *Prop : PDecl->instance_properties()) {
       // Insert into PM if not there already.
       PM.insert(std::make_pair(Prop->getIdentifier(), Prop));
       PO.push_back(Prop);

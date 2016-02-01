@@ -15,4 +15,3 @@ It demonstrates the following features:
 The implementation has many limitations and is not designed to be a full fledged
 C interpreter. It is designed to demonstrate a simple but functional use of the
 Clang compiler libraries.
-

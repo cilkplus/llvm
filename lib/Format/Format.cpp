@@ -47,6 +47,7 @@ template <> struct ScalarEnumerationTraits<FormatStyle::LanguageKind> {
     IO.enumCase(Value, "Java", FormatStyle::LK_Java);
     IO.enumCase(Value, "JavaScript", FormatStyle::LK_JavaScript);
     IO.enumCase(Value, "Proto", FormatStyle::LK_Proto);
+    IO.enumCase(Value, "TableGen", FormatStyle::LK_TableGen);
   }
 };
 
@@ -582,6 +583,7 @@ FormatStyle getGoogleStyle(FormatStyle::LanguageKind Language) {
     GoogleStyle.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_Inline;
     GoogleStyle.AlwaysBreakBeforeMultilineStrings = false;
     GoogleStyle.BreakBeforeTernaryOperators = false;
+    GoogleStyle.CommentPragmas = "@(export|visibility) {";
     GoogleStyle.MaxEmptyLinesToKeep = 3;
     GoogleStyle.SpacesInContainerLiterals = false;
   } else if (Language == FormatStyle::LK_Proto) {
@@ -607,6 +609,7 @@ FormatStyle getChromiumStyle(FormatStyle::LanguageKind Language) {
     ChromiumStyle.BinPackParameters = false;
     ChromiumStyle.DerivePointerAlignment = false;
   }
+  ChromiumStyle.SortIncludes = false;
   return ChromiumStyle;
 }
 
@@ -1236,6 +1239,8 @@ private:
           FormatTok->Type = TT_ImplicitStringLiteral;
           break;
         }
+        if (FormatTok->Type == TT_ImplicitStringLiteral)
+          break;
       }
 
       if (FormatTok->is(TT_ImplicitStringLiteral))
@@ -1274,11 +1279,13 @@ private:
       FormatTok->Tok.setIdentifierInfo(&Info);
       FormatTok->Tok.setKind(Info.getTokenID());
       if (Style.Language == FormatStyle::LK_Java &&
-          FormatTok->isOneOf(tok::kw_struct, tok::kw_union, tok::kw_delete)) {
+          FormatTok->isOneOf(tok::kw_struct, tok::kw_union, tok::kw_delete,
+                             tok::kw_operator)) {
         FormatTok->Tok.setKind(tok::identifier);
         FormatTok->Tok.setIdentifierInfo(nullptr);
       } else if (Style.Language == FormatStyle::LK_JavaScript &&
-                 FormatTok->isOneOf(tok::kw_struct, tok::kw_union)) {
+                 FormatTok->isOneOf(tok::kw_struct, tok::kw_union,
+                                    tok::kw_operator)) {
         FormatTok->Tok.setKind(tok::identifier);
         FormatTok->Tok.setIdentifierInfo(nullptr);
       }
@@ -1897,8 +1904,9 @@ tooling::Replacements reformat(const FormatStyle &Style, StringRef Code,
       IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs),
       new DiagnosticOptions);
   SourceManager SourceMgr(Diagnostics, Files);
-  InMemoryFileSystem->addFile(FileName, 0,
-                              llvm::MemoryBuffer::getMemBuffer(Code, FileName));
+  InMemoryFileSystem->addFile(
+      FileName, 0, llvm::MemoryBuffer::getMemBuffer(
+                       Code, FileName, /*RequiresNullTerminator=*/false));
   FileID ID = SourceMgr.createFileID(Files.getFile(FileName), SourceLocation(),
                                      clang::SrcMgr::C_User);
   SourceLocation StartOfFile = SourceMgr.getLocForStartOfFile(ID);
@@ -1939,15 +1947,15 @@ const char *StyleOptionHelpDescription =
     "  -style=\"{BasedOnStyle: llvm, IndentWidth: 8}\"";
 
 static FormatStyle::LanguageKind getLanguageByFileName(StringRef FileName) {
-  if (FileName.endswith(".java")) {
+  if (FileName.endswith(".java"))
     return FormatStyle::LK_Java;
-  } else if (FileName.endswith_lower(".js") || FileName.endswith_lower(".ts")) {
-    // JavaScript or TypeScript.
-    return FormatStyle::LK_JavaScript;
-  } else if (FileName.endswith_lower(".proto") ||
-             FileName.endswith_lower(".protodevel")) {
+  if (FileName.endswith_lower(".js") || FileName.endswith_lower(".ts"))
+    return FormatStyle::LK_JavaScript; // JavaScript or TypeScript.
+  if (FileName.endswith_lower(".proto") ||
+      FileName.endswith_lower(".protodevel"))
     return FormatStyle::LK_Proto;
-  }
+  if (FileName.endswith_lower(".td"))
+    return FormatStyle::LK_TableGen;
   return FormatStyle::LK_Cpp;
 }
 
