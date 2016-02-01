@@ -1,657 +1,572 @@
-include(CMakePushCheckState)
-include(CheckCXXCompilerFlag)
+if( WIN32 AND NOT CYGWIN )
+  # We consider Cygwin as another Unix
+  set(PURE_WINDOWS 1)
+endif()
+
+include(CheckIncludeFile)
+include(CheckIncludeFileCXX)
 include(CheckLibraryExists)
 include(CheckSymbolExists)
+include(CheckFunctionExists)
+include(CheckCXXSourceCompiles)
 include(TestBigEndian)
 
-function(check_linker_flag flag out_var)
-  cmake_push_check_state()
-  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${flag}")
-  check_cxx_compiler_flag("" ${out_var})
-  cmake_pop_check_state()
-endfunction()
+include(HandleLLVMStdlib)
 
-# CodeGen options.
-check_cxx_compiler_flag(-fPIC                COMPILER_RT_HAS_FPIC_FLAG)
-check_cxx_compiler_flag(-fPIE                COMPILER_RT_HAS_FPIE_FLAG)
-check_cxx_compiler_flag(-fno-builtin         COMPILER_RT_HAS_FNO_BUILTIN_FLAG)
-check_cxx_compiler_flag(-fno-exceptions      COMPILER_RT_HAS_FNO_EXCEPTIONS_FLAG)
-check_cxx_compiler_flag(-fomit-frame-pointer COMPILER_RT_HAS_FOMIT_FRAME_POINTER_FLAG)
-check_cxx_compiler_flag(-funwind-tables      COMPILER_RT_HAS_FUNWIND_TABLES_FLAG)
-check_cxx_compiler_flag(-fno-stack-protector COMPILER_RT_HAS_FNO_STACK_PROTECTOR_FLAG)
-check_cxx_compiler_flag(-fno-sanitize=safe-stack COMPILER_RT_HAS_FNO_SANITIZE_SAFE_STACK_FLAG)
-check_cxx_compiler_flag(-fvisibility=hidden  COMPILER_RT_HAS_FVISIBILITY_HIDDEN_FLAG)
-check_cxx_compiler_flag(-fno-rtti            COMPILER_RT_HAS_FNO_RTTI_FLAG)
-check_cxx_compiler_flag(-ffreestanding       COMPILER_RT_HAS_FFREESTANDING_FLAG)
-check_cxx_compiler_flag("-Werror -fno-function-sections" COMPILER_RT_HAS_FNO_FUNCTION_SECTIONS_FLAG)
-check_cxx_compiler_flag(-std=c++11           COMPILER_RT_HAS_STD_CXX11_FLAG)
-check_cxx_compiler_flag(-ftls-model=initial-exec COMPILER_RT_HAS_FTLS_MODEL_INITIAL_EXEC)
-check_cxx_compiler_flag(-fno-lto             COMPILER_RT_HAS_FNO_LTO_FLAG)
-check_cxx_compiler_flag("-Werror -msse3" COMPILER_RT_HAS_MSSE3_FLAG)
-check_cxx_compiler_flag(-std=c99             COMPILER_RT_HAS_STD_C99_FLAG)
-check_cxx_compiler_flag(--sysroot=.          COMPILER_RT_HAS_SYSROOT_FLAG)
-
-if(NOT WIN32 AND NOT CYGWIN)
-  # MinGW warns if -fvisibility-inlines-hidden is used.
-  check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_RT_HAS_FVISIBILITY_INLINES_HIDDEN_FLAG)
+if( UNIX AND NOT BEOS )
+  # Used by check_symbol_exists:
+  set(CMAKE_REQUIRED_LIBRARIES m)
+endif()
+# x86_64 FreeBSD 9.2 requires libcxxrt to be specified explicitly.
+if( CMAKE_SYSTEM MATCHES "FreeBSD-9.2-RELEASE" AND
+    CMAKE_SIZEOF_VOID_P EQUAL 8 )
+  list(APPEND CMAKE_REQUIRED_LIBRARIES "cxxrt")
 endif()
 
-check_cxx_compiler_flag(/GR COMPILER_RT_HAS_GR_FLAG)
-check_cxx_compiler_flag(/GS COMPILER_RT_HAS_GS_FLAG)
-check_cxx_compiler_flag(/MT COMPILER_RT_HAS_MT_FLAG)
-check_cxx_compiler_flag(/Oy COMPILER_RT_HAS_Oy_FLAG)
-
-# Debug info flags.
-check_cxx_compiler_flag(-gline-tables-only COMPILER_RT_HAS_GLINE_TABLES_ONLY_FLAG)
-check_cxx_compiler_flag(-g COMPILER_RT_HAS_G_FLAG)
-check_cxx_compiler_flag(/Zi COMPILER_RT_HAS_Zi_FLAG)
-
-# Warnings.
-check_cxx_compiler_flag(-Wall COMPILER_RT_HAS_WALL_FLAG)
-check_cxx_compiler_flag(-Werror COMPILER_RT_HAS_WERROR_FLAG)
-check_cxx_compiler_flag("-Werror -Wframe-larger-than=512" COMPILER_RT_HAS_WFRAME_LARGER_THAN_FLAG)
-check_cxx_compiler_flag("-Werror -Wglobal-constructors"   COMPILER_RT_HAS_WGLOBAL_CONSTRUCTORS_FLAG)
-check_cxx_compiler_flag("-Werror -Wc99-extensions"     COMPILER_RT_HAS_WC99_EXTENSIONS_FLAG)
-check_cxx_compiler_flag("-Werror -Wgnu"                COMPILER_RT_HAS_WGNU_FLAG)
-check_cxx_compiler_flag("-Werror -Wnon-virtual-dtor"   COMPILER_RT_HAS_WNON_VIRTUAL_DTOR_FLAG)
-check_cxx_compiler_flag("-Werror -Wvariadic-macros"    COMPILER_RT_HAS_WVARIADIC_MACROS_FLAG)
-
-check_cxx_compiler_flag(/W3 COMPILER_RT_HAS_W3_FLAG)
-check_cxx_compiler_flag(/WX COMPILER_RT_HAS_WX_FLAG)
-check_cxx_compiler_flag(/wd4146 COMPILER_RT_HAS_WD4146_FLAG)
-check_cxx_compiler_flag(/wd4291 COMPILER_RT_HAS_WD4291_FLAG)
-check_cxx_compiler_flag(/wd4391 COMPILER_RT_HAS_WD4391_FLAG)
-check_cxx_compiler_flag(/wd4722 COMPILER_RT_HAS_WD4722_FLAG)
-check_cxx_compiler_flag(/wd4800 COMPILER_RT_HAS_WD4800_FLAG)
-
-# Symbols.
-check_symbol_exists(__func__ "" COMPILER_RT_HAS_FUNC_SYMBOL)
-
-# Libraries.
-check_library_exists(c fopen "" COMPILER_RT_HAS_LIBC)
-check_library_exists(dl dlopen "" COMPILER_RT_HAS_LIBDL)
-check_library_exists(rt shm_open "" COMPILER_RT_HAS_LIBRT)
-check_library_exists(m pow "" COMPILER_RT_HAS_LIBM)
-check_library_exists(pthread pthread_create "" COMPILER_RT_HAS_LIBPTHREAD)
-check_library_exists(stdc++ __cxa_throw "" COMPILER_RT_HAS_LIBSTDCXX)
-
-# Linker flags.
-if(ANDROID)
-  check_linker_flag("-Wl,-z,global" COMPILER_RT_HAS_Z_GLOBAL)
-  check_library_exists(log __android_log_write "" COMPILER_RT_HAS_LIBLOG)
-endif()
-
-# Architectures.
-
-# List of all architectures we can target.
-set(COMPILER_RT_SUPPORTED_ARCH)
-
-# Try to compile a very simple source file to ensure we can target the given
-# platform. We use the results of these tests to build only the various target
-# runtime libraries supported by our current compilers cross-compiling
-# abilities.
-set(SIMPLE_SOURCE ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/simple.cc)
-file(WRITE ${SIMPLE_SOURCE} "#include <stdlib.h>\n#include <limits>\nint main() {}\n")
-
-function(check_compile_definition def argstring out_var)
-  if("${def}" STREQUAL "")
-    set(${out_var} TRUE PARENT_SCOPE)
-    return()
-  endif()
-  cmake_push_check_state()
-  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${argstring}")
-  check_symbol_exists(${def} "" ${out_var})
-  cmake_pop_check_state()
-endfunction()
-
-# test_target_arch(<arch> <def> <target flags...>)
-# Checks if architecture is supported: runs host compiler with provided
-# flags to verify that:
-#   1) <def> is defined (if non-empty)
-#   2) simple file can be successfully built.
-# If successful, saves target flags for this architecture.
-macro(test_target_arch arch def)
-  set(TARGET_${arch}_CFLAGS ${ARGN})
-  set(argstring "")
-  foreach(arg ${ARGN})
-    set(argstring "${argstring} ${arg}")
+# Helper macros and functions
+macro(add_cxx_include result files)
+  set(${result} "")
+  foreach (file_name ${files})
+     set(${result} "${${result}}#include<${file_name}>\n")
   endforeach()
-  check_compile_definition("${def}" "${argstring}" HAS_${arch}_DEF)
-  if(NOT HAS_${arch}_DEF)
-    set(CAN_TARGET_${arch} FALSE)
-  else()
-    set(argstring "${CMAKE_EXE_LINKER_FLAGS} ${argstring}")
-    try_compile(CAN_TARGET_${arch} ${CMAKE_BINARY_DIR} ${SIMPLE_SOURCE}
-                COMPILE_DEFINITIONS "${TARGET_${arch}_CFLAGS}"
-                OUTPUT_VARIABLE TARGET_${arch}_OUTPUT
-                CMAKE_FLAGS "-DCMAKE_EXE_LINKER_FLAGS:STRING=${argstring}")
-  endif()
-  if(${CAN_TARGET_${arch}})
-    list(APPEND COMPILER_RT_SUPPORTED_ARCH ${arch})
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "${arch}" AND
-         COMPILER_RT_HAS_EXPLICIT_DEFAULT_TARGET_TRIPLE)
-    # Bail out if we cannot target the architecture we plan to test.
-    message(FATAL_ERROR "Cannot compile for ${arch}:\n${TARGET_${arch}_OUTPUT}")
-  endif()
-endmacro()
+endmacro(add_cxx_include files result)
 
-# Add $arch as supported with no additional flags.
-macro(add_default_target_arch arch)
-  set(TARGET_${arch}_CFLAGS "")
-  set(CAN_TARGET_${arch} 1)
-  list(APPEND COMPILER_RT_SUPPORTED_ARCH ${arch})
-endmacro()
-
-macro(detect_target_arch)
-  check_symbol_exists(__arm__ "" __ARM)
-  check_symbol_exists(__aarch64__ "" __AARCH64)
-  check_symbol_exists(__x86_64__ "" __X86_64)
-  check_symbol_exists(__i686__ "" __I686)
-  check_symbol_exists(__i386__ "" __I386)
-  check_symbol_exists(__mips__ "" __MIPS)
-  check_symbol_exists(__mips64__ "" __MIPS64)
-  check_symbol_exists(__wasm32__ "" __WEBASSEMBLY32)
-  check_symbol_exists(__wasm64__ "" __WEBASSEMBLY64)
-  if(__ARM)
-    add_default_target_arch(arm)
-  elseif(__AARCH64)
-    add_default_target_arch(aarch64)
-  elseif(__X86_64)
-    add_default_target_arch(x86_64)
-  elseif(__I686)
-    add_default_target_arch(i686)
-  elseif(__I386)
-    add_default_target_arch(i386)
-  elseif(__MIPS64) # must be checked before __MIPS
-    add_default_target_arch(mips64)
-  elseif(__MIPS)
-    add_default_target_arch(mips)
-  elseif(__WEBASSEMBLY32)
-    add_default_target_arch(wasm32)
-  elseif(__WEBASSEMBLY64)
-    add_default_target_arch(wasm64)
-  endif()
-endmacro()
-
-# Detect whether the current target platform is 32-bit or 64-bit, and setup
-# the correct commandline flags needed to attempt to target 32-bit and 64-bit.
-if (NOT CMAKE_SIZEOF_VOID_P EQUAL 4 AND
-    NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-  message(FATAL_ERROR "Please use architecture with 4 or 8 byte pointers.")
-endif()
-
-# Generate the COMPILER_RT_SUPPORTED_ARCH list.
-if(ANDROID)
-  # Examine compiler output to determine target architecture.
-  detect_target_arch()
-  set(COMPILER_RT_OS_SUFFIX "-android")
-elseif(NOT APPLE) # Supported archs for Apple platforms are generated later
-  if("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "i[2-6]86|x86|amd64")
-    if(NOT MSVC)
-      test_target_arch(x86_64 "" "-m64")
-      # FIXME: We build runtimes for both i686 and i386, as "clang -m32" may
-      # target different variant than "$CMAKE_C_COMPILER -m32". This part should
-      # be gone after we resolve PR14109.
-      test_target_arch(i686 __i686__ "-m32")
-      test_target_arch(i386 __i386__ "-m32")
-    else()
-      if (CMAKE_SIZEOF_VOID_P EQUAL 4)
-        test_target_arch(i386 "" "")
-      else()
-        test_target_arch(x86_64 "" "")
-      endif()
-    endif()
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "powerpc")
-    TEST_BIG_ENDIAN(HOST_IS_BIG_ENDIAN)
-    if(HOST_IS_BIG_ENDIAN)
-      test_target_arch(powerpc64 "" "-m64")
-    else()
-      test_target_arch(powerpc64le "" "-m64")
-    endif()
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "mipsel|mips64el")
-    # Gcc doesn't accept -m32/-m64 so we do the next best thing and use
-    # -mips32r2/-mips64r2. We don't use -mips1/-mips3 because we want to match
-    # clang's default CPU's. In the 64-bit case, we must also specify the ABI
-    # since the default ABI differs between gcc and clang.
-    # FIXME: Ideally, we would build the N32 library too.
-    test_target_arch(mipsel "" "-mips32r2" "--target=mipsel-linux-gnu")
-    test_target_arch(mips64el "" "-mips64r2" "--target=mips64el-linux-gnu" "-mabi=n64")
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "mips")
-    test_target_arch(mips "" "-mips32r2" "--target=mips-linux-gnu")
-    test_target_arch(mips64 "" "-mips64r2" "--target=mips64-linux-gnu" "-mabi=n64")
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "arm")
-    test_target_arch(arm "" "-march=armv7-a" "-mfloat-abi=soft")
-    test_target_arch(armhf "" "-march=armv7-a" "-mfloat-abi=hard")
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "aarch32")
-    test_target_arch(aarch32 "" "-march=armv8-a")
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "aarch64")
-    test_target_arch(aarch64 "" "-march=armv8-a")
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "wasm32")
-    test_target_arch(wasm32 "" "--target=wasm32-unknown-unknown")
-  elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "wasm64")
-    test_target_arch(wasm64 "" "--target=wasm64-unknown-unknown")
-  endif()
-  set(COMPILER_RT_OS_SUFFIX "")
-endif()
-
-# Takes ${ARGN} and puts only supported architectures in @out_var list.
-function(filter_available_targets out_var)
-  set(archs ${${out_var}})
-  foreach(arch ${ARGN})
-    list(FIND COMPILER_RT_SUPPORTED_ARCH ${arch} ARCH_INDEX)
-    if(NOT (ARCH_INDEX EQUAL -1) AND CAN_TARGET_${arch})
-      list(APPEND archs ${arch})
-    endif()
-  endforeach()
-  set(${out_var} ${archs} PARENT_SCOPE)
+function(check_type_exists type files variable)
+  add_cxx_include(includes "${files}")
+  CHECK_CXX_SOURCE_COMPILES("
+    ${includes} ${type} typeVar;
+    int main() {
+        return 0;
+    }
+    " ${variable})
 endfunction()
 
-# Returns a list of architecture specific target cflags in @out_var list.
-function(get_target_flags_for_arch arch out_var)
-  list(FIND COMPILER_RT_SUPPORTED_ARCH ${arch} ARCH_INDEX)
-  if(ARCH_INDEX EQUAL -1)
-    message(FATAL_ERROR "Unsupported architecture: ${arch}")
+# include checks
+check_include_file(dirent.h HAVE_DIRENT_H)
+check_include_file(dlfcn.h HAVE_DLFCN_H)
+check_include_file(errno.h HAVE_ERRNO_H)
+check_include_file(execinfo.h HAVE_EXECINFO_H)
+check_include_file(fcntl.h HAVE_FCNTL_H)
+check_include_file(inttypes.h HAVE_INTTYPES_H)
+check_include_file(limits.h HAVE_LIMITS_H)
+check_include_file(link.h HAVE_LINK_H)
+check_include_file(malloc.h HAVE_MALLOC_H)
+check_include_file(malloc/malloc.h HAVE_MALLOC_MALLOC_H)
+check_include_file(ndir.h HAVE_NDIR_H)
+if( NOT PURE_WINDOWS )
+  check_include_file(pthread.h HAVE_PTHREAD_H)
+endif()
+check_include_file(signal.h HAVE_SIGNAL_H)
+check_include_file(stdint.h HAVE_STDINT_H)
+check_include_file(sys/dir.h HAVE_SYS_DIR_H)
+check_include_file(sys/ioctl.h HAVE_SYS_IOCTL_H)
+check_include_file(sys/mman.h HAVE_SYS_MMAN_H)
+check_include_file(sys/ndir.h HAVE_SYS_NDIR_H)
+check_include_file(sys/param.h HAVE_SYS_PARAM_H)
+check_include_file(sys/resource.h HAVE_SYS_RESOURCE_H)
+check_include_file(sys/stat.h HAVE_SYS_STAT_H)
+check_include_file(sys/time.h HAVE_SYS_TIME_H)
+check_include_file(sys/uio.h HAVE_SYS_UIO_H)
+check_include_file(termios.h HAVE_TERMIOS_H)
+check_include_file(unistd.h HAVE_UNISTD_H)
+check_include_file(utime.h HAVE_UTIME_H)
+check_include_file(valgrind/valgrind.h HAVE_VALGRIND_VALGRIND_H)
+check_include_file(zlib.h HAVE_ZLIB_H)
+check_include_file(fenv.h HAVE_FENV_H)
+check_symbol_exists(FE_ALL_EXCEPT "fenv.h" HAVE_DECL_FE_ALL_EXCEPT)
+check_symbol_exists(FE_INEXACT "fenv.h" HAVE_DECL_FE_INEXACT)
+
+check_include_file(mach/mach.h HAVE_MACH_MACH_H)
+check_include_file(mach-o/dyld.h HAVE_MACH_O_DYLD_H)
+check_include_file(histedit.h HAVE_HISTEDIT_H)
+
+# size_t must be defined before including cxxabi.h on FreeBSD 10.0.
+check_cxx_source_compiles("
+#include <stddef.h>
+#include <cxxabi.h>
+int main() { return 0; }
+" HAVE_CXXABI_H)
+
+# library checks
+if( NOT PURE_WINDOWS )
+  check_library_exists(pthread pthread_create "" HAVE_LIBPTHREAD)
+  if (HAVE_LIBPTHREAD)
+    check_library_exists(pthread pthread_getspecific "" HAVE_PTHREAD_GETSPECIFIC)
+    check_library_exists(pthread pthread_rwlock_init "" HAVE_PTHREAD_RWLOCK_INIT)
+    check_library_exists(pthread pthread_mutex_lock "" HAVE_PTHREAD_MUTEX_LOCK)
   else()
-    if (NOT APPLE)
-      set(${out_var} ${TARGET_${arch}_CFLAGS} PARENT_SCOPE)
-    else()
-      # This is only called in constructing cflags for tests executing on the
-      # host. This will need to all be cleaned up to support building tests
-      # for cross-targeted hardware (i.e. iOS).
-      set(${out_var} -arch ${arch} PARENT_SCOPE)
+    # this could be Android
+    check_library_exists(c pthread_create "" PTHREAD_IN_LIBC)
+    if (PTHREAD_IN_LIBC)
+      check_library_exists(c pthread_getspecific "" HAVE_PTHREAD_GETSPECIFIC)
+      check_library_exists(c pthread_rwlock_init "" HAVE_PTHREAD_RWLOCK_INIT)
+      check_library_exists(c pthread_mutex_lock "" HAVE_PTHREAD_MUTEX_LOCK)
     endif()
   endif()
-endfunction()
-
-set(ARM64 aarch64)
-set(ARM32 arm armhf)
-set(X86 i386 i686)
-set(X86_64 x86_64)
-set(MIPS32 mips mipsel)
-set(MIPS64 mips64 mips64el)
-set(PPC64 powerpc64 powerpc64le)
-set(WASM32 wasm32)
-set(WASM64 wasm64)
-
-if(APPLE)
-  set(ARM64 arm64)
-  set(ARM32 armv7 armv7s)
-  set(X86_64 x86_64 x86_64h)
+  check_library_exists(dl dlopen "" HAVE_LIBDL)
+  check_library_exists(rt clock_gettime "" HAVE_LIBRT)
 endif()
 
-set(ALL_BUILTIN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64}
-    ${MIPS32} ${MIPS64} ${WASM32} ${WASM64})
-set(ALL_SANITIZER_COMMON_SUPPORTED_ARCH ${X86} ${X86_64} ${PPC64}
-    ${ARM32} ${ARM64} ${MIPS32} ${MIPS64})
-set(ALL_ASAN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64}
-    ${MIPS32} ${MIPS64} ${PPC64})
-set(ALL_DFSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64})
-set(ALL_LSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64})
-set(ALL_MSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64})
-set(ALL_PROFILE_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${PPC64}
-    ${MIPS32} ${MIPS64})
-set(ALL_TSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64} ${PPC64})
-set(ALL_UBSAN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64}
-    ${MIPS32} ${MIPS64} ${PPC64})
-set(ALL_SAFESTACK_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM64})
-set(ALL_CFI_SUPPORTED_ARCH ${X86} ${X86_64})
-
-if(APPLE)
-  include(CompilerRTDarwinUtils)
-
-  # On Darwin if /usr/include doesn't exist, the user probably has Xcode but not
-  # the command line tools. If this is the case, we need to find the OS X
-  # sysroot to pass to clang.
-  if(NOT EXISTS /usr/include)
-    execute_process(COMMAND xcodebuild -version -sdk macosx Path
-       OUTPUT_VARIABLE OSX_SYSROOT
-       ERROR_QUIET
-       OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(OSX_SYSROOT_FLAG "-isysroot${OSX_SYSROOT}")
+# Don't look for these libraries on Windows. Also don't look for them if we're
+# using MSan, since uninstrmented third party code may call MSan interceptors
+# like strlen, leading to false positives.
+if( NOT PURE_WINDOWS AND NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
+  if (LLVM_ENABLE_ZLIB)
+    check_library_exists(z compress2 "" HAVE_LIBZ)
+  else()
+    set(HAVE_LIBZ 0)
   endif()
-
-  option(COMPILER_RT_ENABLE_IOS "Enable building for iOS - Experimental" Off)
-  option(COMPILER_RT_ENABLE_WATCHOS "Enable building for watchOS - Experimental" Off)
-  option(COMPILER_RT_ENABLE_TVOS "Enable building for tvOS - Experimental" Off)
-
-  find_darwin_sdk_dir(DARWIN_osx_SYSROOT macosx)
-  find_darwin_sdk_dir(DARWIN_iossim_SYSROOT iphonesimulator)
-  find_darwin_sdk_dir(DARWIN_ios_SYSROOT iphoneos)
-  find_darwin_sdk_dir(DARWIN_watchossim_SYSROOT watchsimulator)
-  find_darwin_sdk_dir(DARWIN_watchos_SYSROOT watchos)
-  find_darwin_sdk_dir(DARWIN_tvossim_SYSROOT appletvsimulator)
-  find_darwin_sdk_dir(DARWIN_tvos_SYSROOT appletvos)
-
-  if(COMPILER_RT_ENABLE_IOS)
-    list(APPEND DARWIN_EMBEDDED_PLATFORMS ios)
-    set(DARWIN_ios_MIN_VER_FLAG -miphoneos-version-min)
-    set(DARWIN_ios_SANITIZER_MIN_VER_FLAG
-      ${DARWIN_ios_MIN_VER_FLAG}=7.0)
-    set(DARWIN_ios_BUILTIN_MIN_VER 6.0)
-    set(DARWIN_ios_BUILTIN_MIN_VER_FLAG
-      ${DARWIN_ios_MIN_VER_FLAG}=${DARWIN_ios_BUILTIN_MIN_VER})
+  if (HAVE_HISTEDIT_H)
+    check_library_exists(edit el_init "" HAVE_LIBEDIT)
   endif()
-  if(COMPILER_RT_ENABLE_WATCHOS)
-    list(APPEND DARWIN_EMBEDDED_PLATFORMS watchos)
-    set(DARWIN_watchos_MIN_VER_FLAG -mwatchos-version-min)
-    set(DARWIN_watchos_SANITIZER_MIN_VER_FLAG
-      ${DARWIN_watchos_MIN_VER_FLAG}=2.0)
-    set(DARWIN_watchos_BUILTIN_MIN_VER 2.0)
-    set(DARWIN_watchos_BUILTIN_MIN_VER_FLAG
-      ${DARWIN_watchos_MIN_VER_FLAG}=${DARWIN_watchos_BUILTIN_MIN_VER})
-  endif()
-  if(COMPILER_RT_ENABLE_TVOS)
-    list(APPEND DARWIN_EMBEDDED_PLATFORMS tvos)
-    set(DARWIN_tvos_MIN_VER_FLAG -mtvos-version-min)
-    set(DARWIN_tvos_SANITIZER_MIN_VER_FLAG
-      ${DARWIN_tvos_MIN_VER_FLAG}=9.0)
-    set(DARWIN_tvos_BUILTIN_MIN_VER 9.0)
-    set(DARWIN_tvos_BUILTIN_MIN_VER_FLAG
-      ${DARWIN_tvos_MIN_VER_FLAG}=${DARWIN_tvos_BUILTIN_MIN_VER})
-  endif()
-
-  # Note: In order to target x86_64h on OS X the minimum deployment target must
-  # be 10.8 or higher.
-  set(SANITIZER_COMMON_SUPPORTED_OS osx)
-  set(BUILTIN_SUPPORTED_OS osx)
-  set(PROFILE_SUPPORTED_OS osx)
-  set(TSAN_SUPPORTED_OS osx)
-  if(NOT SANITIZER_MIN_OSX_VERSION)
-    string(REGEX MATCH "-mmacosx-version-min=([.0-9]+)"
-           MACOSX_VERSION_MIN_FLAG "${CMAKE_CXX_FLAGS}")
-    if(MACOSX_VERSION_MIN_FLAG)
-      set(SANITIZER_MIN_OSX_VERSION "${CMAKE_MATCH_1}")
-    elseif(CMAKE_OSX_DEPLOYMENT_TARGET)
-      set(SANITIZER_MIN_OSX_VERSION ${CMAKE_OSX_DEPLOYMENT_TARGET})
-    else()
-      set(SANITIZER_MIN_OSX_VERSION 10.9)
-    endif()
-    if(SANITIZER_MIN_OSX_VERSION VERSION_LESS "10.7")
-      message(FATAL_ERROR "Too old OS X version: ${SANITIZER_MIN_OSX_VERSION}")
-    endif()
-  endif()
-
-  # We're setting the flag manually for each target OS
-  set(CMAKE_OSX_DEPLOYMENT_TARGET "")
-  
-  set(DARWIN_COMMON_CFLAGS -stdlib=libc++)
-  set(DARWIN_COMMON_LINKFLAGS
-    -stdlib=libc++
-    -lc++
-    -lc++abi)
-  
-  check_linker_flag("-fapplication-extension" COMPILER_RT_HAS_APP_EXTENSION)
-  if(COMPILER_RT_HAS_APP_EXTENSION)
-    list(APPEND DARWIN_COMMON_LINKFLAGS "-fapplication-extension")
-  endif()
-
-  set(DARWIN_osx_CFLAGS
-    ${DARWIN_COMMON_CFLAGS}
-    -mmacosx-version-min=${SANITIZER_MIN_OSX_VERSION})
-  set(DARWIN_osx_LINKFLAGS
-    ${DARWIN_COMMON_LINKFLAGS}
-    -mmacosx-version-min=${SANITIZER_MIN_OSX_VERSION})
-  set(DARWIN_osx_BUILTIN_MIN_VER 10.5)
-  set(DARWIN_osx_BUILTIN_MIN_VER_FLAG
-      -mmacosx-version-min=${DARWIN_osx_BUILTIN_MIN_VER})
-
-  if(DARWIN_osx_SYSROOT)
-    list(APPEND DARWIN_osx_CFLAGS -isysroot ${DARWIN_osx_SYSROOT})
-    list(APPEND DARWIN_osx_LINKFLAGS -isysroot ${DARWIN_osx_SYSROOT})
-  endif()
-
-  # Figure out which arches to use for each OS
-  darwin_get_toolchain_supported_archs(toolchain_arches)
-  message(STATUS "Toolchain supported arches: ${toolchain_arches}")
-  
-  if(NOT MACOSX_VERSION_MIN_FLAG)
-    darwin_test_archs(osx
-      DARWIN_osx_ARCHS
-      ${toolchain_arches})
-    message(STATUS "OSX supported arches: ${DARWIN_osx_ARCHS}")
-    foreach(arch ${DARWIN_osx_ARCHS})
-      list(APPEND COMPILER_RT_SUPPORTED_ARCH ${arch})
-      set(CAN_TARGET_${arch} 1)
-    endforeach()
-
-    # Need to build a 10.4 compatible libclang_rt
-    set(DARWIN_10.4_SYSROOT ${DARWIN_osx_SYSROOT})
-    set(DARWIN_10.4_BUILTIN_MIN_VER 10.4)
-    set(DARWIN_10.4_BUILTIN_MIN_VER_FLAG
-        -mmacosx-version-min=${DARWIN_10.4_BUILTIN_MIN_VER})
-    set(DARWIN_10.4_SKIP_CC_KEXT On)
-    darwin_test_archs(10.4
-      DARWIN_10.4_ARCHS
-      ${toolchain_arches})
-    message(STATUS "OSX 10.4 supported arches: ${DARWIN_10.4_ARCHS}")
-    if(DARWIN_10.4_ARCHS)
-      # don't include the Haswell slice in the 10.4 compatibility library
-      list(REMOVE_ITEM DARWIN_10.4_ARCHS x86_64h)
-      list(APPEND BUILTIN_SUPPORTED_OS 10.4)
-    endif()
-
-    foreach(platform ${DARWIN_EMBEDDED_PLATFORMS})
-      if(DARWIN_${platform}sim_SYSROOT)
-        set(DARWIN_${platform}sim_CFLAGS
-          ${DARWIN_COMMON_CFLAGS}
-          ${DARWIN_${platform}_SANITIZER_MIN_VER_FLAG}
-          -isysroot ${DARWIN_iossim_SYSROOT})
-        set(DARWIN_${platform}sim_LINKFLAGS
-          ${DARWIN_COMMON_LINKFLAGS}
-          ${DARWIN_${platform}_SANITIZER_MIN_VER_FLAG}
-          -isysroot ${DARWIN_${platform}sim_SYSROOT})
-        set(DARWIN_${platform}sim_BUILTIN_MIN_VER
-          ${DARWIN_${platform}_BUILTIN_MIN_VER})
-        set(DARWIN_${platform}sim_BUILTIN_MIN_VER_FLAG
-          ${DARWIN_${platform}_BUILTIN_MIN_VER_FLAG})
-
-        set(DARWIN_${platform}sim_SKIP_CC_KEXT On)
-        darwin_test_archs(${platform}sim
-          DARWIN_${platform}sim_ARCHS
-          ${toolchain_arches})
-        message(STATUS "${platform} Simulator supported arches: ${DARWIN_${platform}sim_ARCHS}")
-        if(DARWIN_iossim_ARCHS)
-          list(APPEND SANITIZER_COMMON_SUPPORTED_OS ${platform}sim)
-          list(APPEND BUILTIN_SUPPORTED_OS ${platform}sim)
-          list(APPEND PROFILE_SUPPORTED_OS ${platform}sim)
-        endif()
-        foreach(arch ${DARWIN_${platform}sim_ARCHS})
-          list(APPEND COMPILER_RT_SUPPORTED_ARCH ${arch})
-          set(CAN_TARGET_${arch} 1)
-        endforeach()
-      endif()
-
-      if(DARWIN_${platform}_SYSROOT)
-        set(DARWIN_${platform}_CFLAGS
-          ${DARWIN_COMMON_CFLAGS}
-          ${DARWIN_${platform}_SANITIZER_MIN_VER_FLAG}
-          -isysroot ${DARWIN_${platform}_SYSROOT})
-        set(DARWIN_${platform}_LINKFLAGS
-          ${DARWIN_COMMON_LINKFLAGS}
-          ${DARWIN_${platform}_SANITIZER_MIN_VER_FLAG}
-          -isysroot ${DARWIN_${platform}_SYSROOT})
-
-        darwin_test_archs(${platform}
-          DARWIN_${platform}_ARCHS
-          ${toolchain_arches})
-        message(STATUS "${platform} supported arches: ${DARWIN_${platform}_ARCHS}")
-        if(DARWIN_${platform}_ARCHS)
-          list(APPEND SANITIZER_COMMON_SUPPORTED_OS ${platform})
-          list(APPEND BUILTIN_SUPPORTED_OS ${platform})
-          list(APPEND PROFILE_SUPPORTED_OS ${platform})
-        endif()
-        foreach(arch ${DARWIN_${platform}_ARCHS})
-          list(APPEND COMPILER_RT_SUPPORTED_ARCH ${arch})
-          set(CAN_TARGET_${arch} 1)
-        endforeach()
+  if(LLVM_ENABLE_TERMINFO)
+    set(HAVE_TERMINFO 0)
+    foreach(library tinfo terminfo curses ncurses ncursesw)
+      string(TOUPPER ${library} library_suffix)
+      check_library_exists(${library} setupterm "" HAVE_TERMINFO_${library_suffix})
+      if(HAVE_TERMINFO_${library_suffix})
+        set(HAVE_TERMINFO 1)
+        set(TERMINFO_LIBS "${library}")
+        break()
       endif()
     endforeach()
+  else()
+    set(HAVE_TERMINFO 0)
+  endif()
+endif()
+
+# function checks
+check_symbol_exists(arc4random "stdlib.h" HAVE_DECL_ARC4RANDOM)
+check_symbol_exists(backtrace "execinfo.h" HAVE_BACKTRACE)
+check_symbol_exists(getpagesize unistd.h HAVE_GETPAGESIZE)
+check_symbol_exists(getrusage sys/resource.h HAVE_GETRUSAGE)
+check_symbol_exists(setrlimit sys/resource.h HAVE_SETRLIMIT)
+check_symbol_exists(isatty unistd.h HAVE_ISATTY)
+check_symbol_exists(futimens sys/stat.h HAVE_FUTIMENS)
+check_symbol_exists(futimes sys/time.h HAVE_FUTIMES)
+if( HAVE_SETJMP_H )
+  check_symbol_exists(longjmp setjmp.h HAVE_LONGJMP)
+  check_symbol_exists(setjmp setjmp.h HAVE_SETJMP)
+  check_symbol_exists(siglongjmp setjmp.h HAVE_SIGLONGJMP)
+  check_symbol_exists(sigsetjmp setjmp.h HAVE_SIGSETJMP)
+endif()
+if( HAVE_SYS_UIO_H )
+  check_symbol_exists(writev sys/uio.h HAVE_WRITEV)
+endif()
+check_symbol_exists(mallctl malloc_np.h HAVE_MALLCTL)
+check_symbol_exists(mallinfo malloc.h HAVE_MALLINFO)
+check_symbol_exists(malloc_zone_statistics malloc/malloc.h
+                    HAVE_MALLOC_ZONE_STATISTICS)
+check_symbol_exists(mkdtemp "stdlib.h;unistd.h" HAVE_MKDTEMP)
+check_symbol_exists(mkstemp "stdlib.h;unistd.h" HAVE_MKSTEMP)
+check_symbol_exists(mktemp "stdlib.h;unistd.h" HAVE_MKTEMP)
+check_symbol_exists(closedir "sys/types.h;dirent.h" HAVE_CLOSEDIR)
+check_symbol_exists(opendir "sys/types.h;dirent.h" HAVE_OPENDIR)
+check_symbol_exists(readdir "sys/types.h;dirent.h" HAVE_READDIR)
+check_symbol_exists(getcwd unistd.h HAVE_GETCWD)
+check_symbol_exists(gettimeofday sys/time.h HAVE_GETTIMEOFDAY)
+check_symbol_exists(getrlimit "sys/types.h;sys/time.h;sys/resource.h" HAVE_GETRLIMIT)
+check_symbol_exists(posix_spawn spawn.h HAVE_POSIX_SPAWN)
+check_symbol_exists(pread unistd.h HAVE_PREAD)
+check_symbol_exists(realpath stdlib.h HAVE_REALPATH)
+check_symbol_exists(sbrk unistd.h HAVE_SBRK)
+check_symbol_exists(srand48 stdlib.h HAVE_RAND48_SRAND48)
+if( HAVE_RAND48_SRAND48 )
+  check_symbol_exists(lrand48 stdlib.h HAVE_RAND48_LRAND48)
+  if( HAVE_RAND48_LRAND48 )
+    check_symbol_exists(drand48 stdlib.h HAVE_RAND48_DRAND48)
+    if( HAVE_RAND48_DRAND48 )
+      set(HAVE_RAND48 1 CACHE INTERNAL "are srand48/lrand48/drand48 available?")
+    endif()
+  endif()
+endif()
+check_symbol_exists(strtoll stdlib.h HAVE_STRTOLL)
+check_symbol_exists(strtoq stdlib.h HAVE_STRTOQ)
+check_symbol_exists(strerror string.h HAVE_STRERROR)
+check_symbol_exists(strerror_r string.h HAVE_STRERROR_R)
+check_symbol_exists(strerror_s string.h HAVE_DECL_STRERROR_S)
+check_symbol_exists(setenv stdlib.h HAVE_SETENV)
+if( PURE_WINDOWS )
+  check_symbol_exists(_chsize_s io.h HAVE__CHSIZE_S)
+
+  check_function_exists(_alloca HAVE__ALLOCA)
+  check_function_exists(__alloca HAVE___ALLOCA)
+  check_function_exists(__chkstk HAVE___CHKSTK)
+  check_function_exists(__chkstk_ms HAVE___CHKSTK_MS)
+  check_function_exists(___chkstk HAVE____CHKSTK)
+  check_function_exists(___chkstk_ms HAVE____CHKSTK_MS)
+
+  check_function_exists(__ashldi3 HAVE___ASHLDI3)
+  check_function_exists(__ashrdi3 HAVE___ASHRDI3)
+  check_function_exists(__divdi3 HAVE___DIVDI3)
+  check_function_exists(__fixdfdi HAVE___FIXDFDI)
+  check_function_exists(__fixsfdi HAVE___FIXSFDI)
+  check_function_exists(__floatdidf HAVE___FLOATDIDF)
+  check_function_exists(__lshrdi3 HAVE___LSHRDI3)
+  check_function_exists(__moddi3 HAVE___MODDI3)
+  check_function_exists(__udivdi3 HAVE___UDIVDI3)
+  check_function_exists(__umoddi3 HAVE___UMODDI3)
+
+  check_function_exists(__main HAVE___MAIN)
+  check_function_exists(__cmpdi2 HAVE___CMPDI2)
+endif()
+if( HAVE_DLFCN_H )
+  if( HAVE_LIBDL )
+    list(APPEND CMAKE_REQUIRED_LIBRARIES dl)
+  endif()
+  check_symbol_exists(dlerror dlfcn.h HAVE_DLERROR)
+  check_symbol_exists(dlopen dlfcn.h HAVE_DLOPEN)
+  if( HAVE_LIBDL )
+    list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES dl)
+  endif()
+endif()
+
+check_symbol_exists(__GLIBC__ stdio.h LLVM_USING_GLIBC)
+if( LLVM_USING_GLIBC )
+  add_llvm_definitions( -D_GNU_SOURCE )
+endif()
+
+set(headers "sys/types.h")
+
+if (HAVE_INTTYPES_H)
+  set(headers ${headers} "inttypes.h")
+endif()
+
+if (HAVE_STDINT_H)
+  set(headers ${headers} "stdint.h")
+endif()
+
+check_type_exists(int64_t "${headers}" HAVE_INT64_T)
+check_type_exists(uint64_t "${headers}" HAVE_UINT64_T)
+check_type_exists(u_int64_t "${headers}" HAVE_U_INT64_T)
+
+# available programs checks
+function(llvm_find_program name)
+  string(TOUPPER ${name} NAME)
+  string(REGEX REPLACE "\\." "_" NAME ${NAME})
+
+  find_program(LLVM_PATH_${NAME} NAMES ${ARGV})
+  mark_as_advanced(LLVM_PATH_${NAME})
+  if(LLVM_PATH_${NAME})
+    set(HAVE_${NAME} 1 CACHE INTERNAL "Is ${name} available ?")
+    mark_as_advanced(HAVE_${NAME})
+  else(LLVM_PATH_${NAME})
+    set(HAVE_${NAME} "" CACHE INTERNAL "Is ${name} available ?")
+  endif(LLVM_PATH_${NAME})
+endfunction()
+
+if (LLVM_ENABLE_DOXYGEN)
+  llvm_find_program(dot)
+endif ()
+
+if( LLVM_ENABLE_FFI )
+  find_path(FFI_INCLUDE_PATH ffi.h PATHS ${FFI_INCLUDE_DIR})
+  if( EXISTS "${FFI_INCLUDE_PATH}/ffi.h" )
+    set(FFI_HEADER ffi.h CACHE INTERNAL "")
+    set(HAVE_FFI_H 1 CACHE INTERNAL "")
+  else()
+    find_path(FFI_INCLUDE_PATH ffi/ffi.h PATHS ${FFI_INCLUDE_DIR})
+    if( EXISTS "${FFI_INCLUDE_PATH}/ffi/ffi.h" )
+      set(FFI_HEADER ffi/ffi.h CACHE INTERNAL "")
+      set(HAVE_FFI_FFI_H 1 CACHE INTERNAL "")
+    endif()
   endif()
 
-  # for list_intersect
-  include(CompilerRTUtils)
+  if( NOT FFI_HEADER )
+    message(FATAL_ERROR "libffi includes are not found.")
+  endif()
 
-  list_intersect(BUILTIN_SUPPORTED_ARCH ALL_BUILTIN_SUPPORTED_ARCH toolchain_arches)
+  find_library(FFI_LIBRARY_PATH ffi PATHS ${FFI_LIBRARY_DIR})
+  if( NOT FFI_LIBRARY_PATH )
+    message(FATAL_ERROR "libffi is not found.")
+  endif()
 
-  list_intersect(SANITIZER_COMMON_SUPPORTED_ARCH
-    ALL_SANITIZER_COMMON_SUPPORTED_ARCH
-    COMPILER_RT_SUPPORTED_ARCH
-    )
-  set(LSAN_COMMON_SUPPORTED_ARCH ${SANITIZER_COMMON_SUPPORTED_ARCH})
-  set(UBSAN_COMMON_SUPPORTED_ARCH ${SANITIZER_COMMON_SUPPORTED_ARCH})
-  list_intersect(ASAN_SUPPORTED_ARCH
-    ALL_ASAN_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(DFSAN_SUPPORTED_ARCH
-    ALL_DFSAN_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(LSAN_SUPPORTED_ARCH
-    ALL_LSAN_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(MSAN_SUPPORTED_ARCH
-    ALL_MSAN_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(PROFILE_SUPPORTED_ARCH
-    ALL_PROFILE_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(TSAN_SUPPORTED_ARCH
-    ALL_TSAN_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(UBSAN_SUPPORTED_ARCH
-    ALL_UBSAN_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(SAFESTACK_SUPPORTED_ARCH
-    ALL_SAFESTACK_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(CFI_SUPPORTED_ARCH
-    ALL_CFI_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
+  list(APPEND CMAKE_REQUIRED_LIBRARIES ${FFI_LIBRARY_PATH})
+  list(APPEND CMAKE_REQUIRED_INCLUDES ${FFI_INCLUDE_PATH})
+  check_symbol_exists(ffi_call ${FFI_HEADER} HAVE_FFI_CALL)
+  list(REMOVE_ITEM CMAKE_REQUIRED_INCLUDES ${FFI_INCLUDE_PATH})
+  list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES ${FFI_LIBRARY_PATH})
 else()
-  # Architectures supported by compiler-rt libraries.
-  filter_available_targets(BUILTIN_SUPPORTED_ARCH
-    ${ALL_BUILTIN_SUPPORTED_ARCH})
-  filter_available_targets(SANITIZER_COMMON_SUPPORTED_ARCH
-    ${ALL_SANITIZER_COMMON_SUPPORTED_ARCH})
-  # LSan and UBSan common files should be available on all architectures
-  # supported by other sanitizers (even if they build into dummy object files).
-  filter_available_targets(LSAN_COMMON_SUPPORTED_ARCH
-    ${SANITIZER_COMMON_SUPPORTED_ARCH})
-  filter_available_targets(UBSAN_COMMON_SUPPORTED_ARCH
-    ${SANITIZER_COMMON_SUPPORTED_ARCH})
-  filter_available_targets(ASAN_SUPPORTED_ARCH ${ALL_ASAN_SUPPORTED_ARCH})
-  filter_available_targets(DFSAN_SUPPORTED_ARCH ${ALL_DFSAN_SUPPORTED_ARCH})
-  filter_available_targets(LSAN_SUPPORTED_ARCH ${ALL_LSAN_SUPPORTED_ARCH})
-  filter_available_targets(MSAN_SUPPORTED_ARCH ${ALL_MSAN_SUPPORTED_ARCH})
-  filter_available_targets(PROFILE_SUPPORTED_ARCH ${ALL_PROFILE_SUPPORTED_ARCH})
-  filter_available_targets(TSAN_SUPPORTED_ARCH ${ALL_TSAN_SUPPORTED_ARCH})
-  filter_available_targets(UBSAN_SUPPORTED_ARCH ${ALL_UBSAN_SUPPORTED_ARCH})
-  filter_available_targets(SAFESTACK_SUPPORTED_ARCH
-    ${ALL_SAFESTACK_SUPPORTED_ARCH})
-  filter_available_targets(CFI_SUPPORTED_ARCH ${ALL_CFI_SUPPORTED_ARCH})
+  unset(HAVE_FFI_FFI_H CACHE)
+  unset(HAVE_FFI_H CACHE)
+  unset(HAVE_FFI_CALL CACHE)
+endif( LLVM_ENABLE_FFI )
+
+# Define LLVM_HAS_ATOMICS if gcc or MSVC atomic builtins are supported.
+include(CheckAtomic)
+
+if( LLVM_ENABLE_PIC )
+  set(ENABLE_PIC 1)
+else()
+  set(ENABLE_PIC 0)
+  check_cxx_compiler_flag("-fno-pie" SUPPORTS_NO_PIE_FLAG)
+  if(SUPPORTS_NO_PIE_FLAG)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fno-pie")
+  endif()
 endif()
 
-if (MSVC)
+check_cxx_compiler_flag("-Wno-variadic-macros" SUPPORTS_NO_VARIADIC_MACROS_FLAG)
+
+set(USE_NO_MAYBE_UNINITIALIZED 0)
+set(USE_NO_UNINITIALIZED 0)
+
+# Disable gcc's potentially uninitialized use analysis as it presents lots of
+# false positives.
+if (CMAKE_COMPILER_IS_GNUCXX)
+  check_cxx_compiler_flag("-Wmaybe-uninitialized" HAS_MAYBE_UNINITIALIZED)
+  if (HAS_MAYBE_UNINITIALIZED)
+    set(USE_NO_MAYBE_UNINITIALIZED 1)
+  else()
+    # Only recent versions of gcc make the distinction between -Wuninitialized
+    # and -Wmaybe-uninitialized. If -Wmaybe-uninitialized isn't supported, just
+    # turn off all uninitialized use warnings.
+    check_cxx_compiler_flag("-Wuninitialized" HAS_UNINITIALIZED)
+    set(USE_NO_UNINITIALIZED ${HAS_UNINITIALIZED})
+  endif()
+endif()
+
+# By default, we target the host, but this can be overridden at CMake
+# invocation time.
+include(GetHostTriple)
+get_host_triple(LLVM_INFERRED_HOST_TRIPLE)
+
+set(LLVM_HOST_TRIPLE "${LLVM_INFERRED_HOST_TRIPLE}" CACHE STRING
+    "Host on which LLVM binaries will run")
+
+# Determine the native architecture.
+string(TOLOWER "${LLVM_TARGET_ARCH}" LLVM_NATIVE_ARCH)
+if( LLVM_NATIVE_ARCH STREQUAL "host" )
+  string(REGEX MATCH "^[^-]*" LLVM_NATIVE_ARCH ${LLVM_HOST_TRIPLE})
+endif ()
+
+if (LLVM_NATIVE_ARCH MATCHES "i[2-6]86")
+  set(LLVM_NATIVE_ARCH X86)
+elseif (LLVM_NATIVE_ARCH STREQUAL "x86")
+  set(LLVM_NATIVE_ARCH X86)
+elseif (LLVM_NATIVE_ARCH STREQUAL "amd64")
+  set(LLVM_NATIVE_ARCH X86)
+elseif (LLVM_NATIVE_ARCH STREQUAL "x86_64")
+  set(LLVM_NATIVE_ARCH X86)
+elseif (LLVM_NATIVE_ARCH MATCHES "sparc")
+  set(LLVM_NATIVE_ARCH Sparc)
+elseif (LLVM_NATIVE_ARCH MATCHES "powerpc")
+  set(LLVM_NATIVE_ARCH PowerPC)
+elseif (LLVM_NATIVE_ARCH MATCHES "aarch64")
+  set(LLVM_NATIVE_ARCH AArch64)
+elseif (LLVM_NATIVE_ARCH MATCHES "arm64")
+  set(LLVM_NATIVE_ARCH AArch64)
+elseif (LLVM_NATIVE_ARCH MATCHES "arm")
+  set(LLVM_NATIVE_ARCH ARM)
+elseif (LLVM_NATIVE_ARCH MATCHES "mips")
+  set(LLVM_NATIVE_ARCH Mips)
+elseif (LLVM_NATIVE_ARCH MATCHES "xcore")
+  set(LLVM_NATIVE_ARCH XCore)
+elseif (LLVM_NATIVE_ARCH MATCHES "msp430")
+  set(LLVM_NATIVE_ARCH MSP430)
+elseif (LLVM_NATIVE_ARCH MATCHES "hexagon")
+  set(LLVM_NATIVE_ARCH Hexagon)
+elseif (LLVM_NATIVE_ARCH MATCHES "s390x")
+  set(LLVM_NATIVE_ARCH SystemZ)
+elseif (LLVM_NATIVE_ARCH MATCHES "wasm32")
+  set(LLVM_NATIVE_ARCH WebAssembly)
+elseif (LLVM_NATIVE_ARCH MATCHES "wasm64")
+  set(LLVM_NATIVE_ARCH WebAssembly)
+else ()
+  message(FATAL_ERROR "Unknown architecture ${LLVM_NATIVE_ARCH}")
+endif ()
+
+# If build targets includes "host", then replace with native architecture.
+list(FIND LLVM_TARGETS_TO_BUILD "host" idx)
+if( NOT idx LESS 0 )
+  list(REMOVE_AT LLVM_TARGETS_TO_BUILD ${idx})
+  list(APPEND LLVM_TARGETS_TO_BUILD ${LLVM_NATIVE_ARCH})
+  list(REMOVE_DUPLICATES LLVM_TARGETS_TO_BUILD)
+endif()
+
+list(FIND LLVM_TARGETS_TO_BUILD ${LLVM_NATIVE_ARCH} NATIVE_ARCH_IDX)
+if (NATIVE_ARCH_IDX EQUAL -1)
+  message(STATUS
+    "Native target ${LLVM_NATIVE_ARCH} is not selected; lli will not JIT code")
+else ()
+  message(STATUS "Native target architecture is ${LLVM_NATIVE_ARCH}")
+  set(LLVM_NATIVE_TARGET LLVMInitialize${LLVM_NATIVE_ARCH}Target)
+  set(LLVM_NATIVE_TARGETINFO LLVMInitialize${LLVM_NATIVE_ARCH}TargetInfo)
+  set(LLVM_NATIVE_TARGETMC LLVMInitialize${LLVM_NATIVE_ARCH}TargetMC)
+  set(LLVM_NATIVE_ASMPRINTER LLVMInitialize${LLVM_NATIVE_ARCH}AsmPrinter)
+
+  # We don't have an ASM parser for all architectures yet.
+  if (EXISTS ${CMAKE_SOURCE_DIR}/lib/Target/${LLVM_NATIVE_ARCH}/AsmParser/CMakeLists.txt)
+    set(LLVM_NATIVE_ASMPARSER LLVMInitialize${LLVM_NATIVE_ARCH}AsmParser)
+  endif ()
+
+  # We don't have an disassembler for all architectures yet.
+  if (EXISTS ${CMAKE_SOURCE_DIR}/lib/Target/${LLVM_NATIVE_ARCH}/Disassembler/CMakeLists.txt)
+    set(LLVM_NATIVE_DISASSEMBLER LLVMInitialize${LLVM_NATIVE_ARCH}Disassembler)
+  endif ()
+endif ()
+
+if( MINGW )
+  set(HAVE_LIBPSAPI 1)
+  set(HAVE_LIBSHELL32 1)
+  # TODO: Check existence of libraries.
+  #   include(CheckLibraryExists)
+endif( MINGW )
+
+if (NOT HAVE_STRTOLL)
+  # Use _strtoi64 if strtoll is not available.
+  check_symbol_exists(_strtoi64 stdlib.h have_strtoi64)
+  if (have_strtoi64)
+    set(HAVE_STRTOLL 1)
+    set(strtoll "_strtoi64")
+    set(strtoull "_strtoui64")
+  endif ()
+endif ()
+
+if( MSVC )
+  set(SHLIBEXT ".lib")
+  set(stricmp "_stricmp")
+  set(strdup "_strdup")
+
   # See if the DIA SDK is available and usable.
   set(MSVC_DIA_SDK_DIR "$ENV{VSINSTALLDIR}DIA SDK")
+
+  # Due to a bug in MSVC 2013's installation software, it is possible
+  # for MSVC 2013 to write the DIA SDK into the Visual Studio 2012
+  # install directory.  If this happens, the installation is corrupt
+  # and there's nothing we can do.  It happens with enough frequency
+  # though that we should handle it.  We do so by simply checking that
+  # the DIA SDK folder exists.  Should this happen you will need to
+  # uninstall VS 2012 and then re-install VS 2013.
   if (IS_DIRECTORY ${MSVC_DIA_SDK_DIR})
-    set(CAN_SYMBOLIZE 1)
+    set(HAVE_DIA_SDK 1)
   else()
-    set(CAN_SYMBOLIZE 0)
+    set(HAVE_DIA_SDK 0)
   endif()
 else()
-  set(CAN_SYMBOLIZE 1)
+  set(HAVE_DIA_SDK 0)
+endif( MSVC )
+
+if( PURE_WINDOWS )
+  CHECK_CXX_SOURCE_COMPILES("
+    #include <windows.h>
+    #include <imagehlp.h>
+    extern \"C\" void foo(PENUMLOADED_MODULES_CALLBACK);
+    extern \"C\" void foo(BOOL(CALLBACK*)(PCSTR,ULONG_PTR,ULONG,PVOID));
+    int main(){return 0;}"
+    HAVE_ELMCB_PCSTR)
+  if( HAVE_ELMCB_PCSTR )
+    set(WIN32_ELMCB_PCSTR "PCSTR")
+  else()
+    set(WIN32_ELMCB_PCSTR "PSTR")
+  endif()
+endif( PURE_WINDOWS )
+
+# FIXME: Signal handler return type, currently hardcoded to 'void'
+set(RETSIGTYPE void)
+
+if( LLVM_ENABLE_THREADS )
+  # Check if threading primitives aren't supported on this platform
+  if( NOT HAVE_PTHREAD_H AND NOT WIN32 )
+    set(LLVM_ENABLE_THREADS 0)
+  endif()
 endif()
 
-message(STATUS "Compiler-RT supported architectures: ${COMPILER_RT_SUPPORTED_ARCH}")
+if( LLVM_ENABLE_THREADS )
+  message(STATUS "Threads enabled.")
+else( LLVM_ENABLE_THREADS )
+  message(STATUS "Threads disabled.")
+endif()
 
-if(ANDROID)
-  set(OS_NAME "Android")
+if (LLVM_ENABLE_ZLIB )
+  # Check if zlib is available in the system.
+  if ( NOT HAVE_ZLIB_H OR NOT HAVE_LIBZ )
+    set(LLVM_ENABLE_ZLIB 0)
+  endif()
+endif()
+
+set(LLVM_PREFIX ${CMAKE_INSTALL_PREFIX})
+
+if (LLVM_ENABLE_DOXYGEN)
+  message(STATUS "Doxygen enabled.")
+  find_package(Doxygen REQUIRED)
+
+  if (DOXYGEN_FOUND)
+    # If we find doxygen and we want to enable doxygen by default create a
+    # global aggregate doxygen target for generating llvm and any/all
+    # subprojects doxygen documentation.
+    if (LLVM_BUILD_DOCS)
+      add_custom_target(doxygen ALL)
+    endif()
+
+    option(LLVM_DOXYGEN_EXTERNAL_SEARCH "Enable doxygen external search." OFF)
+    if (LLVM_DOXYGEN_EXTERNAL_SEARCH)
+      set(LLVM_DOXYGEN_SEARCHENGINE_URL "" CACHE STRING "URL to use for external search.")
+      set(LLVM_DOXYGEN_SEARCH_MAPPINGS "" CACHE STRING "Doxygen Search Mappings")
+    endif()
+  endif()
 else()
-  set(OS_NAME "${CMAKE_SYSTEM_NAME}")
+  message(STATUS "Doxygen disabled.")
 endif()
 
-if (SANITIZER_COMMON_SUPPORTED_ARCH AND NOT LLVM_USE_SANITIZER AND
-    (OS_NAME MATCHES "Android|Darwin|Linux|FreeBSD" OR
-    (OS_NAME MATCHES "Windows" AND MSVC)))
-  set(COMPILER_RT_HAS_SANITIZER_COMMON TRUE)
+if (LLVM_ENABLE_SPHINX)
+  message(STATUS "Sphinx enabled.")
+  find_package(Sphinx REQUIRED)
+  if (LLVM_BUILD_DOCS)
+    add_custom_target(sphinx ALL)
+  endif()
 else()
-  set(COMPILER_RT_HAS_SANITIZER_COMMON FALSE)
+  message(STATUS "Sphinx disabled.")
 endif()
 
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND
-    (NOT OS_NAME MATCHES "Windows" OR CMAKE_SIZEOF_VOID_P EQUAL 4))
-  set(COMPILER_RT_HAS_INTERCEPTION TRUE)
+set(LLVM_BINDINGS "")
+if(WIN32)
+  message(STATUS "Go bindings disabled.")
 else()
-  set(COMPILER_RT_HAS_INTERCEPTION FALSE)
+  find_program(GO_EXECUTABLE NAMES go DOC "go executable")
+  if(GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
+    message(STATUS "Go bindings disabled.")
+  else()
+    execute_process(COMMAND ${GO_EXECUTABLE} run ${CMAKE_SOURCE_DIR}/bindings/go/conftest.go
+                    RESULT_VARIABLE GO_CONFTEST)
+    if(GO_CONFTEST STREQUAL "0")
+      set(LLVM_BINDINGS "${LLVM_BINDINGS} go")
+      message(STATUS "Go bindings enabled.")
+    else()
+      message(STATUS "Go bindings disabled, need at least Go 1.2.")
+    endif()
+  endif()
 endif()
 
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND ASAN_SUPPORTED_ARCH AND
-    (NOT OS_NAME MATCHES "Windows" OR CMAKE_SIZEOF_VOID_P EQUAL 4))
-  set(COMPILER_RT_HAS_ASAN TRUE)
+find_program(GOLD_EXECUTABLE NAMES ${LLVM_DEFAULT_TARGET_TRIPLE}-ld.gold ld.gold ${LLVM_DEFAULT_TARGET_TRIPLE}-ld ld DOC "The gold linker")
+set(LLVM_BINUTILS_INCDIR "" CACHE PATH
+	"PATH to binutils/include containing plugin-api.h for gold plugin.")
+
+if(APPLE)
+  find_program(LD64_EXECUTABLE NAMES ld DOC "The ld64 linker")
+endif()
+
+include(FindOCaml)
+include(AddOCaml)
+if(WIN32)
+  message(STATUS "OCaml bindings disabled.")
 else()
-  set(COMPILER_RT_HAS_ASAN FALSE)
+  find_package(OCaml)
+  if( NOT OCAML_FOUND )
+    message(STATUS "OCaml bindings disabled.")
+  else()
+    if( OCAML_VERSION VERSION_LESS "4.00.0" )
+      message(STATUS "OCaml bindings disabled, need OCaml >=4.00.0.")
+    else()
+      find_ocamlfind_package(ctypes VERSION 0.4 OPTIONAL)
+      if( HAVE_OCAML_CTYPES )
+        message(STATUS "OCaml bindings enabled.")
+        find_ocamlfind_package(oUnit VERSION 2 OPTIONAL)
+        set(LLVM_BINDINGS "${LLVM_BINDINGS} ocaml")
+      else()
+        message(STATUS "OCaml bindings disabled, need ctypes >=0.4.")
+      endif()
+    endif()
+  endif()
 endif()
 
-if (OS_NAME MATCHES "Linux|FreeBSD|Windows")
-  set(COMPILER_RT_ASAN_HAS_STATIC_RUNTIME TRUE)
-else()
-  set(COMPILER_RT_ASAN_HAS_STATIC_RUNTIME FALSE)
-endif()
-
-# TODO: Add builtins support.
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND DFSAN_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Linux")
-  set(COMPILER_RT_HAS_DFSAN TRUE)
-else()
-  set(COMPILER_RT_HAS_DFSAN FALSE)
-endif()
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND LSAN_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Linux|FreeBSD")
-  set(COMPILER_RT_HAS_LSAN TRUE)
-else()
-  set(COMPILER_RT_HAS_LSAN FALSE)
-endif()
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND MSAN_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Linux")
-  set(COMPILER_RT_HAS_MSAN TRUE)
-else()
-  set(COMPILER_RT_HAS_MSAN FALSE)
-endif()
-
-if (PROFILE_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Darwin|Linux|FreeBSD|Windows")
-  set(COMPILER_RT_HAS_PROFILE TRUE)
-else()
-  set(COMPILER_RT_HAS_PROFILE FALSE)
-endif()
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND TSAN_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Darwin|Linux|FreeBSD")
-  set(COMPILER_RT_HAS_TSAN TRUE)
-else()
-  set(COMPILER_RT_HAS_TSAN FALSE)
-endif()
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND UBSAN_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Darwin|Linux|FreeBSD|Windows")
-  set(COMPILER_RT_HAS_UBSAN TRUE)
-else()
-  set(COMPILER_RT_HAS_UBSAN FALSE)
-endif()
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND SAFESTACK_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Darwin|Linux|FreeBSD")
-  set(COMPILER_RT_HAS_SAFESTACK TRUE)
-else()
-  set(COMPILER_RT_HAS_SAFESTACK FALSE)
-endif()
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND CFI_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Linux")
-  set(COMPILER_RT_HAS_CFI TRUE)
-else()
-  set(COMPILER_RT_HAS_CFI FALSE)
-endif()
+string(REPLACE " " ";" LLVM_BINDINGS_LIST "${LLVM_BINDINGS}")

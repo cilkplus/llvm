@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Clang documentation build configuration file, created by
-# sphinx-quickstart on Sun Dec  9 20:01:55 2012.
+# LLVM documentation build configuration file.
 #
 # This file is execfile()d with the current directory set to its containing dir.
 #
@@ -26,7 +25,7 @@ from datetime import date
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ['sphinx.ext.todo', 'sphinx.ext.mathjax']
+extensions = ['sphinx.ext.intersphinx', 'sphinx.ext.todo']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -41,8 +40,8 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'Clang'
-copyright = u'2007-%d, The Clang Team' % date.today().year
+project = u'LLVM'
+copyright = u'2003-%d, LLVM Project' % date.today().year
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -61,11 +60,11 @@ release = '3.9'
 # non-false value, then it is used:
 #today = ''
 # Else, today_fmt is used as the format for a strftime call.
-#today_fmt = '%B %d, %Y'
+today_fmt = '%Y-%m-%d'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build', 'analyzer']
+exclude_patterns = ['_build']
 
 # The reST default role (used for this markup: `text`) to use for all documents.
 #default_role = None
@@ -79,7 +78,7 @@ exclude_patterns = ['_build', 'analyzer']
 
 # If true, sectionauthor and moduleauthor directives will be shown in the
 # output. They are ignored by default.
-#show_authors = False
+show_authors = True
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'friendly'
@@ -92,15 +91,15 @@ pygments_style = 'friendly'
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = 'haiku'
+html_theme = 'llvm-theme'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-#html_theme_options = {}
+html_theme_options = { "nosidebar": True }
 
 # Add any paths that contain custom themes here, relative to this directory.
-#html_theme_path = []
+html_theme_path = ["_themes"]
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
@@ -121,18 +120,18 @@ html_theme = 'haiku'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = []
+html_static_path = ['_static']
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
-#html_last_updated_fmt = '%b %d, %Y'
+html_last_updated_fmt = '%Y-%m-%d'
 
 # If true, SmartyPants will be used to convert quotes and dashes to
 # typographically correct entities.
 #html_use_smartypants = True
 
 # Custom sidebar templates, maps document names to template names.
-#html_sidebars = {}
+html_sidebars = {'index': 'indexsidebar.html'}
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.
@@ -148,7 +147,7 @@ html_static_path = []
 #html_split_index = False
 
 # If true, links to the reST sources are added to the pages.
-#html_show_sourcelink = True
+html_show_sourcelink = True
 
 # If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
 #html_show_sphinx = True
@@ -165,7 +164,7 @@ html_static_path = []
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'Clangdoc'
+htmlhelp_basename = 'LLVMdoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -184,8 +183,8 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'Clang.tex', u'Clang Documentation',
-   u'The Clang Team', 'manual'),
+  ('index', 'LLVM.tex', u'LLVM Documentation',
+   u'LLVM project', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -216,9 +215,9 @@ latex_documents = [
 man_pages = []
 
 # Automatically derive the list of man pages from the contents of the command
-# guide subdirectory. This was copied from llvm/docs/conf.py.
+# guide subdirectory.
 basedir = os.path.dirname(__file__)
-man_page_authors = u'Maintained by the Clang / LLVM Team (<http://clang.llvm.org>)'
+man_page_authors = "Maintained by The LLVM Team (http://llvm.org/)."
 command_guide_subpath = 'CommandGuide'
 command_guide_path = os.path.join(basedir, command_guide_subpath)
 for name in os.listdir(command_guide_path):
@@ -247,27 +246,8 @@ for name in os.listdir(command_guide_path):
         man_pages.append((file_subpath.replace('.rst',''), name,
                           description, man_page_authors, 1))
 
-
 # If true, show URL addresses after external links.
 #man_show_urls = False
 
-
-# -- Options for Texinfo output ------------------------------------------------
-
-# Grouping the document tree into Texinfo files. List of tuples
-# (source start file, target name, title, author,
-#  dir menu entry, description, category)
-texinfo_documents = [
-  ('index', 'Clang', u'Clang Documentation',
-   u'The Clang Team', 'Clang', 'One line description of project.',
-   'Miscellaneous'),
-]
-
-# Documents to append as an appendix to all manuals.
-#texinfo_appendices = []
-
-# If false, no module index is generated.
-#texinfo_domain_indices = True
-
-# How to display URL addresses: 'footnote', 'no', or 'inline'.
-#texinfo_show_urls = 'footnote'
+# FIXME: Define intersphinx configration.
+intersphinx_mapping = {}

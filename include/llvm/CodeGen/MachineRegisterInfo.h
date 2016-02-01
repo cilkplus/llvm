@@ -95,20 +95,8 @@ private:
     return MO->Contents.Reg.Next;
   }
 
-  /// UsedRegUnits - This is a bit vector that is computed and set by the
-  /// register allocator, and must be kept up to date by passes that run after
-  /// register allocation (though most don't modify this).  This is used
-  /// so that the code generator knows which callee save registers to save and
-  /// for other target specific uses.
-  /// This vector has bits set for register units that are modified in the
-  /// current function. It doesn't include registers clobbered by function
-  /// calls with register mask operands.
-  BitVector UsedRegUnits;
-
   /// UsedPhysRegMask - Additional used physregs including aliases.
   /// This bit vector represents all the registers clobbered by function calls.
-  /// It can model things that UsedRegUnits can't, such as function calls that
-  /// clobber ymm7 but preserve the low half in xmm7.
   BitVector UsedPhysRegMask;
 
   /// ReservedRegs - This is a bit vector of reserved registers.  The target

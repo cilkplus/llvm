@@ -172,7 +172,6 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg(
     }
 
     LaneVGPRs[LaneVGPRIdx] = LaneVGPR;
-    MRI.setPhysRegUsed(LaneVGPR);
 
     // Add this register as live-in to all blocks to avoid machine verifer
     // complaining about use of an undefined physical register.

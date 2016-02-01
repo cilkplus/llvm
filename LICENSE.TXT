@@ -4,7 +4,7 @@ LLVM Release License
 University of Illinois/NCSA
 Open Source License
 
-Copyright (c) 2007-2015 University of Illinois at Urbana-Champaign.
+Copyright (c) 2003-2015 University of Illinois at Urbana-Champaign.
 All rights reserved.
 
 Developed by:
@@ -43,6 +43,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
 SOFTWARE.
 
 ==============================================================================
+Copyrights and Licenses for Third Party Software Distributed with LLVM:
+==============================================================================
 The LLVM software contains code written by third parties.  Such software will
 have its own individual LICENSE.TXT file in the directory in which it appears.
 This file will describe the copyrights, license, and restrictions which apply
@@ -59,5 +61,10 @@ licenses, and/or restrictions:
 
 Program             Directory
 -------             ---------
-<none yet>
-
+Autoconf            llvm/autoconf
+                    llvm/projects/ModuleMaker/autoconf
+Google Test         llvm/utils/unittest/googletest
+OpenBSD regex       llvm/lib/Support/{reg*, COPYRIGHT.regex}
+pyyaml tests        llvm/test/YAMLParser/{*.data, LICENSE.TXT}
+ARM contributions   llvm/lib/Target/ARM/LICENSE.TXT
+md5 contributions   llvm/lib/Support/MD5.cpp llvm/include/llvm/Support/MD5.h

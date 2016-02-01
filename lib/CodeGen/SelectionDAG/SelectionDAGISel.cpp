@@ -451,12 +451,6 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   LibInfo = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
   GFI = Fn.hasGC() ? &getAnalysis<GCModuleInfo>().getFunctionInfo(Fn) : nullptr;
 
-  // Reset OptLevel to None for optnone functions.
-  CodeGenOpt::Level NewOptLevel = OptLevel;
-  if (Fn.hasFnAttribute(Attribute::OptimizeNone))
-    NewOptLevel = CodeGenOpt::None;
-  OptLevelChanger OLC(*this, NewOptLevel);
-
   DEBUG(dbgs() << "\n\n\n=== " << Fn.getName() << "\n");
 
   SplitCriticalSideEffectEdges(const_cast<Function &>(Fn));

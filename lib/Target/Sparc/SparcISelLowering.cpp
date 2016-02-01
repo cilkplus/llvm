@@ -1809,12 +1809,6 @@ EVT SparcTargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
   return VT.changeVectorElementTypeToInteger();
 }
 
-EVT SparcTargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
-  if (!VT.isVector())
-    return MVT::i32;
-  return VT.changeVectorElementTypeToInteger();
-}
-
 /// isMaskedValueZeroForTargetNode - Return true if 'Op & Mask' is known to
 /// be zero. Op is expected to be a target specific node. Used by DAG
 /// combiner.

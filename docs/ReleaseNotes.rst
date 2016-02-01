@@ -1,254 +1,118 @@
-=====================================
-Clang 3.9 (In-Progress) Release Notes
-=====================================
+======================
+LLVM 3.9 Release Notes
+======================
 
 .. contents::
-   :local:
-   :depth: 2
-
-Written by the `LLVM Team <http://llvm.org/>`_
+    :local:
 
 .. warning::
+   These are in-progress notes for the upcoming LLVM 3.9 release.  You may
+   prefer the `LLVM 3.7 Release Notes <http://llvm.org/releases/3.7.0/docs
+   /ReleaseNotes.html>`_.
 
-   These are in-progress notes for the upcoming Clang 3.9 release. You may
-   prefer the `Clang 3.7 Release Notes
-   <http://llvm.org/releases/3.7.0/tools/clang/docs/ReleaseNotes.html>`_.
 
 Introduction
 ============
 
-This document contains the release notes for the Clang C/C++/Objective-C
-frontend, part of the LLVM Compiler Infrastructure, release 3.9. Here we
-describe the status of Clang in some detail, including major
-improvements from the previous release and new feature work. For the
-general LLVM release notes, see `the LLVM
-documentation <http://llvm.org/docs/ReleaseNotes.html>`_. All LLVM
-releases may be downloaded from the `LLVM releases web
-site <http://llvm.org/releases/>`_.
+This document contains the release notes for the LLVM Compiler Infrastructure,
+release 3.9.  Here we describe the status of LLVM, including major improvements
+from the previous release, improvements in various subprojects of LLVM, and
+some of the current users of the code.  All LLVM releases may be downloaded
+from the `LLVM releases web site <http://llvm.org/releases/>`_.
 
-For more information about Clang or LLVM, including information about the
-latest release, please check out the main `Clang Web Site
-<http://clang.llvm.org>`_ or the `LLVM Web Site <http://llvm.org>`_.
+For more information about LLVM, including information about the latest
+release, please check out the `main LLVM web site <http://llvm.org/>`_.  If you
+have questions or comments, the `LLVM Developer's Mailing List
+<http://lists.llvm.org/mailman/listinfo/llvm-dev>`_ is a good place to send
+them.
 
-What's New in Clang 3.9?
-========================
+Note that if you are reading this file from a Subversion checkout or the main
+LLVM web page, this document applies to the *next* release, not the current
+one.  To see the release notes for a specific release, please see the `releases
+page <http://llvm.org/releases/>`_.
 
-Some of the major new features and improvements to Clang are listed here.
-Generic improvements to Clang as a whole or to its underlying infrastructure
-are described first, followed by language-specific sections with improvements
-to Clang's support for those languages.
+Non-comprehensive list of changes in this release
+=================================================
+* .. note about autoconf build having been removed.
 
-Major New Features
-------------------
+* .. note about C API functions LLVMLinkModules, LLVMParseBitcode,
+   LLVMParseBitcodeInContext, LLVMGetBitcodeModuleInContext and
+   LLVMGetBitcodeModule having been removed.
 
-- Feature1...
+.. NOTE
+   For small 1-3 sentence descriptions, just add an entry at the end of
+   this list. If your description won't fit comfortably in one bullet
+   point (e.g. maybe you would like to give an example of the
+   functionality, or simply have a lot to talk about), see the `NOTE` below
+   for adding a new subsection.
 
-- On Windows targets, some uses of the ``__try``, ``__except``, and
-  ``__finally`` language constructs are supported in Clang 3.7. MSVC-compatible
-  C++ exceptions are not yet supported, however.
+* ... next change ...
 
-- Clang 3.7 fully supports OpenMP 3.1 and reported to work on many platforms,
-  including x86, x86-64 and Power. Also, pragma ``omp simd`` from OpenMP 4.0 is
-  supported as well. See below for details.
+.. NOTE
+   If you would like to document a larger change, then you can add a
+   subsection about it right here. You can copy the following boilerplate
+   and un-indent it (the indentation causes it to be inside this comment).
 
-- Clang 3.7 includes an implementation of :doc:`control flow integrity
-  <ControlFlowIntegrity>`, a security hardening mechanism.
+   Special New Feature
+   -------------------
 
+   Makes programs 10x faster by doing Special New Thing.
 
-Improvements to Clang's diagnostics
------------------------------------
+Changes to the ARM Backend
+--------------------------
 
-Clang's diagnostics are constantly being improved to catch more issues,
-explain them more clearly, and provide more accurate source information
-about them. The improvements since the 3.7 release include:
-
-- -Wmove is a new warning group which has the previous two warnings,
-  -Wredundant-move and -Wpessimizing-move, as well as previous warning
-  -Wself-move.  In addition, this group is part of -Wmost and -Wall now.
-
-- -Winfinite-recursion, a warning for functions that only call themselves,
-  is now part of -Wmost and -Wall.
-
-- -Wobjc-circular-container prevents creation of circular containers, 
-  it covers ``NSMutableArray``, ``NSMutableSet``, ``NSMutableDictionary``,
-  ``NSMutableOrderedSet`` and all their subclasses.
-
-New Compiler Flags
-------------------
-
-The option ....
-
-In addition, ``[[deprecated]]`` is now accepted as a synonym for Clang's
-existing ``deprecated`` attribute.
-
-- ``objc_boxable`` attribute was added. Structs and unions marked with this attribute can be
-  used with boxed expressions (``@(...)``) to create ``NSValue``.
-
-Profile Guided Optimization
----------------------------
-
-Clang now accepts GCC-compatible flags for profile guided optimization (PGO).
-You can now use ``-fprofile-generate=<dir>``, ``-fprofile-use=<dir>``,
-``-fno-profile-generate`` and ``-fno-profile-use``. These flags have the
-same semantics as their GCC counterparts. However, the generated profile
-is still LLVM-specific. PGO profiles generated with Clang cannot be used
-by GCC and vice-versa.
-
-Clang now emits function entry counts in profile-instrumented binaries.
-This has improved the computation of weights and frequencies in
-profile analysis.
-
-OpenMP Support
---------------
-OpenMP 3.1 is fully supported, but disabled by default. To enable it, please use
-the ``-fopenmp=libomp`` command line option. Your feedback (positive or negative) on
-using OpenMP-enabled clang would be much appreciated; please share it either on
-`cfe-dev <http://lists.llvm.org/mailman/listinfo/cfe-dev>`_ or `openmp-dev
-<http://lists.llvm.org/mailman/listinfo/openmp-dev>`_ mailing lists.
-
-In addition to OpenMP 3.1, several important elements of the 4.0 version of the
-standard are supported as well:
-
-- ``omp simd``, ``omp for simd`` and ``omp parallel for simd`` pragmas
-- atomic constructs
-- ``proc_bind`` clause of ``omp parallel`` pragma
-- ``depend`` clause of ``omp task`` pragma (except for array sections)
-- ``omp cancel`` and ``omp cancellation point`` pragmas
-- ``omp taskgroup`` pragma
-
-Internal API Changes
---------------------
-
-These are major API changes that have happened since the 3.6 release of
-Clang. If upgrading an external codebase that uses Clang as a library,
-this section should help get you past the largest hurdles of upgrading.
-
--  Some of the ``PPCallbacks`` interface now deals in ``MacroDefinition``
-   objects instead of ``MacroDirective`` objects. This allows preserving
-   full information on macros imported from modules.
-
--  ``clang-c/Index.h`` no longer ``#include``\s ``clang-c/Documentation.h``.
-   You now need to explicitly ``#include "clang-c/Documentation.h"`` if
-   you use the libclang documentation API.
-
-Static Analyzer
----------------
-
-* The generated plists now contain the name of the check that generated it.
-
-TLS is enabled for Cygwin defaults to -femulated-tls.
+ During this release ...
 
 
-* New check for dereferencing object that the result of a zero-length
-  allocation.
+Changes to the MIPS Target
+--------------------------
 
-* Also check functions in precompiled headers.
-
-* Properly handle alloca() in some checkers.
-
-* Various improvements to the retain count checker.
+ During this release ...
 
 
-clang-tidy
-----------
-Added new checks:
+Changes to the PowerPC Target
+-----------------------------
 
-* google-global-names-in-headers: flag global namespace pollution in header
-  files.
-
-* misc-assert-side-effect: detects ``assert()`` conditions with side effects
-  which can cause different behavior in debug / release builds.
-
-* misc-assign-operator-signature: finds declarations of assign operators with
-  the wrong return and/or argument types.
-
-* misc-inaccurate-erase: warns when some elements of a container are not
-  removed due to using the ``erase()`` algorithm incorrectly.
-
-* misc-inefficient-algorithm: warns on inefficient use of STL algorithms on
-  associative containers.
-
-* misc-macro-parentheses: finds macros that can have unexpected behavior due
-  to missing parentheses.
-
-* misc-macro-repeated-side-effects: checks for repeated argument with side
-  effects in macros.
-
-These are major API changes that have happened since the 3.8 release of
-Clang. If upgrading an external codebase that uses Clang as a library,
-this section should help get you past the largest hurdles of upgrading.
-
--  ...
-
-AST Matchers
-------------
-
-...
-
-* readability-else-after-return: flags conditional statements having the
-  ``else`` branch, when the ``true`` branch has a ``return`` as the last statement.
-
-* readability-redundant-string-cstr: finds unnecessary calls to
-  ``std::string::c_str()``.
-
-* readability-shrink-to-fit: replaces copy and swap tricks on shrinkable
-  containers with the ``shrink_to_fit()`` method call.
-
-* readability-simplify-boolean-expr: looks for boolean expressions involving
-  boolean constants and simplifies them to use the appropriate boolean
-  expression directly (``if (x == true) ... -> if (x)``, etc.)
-
-SystemZ
--------
-
-* Clang will now always default to the z10 processor when compiling
-  without any ``-march=`` option. Previous releases used to automatically
-  detect the current host CPU when compiling natively. If you wish to
-  still have clang detect the current host CPU, you now need to use the
-  ``-march=native`` option.
-
-* Clang now provides the ``<s390intrin.h>`` header file.
-
-* Clang now supports the transactional-execution facility and
-  provides associated builtins and the ``<htmintrin.h>`` and
-  ``<htmxlintrin.h>`` header files. Support is enabled by default
-  on zEC12 and above, and can additionally be enabled or disabled
-  via the ``-mhtm`` / ``-mno-htm`` command line options.
-
-* Clang now supports the vector facility. This includes a
-  change in the ABI to pass arguments and return values of
-  vector types in vector registers, as well as a change in
-  the default alignment of vector types. Support is enabled
-  by default on z13 and above, and can additionally be enabled
-  or disabled via the ``-mvx`` / ``-mno-vx`` command line options.
-
-* Clang now supports the System z vector language extension,
-  providing a "vector" keyword to define vector types, and a
-  set of builtins defined in the ``<vecintrin.h>`` header file.
-  This can be enabled via the ``-fzvector`` command line option.
-  For compatibility with GCC, Clang also supports the
-  ``-mzvector`` option as an alias.
- 
-* Several cases of ABI incompatibility with GCC have been fixed.
+ During this release ...
 
 
-Last release which will run on Windows XP and Windows Vista
------------------------------------------------------------
+Changes to the X86 Target
+-----------------------------
 
-This is expected to the be the last major release of Clang that will support
-running on Windows XP and Windows Vista.  For the next major release the
-minimum Windows version requirement will be Windows 7.
+ During this release ...
+
+Changes to the AMDGPU Target
+-----------------------------
+
+ * Mesa 11.0.x is no longer supported
+
+
+Changes to the OCaml bindings
+-----------------------------
+
+ During this release ...
+
+
+External Open Source Projects Using LLVM 3.9
+============================================
+
+An exciting aspect of LLVM is that it is used as an enabling technology for
+a lot of other language and tools projects. This section lists some of the
+projects that have already been updated to work with LLVM 3.9.
+
+* A project
+
 
 Additional Information
 ======================
 
-A wide variety of additional information is available on the `Clang web
-page <http://clang.llvm.org/>`_. The web page contains versions of the
-API documentation which are up-to-date with the Subversion revision of
-the source code. You can access versions of these documents specific to
-this release by going into the "``clang/docs/``" directory in the Clang
-tree.
+A wide variety of additional information is available on the `LLVM web page
+<http://llvm.org/>`_, in particular in the `documentation
+<http://llvm.org/docs/>`_ section.  The web page also contains versions of the
+API documentation which is up-to-date with the Subversion version of the source
+code.  You can access versions of these documents specific to this release by
+going into the ``llvm/docs/`` directory in the LLVM tree.
 
-If you have any questions or comments about Clang, please feel free to
-contact us via the `mailing
-list <http://lists.llvm.org/mailman/listinfo/cfe-dev>`_.
+If you have any questions or comments about LLVM, please feel free to contact
+us via the `mailing lists <http://llvm.org/docs/#maillist>`_.
+

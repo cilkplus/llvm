@@ -520,27 +520,6 @@ bool COFFAsmParser::ParseDirectiveLinkOnce(StringRef, SMLoc Loc) {
   if (Type == COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE)
     return Error(Loc, "cannot make section associative with .linkonce");
 
-  return false;
-}
-
-/// ParseDirectiveLinkOnce
-///  ::= .linkonce [ identifier [ identifier ] ]
-bool COFFAsmParser::ParseDirectiveLinkOnce(StringRef, SMLoc Loc) {
-  COFF::COMDATType Type = COFF::IMAGE_COMDAT_SELECT_ANY;
-  const MCSectionCOFF *Assoc = 0;
-  if (getLexer().is(AsmToken::Identifier))
-    if (parseCOMDATTypeAndAssoc(Type, Assoc))
-      return true;
-
-  const MCSectionCOFF *Current = static_cast<const MCSectionCOFF*>(
-                                       getStreamer().getCurrentSection().first);
-
-
-  if (Type == COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE) {
-    if (Assoc == Current)
-      return Error(Loc, "cannot associate a section with itself");
-  }
-
   if (Current->getCharacteristics() & COFF::IMAGE_SCN_LNK_COMDAT)
     return Error(Loc, Twine("section '") + Current->getSectionName() +
                                                        "' is already linkonce");

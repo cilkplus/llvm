@@ -1,87 +1,134 @@
-# Test runner infrastructure for Clang. This configures the Clang test trees
-# for use by Lit, and delegates to LLVM's lit test handlers.
-
-if (CMAKE_CFG_INTDIR STREQUAL ".")
-  set(LLVM_BUILD_MODE ".")
-else ()
-  set(LLVM_BUILD_MODE "%(build_mode)s")
-endif ()
-
-string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} CLANG_TOOLS_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
+if(LLVM_BUILD_EXAMPLES)
+  set(ENABLE_EXAMPLES 1)
+endif()
 
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
   )
-
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.site.cfg.in
   ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg
   )
 
-option(CLANG_TEST_USE_VG "Run Clang tests under Valgrind" OFF)
-if(CLANG_TEST_USE_VG)
-  set(CLANG_TEST_EXTRA_ARGS ${CLANG_TEST_EXTRA_ARGS} "--vg")
-endif ()
+# Don't include check-llvm into check-all without LLVM_BUILD_TOOLS.
+if(NOT LLVM_BUILD_TOOLS)
+  set(EXCLUDE_FROM_ALL ON)
+endif()
 
-list(APPEND CLANG_TEST_DEPS
-  clang clang-headers
-  clang-check clang-format
-  c-index-test diagtool
-  clang-tblgen
-  )
+# Set the depends list as a variable so that it can grow conditionally.
+# NOTE: Sync the substitutions in test/lit.cfg when adding to this list.
+set(LLVM_TEST_DEPENDS
+          BugpointPasses
+          FileCheck
+          LLVMHello
+          UnitTests
+          bugpoint
+          count
+          llc
+          lli
+          lli-child-target
+          llvm-ar
+          llvm-as
+          llvm-bcanalyzer
+          llvm-c-test
+          llvm-config
+          llvm-cov
+          llvm-cxxdump
+          llvm-diff
+          llvm-dis
+          llvm-dsymutil
+          llvm-dwarfdump
+          llvm-dwp
+          llvm-extract
+          llvm-lib
+          llvm-link
+          llvm-lto
+          llvm-mc
+          llvm-mcmarkup
+          llvm-nm
+          llvm-objdump
+          llvm-pdbdump
+          llvm-profdata
+          llvm-ranlib
+          llvm-readobj
+          llvm-rtdyld
+          llvm-size
+          llvm-split
+          llvm-symbolizer
+          llvm-tblgen
+          not
+          obj2yaml
+          opt
+          sancov
+          sanstats
+          verify-uselistorder
+          yaml-bench
+          yaml2obj
+        )
 
-if (CLANG_ENABLE_ARCMT)
-  list(APPEND CLANG_TEST_DEPS
-    arcmt-test
-    c-arcmt-test
-  )
-endif ()
+# If Intel JIT events are supported, depend on a tool that tests the listener.
+if( LLVM_USE_INTEL_JITEVENTS )
+  set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS} llvm-jitlistener)
+endif( LLVM_USE_INTEL_JITEVENTS )
 
-if (ENABLE_CLANG_EXAMPLES)
-  list(APPEND CLANG_TEST_DEPS
-    clang-interpreter
-    PrintFunctionNames
-    )
-endif ()
+if(TARGET LLVMgold)
+  set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS} LLVMgold)
+endif()
 
-if (ENABLE_CLANG_STATIC_ANALYZER AND ENABLE_CLANG_EXAMPLES)
-  list(APPEND CLANG_TEST_DEPS
-    SampleAnalyzerPlugin
-    )
-endif ()
+if(TARGET llvm-go)
+  set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS} llvm-go)
+endif()
 
-set(CLANG_TEST_PARAMS
-  clang_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
-  )
+if(APPLE)
+  set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS} LTO)
+endif()
 
-if( NOT CLANG_BUILT_STANDALONE )
-  list(APPEND CLANG_TEST_DEPS
-    llvm-config
-    FileCheck count not
-    llc
-    llvm-bcanalyzer
-    llvm-lto
-    llvm-objdump
-    llvm-profdata
-    llvm-readobj
-    llvm-symbolizer
-    LTO
-    opt
+if(TARGET ocaml_llvm)
+  set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS}
+          ocaml_llvm
+          ocaml_llvm_all_backends
+          ocaml_llvm_analysis
+          ocaml_llvm_bitreader
+          ocaml_llvm_bitwriter
+          ocaml_llvm_executionengine
+          ocaml_llvm_irreader
+          ocaml_llvm_linker
+          ocaml_llvm_target
+          ocaml_llvm_ipo
+          ocaml_llvm_passmgr_builder
+          ocaml_llvm_scalar_opts
+          ocaml_llvm_transform_utils
+          ocaml_llvm_vectorize
+        )
+endif()
+
+if(LLVM_BUILD_EXAMPLES)
+  list(APPEND LLVM_TEST_DEPENDS
+    Kaleidoscope-Ch3
+    Kaleidoscope-Ch4
+    Kaleidoscope-Ch5
+    Kaleidoscope-Ch6
+    Kaleidoscope-Ch7
     )
 endif()
 
-add_lit_testsuite(check-clang "Running the Clang regression tests"
+add_lit_testsuite(check-llvm "Running the LLVM regression tests"
   ${CMAKE_CURRENT_BINARY_DIR}
-  #LIT ${LLVM_LIT}
-  PARAMS ${CLANG_TEST_PARAMS}
-  DEPENDS ${CLANG_TEST_DEPS}
-  ARGS ${CLANG_TEST_EXTRA_ARGS}
+  PARAMS llvm_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
+         llvm_unit_site_config=${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg
+  DEPENDS ${LLVM_TEST_DEPENDS}
   )
-set_target_properties(check-clang PROPERTIES FOLDER "Clang tests")
+set_target_properties(check-llvm PROPERTIES FOLDER "Tests")
 
-# Add a legacy target spelling: clang-test
-add_custom_target(clang-test)
-add_dependencies(clang-test check-clang)
-set_target_properties(clang-test PROPERTIES FOLDER "Clang tests")
+add_lit_testsuites(LLVM ${CMAKE_CURRENT_SOURCE_DIR}
+  PARAMS llvm_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
+         llvm_unit_site_config=${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg
+  DEPENDS ${LLVM_TEST_DEPENDS}
+  )
 
+# Setup a legacy alias for 'check-llvm'. This will likely change to be an
+# alias for 'check-all' at some point in the future.
+add_custom_target(check)
+add_dependencies(check check-llvm)
+set_target_properties(check PROPERTIES FOLDER "Tests")

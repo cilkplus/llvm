@@ -391,12 +391,6 @@ namespace llvm {
     bool shouldAlignPointerArgs(CallInst *CI, unsigned &MinSize,
                                 unsigned &PrefAlign) const override;
 
-    /// Returns true if a cast between SrcAS and DestAS is a noop.
-    virtual bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const {
-      // Addrspacecasts are always noops.
-      return true;
-    }
-
     /// createFastISel - This method returns a target specific FastISel object,
     /// or null if the target does not support "fast" ISel.
     FastISel *createFastISel(FunctionLoweringInfo &funcInfo,

@@ -60,9 +60,8 @@ that's the one you should use for the test-suite and other external tests.
 To run the script on a specific release candidate run::
 
    ./test-release.sh \
-        -release 3.4 \
+        -release 3.3 \
         -rc 1 \
-        -triple x86_64-apple-darwin \
         -no-64bit \
         -test-asserts \
         -no-compare-files
