@@ -1,13 +1,5 @@
 #!/bin/sh
-#
-# TestRunner.sh - Backward compatible utility for testing an individual file.
+# Deprecated, use 'llvm-lit'.
 
-# Find where this script is.
-Dir=$(dirname $(which $0))
-AbsDir=$(cd $Dir; pwd)
-
-# Find 'lit', assuming standard layout.
-lit=$AbsDir/../../../utils/lit/lit.py
-
-# Dispatch to lit.
-$lit "$@"
+echo "warning: '$0' is deprecated, use 'llvm-lit' instead."
+exec llvm-lit "$@"

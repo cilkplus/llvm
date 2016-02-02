@@ -32,7 +32,7 @@ DOXYFILE_ENCODING      = UTF-8
 # title of most generated pages and in a few other places.
 # The default value is: My Project.
 
-PROJECT_NAME           = clang
+PROJECT_NAME           = LLVM
 
 # The PROJECT_NUMBER tag can be used to enter a project or revision number. This
 # could be handy for archiving the generated documentation or if some version
@@ -58,7 +58,7 @@ PROJECT_LOGO           =
 # entered, it will be relative to the location where doxygen was started. If
 # left blank the current directory will be used.
 
-OUTPUT_DIRECTORY       = @abs_builddir@/doxygen
+OUTPUT_DIRECTORY       = @abs_top_builddir@/docs/doxygen
 
 # If the CREATE_SUBDIRS tag is set to YES, then doxygen will create 4096 sub-
 # directories (in 2 levels) under the output directory of each output format and
@@ -743,9 +743,9 @@ WARN_LOGFILE           =
 # spaces.
 # Note: If this tag is empty the current directory is searched.
 
-INPUT                  = @abs_srcdir@/../include \
-                         @abs_srcdir@/../lib \
-                         @abs_srcdir@/doxygen.intro
+INPUT                  = @abs_top_srcdir@/include \
+                         @abs_top_srcdir@/lib \
+                         @abs_top_srcdir@/docs/doxygen.intro
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
@@ -813,7 +813,7 @@ EXCLUDE_SYMBOLS        =
 # that contain example code fragments that are included (see the \include
 # command).
 
-EXAMPLE_PATH           = @abs_srcdir@/../examples
+EXAMPLE_PATH           = @abs_top_srcdir@/examples
 
 # If the value of the EXAMPLE_PATH tag contains directories, you can use the
 # EXAMPLE_PATTERNS tag to specify one or more wildcard pattern (like *.cpp and
@@ -833,7 +833,7 @@ EXAMPLE_RECURSIVE      = YES
 # that contain images that are to be included in the documentation (see the
 # \image command).
 
-IMAGE_PATH             = @abs_srcdir@/img
+IMAGE_PATH             = @abs_top_srcdir@/docs/img
 
 # The INPUT_FILTER tag can be used to specify a program that doxygen should
 # invoke to filter for each input file. Doxygen will invoke the filter program
@@ -993,7 +993,7 @@ COLS_IN_ALPHA_INDEX    = 4
 # while generating the index headers.
 # This tag requires that the tag ALPHABETICAL_INDEX is set to YES.
 
-IGNORE_PREFIX          = clang::
+IGNORE_PREFIX          = llvm::
 
 #---------------------------------------------------------------------------
 # Configuration options related to the HTML output
@@ -1252,14 +1252,14 @@ TOC_EXPAND             = NO
 # The default value is: NO.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-GENERATE_QHP           = @clang_doxygen_generate_qhp@
+GENERATE_QHP           = @llvm_doxygen_generate_qhp@
 
 # If the QHG_LOCATION tag is specified, the QCH_FILE tag can be used to specify
 # the file name of the resulting .qch file. The path specified is relative to
 # the HTML output folder.
 # This tag requires that the tag GENERATE_QHP is set to YES.
 
-QCH_FILE               = @clang_doxygen_qch_filename@
+QCH_FILE               = @llvm_doxygen_qch_filename@
 
 # The QHP_NAMESPACE tag specifies the namespace to use when generating Qt Help
 # Project output. For more information please see Qt Help Project / Namespace
@@ -1267,7 +1267,7 @@ QCH_FILE               = @clang_doxygen_qch_filename@
 # The default value is: org.doxygen.Project.
 # This tag requires that the tag GENERATE_QHP is set to YES.
 
-QHP_NAMESPACE          = @clang_doxygen_qhp_namespace@
+QHP_NAMESPACE          = @llvm_doxygen_qhp_namespace@
 
 # The QHP_VIRTUAL_FOLDER tag specifies the namespace to use when generating Qt
 # Help Project output. For more information please see Qt Help Project / Virtual
@@ -1284,7 +1284,7 @@ QHP_VIRTUAL_FOLDER     = doc
 # filters).
 # This tag requires that the tag GENERATE_QHP is set to YES.
 
-QHP_CUST_FILTER_NAME   = @clang_doxygen_qhp_cust_filter_name@
+QHP_CUST_FILTER_NAME   = @llvm_doxygen_qhp_cust_filter_name@
 
 # The QHP_CUST_FILTER_ATTRS tag specifies the list of the attributes of the
 # custom filter to add. For more information please see Qt Help Project / Custom
@@ -1292,7 +1292,7 @@ QHP_CUST_FILTER_NAME   = @clang_doxygen_qhp_cust_filter_name@
 # filters).
 # This tag requires that the tag GENERATE_QHP is set to YES.
 
-QHP_CUST_FILTER_ATTRS  = @clang_doxygen_qhp_cust_filter_attrs@
+QHP_CUST_FILTER_ATTRS  = @llvm_doxygen_qhp_cust_filter_attrs@
 
 # The QHP_SECT_FILTER_ATTRS tag specifies the list of the attributes this
 # project's filter section matches. Qt Help Project / Filter Attributes (see:
@@ -1306,7 +1306,7 @@ QHP_SECT_FILTER_ATTRS  =
 # generated .qhp file.
 # This tag requires that the tag GENERATE_QHP is set to YES.
 
-QHG_LOCATION           = @clang_doxygen_qhelpgenerator_path@
+QHG_LOCATION           = @llvm_doxygen_qhelpgenerator_path@
 
 # If the GENERATE_ECLIPSEHELP tag is set to YES, additional index files will be
 # generated, together with the HTML files, they form an Eclipse help plugin. To
@@ -1409,7 +1409,7 @@ FORMULA_TRANSPARENT    = YES
 # The default value is: NO.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-USE_MATHJAX            = NO
+USE_MATHJAX            = YES
 
 # When MathJax is enabled you can set the default output format to be used for
 # the MathJax output. See the MathJax site (see:
@@ -1523,7 +1523,7 @@ SEARCHDATA_FILE        = searchdata.xml
 # projects and redirect the results back to the right project.
 # This tag requires that the tag SEARCHENGINE is set to YES.
 
-EXTERNAL_SEARCH_ID     = clang
+EXTERNAL_SEARCH_ID     = llvm
 
 # The EXTRA_SEARCH_MAPPINGS tag can be used to enable searching through doxygen
 # projects other than the one defined by this configuration file, but that are
@@ -2071,7 +2071,7 @@ DOT_NUM_THREADS        = 0
 # The default value is: Helvetica.
 # This tag requires that the tag HAVE_DOT is set to YES.
 
-DOT_FONTNAME           = Helvetica
+DOT_FONTNAME           = FreeSans
 
 # The DOT_FONTSIZE tag can be used to set the size (in points) of the font of
 # dot graphs.

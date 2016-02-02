@@ -1,166 +1,118 @@
-=====================================
-Clang 3.9 (In-Progress) Release Notes
-=====================================
+======================
+LLVM 3.9 Release Notes
+======================
 
 .. contents::
-   :local:
-   :depth: 2
-
-Written by the `LLVM Team <http://llvm.org/>`_
+    :local:
 
 .. warning::
+   These are in-progress notes for the upcoming LLVM 3.9 release.  You may
+   prefer the `LLVM 3.7 Release Notes <http://llvm.org/releases/3.7.0/docs
+   /ReleaseNotes.html>`_.
 
-   These are in-progress notes for the upcoming Clang 3.9 release. You may
-   prefer the `Clang 3.7 Release Notes
-   <http://llvm.org/releases/3.7.0/tools/clang/docs/ReleaseNotes.html>`_.
 
 Introduction
 ============
 
-This document contains the release notes for the Clang C/C++/Objective-C
-frontend, part of the LLVM Compiler Infrastructure, release 3.9. Here we
-describe the status of Clang in some detail, including major
-improvements from the previous release and new feature work. For the
-general LLVM release notes, see `the LLVM
-documentation <http://llvm.org/docs/ReleaseNotes.html>`_. All LLVM
-releases may be downloaded from the `LLVM releases web
-site <http://llvm.org/releases/>`_.
+This document contains the release notes for the LLVM Compiler Infrastructure,
+release 3.9.  Here we describe the status of LLVM, including major improvements
+from the previous release, improvements in various subprojects of LLVM, and
+some of the current users of the code.  All LLVM releases may be downloaded
+from the `LLVM releases web site <http://llvm.org/releases/>`_.
 
-For more information about Clang or LLVM, including information about
-the latest release, please check out the main please see the `Clang Web
-Site <http://clang.llvm.org>`_ or the `LLVM Web
-Site <http://llvm.org>`_.
+For more information about LLVM, including information about the latest
+release, please check out the `main LLVM web site <http://llvm.org/>`_.  If you
+have questions or comments, the `LLVM Developer's Mailing List
+<http://lists.llvm.org/mailman/listinfo/llvm-dev>`_ is a good place to send
+them.
 
-Note that if you are reading this file from a Subversion checkout or the
-main Clang web page, this document applies to the *next* release, not
-the current one. To see the release notes for a specific release, please
-see the `releases page <http://llvm.org/releases/>`_.
+Note that if you are reading this file from a Subversion checkout or the main
+LLVM web page, this document applies to the *next* release, not the current
+one.  To see the release notes for a specific release, please see the `releases
+page <http://llvm.org/releases/>`_.
 
-What's New in Clang 3.9?
-========================
+Non-comprehensive list of changes in this release
+=================================================
+* .. note about autoconf build having been removed.
 
-Some of the major new features and improvements to Clang are listed
-here. Generic improvements to Clang as a whole or to its underlying
-infrastructure are described first, followed by language-specific
-sections with improvements to Clang's support for those languages.
+* .. note about C API functions LLVMLinkModules, LLVMParseBitcode,
+   LLVMParseBitcodeInContext, LLVMGetBitcodeModuleInContext and
+   LLVMGetBitcodeModule having been removed.
 
-Major New Features
-------------------
+.. NOTE
+   For small 1-3 sentence descriptions, just add an entry at the end of
+   this list. If your description won't fit comfortably in one bullet
+   point (e.g. maybe you would like to give an example of the
+   functionality, or simply have a lot to talk about), see the `NOTE` below
+   for adding a new subsection.
 
-- Feature1...
+* ... next change ...
 
-Improvements to Clang's diagnostics
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. NOTE
+   If you would like to document a larger change, then you can add a
+   subsection about it right here. You can copy the following boilerplate
+   and un-indent it (the indentation causes it to be inside this comment).
 
-Clang's diagnostics are constantly being improved to catch more issues,
-explain them more clearly, and provide more accurate source information
-about them. The improvements since the 3.7 release include:
+   Special New Feature
+   -------------------
 
--  ...
+   Makes programs 10x faster by doing Special New Thing.
 
-New Compiler Flags
-------------------
+Changes to the ARM Backend
+--------------------------
 
-The option ....
-
-
-New Pragmas in Clang
------------------------
-
-Clang now supports the ...
-
-Windows Support
----------------
-
-Clang's support for building native Windows programs ...
-
-TLS is enabled for Cygwin defaults to -femulated-tls.
+ During this release ...
 
 
-C Language Changes in Clang
----------------------------
+Changes to the MIPS Target
+--------------------------
 
-...
+ During this release ...
 
-C11 Feature Support
-^^^^^^^^^^^^^^^^^^^
 
-...
-
-C++ Language Changes in Clang
+Changes to the PowerPC Target
 -----------------------------
 
-- ...
+ During this release ...
 
-C++11 Feature Support
-^^^^^^^^^^^^^^^^^^^^^
 
-...
+Changes to the X86 Target
+-----------------------------
 
-Objective-C Language Changes in Clang
--------------------------------------
+ During this release ...
 
-...
+Changes to the AMDGPU Target
+-----------------------------
 
-OpenCL C Language Changes in Clang
-----------------------------------
+ * Mesa 11.0.x is no longer supported
 
-...
 
-Internal API Changes
---------------------
+Changes to the OCaml bindings
+-----------------------------
 
-These are major API changes that have happened since the 3.8 release of
-Clang. If upgrading an external codebase that uses Clang as a library,
-this section should help get you past the largest hurdles of upgrading.
+ During this release ...
 
--  ...
 
-AST Matchers
-------------
+External Open Source Projects Using LLVM 3.9
+============================================
 
-...
+An exciting aspect of LLVM is that it is used as an enabling technology for
+a lot of other language and tools projects. This section lists some of the
+projects that have already been updated to work with LLVM 3.9.
 
-libclang
---------
+* A project
 
-...
-
-Static Analyzer
----------------
-
-...
-
-Core Analysis Improvements
-==========================
-
-- ...
-
-New Issues Found
-================
-
-- ...
-
-Python Binding Changes
-----------------------
-
-The following methods have been added:
-
--  ...
-
-Significant Known Problems
-==========================
 
 Additional Information
 ======================
 
-A wide variety of additional information is available on the `Clang web
-page <http://clang.llvm.org/>`_. The web page contains versions of the
-API documentation which are up-to-date with the Subversion version of
-the source code. You can access versions of these documents specific to
-this release by going into the "``clang/docs/``" directory in the Clang
-tree.
+A wide variety of additional information is available on the `LLVM web page
+<http://llvm.org/>`_, in particular in the `documentation
+<http://llvm.org/docs/>`_ section.  The web page also contains versions of the
+API documentation which is up-to-date with the Subversion version of the source
+code.  You can access versions of these documents specific to this release by
+going into the ``llvm/docs/`` directory in the LLVM tree.
 
-If you have any questions or comments about Clang, please feel free to
-contact us via the `mailing
-list <http://lists.llvm.org/mailman/listinfo/cfe-dev>`_.
+If you have any questions or comments about LLVM, please feel free to contact
+us via the `mailing lists <http://llvm.org/docs/#maillist>`_.
+

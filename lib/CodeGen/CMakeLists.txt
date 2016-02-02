@@ -1,88 +1,148 @@
-set(LLVM_LINK_COMPONENTS
-  Analysis
-  BitReader
-  BitWriter
-  Core
-  IPO
-  IRReader
-  InstCombine
-  Instrumentation
-  Linker
-  MC
-  ObjCARCOpts
-  Object
-  ProfileData
-  ScalarOpts
-  Support
-  Target
-  TransformUtils
-  )
-
-# In a standard Clang+LLVM build, we need to generate intrinsics before
-# building codegen. In a standalone build, LLVM is already built and we don't
-# need this dependency. Furthermore, LLVM doesn't export it so we can't have
-# this dependency.
-set(codegen_deps intrinsics_gen)
-if (CLANG_BUILT_STANDALONE)
-  set(codegen_deps)
+set(system_libs)
+if(CMAKE_HOST_UNIX AND LLVM_ENABLE_THREADS AND HAVE_LIBPTHREAD)
+  set(system_libs ${system_libs} pthread)
 endif()
 
-add_clang_library(clangCodeGen
-  BackendUtil.cpp
-  CGAtomic.cpp
-  CGBlocks.cpp
-  CGBuiltin.cpp
-  CGCUDABuiltin.cpp
-  CGCUDANV.cpp
-  CGCUDARuntime.cpp
-  CGCXX.cpp
-  CGCXXABI.cpp
-  CGCall.cpp
-  CGClass.cpp
-  CGCleanup.cpp
-  CGDebugInfo.cpp
-  CGDecl.cpp
-  CGDeclCXX.cpp
-  CGException.cpp
-  CGExpr.cpp
-  CGExprAgg.cpp
-  CGExprCXX.cpp
-  CGExprComplex.cpp
-  CGExprConstant.cpp
-  CGExprScalar.cpp
-  CGLoopInfo.cpp
-  CGObjC.cpp
-  CGObjCGNU.cpp
-  CGObjCMac.cpp
-  CGObjCRuntime.cpp
-  CGOpenCLRuntime.cpp
-  CGOpenMPRuntime.cpp
-  CGRecordLayoutBuilder.cpp
-  CGStmt.cpp
-  CGStmtOpenMP.cpp
-  CGVTT.cpp
-  CGVTables.cpp
-  CodeGenABITypes.cpp
-  CodeGenAction.cpp
-  CodeGenFunction.cpp
-  CodeGenModule.cpp
-  CodeGenPGO.cpp
-  CodeGenTBAA.cpp
-  CodeGenTypes.cpp
-  CoverageMappingGen.cpp
-  ItaniumCXXABI.cpp
-  MicrosoftCXXABI.cpp
-  ModuleBuilder.cpp
-  ObjectFilePCHContainerOperations.cpp
-  SanitizerMetadata.cpp
-  TargetInfo.cpp
+add_llvm_library(LLVMCodeGen
+  AggressiveAntiDepBreaker.cpp
+  AllocationOrder.cpp
+  Analysis.cpp
+  AtomicExpandPass.cpp
+  BasicTargetTransformInfo.cpp
+  BranchFolding.cpp
+  BuiltinGCs.cpp
+  CalcSpillWeights.cpp
+  CallingConvLower.cpp
+  CodeGen.cpp
+  CodeGenPrepare.cpp
+  CriticalAntiDepBreaker.cpp
+  DeadMachineInstructionElim.cpp
+  DFAPacketizer.cpp
+  DwarfEHPrepare.cpp
+  EarlyIfConversion.cpp
+  EdgeBundles.cpp
+  ExecutionDepsFix.cpp
+  ExpandISelPseudos.cpp
+  ExpandPostRAPseudos.cpp
+  FaultMaps.cpp
+  FuncletLayout.cpp
+  GCMetadata.cpp
+  GCMetadataPrinter.cpp
+  GCRootLowering.cpp
+  GCStrategy.cpp
+  GlobalMerge.cpp
+  IfConversion.cpp
+  ImplicitNullChecks.cpp
+  InlineSpiller.cpp
+  InterferenceCache.cpp
+  InterleavedAccessPass.cpp
+  IntrinsicLowering.cpp
+  LatencyPriorityQueue.cpp
+  LexicalScopes.cpp
+  LiveDebugValues.cpp
+  LiveDebugVariables.cpp
+  LiveIntervalAnalysis.cpp
+  LiveInterval.cpp
+  LiveIntervalUnion.cpp
+  LivePhysRegs.cpp
+  LiveRangeCalc.cpp
+  LiveRangeEdit.cpp
+  LiveRegMatrix.cpp
+  LiveStackAnalysis.cpp
+  LiveVariables.cpp
+  LLVMTargetMachine.cpp
+  LocalStackSlotAllocation.cpp
+  LowerEmuTLS.cpp
+  MachineBasicBlock.cpp
+  MachineBlockFrequencyInfo.cpp
+  MachineBlockPlacement.cpp
+  MachineBranchProbabilityInfo.cpp
+  MachineCombiner.cpp
+  MachineCopyPropagation.cpp
+  MachineCSE.cpp
+  MachineDominanceFrontier.cpp
+  MachineDominators.cpp
+  MachineFunctionAnalysis.cpp
+  MachineFunction.cpp
+  MachineFunctionPass.cpp
+  MachineFunctionPrinterPass.cpp
+  MachineInstrBundle.cpp
+  MachineInstr.cpp
+  MachineLICM.cpp
+  MachineLoopInfo.cpp
+  MachineModuleInfo.cpp
+  MachineModuleInfoImpls.cpp
+  MachinePassRegistry.cpp
+  MachinePostDominators.cpp
+  MachineRegionInfo.cpp
+  MachineRegisterInfo.cpp
+  MachineScheduler.cpp
+  MachineSink.cpp
+  MachineSSAUpdater.cpp
+  MachineTraceMetrics.cpp
+  MachineVerifier.cpp
+  MIRPrinter.cpp
+  MIRPrintingPass.cpp
+  OptimizePHIs.cpp
+  ParallelCG.cpp
+  Passes.cpp
+  PeepholeOptimizer.cpp
+  PHIElimination.cpp
+  PHIEliminationUtils.cpp
+  PostRASchedulerList.cpp
+  ProcessImplicitDefs.cpp
+  PrologEpilogInserter.cpp
+  PseudoSourceValue.cpp
+  RegAllocBase.cpp
+  RegAllocBasic.cpp
+  RegAllocFast.cpp
+  RegAllocGreedy.cpp
+  RegAllocPBQP.cpp
+  RegisterClassInfo.cpp
+  RegisterCoalescer.cpp
+  RegisterPressure.cpp
+  RegisterScavenging.cpp
+  SafeStack.cpp
+  ScheduleDAG.cpp
+  ScheduleDAGInstrs.cpp
+  ScheduleDAGPrinter.cpp
+  ScoreboardHazardRecognizer.cpp
+  ShadowStackGCLowering.cpp
+  ShrinkWrap.cpp
+  SjLjEHPrepare.cpp
+  SlotIndexes.cpp
+  SpillPlacement.cpp
+  SplitKit.cpp
+  StackColoring.cpp
+  StackMapLivenessAnalysis.cpp
+  StackMaps.cpp
+  StackProtector.cpp
+  StackSlotColoring.cpp
+  TailDuplication.cpp
+  TargetFrameLoweringImpl.cpp
+  TargetInstrInfo.cpp
+  TargetLoweringBase.cpp
+  TargetLoweringObjectFileImpl.cpp
+  TargetOptionsImpl.cpp
+  TargetRegisterInfo.cpp
+  TargetSchedule.cpp
+  TwoAddressInstructionPass.cpp
+  UnreachableBlockElim.cpp
+  VirtRegMap.cpp
+  WinEHPrepare.cpp
 
-  DEPENDS
-  ${codegen_deps}
+  ADDITIONAL_HEADER_DIRS
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/CodeGen
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/CodeGen/PBQP
 
-  LINK_LIBS
-  clangAST
-  clangBasic
-  clangFrontend
-  clangLex
+  LINK_LIBS ${system_libs}
   )
+
+add_dependencies(LLVMCodeGen intrinsics_gen)
+
+add_subdirectory(SelectionDAG)
+add_subdirectory(AsmPrinter)
+add_subdirectory(MIRParser)
+if(LLVM_BUILD_GLOBAL_ISEL)
+  add_subdirectory(GlobalISel)
+endif()

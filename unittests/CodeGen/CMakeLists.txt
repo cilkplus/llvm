@@ -1,15 +1,12 @@
 set(LLVM_LINK_COMPONENTS
-  Core
+  AsmPrinter
   Support
   )
 
-add_clang_unittest(ClangCodeGenTests
-  BufferSourceTest.cpp
+set(CodeGenSources
+  DIEHashTest.cpp
   )
 
-target_link_libraries(ClangCodeGenTests
-  clangBasic
-  clangCodeGen
-  clangFrontend
-  clangParse
+add_llvm_unittest(CodeGenTests
+  ${CodeGenSources}
   )
