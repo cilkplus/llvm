@@ -1,28 +1,52 @@
-create_subdirectory_options(CLANG TOOL)
+# This file will recurse into all subdirectories that contain CMakeLists.txt
+# Setting variables that match the pattern LLVM_TOOL_{NAME}_BUILD to Off will
+# prevent traversing into a directory.
+#
+# The only tools that need to be explicitly added are ones that have explicit
+# ordering requirements.
 
-add_clang_subdirectory(diagtool)
-add_clang_subdirectory(driver)
-add_clang_subdirectory(clang-format)
-add_clang_subdirectory(clang-format-vs)
-add_clang_subdirectory(clang-fuzzer)
+# Iterates all the subdirectories to create CMake options to enable/disable
+# traversing each directory.
+create_llvm_tool_options()
 
-add_clang_subdirectory(c-index-test)
-add_clang_subdirectory(libclang)
-
-if(CLANG_ENABLE_ARCMT)
-  add_clang_subdirectory(arcmt-test)
-  add_clang_subdirectory(c-arcmt-test)
+# Build polly before the tools: the tools link against polly when
+# LINK_POLLY_INTO_TOOLS is set.
+if(WITH_POLLY)
+  add_llvm_external_project(polly)
+else()
+  set(LLVM_TOOL_POLLY_BUILD Off)
 endif()
 
-if(CLANG_ENABLE_STATIC_ANALYZER)
-  add_clang_subdirectory(clang-check)
-  add_clang_subdirectory(scan-build)
-  add_clang_subdirectory(scan-view)
+if(NOT LLVM_BUILD_LLVM_DYLIB )
+  set(LLVM_TOOL_LLVM_SHLIB_BUILD Off)
 endif()
 
-# We support checking out the clang-tools-extra repository into the 'extra'
-# subdirectory. It contains tools developed as part of the Clang/LLVM project
-# on top of the Clang tooling platform. We keep them in a separate repository
-# to keep the primary Clang repository small and focused.
-# It also may be included by LLVM_EXTERNAL_CLANG_TOOLS_EXTRA_SOURCE_DIR.
-add_llvm_external_project(clang-tools-extra extra)
+if(NOT LLVM_USE_INTEL_JITEVENTS )
+  set(LLVM_TOOL_LLVM_JITLISTENER_BUILD Off)
+endif()
+
+if(CYGWIN)
+  set(LLVM_TOOL_LTO_BUILD Off)
+  set(LLVM_TOOL_LLVM_LTO_BUILD Off)
+endif()
+
+# Add LTO, llvm-ar, llvm-config, and llvm-profdata before clang, ExternalProject
+# requires targets specified in DEPENDS to exist before the call to
+# ExternalProject_Add.
+add_llvm_tool_subdirectory(lto)
+add_llvm_tool_subdirectory(llvm-ar)
+add_llvm_tool_subdirectory(llvm-config)
+add_llvm_tool_subdirectory(llvm-profdata)
+
+# Projects supported via LLVM_EXTERNAL_*_SOURCE_DIR need to be explicitly
+# specified.
+add_llvm_external_project(clang)
+add_llvm_external_project(llgo)
+add_llvm_external_project(lld)
+add_llvm_external_project(lldb)
+
+# Automatically add remaining sub-directories containing a 'CMakeLists.txt'
+# file as external projects.
+add_llvm_implicit_projects()
+
+set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} PARENT_SCOPE)

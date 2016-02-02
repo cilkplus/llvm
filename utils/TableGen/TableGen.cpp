@@ -1,4 +1,4 @@
-//===- TableGen.cpp - Top-Level TableGen implementation for Clang ---------===//
+//===- TableGen.cpp - Top-Level TableGen implementation for LLVM ----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the main function for Clang's TableGen.
+// This file contains the main function for LLVM's TableGen.
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,220 +19,158 @@
 #include "llvm/TableGen/Error.h"
 #include "llvm/TableGen/Main.h"
 #include "llvm/TableGen/Record.h"
+#include "llvm/TableGen/SetTheory.h"
 
 using namespace llvm;
-using namespace clang;
 
 enum ActionType {
-  GenClangAttrClasses,
-  GenClangAttrParserStringSwitches,
-  GenClangAttrImpl,
-  GenClangAttrList,
-  GenClangAttrPCHRead,
-  GenClangAttrPCHWrite,
-  GenClangAttrHasAttributeImpl,
-  GenClangAttrSpellingListIndex,
-  GenClangAttrASTVisitor,
-  GenClangAttrTemplateInstantiate,
-  GenClangAttrParsedAttrList,
-  GenClangAttrParsedAttrImpl,
-  GenClangAttrParsedAttrKinds,
-  GenClangAttrDump,
-  GenClangDiagsDefs,
-  GenClangDiagGroups,
-  GenClangDiagsIndexName,
-  GenClangCommentNodes,
-  GenClangDeclNodes,
-  GenClangStmtNodes,
-  GenClangSACheckers,
-  GenClangCommentHTMLTags,
-  GenClangCommentHTMLTagsProperties,
-  GenClangCommentHTMLNamedCharacterReferences,
-  GenClangCommentCommandInfo,
-  GenClangCommentCommandList,
-  GenArmNeon,
-  GenArmNeonSema,
-  GenArmNeonTest,
-  GenAttrDocs
+  PrintRecords,
+  GenEmitter,
+  GenRegisterInfo,
+  GenInstrInfo,
+  GenAsmWriter,
+  GenAsmMatcher,
+  GenDisassembler,
+  GenPseudoLowering,
+  GenCallingConv,
+  GenDAGISel,
+  GenDFAPacketizer,
+  GenFastISel,
+  GenSubtarget,
+  GenIntrinsic,
+  GenTgtIntrinsic,
+  PrintEnums,
+  PrintSets,
+  GenOptParserDefs,
+  GenCTags,
+  GenAttributes
 };
 
 namespace {
-cl::opt<ActionType> Action(
-    cl::desc("Action to perform:"),
-    cl::values(
-        clEnumValN(GenClangAttrClasses, "gen-clang-attr-classes",
-                   "Generate clang attribute clases"),
-        clEnumValN(GenClangAttrParserStringSwitches,
-                   "gen-clang-attr-parser-string-switches",
-                   "Generate all parser-related attribute string switches"),
-        clEnumValN(GenClangAttrImpl, "gen-clang-attr-impl",
-                   "Generate clang attribute implementations"),
-        clEnumValN(GenClangAttrList, "gen-clang-attr-list",
-                   "Generate a clang attribute list"),
-        clEnumValN(GenClangAttrPCHRead, "gen-clang-attr-pch-read",
-                   "Generate clang PCH attribute reader"),
-        clEnumValN(GenClangAttrPCHWrite, "gen-clang-attr-pch-write",
-                   "Generate clang PCH attribute writer"),
-        clEnumValN(GenClangAttrHasAttributeImpl,
-                   "gen-clang-attr-has-attribute-impl",
-                   "Generate a clang attribute spelling list"),
-        clEnumValN(GenClangAttrSpellingListIndex,
-                   "gen-clang-attr-spelling-index",
-                   "Generate a clang attribute spelling index"),
-        clEnumValN(GenClangAttrASTVisitor,
-                   "gen-clang-attr-ast-visitor",
-                   "Generate a recursive AST visitor for clang attributes"),
-        clEnumValN(GenClangAttrTemplateInstantiate,
-                   "gen-clang-attr-template-instantiate",
-                   "Generate a clang template instantiate code"),
-        clEnumValN(GenClangAttrParsedAttrList,
-                   "gen-clang-attr-parsed-attr-list",
-                   "Generate a clang parsed attribute list"),
-        clEnumValN(GenClangAttrParsedAttrImpl,
-                   "gen-clang-attr-parsed-attr-impl",
-                   "Generate the clang parsed attribute helpers"),
-        clEnumValN(GenClangAttrParsedAttrKinds,
-                   "gen-clang-attr-parsed-attr-kinds",
-                   "Generate a clang parsed attribute kinds"),
-        clEnumValN(GenClangAttrDump, "gen-clang-attr-dump",
-                   "Generate clang attribute dumper"),
-        clEnumValN(GenClangDiagsDefs, "gen-clang-diags-defs",
-                   "Generate Clang diagnostics definitions"),
-        clEnumValN(GenClangDiagGroups, "gen-clang-diag-groups",
-                   "Generate Clang diagnostic groups"),
-        clEnumValN(GenClangDiagsIndexName, "gen-clang-diags-index-name",
-                   "Generate Clang diagnostic name index"),
-        clEnumValN(GenClangCommentNodes, "gen-clang-comment-nodes",
-                   "Generate Clang AST comment nodes"),
-        clEnumValN(GenClangDeclNodes, "gen-clang-decl-nodes",
-                   "Generate Clang AST declaration nodes"),
-        clEnumValN(GenClangStmtNodes, "gen-clang-stmt-nodes",
-                   "Generate Clang AST statement nodes"),
-        clEnumValN(GenClangSACheckers, "gen-clang-sa-checkers",
-                   "Generate Clang Static Analyzer checkers"),
-        clEnumValN(GenClangCommentHTMLTags, "gen-clang-comment-html-tags",
-                   "Generate efficient matchers for HTML tag "
-                   "names that are used in documentation comments"),
-        clEnumValN(GenClangCommentHTMLTagsProperties,
-                   "gen-clang-comment-html-tags-properties",
-                   "Generate efficient matchers for HTML tag "
-                   "properties"),
-        clEnumValN(GenClangCommentHTMLNamedCharacterReferences,
-                   "gen-clang-comment-html-named-character-references",
-                   "Generate function to translate named character "
-                   "references to UTF-8 sequences"),
-        clEnumValN(GenClangCommentCommandInfo, "gen-clang-comment-command-info",
-                   "Generate command properties for commands that "
-                   "are used in documentation comments"),
-        clEnumValN(GenClangCommentCommandList, "gen-clang-comment-command-list",
-                   "Generate list of commands that are used in "
-                   "documentation comments"),
-        clEnumValN(GenArmNeon, "gen-arm-neon", "Generate arm_neon.h for clang"),
-        clEnumValN(GenArmNeonSema, "gen-arm-neon-sema",
-                   "Generate ARM NEON sema support for clang"),
-        clEnumValN(GenArmNeonTest, "gen-arm-neon-test",
-                   "Generate ARM NEON tests for clang"),
-        clEnumValN(GenAttrDocs, "gen-attr-docs",
-                   "Generate attribute documentation"),
-        clEnumValEnd));
+  cl::opt<ActionType>
+  Action(cl::desc("Action to perform:"),
+         cl::values(clEnumValN(PrintRecords, "print-records",
+                               "Print all records to stdout (default)"),
+                    clEnumValN(GenEmitter, "gen-emitter",
+                               "Generate machine code emitter"),
+                    clEnumValN(GenRegisterInfo, "gen-register-info",
+                               "Generate registers and register classes info"),
+                    clEnumValN(GenInstrInfo, "gen-instr-info",
+                               "Generate instruction descriptions"),
+                    clEnumValN(GenCallingConv, "gen-callingconv",
+                               "Generate calling convention descriptions"),
+                    clEnumValN(GenAsmWriter, "gen-asm-writer",
+                               "Generate assembly writer"),
+                    clEnumValN(GenDisassembler, "gen-disassembler",
+                               "Generate disassembler"),
+                    clEnumValN(GenPseudoLowering, "gen-pseudo-lowering",
+                               "Generate pseudo instruction lowering"),
+                    clEnumValN(GenAsmMatcher, "gen-asm-matcher",
+                               "Generate assembly instruction matcher"),
+                    clEnumValN(GenDAGISel, "gen-dag-isel",
+                               "Generate a DAG instruction selector"),
+                    clEnumValN(GenDFAPacketizer, "gen-dfa-packetizer",
+                               "Generate DFA Packetizer for VLIW targets"),
+                    clEnumValN(GenFastISel, "gen-fast-isel",
+                               "Generate a \"fast\" instruction selector"),
+                    clEnumValN(GenSubtarget, "gen-subtarget",
+                               "Generate subtarget enumerations"),
+                    clEnumValN(GenIntrinsic, "gen-intrinsic",
+                               "Generate intrinsic information"),
+                    clEnumValN(GenTgtIntrinsic, "gen-tgt-intrinsic",
+                               "Generate target intrinsic information"),
+                    clEnumValN(PrintEnums, "print-enums",
+                               "Print enum values for a class"),
+                    clEnumValN(PrintSets, "print-sets",
+                               "Print expanded sets for testing DAG exprs"),
+                    clEnumValN(GenOptParserDefs, "gen-opt-parser-defs",
+                               "Generate option definitions"),
+                    clEnumValN(GenCTags, "gen-ctags",
+                               "Generate ctags-compatible index"),
+                    clEnumValN(GenAttributes, "gen-attrs",
+                               "Generate attributes"),
+                    clEnumValEnd));
 
-cl::opt<std::string>
-ClangComponent("clang-component",
-               cl::desc("Only use warnings from specified component"),
-               cl::value_desc("component"), cl::Hidden);
+  cl::opt<std::string>
+  Class("class", cl::desc("Print Enum list for this class"),
+          cl::value_desc("class name"));
 
-bool ClangTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
+bool LLVMTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
   switch (Action) {
-  case GenClangAttrClasses:
-    EmitClangAttrClass(Records, OS);
+  case PrintRecords:
+    OS << Records;           // No argument, dump all contents
     break;
-  case GenClangAttrParserStringSwitches:
-    EmitClangAttrParserStringSwitches(Records, OS);
+  case GenEmitter:
+    EmitCodeEmitter(Records, OS);
     break;
-  case GenClangAttrImpl:
-    EmitClangAttrImpl(Records, OS);
+  case GenRegisterInfo:
+    EmitRegisterInfo(Records, OS);
     break;
-  case GenClangAttrList:
-    EmitClangAttrList(Records, OS);
+  case GenInstrInfo:
+    EmitInstrInfo(Records, OS);
     break;
-  case GenClangAttrPCHRead:
-    EmitClangAttrPCHRead(Records, OS);
+  case GenCallingConv:
+    EmitCallingConv(Records, OS);
     break;
-  case GenClangAttrPCHWrite:
-    EmitClangAttrPCHWrite(Records, OS);
+  case GenAsmWriter:
+    EmitAsmWriter(Records, OS);
     break;
-  case GenClangAttrHasAttributeImpl:
-    EmitClangAttrHasAttrImpl(Records, OS);
+  case GenAsmMatcher:
+    EmitAsmMatcher(Records, OS);
     break;
-  case GenClangAttrSpellingListIndex:
-    EmitClangAttrSpellingListIndex(Records, OS);
+  case GenDisassembler:
+    EmitDisassembler(Records, OS);
     break;
-  case GenClangAttrASTVisitor:
-    EmitClangAttrASTVisitor(Records, OS);
+  case GenPseudoLowering:
+    EmitPseudoLowering(Records, OS);
     break;
-  case GenClangAttrTemplateInstantiate:
-    EmitClangAttrTemplateInstantiate(Records, OS);
+  case GenDAGISel:
+    EmitDAGISel(Records, OS);
     break;
-  case GenClangAttrParsedAttrList:
-    EmitClangAttrParsedAttrList(Records, OS);
+  case GenDFAPacketizer:
+    EmitDFAPacketizer(Records, OS);
     break;
-  case GenClangAttrParsedAttrImpl:
-    EmitClangAttrParsedAttrImpl(Records, OS);
+  case GenFastISel:
+    EmitFastISel(Records, OS);
     break;
-  case GenClangAttrParsedAttrKinds:
-    EmitClangAttrParsedAttrKinds(Records, OS);
+  case GenSubtarget:
+    EmitSubtarget(Records, OS);
     break;
-  case GenClangAttrDump:
-    EmitClangAttrDump(Records, OS);
+  case GenIntrinsic:
+    EmitIntrinsics(Records, OS);
     break;
-  case GenClangDiagsDefs:
-    EmitClangDiagsDefs(Records, OS, ClangComponent);
+  case GenTgtIntrinsic:
+    EmitIntrinsics(Records, OS, true);
     break;
-  case GenClangDiagGroups:
-    EmitClangDiagGroups(Records, OS);
+  case GenOptParserDefs:
+    EmitOptParser(Records, OS);
     break;
-  case GenClangDiagsIndexName:
-    EmitClangDiagsIndexName(Records, OS);
+  case PrintEnums:
+  {
+    for (Record *Rec : Records.getAllDerivedDefinitions(Class))
+      OS << Rec->getName() << ", ";
+    OS << "\n";
     break;
-  case GenClangCommentNodes:
-    EmitClangASTNodes(Records, OS, "Comment", "");
+  }
+  case PrintSets:
+  {
+    SetTheory Sets;
+    Sets.addFieldExpander("Set", "Elements");
+    for (Record *Rec : Records.getAllDerivedDefinitions("Set")) {
+      OS << Rec->getName() << " = [";
+      const std::vector<Record*> *Elts = Sets.expand(Rec);
+      assert(Elts && "Couldn't expand Set instance");
+      for (Record *Elt : *Elts)
+        OS << ' ' << Elt->getName();
+      OS << " ]\n";
+    }
     break;
-  case GenClangDeclNodes:
-    EmitClangASTNodes(Records, OS, "Decl", "Decl");
-    EmitClangDeclContext(Records, OS);
+  }
+  case GenCTags:
+    EmitCTags(Records, OS);
     break;
-  case GenClangStmtNodes:
-    EmitClangASTNodes(Records, OS, "Stmt", "");
-    break;
-  case GenClangSACheckers:
-    EmitClangSACheckers(Records, OS);
-    break;
-  case GenClangCommentHTMLTags:
-    EmitClangCommentHTMLTags(Records, OS);
-    break;
-  case GenClangCommentHTMLTagsProperties:
-    EmitClangCommentHTMLTagsProperties(Records, OS);
-    break;
-  case GenClangCommentHTMLNamedCharacterReferences:
-    EmitClangCommentHTMLNamedCharacterReferences(Records, OS);
-    break;
-  case GenClangCommentCommandInfo:
-    EmitClangCommentCommandInfo(Records, OS);
-    break;
-  case GenClangCommentCommandList:
-    EmitClangCommentCommandList(Records, OS);
-    break;
-  case GenArmNeon:
-    EmitNeon(Records, OS);
-    break;
-  case GenArmNeonSema:
-    EmitNeonSema(Records, OS);
-    break;
-  case GenArmNeonTest:
-    EmitNeonTest(Records, OS);
-    break;
-  case GenAttrDocs:
-    EmitClangAttrDocs(Records, OS);
+  case GenAttributes:
+    EmitAttributes(Records, OS);
     break;
   }
 
@@ -247,7 +185,7 @@ int main(int argc, char **argv) {
 
   llvm_shutdown_obj Y;
 
-  return TableGenMain(argv[0], &ClangTableGenMain);
+  return TableGenMain(argv[0], &LLVMTableGenMain);
 }
 
 #ifdef __has_feature

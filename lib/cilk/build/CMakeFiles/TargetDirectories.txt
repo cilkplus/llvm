@@ -1,2 +1,0 @@
-/export/users/avtische/open-sources/_git/cilk/new-git-cilk-Jan-26/projects/compiler-rt/lib/cilk/build/CMakeFiles/cilkrts.dir
-/export/users/avtische/open-sources/_git/cilk/new-git-cilk-Jan-26/projects/compiler-rt/lib/cilk/build/CMakeFiles/cilkrts_static.dir

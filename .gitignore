@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 #==============================================================================#
 # This file specifies intentionally untracked files that git should ignore.
 # See: http://www.kernel.org/pub/software/scm/git/docs/gitignore.html
@@ -19,29 +18,49 @@
 # vim swap files
 .*.sw?
 .sw?
+#OS X specific files.
+.DS_store
 
 #==============================================================================#
 # Explicit files to ignore (only matches one).
 #==============================================================================#
+# Various tag programs
+/tags
+/TAGS
+/GPATH
+/GRTAGS
+/GSYMS
+/GTAGS
+.gitusers
+autom4te.cache
 cscope.files
 cscope.out
+autoconf/aclocal.m4
+autoconf/autom4te.cache
+/compile_commands.json
 
 #==============================================================================#
 # Directories to ignore (do not add trailing '/'s, they skip symlinks).
 #==============================================================================#
-# Clang extra user tools, which is tracked independently (clang-tools-extra).
-tools/extra
-# Sphinx build products
+# External projects that are tracked independently.
+projects/*
+!projects/*.*
+!projects/Makefile
+# Clang, which is tracked independently.
+tools/clang
+# LLDB, which is tracked independently.
+tools/lldb
+# lld, which is tracked independently.
+tools/lld
+# llgo, which is tracked independently.
+tools/llgo
+# Polly, which is tracked independently.
+tools/polly
+# Sphinx build tree, if building in-source dir.
 docs/_build
-docs/analyzer/_build
-=======
-*~
-darwin_fat
-clang_darwin
-multi_arch
-*.sw?
-<<<<<<< HEAD
->>>>>>> 17170d7301fb1c2e6658e88c9e413410b0e7a069
-=======
->>>>>>> 4120db756e31773df5389fd0fef18d4c6453204c
->>>>>>> master
+
+#==============================================================================#
+# Files created in tree by the Go bindings.
+#==============================================================================#
+bindings/go/llvm/llvm_config.go
+bindings/go/llvm/workdir
