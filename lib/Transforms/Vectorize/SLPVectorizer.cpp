@@ -1801,7 +1801,7 @@ int BoUpSLP::getTreeCost() {
   for (TreeEntry &TE : VectorizableTree) {
     int C = getEntryCost(&TE);
     DEBUG(dbgs() << "SLP: Adding cost " << C << " for bundle that starts with "
-          << TE.Scalars[0] << " .\n");
+                 << *TE.Scalars[0] << ".\n");
     Cost += C;
   }
 
@@ -3292,6 +3292,11 @@ void BoUpSLP::computeMinimumValueSizes() {
   // a truncation, we mark it as seeding another demotion.
   for (auto &Entry : VectorizableTree)
     Expr.insert(Entry.Scalars[0]);
+
+  // Ensure the root of the vectorizable tree doesn't form a cycle. It must
+  // have a single external user that is not in the vectorizable tree.
+  if (!TreeRoot[0]->hasOneUse() || Expr.count(*TreeRoot[0]->user_begin()))
+    return;
 
   // Conservatively determine if we can actually truncate the root of the
   // expression. Collect the values that can be demoted in ToDemote and
